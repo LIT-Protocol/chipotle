@@ -1,6 +1,9 @@
-//! Review email for the monthly enterprise invoice. Sent to the account's
-//! `notify_email` so a human can sanity-check the numbers and click Send on the
-//! draft invoice in Stripe (v1, before we drop the human-in-the-loop step).
+//! Notification emails for the monthly enterprise invoice, sent to the
+//! account's `notify_email`.
+//!
+//! Two variants: a **review** email when the invoice is left as a draft (a
+//! human sanity-checks the numbers and clicks Send in Stripe), and a **sent**
+//! FYI when `auto_send` finalized + sent the invoice automatically.
 
 use anyhow::Result;
 use lit_billing_core::format::cents_to_display;
@@ -8,19 +11,49 @@ use lit_billing_core::format::cents_to_display;
 use super::types::{EnterpriseAccount, EnterpriseInvoice};
 use crate::mail::Mailer;
 
-/// Send the breakdown email with a link to the draft invoice.
+/// Send the review breakdown with a link to the draft invoice (manual-send
+/// accounts, and auto_send accounts whose cycle was held as anomalous).
 pub async fn send_review_email(
     mailer: &Mailer,
     account: &EnterpriseAccount,
     inv: &EnterpriseInvoice,
     invoice_url: &str,
 ) -> Result<()> {
-    let subject = format!(
-        "[Lit] {} — draft invoice {} ready ({})",
-        account.name,
-        inv.period_key,
-        cents_to_display(inv.total_cents),
-    );
+    send_invoice_email(mailer, account, inv, invoice_url, false).await
+}
+
+/// Send the FYI breakdown after `auto_send` finalized + sent the invoice.
+pub async fn send_sent_email(
+    mailer: &Mailer,
+    account: &EnterpriseAccount,
+    inv: &EnterpriseInvoice,
+    invoice_url: &str,
+) -> Result<()> {
+    send_invoice_email(mailer, account, inv, invoice_url, true).await
+}
+
+async fn send_invoice_email(
+    mailer: &Mailer,
+    account: &EnterpriseAccount,
+    inv: &EnterpriseInvoice,
+    invoice_url: &str,
+    sent: bool,
+) -> Result<()> {
+    let subject = if sent {
+        format!(
+            "[Lit] {} — invoice {} sent ({})",
+            account.name,
+            inv.period_key,
+            cents_to_display(inv.total_cents),
+        )
+    } else {
+        format!(
+            "[Lit] {} — draft invoice {} ready ({})",
+            account.name,
+            inv.period_key,
+            cents_to_display(inv.total_cents),
+        )
+    };
 
     let committed = cents_to_display(inv.committed_fee_cents);
     let overage = cents_to_display(inv.overage_cents);
@@ -29,16 +62,24 @@ pub async fn send_review_email(
     // Metering sanity flag surfaced to the reviewer. 0 units for an active
     // enterprise account is unusual and usually means an external credit hit the
     // payer (which understates overage) or usage genuinely stopped — either way,
-    // worth a look before sending.
-    let caution = (inv.consumed_units == 0).then_some(
-        "0 units recorded this cycle — unusual for an active account. Verify the payer's Stripe \
-         balance and that no external credit (admin grant / LITKEY top-up) hit the payer account, \
-         which would understate overage.",
-    );
+    // worth a look before sending. (0-unit cycles are always held as a draft,
+    // so this never appears on the sent variant.)
+    let caution = (inv.consumed_units == 0).then(|| {
+        let mut c = "0 units recorded this cycle — unusual for an active account. Verify the \
+                     payer's Stripe balance and that no external credit (admin grant / LITKEY \
+                     top-up) hit the payer account, which would understate overage."
+            .to_string();
+        if account.auto_send {
+            c.push_str(" Auto-send is enabled for this account but this cycle was HELD as a draft pending review.");
+        }
+        c
+    });
     let text_caution = caution
+        .as_ref()
         .map(|c| format!("\n⚠ HEADS UP: {c}\n"))
         .unwrap_or_default();
     let html_caution = caution
+        .as_ref()
         .map(|c| {
             format!(
                 "<p style=\"background:#fff3cd;border:1px solid #ffe69c;padding:8px;\">\
@@ -47,8 +88,23 @@ pub async fn send_review_email(
         })
         .unwrap_or_default();
 
+    let (text_lead, text_cta) = if sent {
+        (
+            format!(
+                "Invoice for {} has been finalized and sent to the customer (net-30)",
+                account.name
+            ),
+            "View the invoice here:",
+        )
+    } else {
+        (
+            format!("Draft invoice for {} is ready for review", account.name),
+            "Review and send the draft invoice here:",
+        )
+    };
+
     let text = format!(
-        "Draft invoice for {name} is ready for review.\n\
+        "{lead}.\n\
          {text_caution}\
          \n\
          Period (issued): {period}\n\
@@ -65,12 +121,12 @@ pub async fn send_review_email(
          - Overage @ $0.0025/unit: {overage}\n\
          - TOTAL: {total}\n\
          \n\
-         Review and send the draft invoice here:\n\
+         {cta}\n\
          {url}\n\
          \n\
          (Invoice goes to {invoice_cust}; credits/usage are on payer {payer_cust}.)\n\
          The payer's credit buffer has been topped back up to ${target}.\n",
-        name = account.name,
+        lead = text_lead,
         period = inv.period_key,
         committed_period = inv.committed_period,
         p_start = inv.period_start,
@@ -81,6 +137,7 @@ pub async fn send_review_email(
         committed = committed,
         overage = overage,
         total = total,
+        cta = text_cta,
         url = invoice_url,
         invoice_cust = account.invoice_customer_id,
         payer_cust = account.payer_customer_id,
@@ -88,8 +145,23 @@ pub async fn send_review_email(
         text_caution = text_caution,
     );
 
+    let (html_heading, html_cta) = if sent {
+        (
+            format!(
+                "Invoice for {} has been finalized and sent to the customer",
+                account.name
+            ),
+            "View the invoice in Stripe →",
+        )
+    } else {
+        (
+            format!("Draft invoice for {} is ready for review", account.name),
+            "Review &amp; send the draft invoice in Stripe →",
+        )
+    };
+
     let html = format!(
-        "<h2>Draft invoice for {name} is ready for review</h2>\
+        "<h2>{heading}</h2>\
          {html_caution}\
          <table cellpadding=\"4\">\
            <tr><td><b>Period (issued)</b></td><td>{period}</td></tr>\
@@ -108,11 +180,11 @@ pub async fn send_review_email(
            <tr><td>Overage @ $0.0025/unit</td><td align=\"right\">{overage}</td></tr>\
            <tr><td><b>Total</b></td><td align=\"right\"><b>{total}</b></td></tr>\
          </table>\
-         <p><a href=\"{url}\">Review &amp; send the draft invoice in Stripe →</a></p>\
+         <p><a href=\"{url}\">{cta}</a></p>\
          <p style=\"color:#666;font-size:12px\">Invoice goes to {invoice_cust}; credits/usage \
          are on payer {payer_cust}. The payer's credit buffer has been topped back up to \
          ${target}.</p>",
-        name = account.name,
+        heading = html_heading,
         period = inv.period_key,
         committed_period = inv.committed_period,
         p_start = inv.period_start,
@@ -123,6 +195,7 @@ pub async fn send_review_email(
         committed = committed,
         overage = overage,
         total = total,
+        cta = html_cta,
         url = invoice_url,
         invoice_cust = account.invoice_customer_id,
         payer_cust = account.payer_customer_id,

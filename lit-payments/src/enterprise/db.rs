@@ -158,6 +158,19 @@ pub async fn set_invoice_drafted(pool: &PgPool, id: i64, now: OffsetDateTime) ->
     Ok(())
 }
 
+/// Mark the invoice finalized + sent to the customer and the FYI email sent.
+pub async fn set_invoice_sent(pool: &PgPool, id: i64, now: OffsetDateTime) -> Result<()> {
+    sqlx::query(
+        "UPDATE enterprise_invoices SET status = 'sent', notified_at = $2, updated_at = now() \
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Whether the payer account has auto-topup enabled — a hard stop, since any
 /// non-regrant credit corrupts the `consumed = target + balance` identity.
 pub async fn payer_auto_topup_enabled(pool: &PgPool, payer_customer_id: &str) -> Result<bool> {

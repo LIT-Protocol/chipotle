@@ -1,14 +1,15 @@
 //! Stripe invoicing primitives.
 //!
 //! Used by the enterprise committed-use billing job in `lit-payments`: create a
-//! *draft* invoice on the invoice customer, attach line items, and (later, when
-//! we drop the human-in-the-loop step) finalize + send it.
+//! *draft* invoice on the invoice customer, attach line items, and — for
+//! `auto_send` accounts — finalize + send it.
 //!
 //! Invoices are created with `collection_method = send_invoice` and
 //! `days_until_due = 30` (net-30), and `auto_advance = false` so they stay as a
-//! reviewable **draft** until explicitly finalized — either by a human in the
-//! Stripe dashboard (v1) or by [`finalize_and_send`] (future). All POSTs take an
-//! idempotency key so retries can't create duplicate invoices or line items.
+//! reviewable **draft** until explicitly finalized — by a human in the Stripe
+//! dashboard, or by [`finalize_and_send`] for `auto_send` accounts. All POSTs
+//! take an idempotency key so retries can't create duplicate invoices or line
+//! items.
 
 use anyhow::Result;
 
@@ -80,10 +81,10 @@ pub async fn add_invoice_item(
     Ok(id)
 }
 
-/// Finalize a draft invoice and send it to the customer (net-30). NOT used in
-/// v1 — invoices are sent manually from the dashboard after review — but kept
-/// here so the future "drop the human" switch is a one-line call. Finalizing
-/// auto-sends because the invoice uses `collection_method = send_invoice`.
+/// Finalize a draft invoice and send it to the customer (net-30). Used by the
+/// billing job for `auto_send` accounts; manual-send accounts finalize from the
+/// dashboard after review instead. Finalizing auto-sends because the invoice
+/// uses `collection_method = send_invoice`.
 pub async fn finalize_and_send(
     client: &StripeClient,
     invoice_id: &str,

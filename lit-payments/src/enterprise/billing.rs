@@ -6,8 +6,11 @@
 //!   2. Determine the current anchor period.
 //!   3. If no invoice exists for it yet, snapshot consumption from the payer's
 //!      live Stripe balance, create a DRAFT invoice on the invoice account,
-//!      regrant the payer buffer back to target, and email the breakdown for a
-//!      human to review + send.
+//!      regrant the payer buffer back to target, and then either finalize +
+//!      send the invoice automatically (`auto_send` accounts, with an FYI email
+//!      to `notify_email`) or email the breakdown for a human to review + send.
+//!      Anomalous cycles (0 consumed units) are always held for review, even
+//!      with `auto_send` on.
 //!
 //! Idempotency: the `enterprise_invoices` row (UNIQUE per account+period) is the
 //! gate; each external side effect is guarded by a stored id so a crash mid-flow
@@ -327,12 +330,58 @@ async fn resume_invoice(
         }
     }
 
-    // c. Email the breakdown + draft link, then mark drafted.
+    // c. Deliver. `auto_send` accounts get finalize + send with an FYI email;
+    //    otherwise the draft is left for a human to review + send. A 0-unit
+    //    cycle means the consumed reading is suspect (external credit hit the
+    //    payer, or usage genuinely stopped) — hold those for review even with
+    //    auto_send on, so a mis-metered invoice never goes out unseen.
     let invoice_url = format!(
         "{}/invoices/{}",
         cfg.stripe_dashboard_base.trim_end_matches('/'),
         invoice_id
     );
+    if account.auto_send && row.consumed_units > 0 {
+        // Durability guard (same class as the create/regrant guards). Past the
+        // idempotency window a finalize replay can't double-charge (Stripe
+        // rejects re-finalizing), but the customer MAY already have been
+        // emailed — hand off to a human instead of guessing.
+        let age_hours = (OffsetDateTime::now_utc() - row.created_at).whole_hours();
+        if age_hours >= MAX_RETRY_AGE_HOURS {
+            db::set_invoice_status(pool, row.id, "error").await?;
+            anyhow::bail!(
+                "invoice {} finalize+send is unconfirmed and {}h old (past the {}h idempotency \
+                 window). The invoice MAY already be finalized and emailed to the customer. \
+                 Check invoice {} in Stripe: if it is open/paid, mark this row 'sent'; if it is \
+                 still a draft, send it from the dashboard and mark this row 'manual'.",
+                row.id,
+                age_hours,
+                MAX_RETRY_AGE_HOURS,
+                invoice_id
+            );
+        }
+        invoice::finalize_and_send(
+            stripe,
+            &invoice_id,
+            &format!("ent_send:{}:{}", account.id, row.period_key),
+        )
+        .await
+        .context("finalize and send invoice")?;
+        email::send_sent_email(mailer, account, &row, &invoice_url)
+            .await
+            .context("send sent-notification email")?;
+        db::set_invoice_sent(pool, row.id, OffsetDateTime::now_utc()).await?;
+
+        tracing::info!(
+            account_id = account.id,
+            period = %row.period_key,
+            invoice = %invoice_id,
+            total_cents = row.total_cents,
+            overage_units = row.overage_units,
+            "enterprise invoice finalized and sent; notification email sent"
+        );
+        return Ok(());
+    }
+
     email::send_review_email(mailer, account, &row, &invoice_url)
         .await
         .context("send review email")?;

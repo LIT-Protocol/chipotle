@@ -17,7 +17,8 @@ pub struct EnterpriseAccount {
     pub target_credit_cents: i64,
     pub billing_anchor_day: i32,
     pub notify_email: String,
-    /// v1 = false: draft + email for manual send.
+    /// false: draft + review email for manual send. true: finalize + send
+    /// automatically (0-unit cycles are still held as drafts for review).
     pub auto_send: bool,
     pub term_start: Option<Date>,
     pub term_end: Option<Date>,
