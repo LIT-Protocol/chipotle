@@ -15,7 +15,7 @@ const ACCOUNT_COLS: &str = "id, name, payer_customer_id, invoice_customer_id, \
 const INVOICE_COLS: &str = "id, enterprise_account_id, period_key, period_start, period_end, \
     committed_period, consumed_units, included_units, overage_units, \
     committed_fee_cents, overage_cents, total_cents, stripe_invoice_id, \
-    regrant_balance_txn_id, status, created_at";
+    regrant_balance_txn_id, finalized_at, status, created_at";
 
 /// All active committed-use accounts.
 pub async fn list_active_accounts(pool: &PgPool) -> Result<Vec<EnterpriseAccount>> {
@@ -150,6 +150,19 @@ pub async fn set_invoice_drafted(pool: &PgPool, id: i64, now: OffsetDateTime) ->
     sqlx::query(
         "UPDATE enterprise_invoices SET status = 'draft', notified_at = $2, updated_at = now() \
          WHERE id = $1",
+    )
+    .bind(id)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Record that Stripe confirmed finalize + send. Written BEFORE the FYI email
+/// so a crash between them resumes at the email, not the Stripe calls.
+pub async fn set_invoice_finalized(pool: &PgPool, id: i64, now: OffsetDateTime) -> Result<()> {
+    sqlx::query(
+        "UPDATE enterprise_invoices SET finalized_at = $2, updated_at = now() WHERE id = $1",
     )
     .bind(id)
     .bind(now)

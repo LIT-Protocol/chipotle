@@ -81,18 +81,28 @@ pub async fn add_invoice_item(
     Ok(id)
 }
 
-/// Finalize a draft invoice and send it to the customer (net-30). Used by the
+/// Finalize a draft invoice and email it to the customer (net-30). Used by the
 /// billing job for `auto_send` accounts; manual-send accounts finalize from the
-/// dashboard after review instead. Finalizing auto-sends because the invoice
-/// uses `collection_method = send_invoice`.
+/// dashboard after review instead.
+///
+/// The explicit `invoices/{id}/send` call is what guarantees the customer email:
+/// finalization alone only emails when the Stripe account's "email finalized
+/// invoices" dashboard setting happens to be on, which this code doesn't control.
+/// The two POSTs take separate idempotency keys so a retry that finds the
+/// invoice already finalized can still be deduped on the send step.
 pub async fn finalize_and_send(
     client: &StripeClient,
     invoice_id: &str,
-    idempotency_key: &str,
+    finalize_idempotency_key: &str,
+    send_idempotency_key: &str,
 ) -> Result<()> {
     let path = format!("invoices/{invoice_id}/finalize");
     client
-        .post_with_idempotency(&path, &[("auto_advance", "true")], idempotency_key)
+        .post_with_idempotency(&path, &[("auto_advance", "true")], finalize_idempotency_key)
+        .await?;
+    let path = format!("invoices/{invoice_id}/send");
+    client
+        .post_with_idempotency(&path, &[], send_idempotency_key)
         .await?;
     Ok(())
 }

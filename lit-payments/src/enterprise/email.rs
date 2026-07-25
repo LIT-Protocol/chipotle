@@ -59,21 +59,36 @@ async fn send_invoice_email(
     let overage = cents_to_display(inv.overage_cents);
     let total = cents_to_display(inv.total_cents);
 
-    // Metering sanity flag surfaced to the reviewer. 0 units for an active
-    // enterprise account is unusual and usually means an external credit hit the
-    // payer (which understates overage) or usage genuinely stopped — either way,
-    // worth a look before sending. (0-unit cycles are always held as a draft,
-    // so this never appears on the sent variant.)
-    let caution = (inv.consumed_units == 0).then(|| {
-        let mut c = "0 units recorded this cycle — unusual for an active account. Verify the \
-                     payer's Stripe balance and that no external credit (admin grant / LITKEY \
-                     top-up) hit the payer account, which would understate overage."
-            .to_string();
-        if account.auto_send {
-            c.push_str(" Auto-send is enabled for this account but this cycle was HELD as a draft pending review.");
-        }
-        c
-    });
+    // Metering sanity flags surfaced to the reviewer, mirroring
+    // `calc::hold_for_review`. Anomalous cycles are always held as a draft, so
+    // neither flag ever appears on the sent variant.
+    let mut caution = if inv.consumed_units == 0 {
+        Some(
+            "0 units recorded this cycle — unusual for an active account. Verify the payer's \
+             Stripe balance and that no external credit (admin grant / LITKEY top-up) hit the \
+             payer account, which would understate overage."
+                .to_string(),
+        )
+    } else if inv.consumed_units >= account.target_credit_cents {
+        Some(format!(
+            "consumed reading ({} units) is at/above the full ${} buffer target — the payer's \
+             balance went to zero or positive during the cycle (buffer exhausted, or an external \
+             debit hit the payer), so the overage figure is unreliable. Verify the payer's Stripe \
+             balance history before sending.",
+            inv.consumed_units,
+            account.target_credit_cents / 100,
+        ))
+    } else {
+        None
+    };
+    if account.auto_send
+        && let Some(c) = caution.as_mut()
+    {
+        c.push_str(
+            " Auto-send is enabled for this account but this cycle was HELD as a draft pending \
+             review.",
+        );
+    }
     let text_caution = caution
         .as_ref()
         .map(|c| format!("\n⚠ HEADS UP: {c}\n"))
