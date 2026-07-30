@@ -7,6 +7,7 @@ use lit_api_server::config;
 use lit_api_server::core;
 use lit_api_server::core::cache_metadata::CacheMetadataIndex;
 use lit_api_server::core::v1::guards::cpu_overload::CpuOverloadMonitor;
+use lit_api_server::core::v1::guards::rate_limit::RateLimiter;
 use lit_api_server::dstack;
 use lit_api_server::internal;
 use lit_api_server::observability;
@@ -185,6 +186,10 @@ async fn main() -> Result<(), rocket::Error> {
             move |state| monitor.run(state),
         );
     }
+    // Per-IP rate limiter for the unauthenticated `new_account` endpoint
+    // (CPL-367). Built once and shared across restart-loop rebuilds so buckets
+    // survive an in-process Rocket restart.
+    let rate_limiter = RateLimiter::new();
     let stripe_state = match stripe::init() {
         Ok(state) => state,
         Err(e) => {
@@ -330,6 +335,7 @@ async fn main() -> Result<(), rocket::Error> {
             signer_pool.clone(),
             chain_config.clone(),
             cpu_monitor.clone(),
+            rate_limiter.clone(),
             stripe_state.clone(),
             internal_config.clone(),
             auth_resolver.clone(),
@@ -456,6 +462,7 @@ fn build_rocket(
     signer_pool: Arc<lit_api_server::accounts::signer_pool::SignerPool>,
     chain_config: Arc<lit_api_server::accounts::chain_config::ChainConfig>,
     cpu_monitor: CpuOverloadMonitor,
+    rate_limiter: RateLimiter,
     stripe_state: Option<Arc<stripe::StripeState>>,
     internal_config: Option<Arc<internal::InternalConfig>>,
     auth_resolver: Arc<dyn lit_billing_core::billing_auth::AuthResolver>,
@@ -524,6 +531,7 @@ fn build_rocket(
         .manage(signer_pool)
         .manage(chain_config)
         .manage(cpu_monitor)
+        .manage(rate_limiter)
         .manage(stripe_state)
         .manage(internal_config)
         .manage(auth_resolver)
