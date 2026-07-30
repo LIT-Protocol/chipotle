@@ -144,6 +144,12 @@ impl RateLimiter {
     }
 
     fn build(enabled: bool, capacity: f64, refill_per_sec: f64, idle_secs: u64) -> Self {
+        // Clamp to >= 1s: a 0s idle TTL would evict every bucket before the
+        // next request, so each request would get a fresh full bucket and the
+        // guard would silently stop throttling. A misconfigured env var must
+        // never disable the limit outright — use NEW_ACCOUNT_RATE_LIMIT_ENABLED
+        // for that.
+        let idle_secs = idle_secs.max(1);
         let buckets = Cache::builder()
             .max_capacity(MAX_TRACKED_IPS)
             .time_to_idle(Duration::from_secs(idle_secs))
@@ -331,6 +337,20 @@ mod tests {
         assert!(
             !limiter.check(None).await,
             "requests with no resolvable IP share a single bucket"
+        );
+    }
+
+    /// A `0` idle TTL must not silently disable throttling: the bucket must
+    /// survive back-to-back requests (clamped to a >= 1s TTL internally).
+    #[tokio::test]
+    async fn zero_idle_ttl_still_throttles() {
+        let limiter = RateLimiter::build(true, 2.0, 0.0, 0);
+        let ip = Some("172.16.0.1".parse().unwrap());
+        assert!(limiter.check(ip).await);
+        assert!(limiter.check(ip).await);
+        assert!(
+            !limiter.check(ip).await,
+            "burst must still be enforced with idle_secs = 0"
         );
     }
 

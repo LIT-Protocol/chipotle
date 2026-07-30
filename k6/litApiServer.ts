@@ -1074,9 +1074,9 @@ export class LitApiServerClient {
   }
 
   /**
- * Create a new managed account: derives a fresh wallet, registers it on-chain, and provisions a Stripe customer with starter credits.
+ * Create a new managed account: derives a fresh wallet, registers it on-chain, and provisions a Stripe customer with starter credits. Returns the account's API key and wallet address.
 
-Unauthenticated by design (this is how a caller gets their first API key), but each call burns operator gas (two on-chain txs) and provisions billing, so it carries two anonymous-abuse guards (CPL-367): [`CpuAvailable`] sheds load when the node is CPU-bound, and [`NewAccountRateLimit`] caps the sustained account-creation rate per client IP. Both return `429`.
+No authentication is required (this is how a caller obtains their first API key), but the endpoint is rate limited per client IP and may return 429 Too Many Requests when the node is under load or a single source creates accounts too quickly. Retry those with exponential backoff.
  */
   newAccount(
     newAccountRequest: NewAccountRequest,
