@@ -795,6 +795,12 @@ async fn execute_with_worker_inner(
         state.put(outbound_tx);
         state.put(inbound_rx);
         state.put(loaded_modules.clone());
+        // Cap concurrent native buffering by `op_lit_proxied_fetch` to the
+        // isolate's memory budget (CPL-373): each in-flight proxied fetch can
+        // hold up to 10 MiB off-heap, invisible to the heap-limit OOM guard.
+        state.put(
+            lit_actions_ext::bindings::ProxiedFetchLimiter::for_memory_budget_mb(memory_limit_mb),
+        );
         drop(state);
     }
 
