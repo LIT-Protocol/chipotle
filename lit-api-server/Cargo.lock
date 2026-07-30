@@ -4555,6 +4555,7 @@ dependencies = [
  "concat-idents",
  "http 1.4.0",
  "hyper-util",
+ "libc",
  "lit-observability",
  "prost 0.13.5",
  "tokio",
@@ -4563,6 +4564,7 @@ dependencies = [
  "tonic-build",
  "tonic-reflection",
  "tower 0.4.13",
+ "tracing",
 ]
 
 [[package]]
