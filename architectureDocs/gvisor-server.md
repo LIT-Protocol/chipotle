@@ -421,9 +421,11 @@ Deploy caveats: the pipeline must build + substitute
 
 ---
 
-## Feature flag — off by default (CPL-359)
+## Feature flag — off by default (CPL-359, CPL-361)
 
-gVisor is opt-in on both axes:
+gVisor is opt-in on **three independent axes**. A `/lit_binary_action` call
+succeeds past the gate only when all three opt in; any one off degrades cleanly
+to `503` rather than hanging on an absent socket.
 
 - **Build.** The `lit_actions_gvisor` supervisor and the guest `lit` CLI are
   gated behind the `gvisor` cargo feature on `lit-actions-gvisor-server`
@@ -432,18 +434,30 @@ gVisor is opt-in on both axes:
   in. `Dockerfile.lit-actions-gvisor` passes `--features gvisor` (the image
   build is the opt-in), and CI's `--all-features` keeps the binaries linted and
   tested.
-- **Run.** lit-api-server always mounts `/lit_binary_action` (its OpenAPI
-  surface is stable), but the `GvisorEnabled` request guard (`actions::gvisor`,
-  driven by the `LIT_GVISOR_ENABLED` env var) runs *before* the CPU and billing
-  guards. Unless the var is truthy (`1`/`true`/`yes`/`on`) the guard
-  short-circuits with `503` — *"The gVisor any-language runner is disabled on
-  this node."* — so a disabled node sheds the call without a Stripe credit check
-  or dialing the runner socket. `docker-compose.phala.yml` sets
-  `LIT_GVISOR_ENABLED=true` on the api-server because that stack ships the
-  runner container.
+- **Run (process / env).** lit-api-server always mounts `/lit_binary_action`
+  (its OpenAPI surface is stable), but the `GvisorEnabled` request guard
+  (`actions::gvisor`, driven by the `LIT_GVISOR_ENABLED` env var) runs *before*
+  the CPU and billing guards. Unless the var is truthy (`1`/`true`/`yes`/`on`)
+  the guard short-circuits with `503` — *"The gVisor any-language runner is
+  disabled on this node."* — so a disabled node sheds the call without a Stripe
+  credit check or dialing the runner socket. Since **CPL-361** the value is
+  rendered per-deploy from `docker-compose.phala.yml`'s `${LIT_GVISOR_ENABLED}`
+  placeholder: testing/manual/staging deploys substitute `true`
+  (`deploy-staging.yml`, `justfile.deploy`), the production workflow substitutes
+  `false` (`deploy-prod-1-propose.yml`). An unsubstituted/empty value fails
+  closed.
+- **Run (on-chain / contract).** Even a built, env-enabled node stays gated
+  until the `GVISOR_RUNNER_ENABLED` key in the AccountConfig contract's
+  `nodeConfigurationValues` map is truthy (**CPL-361**). The guard reads it via
+  the cached `ChainConfig` snapshot (`accounts::chain_config`, 30 s refresh,
+  no per-request I/O); absent/non-truthy fails closed with a distinct `503` —
+  *"…disabled network-wide by contract configuration."*. This is the runtime
+  kill-switch that flips the runner off/on **network-wide without redeploying**
+  the binary. Set it with `WritesFacet.setNodeConfiguration("GVISOR_RUNNER_ENABLED", "true")`.
 
-The two halves are independent: an api-server image built without a runner
-alongside it degrades cleanly to 503 rather than hanging on an absent socket.
+The axes are independent and all fail closed: an api-server image built without
+a runner alongside it, a prod deploy that never set the env, or a contract that
+never opted in each degrade to 503 rather than hanging on an absent socket.
 
 ---
 
