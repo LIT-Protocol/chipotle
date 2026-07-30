@@ -57,6 +57,13 @@ fn lit_actions_ops_extension() -> deno_core::Extension {
 // Same default limits as in lit-node's action client
 const DEFAULT_TIMEOUT_MS: u64 = 1000 * 60 * 15; // 15 minutes
 pub(crate) const DEFAULT_MEMORY_LIMIT_MB: usize = 64; // 64MB
+// Hard ceilings for caller-supplied `timeout` / `memory_limit`. Without them a
+// client can request up to `u64::MAX` — pinning a worker forever and letting
+// the requested heap outrun the near-heap OOM guard, so the host OOM-killer
+// takes down the runner (and any co-located lit_node) instead. Mirrors the
+// sibling gvisor-server's clamps (`supervisor.rs`); see CPL-371.
+const MAX_TIMEOUT_MS: u64 = 1000 * 60 * 150; // 150 minutes
+pub(crate) const MAX_MEMORY_LIMIT_MB: usize = 2048; // 2GB
 const MEMORY_SAMPLE_INTERVAL_MS: u64 = 500; // 500ms
 const EXECUTION_TERMINATED_ERROR: &str = "Uncaught Error: execution terminated";
 const MAX_ACTION_CODE_CACHE_BYTES: usize = 100 * 1024 * 1024;
@@ -680,7 +687,9 @@ pub(crate) async fn execute_js(
         module_cache,
         lockfile_path,
         http_client,
-        memory_limit_mb: memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB),
+        memory_limit_mb: memory_limit_mb
+            .unwrap_or(DEFAULT_MEMORY_LIMIT_MB)
+            .min(MAX_MEMORY_LIMIT_MB),
         v8_code_cache,
     });
 
@@ -770,7 +779,7 @@ async fn execute_with_worker_inner(
         loaded_modules,
     } = prepared;
 
-    let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
+    let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS).min(MAX_TIMEOUT_MS);
     let memory_limit_mb = shared.memory_limit_mb;
 
     // Check the action code cache early so we can skip prepare_action_code
