@@ -62,8 +62,15 @@ jobs:
           # boundary — the dstack-verifier cryptographically validates it below,
           # so trust of Phala's transport gateway cert is irrelevant. (Same
           # rationale as wait-for-api-restart, PR #611.)
+          #
+          # Match on the extracted hostname (strip scheme, path/query, and port)
+          # rather than the whole URL, so a ".phala.network" substring in a path
+          # or query can't flip a non-Phala host into -k.
+          HOST="${ATTESTATION_URL#*://}"   # strip scheme
+          HOST="${HOST%%/*}"               # strip path/query
+          HOST="${HOST%%:*}"               # strip port
           INSECURE=""
-          case "$ATTESTATION_URL" in *.phala.network*) INSECURE="-k" ;; esac
+          case "$HOST" in *.phala.network) INSECURE="-k" ;; esac
 
           echo "Fetching attestation from $ATTESTATION_URL/attestation..."
           curl -sf $INSECURE "$ATTESTATION_URL/attestation" > "$TMP_DIR/attestation.json" || {
