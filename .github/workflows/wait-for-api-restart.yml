@@ -120,6 +120,15 @@ jobs:
           TIMEOUT="${{ inputs.timeout }}"
           VERSION_URL="${BASE_URL}/version"
 
+          # Phala's auto-issued TLS cert for the raw *-8000.*.phala.network CVM
+          # endpoint is frequently expired/self-signed (it's Phala-managed, not
+          # our certbot cert). We're only reading a version string here, and the
+          # box's integrity is proven separately by verify-attestation, so skip
+          # TLS verification for the Phala direct URL. The public domain
+          # (confirm-cutover) is NOT a phala.network host, so it keeps strict TLS.
+          INSECURE=""
+          case "$VERSION_URL" in *.phala.network*) INSECURE="-k" ;; esac
+
           # The API's commit_version is produced by git_version!() which runs
           # git describe --always at compile time. Reproduce the same output
           # here so we can compare directly.
@@ -136,7 +145,7 @@ jobs:
           deadline=$(( $(date +%s) + TIMEOUT ))
 
           while true; do
-            CURRENT_VERSION=$(curl -sf "$VERSION_URL" 2>/dev/null | jq -r '.commit_version // empty' 2>/dev/null || true)
+            CURRENT_VERSION=$(curl -sf $INSECURE "$VERSION_URL" 2>/dev/null | jq -r '.commit_version // empty' 2>/dev/null || true)
             case "$EXPECTED_VERSION" in "$CURRENT_VERSION"*) PREFIX_MATCH=1 ;; *) PREFIX_MATCH=0 ;; esac
             case "$CURRENT_VERSION" in "$EXPECTED_VERSION"*) REVERSE_MATCH=1 ;; *) REVERSE_MATCH=0 ;; esac
             if [ -n "$CURRENT_VERSION" ] && { [ "$PREFIX_MATCH" = 1 ] || [ "$REVERSE_MATCH" = 1 ]; }; then
@@ -158,8 +167,13 @@ jobs:
           TIMEOUT="${{ inputs.timeout }}"
           deadline=$(( $(date +%s) + TIMEOUT ))
 
+          # Same rationale as the version poll: skip TLS verification only for
+          # the Phala-managed direct URL, keep it strict for the public domain.
+          INSECURE=""
+          case "$HEALTH_URL" in *.phala.network*) INSECURE="-k" ;; esac
+
           echo "Confirming $HEALTH_URL is healthy..."
-          until curl -sf "$HEALTH_URL" > /dev/null; do
+          until curl -sf $INSECURE "$HEALTH_URL" > /dev/null; do
             if [ "$(date +%s)" -ge "$deadline" ]; then
               echo "::error::Health check failed within timeout"
               exit 1
