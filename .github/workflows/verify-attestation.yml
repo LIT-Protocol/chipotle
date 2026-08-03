@@ -53,8 +53,27 @@ jobs:
           ATTESTATION_URL="${{ inputs.base_url }}"
           TMP_DIR=$(mktemp -d /tmp/verify-remote-XXXXXX)
 
+          # Phala's auto-issued TLS cert for the raw *-8000.*.phala.network CVM
+          # endpoint is frequently expired/self-signed (it's Phala-managed, not
+          # our certbot cert), which makes `curl -sf` fail before we ever fetch
+          # the attestation. Skip TLS verification for the Phala direct URL only;
+          # a non-phala.network public domain keeps strict TLS. This is safe here
+          # because the fetched attestation quote is itself the integrity
+          # boundary — the dstack-verifier cryptographically validates it below,
+          # so trust of Phala's transport gateway cert is irrelevant. (Same
+          # rationale as wait-for-api-restart, PR #611.)
+          #
+          # Match on the extracted hostname (strip scheme, path/query, and port)
+          # rather than the whole URL, so a ".phala.network" substring in a path
+          # or query can't flip a non-Phala host into -k.
+          HOST="${ATTESTATION_URL#*://}"   # strip scheme
+          HOST="${HOST%%/*}"               # strip path/query
+          HOST="${HOST%%:*}"               # strip port
+          INSECURE=""
+          case "$HOST" in *.phala.network) INSECURE="-k" ;; esac
+
           echo "Fetching attestation from $ATTESTATION_URL/attestation..."
-          curl -sf "$ATTESTATION_URL/attestation" > "$TMP_DIR/attestation.json" || {
+          curl -sf $INSECURE "$ATTESTATION_URL/attestation" > "$TMP_DIR/attestation.json" || {
             echo "::error::Failed to fetch $ATTESTATION_URL/attestation"
             rm -rf "$TMP_DIR"
             exit 1
