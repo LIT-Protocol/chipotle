@@ -46,30 +46,7 @@ jobs:
       - name: Generate litApiServer from deployed OpenAPI spec
         run: |
           npm install -g @grafana/openapi-to-k6
-          SPEC_URL="${{ inputs.api_root_url }}/openapi.json"
-
-          # Phala's auto-issued TLS cert for the raw *-8000.*.phala.network CVM
-          # endpoint is frequently expired/self-signed (it's Phala-managed, not
-          # our certbot cert). openapi-to-k6 fetches the spec via Node's fetch,
-          # which can't relax TLS per-host, so pre-download the spec ourselves
-          # with curl -k for the Phala direct URL only and feed the local file
-          # to the generator. A non-phala.network public domain keeps strict TLS.
-          # Box integrity is proven separately by verify-attestation, so trust of
-          # Phala's transport cert is not the boundary here. (Same rationale as
-          # wait-for-api-restart PR #611 and verify-attestation PR #612.)
-          #
-          # Match on the extracted hostname (strip scheme, path/query, and port),
-          # not the whole URL, so a ".phala.network" substring in a path/query
-          # can't flip a non-Phala host into -k.
-          HOST="${SPEC_URL#*://}"   # strip scheme
-          HOST="${HOST%%/*}"        # strip path/query
-          HOST="${HOST%%:*}"        # strip port
-          INSECURE=""
-          case "$HOST" in *.phala.network) INSECURE="-k" ;; esac
-
-          SPEC_FILE="${{ runner.temp }}/openapi.json"
-          curl -sf $INSECURE "$SPEC_URL" -o "$SPEC_FILE"
-          openapi-to-k6 --verbose "$SPEC_FILE" "${{ runner.temp }}/k6-generated"
+          openapi-to-k6 --verbose "${{ inputs.api_root_url }}/openapi.json" "${{ runner.temp }}/k6-generated"
 
       - name: Compare with committed litApiServer.ts
         run: |
