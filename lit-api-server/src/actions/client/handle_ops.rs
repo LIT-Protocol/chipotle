@@ -180,6 +180,11 @@ impl Client {
                         match crate::stripe::charge_lit_action_time(
                             &self.api_key,
                             self.state.unbilled_seconds,
+                            // Derived CID of the action — always set on the billed
+                            // execution path. The empty-string filter only guards
+                            // the builder's default (see execution.rs).
+                            Some(self.ipfs_id.as_str()).filter(|s| !s.is_empty()),
+                            self.request_id.as_deref(),
                             stripe,
                         )
                         .await

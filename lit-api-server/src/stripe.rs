@@ -113,10 +113,15 @@ impl BillingReason {
     }
 
     /// Human-readable description sent as the Stripe balance transaction
-    /// `description`, so the charge type is legible in the Stripe dashboard.
+    /// `description` (the "Reason" field in the Stripe dashboard), so the charge
+    /// type is legible there.
+    ///
+    /// This is the fallback label. Lit Action charges override it with the
+    /// action's IPFS CID (`Lit Action {cid}`) when one is available — see
+    /// [`charge`].
     pub fn description(self) -> &'static str {
         match self {
-            BillingReason::Management => "Management API call",
+            BillingReason::Management => "Configuration change",
             BillingReason::LitAction => "Lit Action execution",
         }
     }
@@ -826,6 +831,8 @@ async fn charge(
     api_key: &str,
     cost_cents: i64,
     reason: BillingReason,
+    ipfs_id: Option<&str>,
+    request_id: Option<&str>,
     state: &StripeState,
 ) -> std::result::Result<(), BillingError> {
     tracing::debug!(cost_cents, "stripe::charge: starting");
@@ -892,6 +899,18 @@ async fn charge(
     let cid = customer_id.clone();
     let wallet_for_metric = wallet.clone();
     let idempotency_key = uuid::Uuid::new_v4().to_string();
+    // Owned copies of the Stripe `description` ("Reason" in the dashboard) and
+    // the metadata values, moved into the fire-and-forget task below. Lit Action
+    // charges label the Reason with the action's IPFS CID; everything else falls
+    // back to the reason's static description ("Configuration change", etc.).
+    let description = match ipfs_id {
+        Some(id) => format!("Lit Action {id}"),
+        None => reason.description().to_string(),
+    };
+    let ipfs_id = ipfs_id.map(str::to_owned);
+    // Groups the (possibly several) balance transactions a single request emits:
+    // one Lit Action execution flushes per-second charges under one request-id.
+    let request_id = request_id.map(str::to_owned);
     tokio::spawn(async move {
         let cost_str = cost_cents.to_string();
         let delays = [
@@ -906,16 +925,23 @@ async fn charge(
             if !delay.is_zero() {
                 tokio::time::sleep(delay).await;
             }
+            let mut params: Vec<(&str, &str)> = vec![
+                ("amount", cost_str.as_str()),
+                ("currency", "usd"),
+                ("description", description.as_str()),
+                ("metadata[reason]", reason.as_str()),
+            ];
+            if let Some(id) = ipfs_id.as_deref() {
+                params.push(("metadata[ipfs_id]", id));
+            }
+            if let Some(rid) = request_id.as_deref() {
+                params.push(("metadata[request_id]", rid));
+            }
             match state
                 .client
                 .post_with_idempotency(
                     &format!("customers/{cid}/balance_transactions"),
-                    &[
-                        ("amount", cost_str.as_str()),
-                        ("currency", "usd"),
-                        ("description", reason.description()),
-                        ("metadata[reason]", reason.as_str()),
-                    ],
+                    &params,
                     &idempotency_key,
                 )
                 .await
@@ -950,15 +976,21 @@ async fn charge(
     Ok(())
 }
 
-/// Charge $0.01 for a management API call.
+/// Charge $0.01 for a management (configuration-change) API call.
+///
+/// `request_id` is the request's `X-Request-Id`, recorded as
+/// `metadata[request_id]` on the Stripe transaction for later correlation.
 pub async fn charge_management(
     api_key: &str,
+    request_id: Option<&str>,
     state: &StripeState,
 ) -> std::result::Result<(), BillingError> {
     charge(
         api_key,
         COST_MANAGEMENT_CENTS,
         BillingReason::Management,
+        None,
+        request_id,
         state,
     )
     .await
@@ -966,9 +998,17 @@ pub async fn charge_management(
 
 /// Charge for `seconds` of Lit Action execution time.
 /// Returns `Ok(())` if the charge succeeds, `Err` if insufficient credits.
+///
+/// `ipfs_id` is the executing action's IPFS CID; it becomes the Stripe
+/// transaction `description` (`Lit Action {cid}` — the "Reason" field) and
+/// `metadata[ipfs_id]`. `request_id` is the request's `X-Request-Id`, recorded
+/// as `metadata[request_id]` so the several per-second flushes of one execution
+/// can be grouped after the fact.
 pub async fn charge_lit_action_time(
     api_key: &str,
     seconds: u64,
+    ipfs_id: Option<&str>,
+    request_id: Option<&str>,
     state: &StripeState,
 ) -> Result<()> {
     tracing::debug!(seconds, "stripe::charge_lit_action_time: starting");
@@ -980,9 +1020,16 @@ pub async fn charge_lit_action_time(
     if cost == 0 {
         return Ok(());
     }
-    charge(api_key, cost, BillingReason::LitAction, state)
-        .await
-        .map_err(anyhow::Error::new)
+    charge(
+        api_key,
+        cost,
+        BillingReason::LitAction,
+        ipfs_id,
+        request_id,
+        state,
+    )
+    .await
+    .map_err(anyhow::Error::new)
 }
 
 /// Grant the configured starter credits to a newly created customer.
@@ -1208,11 +1255,12 @@ mod tests {
 
     #[test]
     fn billing_reason_descriptions_distinguish_charge_type() {
-        // Sent as the Stripe balance transaction `description`; must differ per
-        // reason so the charge type is legible in the Stripe dashboard.
+        // Fallback `description` (the "Reason" field in the Stripe dashboard).
+        // Lit Action charges override it with `Lit Action {cid}` when a CID is
+        // available; this is the label used when none is.
         assert_eq!(
             BillingReason::Management.description(),
-            "Management API call"
+            "Configuration change"
         );
         assert_eq!(
             BillingReason::LitAction.description(),
