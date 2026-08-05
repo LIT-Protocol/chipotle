@@ -1141,6 +1141,17 @@ pub async fn create_payment_intent(
     Ok((client_secret, pi_id))
 }
 
+/// Stripe idempotency key for the top-up balance transaction of a PaymentIntent.
+///
+/// The key is a pure function of the PaymentIntent ID: every caller that races to
+/// credit the same intent computes the identical key, and Stripe collapses those
+/// requests into a single balance transaction (dedup window: 24h). Kept as a
+/// standalone, deterministic helper so the format is unit-testable and cannot drift
+/// silently — a regression here would re-open the double-credit window (CPL-370).
+fn topup_credit_idempotency_key(payment_intent_id: &str) -> String {
+    format!("topup-credit-{payment_intent_id}")
+}
+
 /// Verify a PaymentIntent succeeded and credit the customer's account.
 ///
 /// Replay protection:
@@ -1150,6 +1161,12 @@ pub async fn create_payment_intent(
 /// 3. Marks the PaymentIntent as credited (`metadata[credited]=true`) **before** creating
 ///    the balance transaction, so a crash or retry after this point is safe (the second call
 ///    will be rejected by check 1).
+/// 4. Posts the balance transaction with a stable idempotency key
+///    (`topup-credit-{payment_intent_id}`, see [`topup_credit_idempotency_key`]). The
+///    check-then-set in step 3 spans two Stripe round-trips and is not atomic, so N
+///    concurrent callers can all pass check 1 before any writes the metadata; the shared
+///    idempotency key ensures Stripe still records the credit exactly once, closing that
+///    TOCTOU double-credit window.
 pub async fn confirm_payment_and_credit(
     payment_intent_id: &str,
     wallet_address: &str,
@@ -1212,15 +1229,21 @@ pub async fn confirm_payment_and_credit(
         .await?;
 
     let credit = (-amount).to_string(); // negative = credit to customer
+    // Stable idempotency key derived from the PaymentIntent so that N concurrent
+    // confirm_payment calls racing past the metadata.credited check-then-set above
+    // still produce exactly one balance transaction (Stripe deduplicates keys for
+    // 24h). This closes the TOCTOU window between the check and the credit POST.
+    let idempotency_key = topup_credit_idempotency_key(payment_intent_id);
     state
         .client
-        .post(
+        .post_with_idempotency(
             &format!("customers/{customer_id}/balance_transactions"),
             &[
                 ("amount", credit.as_str()),
                 ("currency", "usd"),
                 ("description", &format!("Top-up via {payment_intent_id}")),
             ],
+            &idempotency_key,
         )
         .await?;
 
@@ -1397,6 +1420,38 @@ mod tests {
         let raw = "test-api-key";
         let hash_hex = format!("0x{:064x}", api_key_hash(raw));
         assert_eq!(cache_key(raw), cache_key(&hash_hex));
+    }
+
+    // ── Top-up credit idempotency key (CPL-370) ──────────────────────────────
+
+    #[test]
+    fn topup_key_has_expected_format() {
+        // The format is the load-bearing contract with Stripe: it must stay
+        // `topup-credit-<pi_id>` verbatim or the dedup guarantee silently breaks.
+        assert_eq!(
+            topup_credit_idempotency_key("pi_3AbCdEf12345"),
+            "topup-credit-pi_3AbCdEf12345"
+        );
+    }
+
+    #[test]
+    fn topup_key_is_deterministic_per_intent() {
+        // Same intent → same key, so concurrent confirm_payment callers collapse
+        // to a single Stripe balance transaction.
+        assert_eq!(
+            topup_credit_idempotency_key("pi_same"),
+            topup_credit_idempotency_key("pi_same")
+        );
+    }
+
+    #[test]
+    fn topup_key_differs_across_intents() {
+        // Distinct intents must never share a key, or a legitimate second top-up
+        // would be silently deduped away.
+        assert_ne!(
+            topup_credit_idempotency_key("pi_one"),
+            topup_credit_idempotency_key("pi_two")
+        );
     }
 
     // ── Balance cache merge logic ────────────────────────────────────────────
