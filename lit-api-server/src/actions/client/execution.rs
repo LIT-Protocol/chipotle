@@ -37,12 +37,21 @@ impl Client {
                 return Ok(());
             }
             tracing::debug!(seconds, "execution::flush_unbilled_seconds: charging");
-            crate::stripe::charge_lit_action_time(&self.api_key, seconds, stripe)
-                .await
-                .map_err(|e| {
-                    warn!("Failed to bill remaining {seconds} seconds at end of action: {e}");
-                    anyhow!("Billing failed for {seconds} seconds of execution: {e}")
-                })?;
+            crate::stripe::charge_lit_action_time(
+                &self.api_key,
+                seconds,
+                // Derived CID of the action — always set on the billed execution
+                // path (raw code is hashed the same way registered actions are).
+                // `charge` normalizes an empty CID away, so no filtering here.
+                Some(self.ipfs_id.as_str()),
+                self.request_id.as_deref(),
+                stripe,
+            )
+            .await
+            .map_err(|e| {
+                warn!("Failed to bill remaining {seconds} seconds at end of action: {e}");
+                anyhow!("Billing failed for {seconds} seconds of execution: {e}")
+            })?;
             self.state.unbilled_seconds = 0;
         }
         Ok(())
