@@ -5,6 +5,7 @@ use crate::core::account_management;
 use crate::core::v1::guards::apikey::ApiKey;
 use crate::core::v1::guards::billing::BilledManagementApiKey;
 use crate::core::v1::guards::cpu_overload::CpuAvailable;
+use crate::core::v1::guards::rate_limit::NewAccountRateLimit;
 use crate::core::v1::helpers::api_status::{ApiResult, ErrMessage};
 use crate::core::v1::helpers::open_api_response::OpenApiResponse;
 use crate::core::v1::models::request::{
@@ -27,9 +28,23 @@ use rocket::serde::json::Json;
 use rocket::{get, post};
 use rocket_okapi::openapi;
 
+/// Create a new managed account: derives a fresh wallet, registers it on-chain,
+/// and provisions a Stripe customer with starter credits. Returns the account's
+/// API key and wallet address.
+///
+/// No authentication is required (this is how a caller obtains their first API
+/// key), but the endpoint is rate limited per client IP and may return 429 Too
+/// Many Requests when the node is under load or a single source creates
+/// accounts too quickly. Retry those with exponential backoff.
+// Unauthenticated + expensive (two operator-funded on-chain txs, a Stripe
+// customer, and starter credits per call), so it carries two anonymous-abuse
+// guards (CPL-367): CpuAvailable sheds load when the node is CPU-bound, and
+// NewAccountRateLimit caps the sustained account-creation rate per client IP.
 #[openapi(tag = "Account Management")]
 #[post("/new_account", format = "json", data = "<new_account_request>")]
 pub(super) async fn new_account(
+    _cpu: CpuAvailable,
+    _rate_limit: NewAccountRateLimit,
     signer_pool: &State<Arc<SignerPool>>,
     stripe_state: &State<Option<Arc<StripeState>>>,
     new_account_request: Json<NewAccountRequest>,

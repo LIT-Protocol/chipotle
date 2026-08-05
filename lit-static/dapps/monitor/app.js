@@ -32,6 +32,21 @@ const ACCOUNT_CONFIG_VIEW_ABI = [
   },
   {
     inputs: [],
+    name: 'configOperator',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    // ERC-173 owner() — served by the diamond's OwnershipFacet.
+    inputs: [],
+    name: 'owner',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
     name: 'adminApiPayerAccount',
     outputs: [{ internalType: 'address', name: '', type: 'address' }],
     stateMutability: 'view',
@@ -468,7 +483,7 @@ async function getNodeChainConfig(serverUrl) {
 
   if (errEl) errEl.style.display = 'none';
   if (resultsEl) resultsEl.style.display = 'block';
-  ['cc-chain-name','cc-chain-id','cc-is-evm','cc-testnet','cc-token','cc-contract-address']
+  ['cc-chain-name','cc-chain-id','cc-is-evm','cc-testnet','cc-token','cc-contract-address','ver-contract-address']
     .forEach(id => setValue(id, '…', false));
   const rpcUrlInput = el('cc-rpc-url');
   if (rpcUrlInput) rpcUrlInput.value = '';
@@ -492,12 +507,14 @@ async function getNodeChainConfig(serverUrl) {
     if (rpcInput) rpcInput.value = rpcUrl;
 
     setValue('cc-contract-address', cfg.contract_address ?? '—', !cfg.contract_address);
+    setValue('ver-contract-address', cfg.contract_address ?? '—', !cfg.contract_address);
 
     const contractInput = el('contract-address');
     if (contractInput && cfg.contract_address) contractInput.value = cfg.contract_address;
   } catch (e) {
     const rpcInput = el('cc-rpc-url');
     if (rpcInput) rpcInput.value = '';
+    setValue('ver-contract-address', '—', true);
     if (resultsEl) resultsEl.style.display = 'none';
     if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
   }
@@ -566,15 +583,16 @@ async function getApiPayers(serverUrl) {
   }
 }
 
+// Renders into the horizontal version bar just above the Pool Health bar.
 async function fetchVersion(serverUrl) {
-  const resultsEl = el('version-results');
   const errEl = el('version-error');
+  const submodulesEl = el('ver-submodules');
 
   if (errEl) errEl.style.display = 'none';
+  setValue('ver-name', '…', false);
   setValue('ver-version', '…', false);
-  const submodulesEl = el('ver-submodules');
+  setValue('ver-commit-version', '…', false);
   if (submodulesEl) submodulesEl.innerHTML = '';
-  if (resultsEl) resultsEl.style.display = 'block';
 
   try {
     const res = await fetch(`${serverUrl}/version`);
@@ -586,23 +604,15 @@ async function fetchVersion(serverUrl) {
     setValue('ver-commit-version', data.commit_version ?? '—', !data.commit_version);
 
     if (submodulesEl) {
-      const rows = (data.submodule_versions ?? []);
-      if (rows.length === 0) {
-        submodulesEl.innerHTML = '<span style="color:var(--muted);font-size:0.85rem">None</span>';
-      } else {
-        submodulesEl.innerHTML =
-          `<table>` +
-            `<thead><tr><th>Submodule</th><th>Version</th></tr></thead>` +
-            `<tbody>` +
-              rows.map(([name, ver]) =>
-                `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(ver)}</td></tr>`
-              ).join('') +
-            `</tbody>` +
-          `</table>`;
-      }
+      submodulesEl.innerHTML = (data.submodule_versions ?? []).map(([name, ver]) =>
+        `<div class="health-bar-item">` +
+          `<span class="health-bar-label">${escapeHtml(name)}</span>` +
+          `<span class="health-bar-value">${escapeHtml(ver)}</span>` +
+        `</div>`
+      ).join('');
     }
   } catch (e) {
-    if (resultsEl) resultsEl.style.display = 'none';
+    ['ver-name', 'ver-version', 'ver-commit-version'].forEach(id => setValue(id, '—', true));
     if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
   }
 }
@@ -630,8 +640,11 @@ async function fetchContractValues() {
   }
 
   hideError();
+  setValue('val-contract-owner', '…', false);
   setValue('val-pricing-operator', '…', false);
   setValue('val-pricing-operator-balance', '', false);
+  setValue('val-config-operator', '…', false);
+  setValue('val-config-operator-balance', '', false);
   setValue('val-admin-api-payer', '…', false);
   setValue('val-admin-api-payer-balance', '', false);
   setValue('val-payer-count', '…', false);
@@ -655,6 +668,30 @@ async function fetchContractValues() {
 
     setValue('val-pricing-operator', pricingOperator ?? '—', !pricingOperator);
     setValue('val-admin-api-payer', adminApiPayer ?? '—', !adminApiPayer);
+
+    // configOperator() may be absent on older diamonds — fetch separately so a
+    // missing selector doesn't blank the rest of the card.
+    contract.configOperator()
+      .then(addr => {
+        setValue('val-config-operator', addr ?? '—', !addr);
+        if (addr && addr !== ethers.ZeroAddress) {
+          provider.getBalance(addr).then(wei => {
+            const node = el('val-config-operator-balance');
+            if (node) {
+              node.textContent = parseFloat(ethers.formatEther(wei)).toFixed(6) + ' ETH';
+              node.style.color = '';
+            }
+          }).catch(() => {});
+        }
+      })
+      .catch(() => setValue('val-config-operator', '—', true));
+
+    // owner() lives on the OwnershipFacet — fetch it separately so a diamond
+    // deployed without that facet doesn't blank the rest of the card.
+    contract.owner()
+      .then(owner => setValue('val-contract-owner', owner ?? '—', !owner))
+      .catch(() => setValue('val-contract-owner', '—', true));
+
     setValue('val-payer-count', String(apiPayerCount), false);
     setValue('val-requested-api-payer-count', String(requestedApiPayerCount), false);
     setValue('val-rebalance-amount', ethers.formatEther(rebalanceAmountWei) + ' ETH', false);
@@ -801,12 +838,17 @@ async function connectWallet() {
 
 // ── fetchChainConfigKeys ────────────────────────────────────────────────
 
+// Populates the Node Configuration key dropdown with the ConfigKeys variants
+// the node reads from chain (GET /get_chain_config_keys).
 async function fetchChainConfigKeys(serverUrl) {
-  const listEl = el('chain-config-keys-list');
-  const errEl = el('chain-config-keys-error');
+  const select = el('node-config-key');
+  const errEl = el('node-config-keys-error');
 
   if (errEl) errEl.style.display = 'none';
-  if (listEl) listEl.innerHTML = '<span style="color:var(--muted)">Loading…</span>';
+  if (!select) return;
+
+  const previous = select.value;
+  select.innerHTML = '<option value="" disabled selected>Loading keys…</option>';
 
   try {
     const res = await fetch(`${serverUrl}/get_chain_config_keys`);
@@ -814,13 +856,12 @@ async function fetchChainConfigKeys(serverUrl) {
     const data = await res.json();
     const keys = data.keys ?? [];
 
-    if (listEl) {
-      listEl.innerHTML = keys.length === 0
-        ? '<span style="color:var(--muted)">No keys returned.</span>'
-        : keys.map(k => `<div class="result-row"><span class="result-value">${escapeHtml(k)}</span></div>`).join('');
-    }
+    select.innerHTML =
+      '<option value="" disabled selected>Select a key…</option>' +
+      keys.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('');
+    if (previous && keys.includes(previous)) select.value = previous;
   } catch (e) {
-    if (listEl) listEl.innerHTML = '';
+    select.innerHTML = '<option value="" disabled selected>Failed to load keys</option>';
     if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
   }
 }
@@ -1417,7 +1458,7 @@ el('btn-set-node-config')?.addEventListener('click', async () => {
     return;
   }
   if (!key) {
-    showStatus('node-config-status', 'Enter a configuration key.', true);
+    showStatus('node-config-status', 'Select a configuration key.', true);
     return;
   }
 
@@ -1517,6 +1558,12 @@ el('btn-set-payer-count')?.addEventListener('click', async () => {
 });
 
 /* ═══ Initialization ═════════════════════════════════════════════════════════ */
+
+el('ver-contract-address')?.addEventListener('click', () => {
+  const node = el('ver-contract-address');
+  const text = (node?.textContent || '').trim();
+  if (text && text !== '—' && text !== '…') copyText(text, node);
+});
 
 (function () {
   const select = el('network');
