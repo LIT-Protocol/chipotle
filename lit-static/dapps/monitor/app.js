@@ -804,7 +804,19 @@ async function connectWallet() {
     try {
       _wcProvider = await EthereumProvider.init({
         projectId: WALLETCONNECT_PROJECT_ID,
-        chains: [chainId],
+        // CRITICAL: use `optionalChains`, NOT `chains`. @walletconnect/ethereum-provider
+        // turns `chains` into a *requiredNamespaces* entry. A Gnosis Safe (and any
+        // smart-contract wallet) only supports the single chain it was deployed to, and
+        // Reown's own guidance is explicit that required namespaces "cause issues" with
+        // such wallets: the session pairs successfully (the Safe app opens) but the
+        // eth_sendTransaction request never routes to the wallet, so the transaction to
+        // sign silently disappears. Declaring the chain as *optional* keeps EOA wallets
+        // (MetaMask, Rabby) working while letting the Safe negotiate its single chain.
+        // Methods intentionally left unset → they default to the full OPTIONAL_METHODS
+        // set (includes eth_sendTransaction), which the wallet echoes into the approved
+        // namespace so signing routes to the wallet rather than the read-only RPC.
+        // See https://docs.reown.com/advanced/providers/ethereum ("Smart Contract Wallets").
+        optionalChains: [chainId],
         rpcMap: rpcUrl ? { [chainId]: rpcUrl } : undefined,
         showQrModal: true,
       });
