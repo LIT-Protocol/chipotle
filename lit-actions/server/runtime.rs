@@ -56,6 +56,29 @@ fn lit_actions_ops_extension() -> deno_core::Extension {
 // Same default limits as in lit-node's action client
 const DEFAULT_TIMEOUT_MS: u64 = 1000 * 60 * 15; // 15 minutes
 pub(crate) const DEFAULT_MEMORY_LIMIT_MB: usize = 64; // 64MB
+// Hard ceilings for caller-supplied `timeout` / `memory_limit`. The proto
+// types (`uint64 timeout`, `uint32 memory_limit`) let a client request values
+// far larger than any host can honor: an effectively unbounded timeout pins a
+// worker forever, and an oversized heap request outruns the near-heap OOM
+// guard so the host OOM-killer takes down the runner (and any co-located
+// lit_node) instead. Mirrors the sibling gvisor-server's clamps
+// (`supervisor.rs`); see CPL-371.
+const MAX_TIMEOUT_MS: u64 = 1000 * 60 * 150; // 150 minutes
+pub(crate) const MAX_MEMORY_LIMIT_MB: usize = 2048; // 2GB
+
+/// Resolve a caller-supplied execution timeout: fall back to the default when
+/// unset, then clamp to `MAX_TIMEOUT_MS` (CPL-371).
+fn clamp_timeout_ms(requested: Option<u64>) -> u64 {
+    requested.unwrap_or(DEFAULT_TIMEOUT_MS).min(MAX_TIMEOUT_MS)
+}
+
+/// Resolve a caller-supplied heap limit: fall back to the default when unset,
+/// then clamp to `MAX_MEMORY_LIMIT_MB` (CPL-371).
+fn clamp_memory_limit_mb(requested: Option<usize>) -> usize {
+    requested
+        .unwrap_or(DEFAULT_MEMORY_LIMIT_MB)
+        .min(MAX_MEMORY_LIMIT_MB)
+}
 const MEMORY_SAMPLE_INTERVAL_MS: u64 = 500; // 500ms
 const EXECUTION_TERMINATED_ERROR: &str = "Uncaught Error: execution terminated";
 const MAX_ACTION_CODE_CACHE_BYTES: usize = 100 * 1024 * 1024;
@@ -678,7 +701,7 @@ pub(crate) async fn execute_js(
         module_cache,
         lockfile_path,
         http_client,
-        memory_limit_mb: memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB),
+        memory_limit_mb: clamp_memory_limit_mb(memory_limit_mb),
         v8_code_cache,
     });
 
@@ -768,7 +791,7 @@ async fn execute_with_worker_inner(
         loaded_modules,
     } = prepared;
 
-    let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
+    let timeout_ms = clamp_timeout_ms(timeout_ms);
     let memory_limit_mb = shared.memory_limit_mb;
 
     // Check the action code cache early so we can skip prepare_action_code
@@ -793,6 +816,12 @@ async fn execute_with_worker_inner(
         state.put(outbound_tx);
         state.put(inbound_rx);
         state.put(loaded_modules.clone());
+        // Cap concurrent native buffering by `op_lit_proxied_fetch` to the
+        // isolate's memory budget (CPL-373): each in-flight proxied fetch can
+        // hold up to 10 MiB off-heap, invisible to the heap-limit OOM guard.
+        state.put(
+            lit_actions_ext::bindings::ProxiedFetchLimiter::for_memory_budget_mb(memory_limit_mb),
+        );
         drop(state);
     }
 
@@ -1049,6 +1078,41 @@ mod tests {
             code: code.to_string(),
             loaded_modules: Vec::new(),
         }
+    }
+
+    #[test]
+    fn clamp_timeout_ms_bounds_caller_values() {
+        // Unset falls back to the default.
+        assert_eq!(clamp_timeout_ms(None), DEFAULT_TIMEOUT_MS);
+        // Values at or below the ceiling pass through untouched.
+        assert_eq!(clamp_timeout_ms(Some(500)), 500);
+        assert_eq!(clamp_timeout_ms(Some(MAX_TIMEOUT_MS)), MAX_TIMEOUT_MS);
+        // Anything above the ceiling — including the proto's `u64::MAX` — is
+        // clamped down, so a worker can never be pinned indefinitely.
+        assert_eq!(clamp_timeout_ms(Some(MAX_TIMEOUT_MS + 1)), MAX_TIMEOUT_MS);
+        assert_eq!(clamp_timeout_ms(Some(u64::MAX)), MAX_TIMEOUT_MS);
+    }
+
+    #[test]
+    fn clamp_memory_limit_mb_bounds_caller_values() {
+        // Unset falls back to the default.
+        assert_eq!(clamp_memory_limit_mb(None), DEFAULT_MEMORY_LIMIT_MB);
+        // Values at or below the ceiling pass through untouched.
+        assert_eq!(clamp_memory_limit_mb(Some(100)), 100);
+        assert_eq!(
+            clamp_memory_limit_mb(Some(MAX_MEMORY_LIMIT_MB)),
+            MAX_MEMORY_LIMIT_MB
+        );
+        // Anything above the ceiling — including the proto's `u32::MAX` (MB) —
+        // is clamped down so V8's heap limit stays below what the host can OOM.
+        assert_eq!(
+            clamp_memory_limit_mb(Some(MAX_MEMORY_LIMIT_MB + 1)),
+            MAX_MEMORY_LIMIT_MB
+        );
+        assert_eq!(
+            clamp_memory_limit_mb(Some(u32::MAX as usize)),
+            MAX_MEMORY_LIMIT_MB
+        );
     }
 
     #[test]

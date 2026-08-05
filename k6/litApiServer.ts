@@ -1073,6 +1073,11 @@ export class LitApiServerClient {
     };
   }
 
+  /**
+ * Create a new managed account: derives a fresh wallet, registers it on-chain, and provisions a Stripe customer with starter credits. Returns the account's API key and wallet address.
+
+No authentication is required (this is how a caller obtains their first API key), but the endpoint is rate limited per client IP and may return 429 Too Many Requests when the node is under load or a single source creates accounts too quickly. Retry those with exponential backoff.
+ */
   newAccount(
     newAccountRequest: NewAccountRequest,
     requestParameters?: Params,
