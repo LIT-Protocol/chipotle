@@ -158,38 +158,44 @@ v1 billing stays flat per-second via the unchanged `UpdateResourceUsage` path.
 Ship as a new container in the existing `docker-compose.phala.yml` (same CVM,
 same attested identity — no new cross-VM trust plumbing). It mounts the same
 `lit-socket` volume the JS runner uses and serves its own socket there. The
-container runs unprivileged with a minimal profile (CPL-377): the spikes used
-`privileged`, but that grants the full capability set plus host-device access,
-so a runsc escape would mean near-total control of the CVM host (which also
-mounts `/var/run/dstack.sock` for key derivation). The scoped-down set below is
-all nested runsc needs on systrap/ptrace. Adding the service changes
-`compose_hash`, which is a governed change in production.
+container runs unprivileged (CPL-377): the spikes used `privileged`, but that
+grants the full capability set plus host-device access, so a runsc escape would
+mean near-total control of the CVM host (which also mounts `/var/run/dstack.sock`
+for key derivation). Dropping it leaves Docker's default (non-privileged)
+capability bounding set, to which we add only the two extra capabilities nested
+runsc needs on systrap/ptrace. Adding the service changes `compose_hash`, which
+is a governed change in production.
 
 ```yaml
   lit-actions-gvisor:
     image: <built from image/Dockerfile.runner>
-    command: ["lit_actions_gvisor", "--socket", "/var/run/lit/lit_actions_gvisor.sock",
+    command: ["lit_actions_gvisor", "--socket", "/tmp/lit_actions_gvisor.sock",
               "--rootfs", "/var/lib/lit/sandbox-rootfs"]
-    # Nested runsc, no privileged mode. SYS_ADMIN: mount/pivot_root/namespaces;
-    # NET_ADMIN: sandbox netstack. seccomp/apparmor unconfined: runsc's own
-    # syscalls (the Sentry is the boundary for guest code). No devices — the CVM
-    # has no /dev/kvm (systrap/ptrace only). Add SYS_PTRACE only if forcing the
-    # ptrace platform.
+    # No privileged mode. cap_add ADDS to Docker's default (already reduced)
+    # cap set — SYS_ADMIN: mount/pivot_root/namespaces; NET_ADMIN: sandbox
+    # netstack. seccomp/apparmor unconfined: runsc's own syscalls (the Sentry is
+    # the boundary for guest code). No devices — the CVM has no /dev/kvm
+    # (systrap/ptrace only). Add SYS_PTRACE only if forcing the ptrace platform.
     cap_add: [SYS_ADMIN, NET_ADMIN]
     security_opt: [seccomp=unconfined, apparmor=unconfined]
-    volumes: [ "lit-socket:/var/run/lit" ]
+    volumes: [ "lit-socket:/tmp" ]
     cpus: 2
     mem_limit: 4g
     pids_limit: 2048
 ```
+
+A stricter `cap_drop: [ALL]` + explicit re-add is a further tightening, but runsc
+also leans on several Docker defaults (SETUID/SETGID for userns mapping,
+CHOWN/DAC_OVERRIDE/FOWNER for the overlay, KILL, SYS_CHROOT), so that allowlist
+must be validated in staging rather than assumed.
 
 Validate the scoped profile in staging (`LIT_GVISOR_ENABLED=true`) via the k6
 `gvisor-smoke` test before prod, where the runner is gated off
 (`LIT_GVISOR_ENABLED=false`). If that smoke test can spawn a nested sandbox, the
 capability set is sufficient.
 
-lit-api-server connects to `/var/run/lit/lit_actions_gvisor.sock` the same way
-it connects to the JS runner's socket today (`actions/client/execution.rs`).
+lit-api-server connects to `/tmp/lit_actions_gvisor.sock` the same way it
+connects to the JS runner's socket today (`actions/client/execution.rs`).
 
 ## Local development & tests
 

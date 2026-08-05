@@ -402,17 +402,17 @@ Ships as a new `lit-actions-gvisor` container in the existing
 `docker-compose.phala.yml` — same CVM, same attested identity. It mounts the
 shared `lit-socket` volume and serves its own socket there; lit-api-server
 `depends_on` it and routes `/lit_binary_action` to it. The container runs
-unprivileged with a minimal capability profile (CPL-377): `privileged` granted
-the full cap set plus host-device access — a runsc escape would have meant
-near-total CVM-host control — so it was scoped down to just what nested runsc
-needs.
+unprivileged (CPL-377): `privileged` granted the full cap set plus host-device
+access — a runsc escape would have meant near-total CVM-host control — so it was
+scoped down to Docker's default (non-privileged) cap set plus only the two extra
+capabilities nested runsc needs.
 
 ```yaml
 lit-actions-gvisor:
   image: ${DOCKER_IMAGE_LIT_ACTIONS_GVISOR}
   command: [lit_actions_gvisor, --socket, /tmp/lit_actions_gvisor.sock,
             --rootfs, /var/lib/lit/sandbox-rootfs]
-  cap_add: [SYS_ADMIN, NET_ADMIN]              # mount/namespaces; sandbox netstack
+  cap_add: [SYS_ADMIN, NET_ADMIN]              # ADDED to Docker's default cap set
   security_opt: [seccomp=unconfined, apparmor=unconfined]  # runsc's own syscalls
   volumes: [ "lit-socket:/tmp" ]
 ```
