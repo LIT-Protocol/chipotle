@@ -827,6 +827,48 @@ pub async fn check_credit(
 /// network error cannot produce duplicate balance transactions.
 ///
 /// Returns `Err` only if the *cached* balance would go positive (insufficient credits).
+///
+/// The Stripe "Reason" (`description`) and CID metadata for a charge, along with
+/// the normalized CID. Only Lit Action charges carry a CID: an empty CID, or one
+/// passed with any other `reason`, is dropped so a stray argument can never
+/// mislabel a charge as a Lit Action. Pure so it can be unit-tested.
+fn charge_label<'a>(reason: BillingReason, ipfs_id: Option<&'a str>) -> (String, Option<&'a str>) {
+    let cid = match reason {
+        BillingReason::LitAction => ipfs_id.filter(|s| !s.is_empty()),
+        _ => None,
+    };
+    let description = match cid {
+        Some(id) => format!("Lit Action {id}"),
+        None => reason.description().to_string(),
+    };
+    (description, cid)
+}
+
+/// Build the Stripe balance-transaction form parameters. `ipfs_id` and
+/// `request_id` are attached as metadata only when present. Pure so the exact
+/// param set (and the conditional metadata) can be unit-tested.
+fn charge_params<'a>(
+    cost_str: &'a str,
+    description: &'a str,
+    reason: BillingReason,
+    ipfs_id: Option<&'a str>,
+    request_id: Option<&'a str>,
+) -> Vec<(&'a str, &'a str)> {
+    let mut params = vec![
+        ("amount", cost_str),
+        ("currency", "usd"),
+        ("description", description),
+        ("metadata[reason]", reason.as_str()),
+    ];
+    if let Some(id) = ipfs_id {
+        params.push(("metadata[ipfs_id]", id));
+    }
+    if let Some(rid) = request_id {
+        params.push(("metadata[request_id]", rid));
+    }
+    params
+}
+
 async fn charge(
     api_key: &str,
     cost_cents: i64,
@@ -899,17 +941,12 @@ async fn charge(
     let cid = customer_id.clone();
     let wallet_for_metric = wallet.clone();
     let idempotency_key = uuid::Uuid::new_v4().to_string();
-    // Owned copies of the Stripe `description` ("Reason" in the dashboard) and
-    // the metadata values, moved into the fire-and-forget task below. Lit Action
-    // charges label the Reason with the action's IPFS CID; everything else falls
-    // back to the reason's static description ("Configuration change", etc.).
-    let description = match ipfs_id {
-        Some(id) => format!("Lit Action {id}"),
-        None => reason.description().to_string(),
-    };
+    // The dashboard "Reason" and normalized CID metadata (Lit Action charges
+    // only — see `charge_label`), owned so they can move into the fire-and-forget
+    // task below. `request_id` groups the several balance transactions one
+    // request emits: a Lit Action's per-second flushes share a request-id.
+    let (description, ipfs_id) = charge_label(reason, ipfs_id);
     let ipfs_id = ipfs_id.map(str::to_owned);
-    // Groups the (possibly several) balance transactions a single request emits:
-    // one Lit Action execution flushes per-second charges under one request-id.
     let request_id = request_id.map(str::to_owned);
     tokio::spawn(async move {
         let cost_str = cost_cents.to_string();
@@ -925,18 +962,13 @@ async fn charge(
             if !delay.is_zero() {
                 tokio::time::sleep(delay).await;
             }
-            let mut params: Vec<(&str, &str)> = vec![
-                ("amount", cost_str.as_str()),
-                ("currency", "usd"),
-                ("description", description.as_str()),
-                ("metadata[reason]", reason.as_str()),
-            ];
-            if let Some(id) = ipfs_id.as_deref() {
-                params.push(("metadata[ipfs_id]", id));
-            }
-            if let Some(rid) = request_id.as_deref() {
-                params.push(("metadata[request_id]", rid));
-            }
+            let params = charge_params(
+                cost_str.as_str(),
+                description.as_str(),
+                reason,
+                ipfs_id.as_deref(),
+                request_id.as_deref(),
+            );
             match state
                 .client
                 .post_with_idempotency(
@@ -1270,6 +1302,78 @@ mod tests {
             BillingReason::Management.description(),
             BillingReason::LitAction.description()
         );
+    }
+
+    #[test]
+    fn charge_label_uses_cid_only_for_lit_action() {
+        // Lit Action + real CID → CID becomes the Reason and the metadata.
+        let (desc, cid) = charge_label(BillingReason::LitAction, Some("QmABC123"));
+        assert_eq!(desc, "Lit Action QmABC123");
+        assert_eq!(cid, Some("QmABC123"));
+
+        // Empty CID is dropped: fall back to the static Lit Action label, no meta.
+        let (desc, cid) = charge_label(BillingReason::LitAction, Some(""));
+        assert_eq!(desc, "Lit Action execution");
+        assert_eq!(cid, None);
+
+        // Missing CID on a Lit Action charge → static label, no metadata.
+        let (desc, cid) = charge_label(BillingReason::LitAction, None);
+        assert_eq!(desc, "Lit Action execution");
+        assert_eq!(cid, None);
+
+        // A CID passed with a non–Lit-Action reason must NOT mislabel the charge
+        // or leak into metadata — it is dropped entirely.
+        let (desc, cid) = charge_label(BillingReason::Management, Some("QmABC123"));
+        assert_eq!(desc, "Configuration change");
+        assert_eq!(cid, None);
+
+        let (desc, cid) = charge_label(BillingReason::Management, None);
+        assert_eq!(desc, "Configuration change");
+        assert_eq!(cid, None);
+    }
+
+    #[test]
+    fn charge_params_include_metadata_only_when_present() {
+        // Base params are always present, in order; reason code is always set.
+        let params = charge_params(
+            "10",
+            "Configuration change",
+            BillingReason::Management,
+            None,
+            None,
+        );
+        assert_eq!(
+            params,
+            vec![
+                ("amount", "10"),
+                ("currency", "usd"),
+                ("description", "Configuration change"),
+                ("metadata[reason]", "management"),
+            ]
+        );
+
+        // request_id is included when provided (grouping key for a request's
+        // several charges); ipfs_id is included when provided.
+        let params = charge_params(
+            "5",
+            "Lit Action QmABC123",
+            BillingReason::LitAction,
+            Some("QmABC123"),
+            Some("req-42"),
+        );
+        assert!(params.contains(&("metadata[ipfs_id]", "QmABC123")));
+        assert!(params.contains(&("metadata[request_id]", "req-42")));
+
+        // request_id without a CID is still attached.
+        let params = charge_params(
+            "5",
+            "Lit Action execution",
+            BillingReason::LitAction,
+            None,
+            Some("req-7"),
+        );
+        assert!(params.contains(&("metadata[request_id]", "req-7")));
+        assert!(!params.iter().any(|(k, _)| *k == "metadata[ipfs_id]"));
     }
 
     #[test]

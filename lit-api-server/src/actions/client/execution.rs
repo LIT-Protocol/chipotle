@@ -41,11 +41,9 @@ impl Client {
                 &self.api_key,
                 seconds,
                 // Derived CID of the action — always set on the billed execution
-                // path (both HTTP handlers derive it before charging; raw code is
-                // hashed the same way registered actions are). The empty-string
-                // filter only guards the builder's default, mirroring the
-                // is_empty() handling in execute_js_inner.
-                Some(self.ipfs_id.as_str()).filter(|s| !s.is_empty()),
+                // path (raw code is hashed the same way registered actions are).
+                // `charge` normalizes an empty CID away, so no filtering here.
+                Some(self.ipfs_id.as_str()),
                 self.request_id.as_deref(),
                 stripe,
             )

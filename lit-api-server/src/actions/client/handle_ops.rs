@@ -181,9 +181,9 @@ impl Client {
                             &self.api_key,
                             self.state.unbilled_seconds,
                             // Derived CID of the action — always set on the billed
-                            // execution path. The empty-string filter only guards
-                            // the builder's default (see execution.rs).
-                            Some(self.ipfs_id.as_str()).filter(|s| !s.is_empty()),
+                            // execution path; `charge` normalizes an empty CID
+                            // away (see execution.rs).
+                            Some(self.ipfs_id.as_str()),
                             self.request_id.as_deref(),
                             stripe,
                         )
