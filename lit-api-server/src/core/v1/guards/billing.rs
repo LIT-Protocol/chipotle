@@ -201,9 +201,17 @@ impl Fairing for ManagementBillingFairing {
         let Some(stripe) = state.as_ref() else {
             return;
         };
+        // The request's X-Request-Id, recorded as `metadata[request_id]` on the
+        // Stripe transaction so config-change charges correlate to the request.
+        // `RequestSpan`'s FromRequest is Infallible, so this always succeeds.
+        let request_id = request
+            .guard::<crate::observability::fairing::RequestSpan>()
+            .await
+            .succeeded()
+            .map(|span| span.request_id);
         // resolve/customer/balance are warm in cache from the guard, so this is
         // a fast local decrement plus a spawned (fire-and-forget) Stripe POST.
-        if let Err(e) = stripe::charge_management(key, stripe).await {
+        if let Err(e) = stripe::charge_management(key, request_id.as_deref(), stripe).await {
             // The operation already completed; never fail the response over
             // settlement. Surfaced via the billing settlement metrics/logs.
             tracing::error!("management charge settlement failed (operation completed): {e}");
