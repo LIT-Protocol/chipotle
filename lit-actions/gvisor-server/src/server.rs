@@ -8,12 +8,18 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use lit_actions_grpc::{proto::*, unix};
+use lit_observability::PRIVACY_MODE_TAG;
 use tokio_stream::{Stream, StreamExt as _};
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, instrument};
 
 use crate::bridge::OpBridge;
 use crate::supervisor::Supervisor;
+
+/// Lowercased request-id header, as set by the lit-api-server fairing
+/// (`lit_api_core::context::HEADER_KEY_X_REQUEST_ID`; hardcoded here to keep
+/// this crate off the lit-api-core dependency tree).
+const HEADER_X_REQUEST_ID: &str = "x-request-id";
 
 pub struct GvisorServer {
     supervisor: Arc<Supervisor>,
@@ -80,9 +86,22 @@ impl Action for GvisorServer {
             match first.union {
                 Some(UnionRequest::Execute(req)) => {
                     // `DebugExecutionRequest` redacts user secrets (js_params,
-                    // headers, auth_context) by default (CPL-369), so this is
-                    // safe to log unconditionally.
-                    debug!("{:?}", DebugExecutionRequest::from(&req));
+                    // headers, auth_context) by default (CPL-369). Privacy mode
+                    // is a *stronger* opt-in guarantee that additionally
+                    // suppresses non-secret request metadata (truncated code,
+                    // ids); it runs before request context is set, so the
+                    // `PrivacyModeLayer` can't filter here — keep the explicit
+                    // branch. Forging the tag only reduces the caller's own
+                    // logging, so relying on it for full suppression is safe.
+                    let privacy_mode = req
+                        .http_headers
+                        .get(HEADER_X_REQUEST_ID)
+                        .is_some_and(|id| id.ends_with(PRIVACY_MODE_TAG));
+                    if privacy_mode {
+                        debug!("ExecuteJsRequest: **PRIVACY MODE**");
+                    } else {
+                        debug!("{:?}", DebugExecutionRequest::from(&req));
+                    }
 
                     // Empty-code shortcut (parity with the JS runner).
                     if req.code.bytes().all(|b| b.is_ascii_whitespace()) {

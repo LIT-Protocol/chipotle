@@ -156,15 +156,22 @@ decl_op!(UpdateResourceUsage);
 mod tests {
     use super::*;
 
-    /// By default (no `LIT_LOG_SENSITIVE_DATA` opt-out), the Debug rendering used
-    /// for logging must never expose user-supplied secrets in `js_params`,
-    /// `auth_context`, or `http_headers` (CPL-369). This asserts the redacted
-    /// path; the test process does not set the opt-out env var.
+    /// By default (without the `LIT_LOG_SENSITIVE_DATA` opt-in), the Debug
+    /// rendering used for logging must never expose user-supplied secrets in
+    /// `js_params`, `auth_context`, or `http_headers` (CPL-369). This asserts
+    /// the redacted path.
     #[test]
     fn debug_redacts_user_secrets_by_default() {
+        // `sensitive_logging_enabled()` caches its env read on first call, so
+        // clear the opt-in before that first call to keep this test
+        // deterministic regardless of the ambient environment. Removing (never
+        // setting) the var only moves toward the safe default, so it cannot
+        // affect other tests in this binary.
+        // SAFETY: single-threaded test entry, before any other env access.
+        unsafe { std::env::remove_var(lit_observability::LOG_SENSITIVE_DATA_ENV) };
         assert!(
             !lit_observability::sensitive_logging_enabled(),
-            "test env must not set LIT_LOG_SENSITIVE_DATA"
+            "opt-in must be off for the default-redaction assertion"
         );
 
         let mut req = ExecutionRequest {
