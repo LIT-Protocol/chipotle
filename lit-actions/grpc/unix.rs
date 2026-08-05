@@ -7,9 +7,45 @@ use hyper_util::rt::TokioIo;
 use lit_observability::net::grpc::TracingMiddleware;
 use lit_observability::tonic_middleware::MiddlewareLayer;
 use tokio::net::{UnixListener, UnixStream};
+use tokio_stream::StreamExt as _;
 use tokio_stream::wrappers::UnixListenerStream;
 use tonic::body::BoxBody;
 use tonic::transport::{Channel, Endpoint, Server, Uri};
+use tracing::warn;
+
+/// Peer-credential (SO_PEERCRED) policy for the control socket.
+///
+/// The gRPC control socket lets a client run arbitrary code in the runtime
+/// with client-cooperative resource accounting (CPL-368). Because the socket
+/// lives in a directory shared across the CVM's containers, restrictive file
+/// permissions alone are not a hard guarantee, so we additionally verify the
+/// connecting peer's UID on every accepted connection and drop anything that
+/// isn't us or root.
+#[derive(Copy, Clone)]
+struct AllowedPeers {
+    /// The effective UID of this process. The legitimate client
+    /// (lit-api-server / lit-node) runs as the same user in every supported
+    /// deployment (all containers share a UID in the Phala CVM; local dev and
+    /// the in-process test server share the developer's UID).
+    euid: u32,
+}
+
+impl AllowedPeers {
+    fn current() -> Self {
+        // SAFETY: geteuid() is always successful and has no preconditions.
+        Self {
+            euid: unsafe { libc::geteuid() },
+        }
+    }
+
+    /// A peer is permitted if it runs as the same user as this process, or as
+    /// root. Root is allowed because it can already read the socket and act
+    /// as any user; the boundary this enforces is against *unprivileged*
+    /// local processes, which are the CPL-368 threat.
+    fn permits(&self, peer_uid: u32) -> bool {
+        peer_uid == self.euid || peer_uid == 0
+    }
+}
 
 pub async fn connect_to_socket(socket_path: impl Into<PathBuf>) -> Result<Channel> {
     const IGNORED_URI: &str = "http://[::]:50051";
@@ -62,12 +98,40 @@ where
 
     let uds = UnixListener::bind(socket_path.clone())?;
 
-    // set permissions on socket to 777 so that the lit-node user can talk to it
-    // this is safe - the lit actions runner has no secrets in it and an unauthorized user
-    // could only run JS code on it.
-    fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o777))?;
+    // Restrict the socket to owner + group (0o660), dropping the world-writable
+    // bit the socket used to carry (0o777). The legitimate client runs as the
+    // same user as this process in every supported deployment, so it retains
+    // access; unprivileged local processes no longer can. This is the file-mode
+    // half of the CPL-368 fix — the SO_PEERCRED check below is the enforced
+    // half that does not depend on how the shared volume is mounted.
+    fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o660))?;
 
-    let uds_stream = UnixListenerStream::new(uds);
+    // SO_PEERCRED gate: verify the connecting process's UID before handing the
+    // connection to tonic. A connection that fails the check (unauthorized UID,
+    // or credentials that cannot be read) is silently dropped so it never
+    // reaches `execute_js`. Accept errors are propagated unchanged.
+    let allowed = AllowedPeers::current();
+    let uds_stream = UnixListenerStream::new(uds).filter_map(move |conn| {
+        let stream = match conn {
+            Ok(stream) => stream,
+            Err(e) => return Some(Err(e)),
+        };
+        match stream.peer_cred() {
+            Ok(cred) if allowed.permits(cred.uid()) => Some(Ok(stream)),
+            Ok(cred) => {
+                warn!(
+                    peer_uid = cred.uid(),
+                    peer_pid = cred.pid(),
+                    "rejecting control-socket connection from unauthorized peer"
+                );
+                None
+            }
+            Err(e) => {
+                warn!("rejecting control-socket connection: failed to read peer credentials: {e}");
+                None
+            }
+        }
+    });
 
     let reflection = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(crate::proto::FILE_DESCRIPTOR_SET)
