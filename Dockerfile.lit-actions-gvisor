@@ -32,8 +32,12 @@ COPY lit-actions ./lit-actions/
 RUN sed -i 's/, "tests"//; s/"tests", //' lit-actions/Cargo.toml
 
 # The guest `lit` CLI (baked into the rootfs) and the supervisor share this
-# crate so the guest wire contract and its server cannot drift apart.
+# crate so the guest wire contract and its server cannot drift apart. Both
+# binaries are gated behind the `gvisor` cargo feature (CPL-359): gVisor is
+# off by default, so building this image is the explicit opt-in that compiles
+# them.
 RUN cargo build --release --manifest-path lit-actions/Cargo.toml \
+        --features gvisor \
         -p lit-actions-gvisor-server --bin lit_actions_gvisor --bin lit
 
 # ---- base sandbox rootfs (mirrors image/Dockerfile.rootfs) ---------------

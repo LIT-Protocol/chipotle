@@ -101,10 +101,23 @@ pub enum BillingReason {
 }
 
 impl BillingReason {
+    /// Machine-readable code. Used as the `reason` label on billing metrics, the
+    /// `billing_reason` field on per-payment events, and the `metadata[reason]`
+    /// key on the Stripe balance transaction (so Stripe-side reporting can slice
+    /// spend by charge type).
     pub fn as_str(self) -> &'static str {
         match self {
             BillingReason::Management => "management",
             BillingReason::LitAction => "lit_action",
+        }
+    }
+
+    /// Human-readable description sent as the Stripe balance transaction
+    /// `description`, so the charge type is legible in the Stripe dashboard.
+    pub fn description(self) -> &'static str {
+        match self {
+            BillingReason::Management => "Management API call",
+            BillingReason::LitAction => "Lit Action execution",
         }
     }
 }
@@ -900,7 +913,8 @@ async fn charge(
                     &[
                         ("amount", cost_str.as_str()),
                         ("currency", "usd"),
-                        ("description", "API call charge"),
+                        ("description", reason.description()),
+                        ("metadata[reason]", reason.as_str()),
                     ],
                     &idempotency_key,
                 )
@@ -1185,10 +1199,29 @@ mod tests {
 
     #[test]
     fn billing_reason_labels_are_stable() {
-        // These strings are emitted as metric labels (CPL-329); dashboards and
-        // alerts key off them, so the mapping must not drift.
+        // These strings are emitted as metric labels (CPL-329) and as the Stripe
+        // `metadata[reason]` code; dashboards, alerts, and Stripe-side reporting
+        // key off them, so the mapping must not drift.
         assert_eq!(BillingReason::Management.as_str(), "management");
         assert_eq!(BillingReason::LitAction.as_str(), "lit_action");
+    }
+
+    #[test]
+    fn billing_reason_descriptions_distinguish_charge_type() {
+        // Sent as the Stripe balance transaction `description`; must differ per
+        // reason so the charge type is legible in the Stripe dashboard.
+        assert_eq!(
+            BillingReason::Management.description(),
+            "Management API call"
+        );
+        assert_eq!(
+            BillingReason::LitAction.description(),
+            "Lit Action execution"
+        );
+        assert_ne!(
+            BillingReason::Management.description(),
+            BillingReason::LitAction.description()
+        );
     }
 
     #[test]

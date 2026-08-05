@@ -92,6 +92,17 @@ export interface CreateWalletWithSignatureRequest {
 }
 
 /**
+ * Returned by `POST /prepare_wallet`. Same shape as `CreateWalletWithSignatureResponse` but obtained with no owner signature and no API key. The client MUST follow up with an on-chain `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)` call — until that lands the PKP exists in MPC but is registered to no account, which makes an un-registered response equivalent to a discarded keypair.
+
+NOT IDEMPOTENT: every call returns a brand-new wallet (a fresh random derivation path). Retrying does not return the previous address; concurrent callers each get a different wallet with no server-side dedup. See `docs/management/api_direct.mdx` for the full concurrency semantics.
+ */
+export interface PrepareWalletResponse {
+  wallet_address: string;
+  /** 0x-prefixed lowercase hex (uint256). Pass through verbatim to `registerWalletDerivation`'s `derivationPath` arg. */
+  derivation_path: string;
+}
+
+/**
  * Request for delete_wallet (AccountConfig.removeWalletDerivation). Master (account) API key via header — usage API keys are rejected on-chain (`NotMasterAccount`).
 
 HARD DELETE: permanently and irreversibly removes the wallet (PKP) and wipes its on-chain derivation path. Anything secured by the wallet becomes unrecoverable.
@@ -414,6 +425,62 @@ export interface LitActionClientConfigResponse {
 }
 
 /**
+ * GET /cache_metadata — metadata for the cached action code correlated to the authenticated master account. Excludes the cached binaries themselves.
+ */
+export interface CacheMetadataResponse {
+  /** On-chain account wallet address the caller's key resolves to. */
+  account_address: string;
+  /**
+   * Number of cached entries correlated to this account.
+   * @minimum 0
+   */
+  entry_count: number;
+  /**
+   * Sum of `size_bytes` across the returned entries.
+   * @minimum 0
+   */
+  total_size_bytes: number;
+  /** The cached entries, sorted by most recent execution first. */
+  entries: CacheEntryMetadataItem[];
+}
+
+/**
+ * One cached action-code entry in a `GET /cache_metadata` response (CPL-351).
+
+Describes the cached data only — never the code/binary itself.
+ */
+export interface CacheEntryMetadataItem {
+  /** IPFS id (cache key) of the cached action code. */
+  ipfs_id: string;
+  /**
+   * Size of the cached code in bytes.
+   * @minimum 0
+   */
+  size_bytes: number;
+  /**
+   * Unix-epoch milliseconds when the entry was first cached.
+   * @minimum 0
+   */
+  created_at_ms: number;
+  /**
+   * Unix-epoch milliseconds of the most recent execution.
+   * @minimum 0
+   */
+  last_run_at_ms: number;
+  /**
+   * Number of executions recorded against this entry.
+   * @minimum 0
+   */
+  run_count: number;
+  /**
+   * Time-to-live of the entry, in seconds. `None` for the API-server IPFS cache, which is capacity-bounded (LRU) rather than time-expired.
+   * @minimum 0
+   * @nullable
+   */
+  ttl_seconds?: number | null;
+}
+
+/**
  * Returned by `/get_supported_languages` — the node's language capability surface (see `actions::languages`).
  */
 export interface SupportedLanguagesResponse {
@@ -635,6 +702,8 @@ export type CreateWalletPostDefault = CreateWalletResponse | ErrMessage;
 export type CreateWalletWithSignatureDefault =
   | CreateWalletWithSignatureResponse
   | ErrMessage;
+
+export type PrepareWalletDefault = PrepareWalletResponse | ErrMessage;
 
 export type DeleteWalletHeaders = {
   /**
@@ -891,6 +960,15 @@ export type GetLitActionClientConfigDefault =
   | LitActionClientConfigResponse
   | ErrMessage;
 
+export type GetCacheMetadataHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type GetCacheMetadataDefault = CacheMetadataResponse | ErrMessage;
+
 export type GetSupportedLanguagesDefault =
   | SupportedLanguagesResponse
   | ErrMessage;
@@ -995,6 +1073,11 @@ export class LitApiServerClient {
     };
   }
 
+  /**
+ * Create a new managed account: derives a fresh wallet, registers it on-chain, and provisions a Stripe customer with starter credits. Returns the account's API key and wallet address.
+
+No authentication is required (this is how a caller obtains their first API key), but the endpoint is rate limited per client IP and may return 429 Too Many Requests when the node is under load or a single source creates accounts too quickly. Retry those with exponential backoff.
+ */
   newAccount(
     newAccountRequest: NewAccountRequest,
     requestParameters?: Params,
@@ -1248,6 +1331,45 @@ Deprecated: minting is a metered write, so it should not live on a GET — link 
       response,
       data,
       operationId: "create_wallet_with_signature",
+    };
+  }
+
+  /**
+ * Return a fresh derived wallet address + derivation path — no signature, no API key.
+
+The no-signature equivalent of `create_wallet_with_signature`: it collapses the ChainSecured owner ceremony into a single signed bind UserOp. Fetch the address here, then register it on-chain yourself with `registerWalletDerivation`.
+
+Unauthenticated, so it carries the same `CpuAvailable` load-shedding guard as `lit_action`: each request drives a dstack KDF call, and unlike the `_with_signature` siblings there is no EIP-712 verification in front of it, so the guard bounds how hard an anonymous caller can hammer the KDF path when the box is already saturated.
+
+NOT IDEMPOTENT: every call returns a brand-new wallet (a fresh random derivation path). Retrying returns a different address, and concurrent callers each get a separate wallet with no server-side dedup. See `docs/management/api_direct.mdx`.
+ */
+  prepareWallet(requestParameters?: Params): {
+    response: Response;
+    data: PrepareWalletDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/prepare_wallet`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "POST",
+      k6url.toString(),
+      undefined,
+      mergedRequestParameters,
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "prepare_wallet",
     };
   }
 
@@ -2403,6 +2525,49 @@ Deprecated: minting is a metered write, so it should not live on a GET — link 
       response,
       data,
       operationId: "get_lit_action_client_config",
+    };
+  }
+
+  /**
+   * CPL-351: metadata about the action code cached for the caller's account. Returns TTL/size/last-run metadata only — never the cached code itself.
+   */
+  getCacheMetadata(
+    headers: GetCacheMetadataHeaders,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: GetCacheMetadataDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/cache_metadata`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request("GET", k6url.toString(), undefined, {
+      ...mergedRequestParameters,
+      headers: {
+        ...mergedRequestParameters?.headers,
+        // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+        ...Object.fromEntries(
+          Object.entries(headers || {}).map(([key, value]) => [
+            key,
+            String(value),
+          ]),
+        ),
+      },
+    });
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "get_cache_metadata",
     };
   }
 
