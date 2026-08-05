@@ -28,7 +28,6 @@ use deno_runtime::{
 use indoc::formatdoc;
 use ipfs_hasher::IpfsHasher;
 use lit_actions_grpc::proto::{ExecuteJsRequest, ExecuteJsResponse};
-use lit_api_core::context::HEADER_KEY_X_PRIVACY_MODE;
 use lit_observability::channels::TracedReceiver;
 use lit_observability::logging::clear_task_request_context;
 use sys_traits::impls::RealSys;
@@ -500,13 +499,14 @@ pub(crate) fn inject_lit_namespace(
 ) -> Result<()> {
     let _span = info_span!("LitNamespace.js").entered();
 
-    if http_headers
-        .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
-        .is_some_and(|v| v == "true")
-    {
-        debug!("Populating LitHeaders: **PRIVACY MODE**");
-    } else {
+    // Request headers can carry user secrets: redact by default (CPL-369).
+    if lit_observability::sensitive_logging_enabled() {
         debug!("Populating LitHeaders: {http_headers:?}");
+    } else {
+        debug!(
+            "Populating LitHeaders: <redacted> ({} headers)",
+            http_headers.len()
+        );
     }
 
     // NB: globalThis.LitActions is already part of the V8 snapshot
@@ -581,7 +581,6 @@ fn execute_patch_deno(worker: &mut MainWorker) -> Result<()> {
 fn inject_params_globals(
     worker: &mut MainWorker,
     globals_to_inject: &Option<serde_json::Value>,
-    http_headers: &BTreeMap<String, String>,
 ) -> Result<()> {
     // Omitted js_params => inject `null`, matching the pre-change `main(null)`
     // semantics rather than handing user code `undefined`.
@@ -590,13 +589,12 @@ fn inject_params_globals(
 
     let _span = info_span!("Params.js").entered();
 
-    if http_headers
-        .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
-        .is_some_and(|v| v == "true")
-    {
-        debug!("Injecting js_params global: **PRIVACY MODE**");
-    } else {
+    // js_params is the documented place for customer secrets: redact by
+    // default (CPL-369).
+    if lit_observability::sensitive_logging_enabled() {
         debug!("Injecting js_params global: {params:?}");
+    } else {
+        debug!("Injecting js_params global: <redacted>");
     }
 
     // Bind the whole params object to a single internal global. JSON is a
@@ -842,7 +840,7 @@ async fn execute_with_worker_inner(
     // materializing a large params object into V8 is subject to the same
     // timeout/OOM guards as user code, so an oversized params blob surfaces as
     // a normal resource-exhausted/timeout error instead of a hard V8 abort.
-    inject_params_globals(&mut worker, &js_params, &http_headers)?;
+    inject_params_globals(&mut worker, &js_params)?;
 
     let mut interval = tokio::time::interval(Duration::from_millis(MEMORY_SAMPLE_INTERVAL_MS));
 

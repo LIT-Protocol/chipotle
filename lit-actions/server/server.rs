@@ -18,7 +18,6 @@ use deno_runtime::tokio_util::create_and_run_current_thread;
 use lit_actions_grpc::{proto::*, unix};
 use lit_api_core::context::{HEADER_KEY_X_CORRELATION_ID, HEADER_KEY_X_REQUEST_ID};
 use lit_observability::{
-    PRIVACY_MODE_TAG,
     channels::{ChannelMsg, TracedReceiver, new_traced_bounded_channel},
     logging::{clear_task_request_context, set_request_context},
 };
@@ -234,18 +233,10 @@ impl Action for Server {
             #[allow(clippy::single_match)]
             match req.union {
                 Some(UnionRequest::Execute(req)) => {
-                    // Privacy mode is indicated by the PRIVACY_MODE_TAG suffix
-                    // on the request_id, tagged at the origin (lit-api-server fairing).
-                    let privacy_mode = req
-                        .http_headers
-                        .get(&HEADER_KEY_X_REQUEST_ID.to_ascii_lowercase())
-                        .is_some_and(|id| id.ends_with(PRIVACY_MODE_TAG));
-
-                    if privacy_mode {
-                        debug!("ExecuteJsRequest: **PRIVACY MODE**");
-                    } else {
-                        debug!("{:?}", DebugExecutionRequest::from(&req));
-                    }
+                    // `DebugExecutionRequest` redacts user secrets (js_params,
+                    // headers, auth_context) by default (CPL-369), so this is
+                    // safe to log unconditionally.
+                    debug!("{:?}", DebugExecutionRequest::from(&req));
 
                     dispatch_execute_request(&dispatch, req, outbound_tx, inbound_rx, span).await;
                 }
