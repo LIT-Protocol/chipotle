@@ -1071,6 +1071,11 @@ pub async fn create_payment_intent(
 /// 3. Marks the PaymentIntent as credited (`metadata[credited]=true`) **before** creating
 ///    the balance transaction, so a crash or retry after this point is safe (the second call
 ///    will be rejected by check 1).
+/// 4. Posts the balance transaction with a stable idempotency key
+///    (`topup-credit-{pi_id}`). The check-then-set in step 3 spans two Stripe round-trips
+///    and is not atomic, so N concurrent callers can all pass check 1 before any writes
+///    the metadata; the shared idempotency key ensures Stripe still records the credit
+///    exactly once, closing that TOCTOU double-credit window.
 pub async fn confirm_payment_and_credit(
     payment_intent_id: &str,
     wallet_address: &str,
@@ -1133,15 +1138,21 @@ pub async fn confirm_payment_and_credit(
         .await?;
 
     let credit = (-amount).to_string(); // negative = credit to customer
+    // Stable idempotency key derived from the PaymentIntent so that N concurrent
+    // confirm_payment calls racing past the metadata.credited check-then-set above
+    // still produce exactly one balance transaction (Stripe deduplicates keys for
+    // 24h). This closes the TOCTOU window between the check and the credit POST.
+    let idempotency_key = format!("topup-credit-{payment_intent_id}");
     state
         .client
-        .post(
+        .post_with_idempotency(
             &format!("customers/{customer_id}/balance_transactions"),
             &[
                 ("amount", credit.as_str()),
                 ("currency", "usd"),
                 ("description", &format!("Top-up via {payment_intent_id}")),
             ],
+            &idempotency_key,
         )
         .await?;
 
