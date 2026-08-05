@@ -68,10 +68,10 @@ doesn't describe endpoints the released server lacks.
 - `CONTRIBUTING.md`, expanded `.env.example`, and per-component READMEs.
 
 ### Fixed
-- `POST /new_account` no longer intermittently returns a 500
-  (`NoAccountAccess`) when the RPC provider serves the follow-up wallet
+- `POST /new_account` now retries (with backoff) the intermittent 500
+  (`NoAccountAccess`) seen when the RPC provider serves the follow-up wallet
   registration's dry-run from a node that hasn't executed the just-mined
-  `newAccount` block; the propagation window is now retried with backoff.
+  `newAccount` block, riding out the typical propagation window.
 - Release builds no longer report a spurious `-modified` version suffix
   (`.dockerignore` excluded a tracked file, dirtying `git describe` inside the
   image build).

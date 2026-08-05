@@ -47,6 +47,23 @@ const PERMISSION_ERROR_PATTERNS: &[&str] = &["NotAllowedTo", "NotMasterAccount",
 /// NoAccountAccess revert is retried — see the comment at the call site.
 const REGISTER_WALLET_DERIVATION_ATTEMPTS: u32 = 4;
 
+/// Retry policy for the registerWalletDerivation follow-up inside `new_account`:
+/// returns the backoff before the next attempt, or `None` to stop retrying.
+/// `attempt` is 1-based (the attempt that just failed). Only the stale-read
+/// NoAccountAccess revert is retryable — the newAccount receipt proves the
+/// account exists, so that revert can only mean the dry-run's eth_call hit an
+/// RPC node that hasn't executed the newAccount block yet.
+fn register_wallet_derivation_retry_backoff(
+    attempt: u32,
+    error_msg: &str,
+) -> Option<std::time::Duration> {
+    if attempt < REGISTER_WALLET_DERIVATION_ATTEMPTS && error_msg.contains("NoAccountAccess") {
+        Some(std::time::Duration::from_millis(250u64 << (attempt - 1)))
+    } else {
+        None
+    }
+}
+
 fn map_contract_error(e: anyhow::Error, context: &str) -> ApiStatus {
     let msg = format!("{}", e);
     if PERMISSION_ERROR_PATTERNS
@@ -151,19 +168,19 @@ pub async fn new_account(
         .await
         {
             Ok(_) => break,
-            Err(e)
-                if attempt < REGISTER_WALLET_DERIVATION_ATTEMPTS
-                    && e.to_string().contains("NoAccountAccess") =>
-            {
-                let backoff_ms = 250u64 << (attempt - 1);
-                tracing::warn!(
-                    "new_account: registerWalletDerivation simulation hit stale-read \
-                     NoAccountAccess (attempt {attempt}/{REGISTER_WALLET_DERIVATION_ATTEMPTS}); \
-                     retrying in {backoff_ms}ms"
-                );
-                tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
-            }
-            Err(e) => return Err(e.into()),
+            Err(e) => match register_wallet_derivation_retry_backoff(attempt, &e.to_string()) {
+                Some(backoff) => {
+                    tracing::warn!(
+                        "new_account: registerWalletDerivation simulation hit stale-read \
+                             NoAccountAccess (attempt \
+                             {attempt}/{REGISTER_WALLET_DERIVATION_ATTEMPTS}); retrying in \
+                             {}ms",
+                        backoff.as_millis()
+                    );
+                    tokio::time::sleep(backoff).await;
+                }
+                None => return Err(e.into()),
+            },
         }
     }
 
@@ -983,6 +1000,53 @@ mod tests {
             assert!(
                 !crate::utils::parse_with_hash::is_precomputed_hash_shape(&encoded),
                 "encoded API key {encoded:?} unexpectedly matched precomputed-hash shape",
+            );
+        }
+    }
+
+    const STALE_READ_MSG: &str = "Simulation failed: Contract error: NoAccountAccess (0x7b0f9c07…)";
+
+    /// The stale-read NoAccountAccess revert retries with doubling backoff until
+    /// the attempt budget is spent; the final attempt's failure is not retried.
+    #[test]
+    fn register_wallet_derivation_retries_stale_read_with_doubling_backoff() {
+        assert_eq!(
+            register_wallet_derivation_retry_backoff(1, STALE_READ_MSG),
+            Some(std::time::Duration::from_millis(250))
+        );
+        assert_eq!(
+            register_wallet_derivation_retry_backoff(2, STALE_READ_MSG),
+            Some(std::time::Duration::from_millis(500))
+        );
+        assert_eq!(
+            register_wallet_derivation_retry_backoff(3, STALE_READ_MSG),
+            Some(std::time::Duration::from_millis(1000))
+        );
+        // Attempt budget spent (4 = REGISTER_WALLET_DERIVATION_ATTEMPTS): stop.
+        assert_eq!(
+            register_wallet_derivation_retry_backoff(
+                REGISTER_WALLET_DERIVATION_ATTEMPTS,
+                STALE_READ_MSG
+            ),
+            None
+        );
+    }
+
+    /// Any error other than the stale-read NoAccountAccess revert fails
+    /// immediately — retrying e.g. a nonce failure or a genuine permission
+    /// error would only add latency to a request that cannot succeed.
+    #[test]
+    fn register_wallet_derivation_does_not_retry_other_errors() {
+        for msg in [
+            "Simulation failed: Contract error: InvalidRequest (PKP already registered)",
+            "Failed to send transaction: nonce too low",
+            "transaction reverted on-chain (tx hash: 0xabc, block: Some(1))",
+            "",
+        ] {
+            assert_eq!(
+                register_wallet_derivation_retry_backoff(1, msg),
+                None,
+                "must not retry: {msg:?}"
             );
         }
     }
