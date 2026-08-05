@@ -832,7 +832,7 @@ pub async fn check_credit(
 /// the normalized CID. Only Lit Action charges carry a CID: an empty CID, or one
 /// passed with any other `reason`, is dropped so a stray argument can never
 /// mislabel a charge as a Lit Action. Pure so it can be unit-tested.
-fn charge_label<'a>(reason: BillingReason, ipfs_id: Option<&'a str>) -> (String, Option<&'a str>) {
+fn charge_label(reason: BillingReason, ipfs_id: Option<&str>) -> (String, Option<&str>) {
     let cid = match reason {
         BillingReason::LitAction => ipfs_id.filter(|s| !s.is_empty()),
         _ => None,
