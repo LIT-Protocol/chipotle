@@ -265,6 +265,148 @@ pub async fn insert_payment(pool: &PgPool, payment: &NewLitkeyPayment) -> Result
     Ok(inserted.is_some())
 }
 
+/// Fill in the Stripe `balance_transaction` id on a previously-inserted
+/// credited row, promoting it from "partial" to complete. Keyed by the
+/// on-chain `(chain_id, tx_hash, log_index)` identity so both the live claim
+/// path and the reconciler converge on the same row (CPL-375).
+pub async fn mark_payment_credited(
+    pool: &PgPool,
+    log: &PaymentLog,
+    stripe_balance_transaction_id: &str,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE litkey_payments
+            SET stripe_balance_transaction_id = $1
+          WHERE chain_id = $2 AND tx_hash = $3 AND log_index = $4",
+    )
+    .bind(stripe_balance_transaction_id)
+    .bind(log.chain_id)
+    .bind(format!("{:#x}", log.tx_hash))
+    .bind(log.log_index as i64)
+    .execute(pool)
+    .await
+    .context("marking litkey payment credited")?;
+    Ok(())
+}
+
+/// A `credited` `litkey_payments` row whose Stripe `balance_transaction`
+/// write never landed (crash or Stripe error between INSERT and the credit).
+/// Carries everything the reconciler needs to replay the credit with the
+/// original idempotency key.
+#[derive(Clone, Debug)]
+pub struct PartialLitkeyCredit {
+    pub log: PaymentLog,
+    pub usd_wei_per_litkey: String,
+    pub discount_basis_points: i64,
+    pub cents_credited: i64,
+    pub stripe_customer_id: String,
+    pub credited_at: time::OffsetDateTime,
+}
+
+impl PartialLitkeyCredit {
+    /// The stable Stripe Idempotency-Key for this credit. Reusing it is what
+    /// makes the reconciler retry safe: if the original credit landed, Stripe
+    /// dedupes; if it did not, Stripe credits fresh — never both.
+    pub fn idempotency_key(&self) -> String {
+        self.log.idempotency_key()
+    }
+
+    /// Stripe balance delta (negative cents credit the customer), matching
+    /// [`classify_litkey_payment`].
+    pub fn amount_cents(&self) -> i64 {
+        -self.cents_credited
+    }
+
+    pub fn description(&self) -> String {
+        litkey_payment_description(
+            &self.log,
+            &self.usd_wei_per_litkey,
+            self.discount_basis_points,
+        )
+    }
+}
+
+/// List every credited row still awaiting its `balance_transactions` write
+/// (`stripe_balance_transaction_id IS NULL`), oldest first. The reconciler
+/// age-gates each one before replaying the Stripe credit.
+pub async fn list_partial_litkey_credits(pool: &PgPool) -> Result<Vec<PartialLitkeyCredit>> {
+    let rows = sqlx::query_as::<
+        _,
+        (
+            i64,
+            String,
+            String,
+            i64,
+            i64,
+            String,
+            String,
+            String,
+            Option<String>,
+            i64,
+            i64,
+            Option<String>,
+            time::OffsetDateTime,
+        ),
+    >(
+        "SELECT chain_id, gateway_address, tx_hash, log_index, block_number,
+                wallet_address, payer_address, litkey_amount_wei::text,
+                usd_wei_per_litkey::text, discount_basis_points, cents_credited,
+                stripe_customer_id, credited_at
+           FROM litkey_payments
+          WHERE status = 'credited' AND stripe_balance_transaction_id IS NULL
+          ORDER BY credited_at ASC",
+    )
+    .fetch_all(pool)
+    .await
+    .context("listing partial litkey credits")?;
+
+    rows.into_iter()
+        .map(|r| {
+            let (
+                chain_id,
+                gateway_address,
+                tx_hash,
+                log_index,
+                block_number,
+                wallet_address,
+                payer_address,
+                litkey_amount_wei,
+                usd_wei_per_litkey,
+                discount_basis_points,
+                cents_credited,
+                stripe_customer_id,
+                credited_at,
+            ) = r;
+            let log = PaymentLog {
+                chain_id,
+                gateway_address: gateway_address
+                    .parse()
+                    .context("partial credit gateway_address")?,
+                wallet: wallet_address.parse().context("partial credit wallet")?,
+                payer: payer_address.parse().context("partial credit payer")?,
+                amount_wei: litkey_amount_wei
+                    .parse()
+                    .context("partial credit litkey_amount_wei")?,
+                tx_hash: tx_hash.parse().context("partial credit tx_hash")?,
+                log_index: log_index as u64,
+                block_number: block_number as u64,
+            };
+            Ok(PartialLitkeyCredit {
+                log,
+                // A `credited` row always has a rate and a customer (enforced
+                // by `litkey_payments_status_fields_check`), so these are
+                // never NULL in practice; default defensively rather than
+                // panic if the invariant is ever violated.
+                usd_wei_per_litkey: usd_wei_per_litkey.unwrap_or_default(),
+                discount_basis_points,
+                cents_credited,
+                stripe_customer_id: stripe_customer_id.unwrap_or_default(),
+                credited_at,
+            })
+        })
+        .collect()
+}
+
 #[derive(Debug, Serialize)]
 pub struct LitkeyPaymentConfigResponse {
     pub chain_id: i64,
@@ -695,8 +837,22 @@ pub async fn handle_confirmed_litkey_payment(
             customer::find_by_wallet(stripe, &log.wallet_address()).await?
         }
     };
-    let mut decision =
-        classify_litkey_payment(log, rate.as_ref(), discount_basis_points, customer_id)?;
+    let decision = classify_litkey_payment(log, rate.as_ref(), discount_basis_points, customer_id)?;
+
+    // CPL-375: insert the row BEFORE the Stripe credit so the DB record is
+    // the idempotency guard, not an afterthought. For a credited payment the
+    // row lands "partial" (`stripe_balance_transaction_id` NULL) until the
+    // credit is confirmed; a crash after the Stripe call can no longer strand
+    // a credit with no DB record, so a re-claim past Stripe's ~24h
+    // idempotency-key TTL short-circuits on `payment_exists` instead of
+    // double-crediting. The `litkey_reconciler` completes any partial row
+    // (retrying with the same idempotency key, which dedupes at Stripe).
+    let inserted = insert_payment(pool, &decision.payment).await?;
+    if !inserted {
+        // A concurrent claim of the same event already recorded it (ON
+        // CONFLICT DO NOTHING). That claim owns the credit; nothing to do.
+        return Ok(());
+    }
 
     if let Some(credit) = &decision.stripe_credit {
         let balance_transaction_id = balance::write_transaction(
@@ -707,10 +863,9 @@ pub async fn handle_confirmed_litkey_payment(
             Some(&credit.idempotency_key),
         )
         .await?;
-        decision.payment.stripe_balance_transaction_id = Some(balance_transaction_id);
+        mark_payment_credited(pool, log, &balance_transaction_id).await?;
     }
 
-    insert_payment(pool, &decision.payment).await?;
     Ok(())
 }
 
@@ -729,6 +884,43 @@ mod tests {
             payment_idempotency_key(8453, tx_hash, 7),
             "litkey:8453:0x1111111111111111111111111111111111111111111111111111111111111111:7"
         );
+    }
+
+    // CPL-375: the reconciler must replay the EXACT Stripe call the live claim
+    // path issued — same idempotency key (so Stripe dedupes), same amount, same
+    // description. A partial row reconstructed by the reconciler is derived from
+    // the same fields `classify_litkey_payment` persisted, so the derived credit
+    // parameters must round-trip identically.
+    #[test]
+    fn partial_credit_replays_the_same_stripe_call_as_the_live_path() {
+        let log = sample_payment_log();
+        let discount_bps = 2_000;
+        let decision = classify_litkey_payment(
+            &log,
+            Some(&fresh_rate()),
+            discount_bps,
+            Some("cus_123".to_string()),
+        )
+        .unwrap();
+        let credit = decision
+            .stripe_credit
+            .expect("a customer with a live rate should credit");
+
+        // Rebuild the partial the reconciler would read back from the row.
+        let partial = PartialLitkeyCredit {
+            log: log.clone(),
+            usd_wei_per_litkey: decision.payment.usd_wei_per_litkey.clone().unwrap(),
+            discount_basis_points: decision.payment.discount_basis_points,
+            cents_credited: decision.payment.cents_credited,
+            stripe_customer_id: decision.payment.stripe_customer_id.clone().unwrap(),
+            credited_at: time::OffsetDateTime::UNIX_EPOCH,
+        };
+
+        assert_eq!(partial.idempotency_key(), credit.idempotency_key);
+        assert_eq!(partial.idempotency_key(), log.idempotency_key());
+        assert_eq!(partial.amount_cents(), credit.amount_cents);
+        assert_eq!(partial.description(), credit.description);
+        assert_eq!(partial.stripe_customer_id, credit.customer_id);
     }
 
     #[test]
