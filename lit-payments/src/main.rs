@@ -33,6 +33,8 @@ async fn rocket() -> _ {
     let mailer =
         mail::Mailer::new(cfg.resend_api_key.clone(), cfg.mail_from.clone()).expect("mailer");
     let rate_limit = auth::rate_limit::RateLimiter::new();
+    // Per-client-IP throttle for the public customer-preview endpoint (CPL-376).
+    let preview_rate_limit = lit_payments::portal::rate_limit::PreviewRateLimiter::new();
     let stripe = StripeClient::new(cfg.stripe_secret_key.clone()).expect("stripe client");
     // In-process auth resolver — wallet-sig verification + on-chain
     // billing-wallet lookup, both running locally. Post-#448-glitch-followup
@@ -88,6 +90,7 @@ async fn rocket() -> _ {
         .manage(cfg)
         .manage(mailer)
         .manage(rate_limit)
+        .manage(preview_rate_limit)
         .manage(stripe)
         .manage(auth_resolver)
         .manage(per_customer_mutex)
