@@ -29,7 +29,7 @@
 use std::time::Duration;
 
 use ::time::OffsetDateTime;
-use lit_billing_core::{StripeClient, balance};
+use lit_billing_core::StripeClient;
 use sqlx::PgPool;
 use tokio::time as tokio_time;
 
@@ -40,13 +40,11 @@ use crate::config::Config;
 /// path's own in-flight balance_transactions write, not a real orphan.
 /// Retrying it would race the claim; the shared idempotency key keeps that
 /// race safe but it is wasteful and noisy. Mirrors the auto_topup floor.
+///
+/// The claim path completes fresh partials synchronously (no min-age gate),
+/// so this only defers the *background* sweep; a true crash mid-flow still
+/// recovers within one tick if the user never re-claims.
 const MIN_PARTIAL_AGE_SECS: i64 = 60;
-
-/// Past this age the Stripe Idempotency-Key (~24h TTL) can no longer be
-/// trusted to dedupe, so replaying the credit risks double-crediting. Rows
-/// older than this are surfaced via an error log for manual repair and
-/// skipped. Mirrors the auto_topup / sca_resume 23h cap.
-const MAX_PARTIAL_RETRY_AGE_HOURS: i64 = 23;
 
 /// Spawn the reconciler. Returns immediately; the loop runs in the
 /// background for the lifetime of the process. The first tick fires
@@ -103,7 +101,7 @@ async fn repair_partial(
 
     // Too old: the idempotency key can no longer dedupe. Replaying would risk
     // a double-credit — exactly what this change prevents. Flag for a human.
-    if age.whole_hours() >= MAX_PARTIAL_RETRY_AGE_HOURS {
+    if partial.past_idempotency_window(now) {
         tracing::error!(
             tx_hash = %tx_hash,
             log_index,
@@ -121,14 +119,6 @@ async fn repair_partial(
         customer_id = %partial.stripe_customer_id,
         "litkey reconciler: completing partial credit"
     );
-    let balance_transaction_id = balance::write_transaction(
-        stripe,
-        &partial.stripe_customer_id,
-        partial.amount_cents(),
-        &partial.description(),
-        Some(&partial.idempotency_key()),
-    )
-    .await?;
-    chain::mark_payment_credited(pool, &partial.log, &balance_transaction_id).await?;
+    chain::complete_partial_litkey_credit(stripe, pool, partial).await?;
     Ok(())
 }

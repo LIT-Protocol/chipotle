@@ -123,6 +123,50 @@ async fn reconciler_completes_partial_credit() {
 
 #[tokio::test]
 #[serial_test::serial]
+async fn claim_path_completes_partial_credit_synchronously() {
+    // The synchronous claim-path primitives: find the partial for a
+    // (tx_hash, wallet) and complete it inline. A fresh partial (no min-age
+    // gate) must still complete.
+    let Some(key) = stripe_key() else { return };
+    let Some(url) = db_url() else { return };
+    let stripe = StripeClient::new(key).unwrap();
+    let cust =
+        crate::billing::setup_intent_tests::ensure_unique_customer(&stripe, TEST_WALLET).await;
+    let pool = PgPool::connect(&url).await.unwrap();
+
+    let tx_hash = "0x4444444444444444444444444444444444444444444444444444444444444444";
+    seed_partial(&pool, &cust, tx_hash, 4, Duration::seconds(1)).await;
+
+    let partial = super::chain::find_partial_litkey_credit(&pool, tx_hash, TEST_WALLET)
+        .await
+        .unwrap()
+        .expect("a partial credit should be found for the tx/wallet");
+    super::chain::complete_partial_litkey_credit(&stripe, &pool, &partial)
+        .await
+        .expect("complete partial");
+
+    assert!(
+        balance_tx_id(&pool, tx_hash).await.is_some(),
+        "synchronous completion should fill in the balance_tx id"
+    );
+    // Once completed the row is no longer a partial.
+    assert!(
+        super::chain::find_partial_litkey_credit(&pool, tx_hash, TEST_WALLET)
+            .await
+            .unwrap()
+            .is_none(),
+        "completed row must not be returned as a partial"
+    );
+
+    sqlx::query("DELETE FROM litkey_payments WHERE tx_hash = $1")
+        .bind(tx_hash)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[serial_test::serial]
 async fn reconciler_skips_fresh_partial() {
     // A partial younger than MIN_PARTIAL_AGE_SECS is the live claim still
     // in-flight; the reconciler must leave it alone.
