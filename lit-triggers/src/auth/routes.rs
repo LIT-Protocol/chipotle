@@ -72,13 +72,26 @@ pub async fn request_link(
                  <p style=\"color: #777; font-size: 12px;\">If you didn't request this, you can ignore this email.</p>"
             );
 
+            // Resolve a non-PII identifier for logs: existing users log their
+            // UUID; a brand-new email (no row yet) logs "unregistered" so the
+            // address never lands in info/warn output (GDPR/CCPA). Users are
+            // only created on verify, so we deliberately do not create one here.
+            let log_id = match user::find_by_email(pool, &email).await {
+                Ok(Some(u)) => u.id.to_string(),
+                Ok(None) => "unregistered".to_string(),
+                Err(e) => {
+                    tracing::warn!("magic-link user lookup for logging failed: {e}");
+                    "unknown".to_string()
+                }
+            };
+
             let mailer = mailer.inner().clone();
             let email_for_send = email.clone();
             tokio::spawn(async move {
                 if let Err(e) = mailer.send(&email_for_send, subject, &html, &text).await {
-                    tracing::warn!("magic-link email send failed for {email_for_send}: {e}");
+                    tracing::warn!("magic-link email send failed for user {log_id}: {e}");
                 } else {
-                    tracing::info!("magic-link sent to {email_for_send}");
+                    tracing::info!("magic-link sent to user {log_id}");
                 }
             });
         }
