@@ -15,7 +15,7 @@ use lit_payments::{auth, chain, config, db, mail};
 use rocket::fs::{FileServer, NamedFile};
 use rocket::http::Status;
 use rocket::response::Redirect;
-use rocket::{get, routes};
+use rocket::{catchers, get, routes};
 
 #[rocket::launch]
 async fn rocket() -> _ {
@@ -124,6 +124,10 @@ async fn rocket() -> _ {
             ],
         )
         .mount("/static", FileServer::from("static"))
+        .register(
+            "/",
+            catchers![lit_payments::portal::rate_limit::too_many_requests],
+        )
 }
 
 /// Translate platform-provided env vars (Fly.io and most container hosts set

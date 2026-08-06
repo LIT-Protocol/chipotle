@@ -48,7 +48,10 @@ use std::time::{Duration, Instant};
 use moka::future::Cache;
 use rocket::http::Status;
 use rocket::request::{FromRequest, Outcome, Request};
+use rocket::serde::json::Json;
 use tokio::sync::Mutex;
+
+use super::types::ErrorResponse;
 
 /// Default burst capacity (requests allowed back-to-back before throttling).
 const DEFAULT_BURST: f64 = 60.0;
@@ -223,6 +226,22 @@ impl<'r> FromRequest<'r> for PreviewRateLimit {
     }
 }
 
+/// `429 Too Many Requests` catcher.
+///
+/// The [`PreviewRateLimit`] guard rejects with a bare `429` via
+/// `Outcome::Error`, which would otherwise render Rocket's default HTML body.
+/// The pay-with-LITKEY page reads errors with `fetchJson()`
+/// (`body.error || 'Request failed: ' + status`), so without this the user sees
+/// a generic "Request failed: 429". Registering this catcher makes every 429
+/// return the same `{ "error": … }` shape as the rest of the portal API. This
+/// guard is the only source of a 429 in the service.
+#[rocket::catch(429)]
+pub fn too_many_requests() -> Json<ErrorResponse> {
+    Json(ErrorResponse {
+        error: "Too many requests — please slow down and try again shortly.".to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,15 +331,27 @@ mod tests {
         let limiter = PreviewRateLimiter::build(true, 2.0, 0.0, 3600);
         let rocket = rocket::build()
             .manage(limiter)
-            .mount("/", routes![guarded_route]);
+            .mount("/", routes![guarded_route])
+            .register("/", rocket::catchers![too_many_requests]);
         let client = Client::tracked(rocket).await.expect("valid rocket");
 
         assert_eq!(client.get("/probe").dispatch().await.status(), Status::Ok);
         assert_eq!(client.get("/probe").dispatch().await.status(), Status::Ok);
+
+        // Third request in the same window is throttled, and the catcher renders
+        // the throttle response as JSON with an `error` field (not Rocket's
+        // default HTML) so the pay page surfaces a useful message.
+        let res = client.get("/probe").dispatch().await;
+        assert_eq!(res.status(), Status::TooManyRequests);
         assert_eq!(
-            client.get("/probe").dispatch().await.status(),
-            Status::TooManyRequests,
-            "third request should be throttled"
+            res.content_type(),
+            Some(rocket::http::ContentType::JSON),
+            "429 body should be JSON"
+        );
+        let body = res.into_string().await.expect("body");
+        assert!(
+            body.contains("\"error\""),
+            "429 JSON must carry an `error` field, got: {body}"
         );
     }
 
