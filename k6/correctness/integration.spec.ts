@@ -287,11 +287,15 @@ export default function (data: IntegrationSetupData) {
       }
     },
   }, "listActions");
-  const actionItem = findHelloWorld(listActionsRes.response.body);
+  // Derive the action hash from the account-level list (polled above until the
+  // action is visible with a non-zero id). The in-group list additionally
+  // depends on add_action_to_group membership propagation, which can lag the
+  // on-chain write and yield an empty hash → 0x0.
+  const actionItem = findHelloWorld(listActionsAccountRes.response.body);
   if (
-    !checkAndLog(listActionsRes.response, {
-      "listActions group contains added action with non-zero id": () => actionItem !== undefined,
-    }, "listActions")
+    !checkAndLog(listActionsAccountRes.response, {
+      "listActionsAccount contains added action with non-zero id": () => actionItem !== undefined,
+    }, "listActionsAccount")
   ) {
     return;
   }
@@ -404,6 +408,11 @@ export default function (data: IntegrationSetupData) {
   }, "listApiKeys");
 
   // ── 15. updateActionMetadata ──────────────────────────────────────────────
+const hasActionHash = checkAndLog(hashedCid, {
+  "resolved action hash for updateActionMetadata": (h) =>
+    typeof h === "string" && /^0x(?!0{64}$)[0-9a-fA-F]{64}$/.test(h),
+}, "updateActionMetadata");
+  if (!hasActionHash) return;
   const updateActionRes = client.updateActionMetadata(
     {
       hashed_cid: hashedCid,
