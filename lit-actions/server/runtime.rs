@@ -428,6 +428,26 @@ async fn get_or_prepare_action_code(
     Ok(prepared_code)
 }
 
+/// Bound pre-execution bundling to `timeout_ms` of wall-clock. The V8 timeout
+/// controller can only `terminate_execution` on the isolate; it cannot cancel
+/// the Rust-side CDN fetch / SWC work driven by `fut`, so without this deadline
+/// a slow or hostile dep graph pins a worker for up to `MAX_TIMEOUT_MS` of
+/// unbilled wall-clock before execution (and its usage ticks) ever begin
+/// (CPL-372). On expiry the bundling future is dropped — cancelling its
+/// in-flight fetches — and the caller sees the same `deadline_exceeded` status
+/// an over-long execution would produce.
+async fn prepare_action_code_within_deadline(
+    timeout_ms: u64,
+    fut: impl std::future::Future<Output = Result<CachedActionCode>>,
+) -> Result<CachedActionCode> {
+    match tokio::time::timeout(Duration::from_millis(timeout_ms), fut).await {
+        Ok(result) => result,
+        Err(_) => bail!(Status::deadline_exceeded(format!(
+            "Bundling your function's imports exceeded the maximum runtime of {timeout_ms}ms and was terminated."
+        ))),
+    }
+}
+
 /// Build a `MainWorker` from the V8 snapshot. Warm-time safe: does no JS
 /// injection, so it can run off the request path before `auth_context` and
 /// `http_headers` are known. The single `LoadedModules` handle wired into
@@ -900,8 +920,25 @@ async fn execute_with_worker_inner(
             lockfile_path: &shared.lockfile_path,
             module_cache: &shared.module_cache,
         };
-        get_or_prepare_action_code(&code, &action_ipfs_id, &action_code_cache, &prepare_context)
-            .await?
+        // Pre-execution bundling (CDN fetch + SWC) runs on the Rust side, out of
+        // reach of the V8 timeout controller: `terminate_execution` interrupts
+        // the isolate, not an in-flight reqwest/SWC `.await`. A cold action
+        // importing a wide/deep graph of slow or nonexistent packages could
+        // otherwise pin a worker for up to ~MAX_TIMEOUT_MS of wall-clock that
+        // starts *before* any usage ticks are charged (CPL-372). Bound bundling
+        // to the same request timeout the isolate gets; since the controller
+        // thread's clock started just above, bundling and execution share this
+        // budget and the whole request stays within ~timeout_ms.
+        prepare_action_code_within_deadline(
+            timeout_ms,
+            get_or_prepare_action_code(
+                &code,
+                &action_ipfs_id,
+                &action_code_cache,
+                &prepare_context,
+            ),
+        )
+        .await?
     };
     record_loaded_modules(&loaded_modules, &cached_code);
     let user_code = cached_code.to_executable_code();
@@ -1080,6 +1117,49 @@ mod tests {
             code: code.to_string(),
             loaded_modules: Vec::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn bundling_within_deadline_returns_result() {
+        // A bundle that finishes before the deadline passes straight through.
+        let out = prepare_action_code_within_deadline(60_000, async {
+            Ok(cached_code("console.log('ok')"))
+        })
+        .await
+        .expect("fast bundle should succeed");
+        assert_eq!(out.code, "console.log('ok')");
+    }
+
+    #[tokio::test]
+    async fn bundling_past_deadline_fails_with_deadline_exceeded() {
+        // A bundle that outlives the deadline (e.g. slow/nonexistent CDN deps,
+        // CPL-372) is cancelled and surfaced as a `deadline_exceeded` status
+        // rather than pinning the worker for the full sleep. The 30s sleep never
+        // runs to completion: the 20ms deadline fires first and drops the
+        // future, so the test finishes in ~20ms of real time.
+        let err = prepare_action_code_within_deadline(20, async {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            Ok(cached_code("never reached"))
+        })
+        .await
+        .expect_err("slow bundle should hit the deadline");
+
+        let status = err
+            .downcast_ref::<Status>()
+            .expect("bundling timeout should surface as a tonic Status");
+        assert_eq!(status.code(), tonic::Code::DeadlineExceeded);
+    }
+
+    #[tokio::test]
+    async fn bundling_error_propagates_unchanged() {
+        // A bundling failure that occurs before the deadline is forwarded as-is,
+        // not masked as a timeout.
+        let err = prepare_action_code_within_deadline(60_000, async {
+            bail!("Failed to bundle CDN imports: boom")
+        })
+        .await
+        .expect_err("bundle error should propagate");
+        assert!(err.to_string().contains("Failed to bundle CDN imports"));
     }
 
     #[test]
