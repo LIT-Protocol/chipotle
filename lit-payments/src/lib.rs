@@ -12,6 +12,9 @@ pub mod db;
 pub mod enterprise;
 pub mod gas_funder;
 pub mod internal;
+pub mod litkey_reconciler;
+#[cfg(test)]
+mod litkey_reconciler_tests;
 pub mod mail;
 pub mod portal;
 pub mod rate;

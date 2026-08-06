@@ -47,6 +47,9 @@ async fn rocket() -> _ {
     rate::spawn_rate_poller(pool.clone());
     let per_customer_mutex = PerCustomerMutex::new();
     lit_payments::auto_topup::reconciler::spawn(cfg.clone(), stripe.clone(), pool.clone());
+    // CPL-375: complete any LITKEY credit whose Stripe balance_transaction
+    // write was interrupted between the row INSERT and the credit landing.
+    lit_payments::litkey_reconciler::spawn(cfg.clone(), stripe.clone(), pool.clone());
     // Enterprise committed-use billing: monthly draft invoice + buffer regrant.
     // See plans/enterprise-committed-billing.md.
     lit_payments::enterprise::spawn(cfg.clone(), stripe.clone(), pool.clone(), mailer.clone());
