@@ -125,6 +125,11 @@ yanked = "warn"
 #   =0.4.45, so GHSA-3pv8 (tar PAX desync) stays Dependabot-dismissed until deno
 #   bumps. No RUSTSEC id assigned, so no ignore entry needed here.
 #
+# - 2026-08-10: RUSTSEC-2026-0249 (smartstring unmaintained; repo archived
+#   2026-05-03) newly published and started firing. smartstring 1.0.1 is a
+#   transitive of swc_ecma_lexer <- deno_ast =0.53.2 (lit-actions only), so it
+#   is deno-pinned and not removable in-house. Added to the ignore list.
+#
 # ── BLOCKER SUMMARY (2026-06-09 audit) ───────────────────────────────────────
 # Every remaining entry is held by a source we cannot move without either
 # forking an upstream dep or waiting for an upstream release. Grouped by blocker:
@@ -172,6 +177,7 @@ ignore = [
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained (folded into rustls-pki-types) — rustls-pemfile 1.0.4 via rocket_http 0.5.1 AND the zerossl fork's reqwest 0.11.27 (lit-core/lit-actions). BLOCKER: rocket has no released rustls-0.23 version. WAITING ON: a rocket release on rustls 0.23 (unreleased 0.6) + bumping zerossl's reqwest to 0.12. Not removable without git-pinning rocket." },
     { id = "RUSTSEC-2025-0141", reason = "bincode 1.x unmaintained (2.x is a non-drop-in rewrite) — bincode 1.3.3 via deno_kv (lit-actions). BLOCKER: deno_kv's bincode 1.x pin. WAITING ON: deno_kv migrating to bincode 2.x. Not removable without forking deno." },
     { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 unmaintained — via alloy-sol-macro/alloy-sol-macro-expander (lit-api-server/generator/payments). BLOCKER: Alloy's proc-macro-error2 dep. WAITING ON: Alloy dropping proc-macro-error2. Not removable without forking Alloy." },
+    { id = "RUSTSEC-2026-0249", reason = "smartstring unmaintained (repo archived 2026-05-03; no safe upgrade) — smartstring 1.0.1 via swc_ecma_lexer -> deno_ast =0.53.2 -> deno chain (lit-actions only). BLOCKER: deno_ast/swc's smartstring dep. WAITING ON: swc migrating off smartstring (upstream suggests compact_str/smol_str) + a deno_ast bump. Not removable without forking deno." },
 ]
 
 [sources]
