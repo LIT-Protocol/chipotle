@@ -125,6 +125,12 @@ yanked = "warn"
 #   =0.4.45, so GHSA-3pv8 (tar PAX desync) stays Dependabot-dismissed until deno
 #   bumps. No RUSTSEC id assigned, so no ignore entry needed here.
 #
+# - 2026-08-18: RustSec published RUSTSEC-2026-0258 (h2 unbounded empty DATA
+#   frames, Low). Fires in every rocket workspace: h2 0.3.27 via rocket 0.5.1
+#   -> hyper 0.14 has NO patched 0.3.x release (only 0.4.16), and the fixable
+#   h2 0.4.x copy is covered by the same id. Added to the ignore list below —
+#   same rocket-0.5.1-bound blocker class as 2026-0098/0099/0104.
+#
 # ── BLOCKER SUMMARY (2026-06-09 audit) ───────────────────────────────────────
 # Every remaining entry is held by a source we cannot move without either
 # forking an upstream dep or waiting for an upstream release. Grouped by blocker:
@@ -163,6 +169,7 @@ ignore = [
     { id = "RUSTSEC-2026-0104", reason = "rustls-webpki CRL parsing panic — fixed in 0.103. TWO blockers: deno_tls's 0.102.8 (lit-actions) AND rocket 0.5.1's rustls 0.21 -> rustls-webpki 0.101.7 (lit-core/lit-api-server). WAITING ON: deno (rustls >0.23.40) AND a rocket release on rustls 0.23 (only in unreleased 0.6.0-dev). Not removable without forking deno and/or git-pinning rocket." },
     { id = "RUSTSEC-2026-0118", reason = "hickory NSEC3 unbounded loop — NO stable fix released (only 0.26.0-beta.1+). hickory-proto 0.25.2 via deno_net (lit-actions). BLOCKER: no stable hickory fix + deno transitive. WAITING ON: hickory 0.26 stable AND deno adopting it. Not removable." },
     { id = "RUSTSEC-2026-0119", reason = "hickory DNS O(n^2) name compression — fixed in >=0.26.1. hickory-proto 0.25.2 via deno_net (lit-actions). BLOCKER: deno's hickory 0.25 pin. WAITING ON: deno adopting hickory 0.26. Not removable without forking deno." },
+    { id = "RUSTSEC-2026-0258", reason = "h2 unbounded empty DATA frames (DoS) — Low severity, fixed in >=0.4.16. TWO copies fire in every rocket workspace: h2 0.3.27 via rocket 0.5.1 -> rocket_http -> hyper 0.14 (NO patched 0.3.x release exists; only 0.4.16), plus an h2 0.4.x copy via the hyper-1.x chain (patchable to 0.4.16 but covered by the same advisory id). BLOCKER: rocket 0.5.1's hyper-0.14/h2-0.3 pin — only rocket 0.6.0-dev (git) moves to hyper 1.x. WAITING ON: a rocket release on hyper 1.x. Not removable without git-pinning rocket." },
 
     # ── unsound ───────────────────────────────────────────────────────────────
     { id = "RUSTSEC-2026-0097", reason = "rand RngCore fill_bytes unsound — fixed in >=0.8.6 / >=0.9.3. Fires only in lit-actions: rand =0.8.5 hard-pinned by deno_crypto/deno_kv/deno_ast. Cleared in lit-api-server/payments (0.8.6/0.9.4) and the generator workspace (lockfile bumped 0.8.5->0.8.6, 0.9.2->0.9.4 via alloy-signer-local). BLOCKER: deno's rand =0.8.5 pin. WAITING ON: deno bumping rand. Not removable without forking deno." },
