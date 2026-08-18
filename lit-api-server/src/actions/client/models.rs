@@ -24,6 +24,10 @@ pub struct ExecutionOptions {
     pub code: String,
     pub globals: Option<serde_json::Value>,
     pub action_ipfs_id: Option<String>,
+    /// Bash startup script for binary (gVisor) actions; the JS runner
+    /// ignores it. Travels separately from `code` so different scripts hit
+    /// the runner's cache for the same bundle.
+    pub startup_script: Option<String>,
 }
 
 impl From<&str> for ExecutionOptions {

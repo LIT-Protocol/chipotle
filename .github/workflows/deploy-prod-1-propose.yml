@@ -15,6 +15,12 @@
 #   2. Provision compose file update via Phala Cloud API → get compose hash
 #   3. Propose addComposeHash(hash) to Safe multisig on Base
 #   4. Create draft GitHub release with deployment context for Phase 2
+#   5. Create/advance the release-line branch (release/vX.Y) for hotfixes
+#
+# Release-line branches (CPL-358): each tagged prod release lands its commit on a
+# minor-version branch release/vX.Y. All patch releases on a line share one branch,
+# giving hotfixes to a shipped version a stable home that never moves as main
+# advances. See architectureDocs/deployment/vm-code-upgrade.md ("Release-line branches & hotfixes").
 #
 # Image provenance (DR-1b): Each image is signed with Sigstore (cosign keyless).
 # To verify:
@@ -101,8 +107,8 @@ jobs:
           # with deploy-staging.yml's DEPLOY_PATHS (minus the staging-only entries:
           # the workflow files and k6/, which don't affect prod image content).
           IMAGE_PATHS=(lit-actions/ lit-api-server/ lit-billing-core/ lit-core/ \
-            otel-collector/ Dockerfile.lit-actions Dockerfile.lit-api-server \
-            Dockerfile.otel-collector docker-compose.phala.yml)
+            otel-collector/ Dockerfile.lit-actions Dockerfile.lit-actions-gvisor \
+            Dockerfile.lit-api-server Dockerfile.otel-collector docker-compose.phala.yml)
 
           # 1. Most recent first-parent ancestor carrying a perf-gate/soak status.
           gated=""; state=""
@@ -173,6 +179,8 @@ jobs:
         include:
           - service: lit-actions
             dockerfile: Dockerfile.lit-actions
+          - service: lit-actions-gvisor
+            dockerfile: Dockerfile.lit-actions-gvisor
           - service: lit-api-server
             dockerfile: Dockerfile.lit-api-server
           - service: otel-collector
@@ -244,16 +252,19 @@ jobs:
       - name: Prepare docker-compose for deployment (digest-pinned)
         run: |
           DIGEST_LIT_ACTIONS=$(cat digest-lit-actions.txt | tr -d '\n' | sed 's/}[}]*$//')
+          DIGEST_LIT_ACTIONS_GVISOR=$(cat digest-lit-actions-gvisor.txt | tr -d '\n' | sed 's/}[}]*$//')
           DIGEST_LIT_API_SERVER=$(cat digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
           DIGEST_OTEL_COLLECTOR=$(cat digest-otel-collector.txt | tr -d '\n' | sed 's/}[}]*$//')
           DOMAIN="api.chipotle.litprotocol.com"
           sed \
             -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|${{ vars.DOCKER_IMAGE }}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
+            -e "s|\${DOCKER_IMAGE_LIT_ACTIONS_GVISOR}|${{ vars.DOCKER_IMAGE }}-lit-actions-gvisor@${DIGEST_LIT_ACTIONS_GVISOR}|g" \
             -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|${{ vars.DOCKER_IMAGE }}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
             -e "s|\${DOCKER_IMAGE_OTEL_COLLECTOR}|${{ vars.DOCKER_IMAGE }}-otel-collector@${DIGEST_OTEL_COLLECTOR}|g" \
             -e "s|\${GCP_PROJECT_ID}|chipotle-prod|g" \
             -e "s|\${CERTBOT_DOMAIN}|${DOMAIN}|g" \
             -e "s|\${CERTBOT_AWS_REGION}|${{ vars.CERTBOT_AWS_REGION }}|g" \
+            -e "s|\${LIT_GVISOR_ENABLED}|false|g" \
             docker-compose.phala.yml > docker-compose.deploy.yml
 
       - name: Setup Node.js
@@ -545,3 +556,60 @@ jobs:
             --title "${{ github.ref_name }}" \
             --generate-notes \
             --target "${{ github.sha }}"
+
+  # Land the released commit on a minor-version release-line branch (release/vX.Y)
+  # so hotfixes to a shipped version have a stable home that never moves as main
+  # advances (CPL-358). All patch releases on a line (v1.2.0, v1.2.1, ...) share
+  # one branch. Runs only for tag pushes; workflow_dispatch re-provisions an
+  # existing release and has no tag to key a line off.
+  create-release-branch:
+    needs: [create-draft-release]
+    if: ${{ github.ref_type == 'tag' }}
+    runs-on: self-hosted
+    permissions:
+      contents: write # push the release-line branch
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0 # need history to test fast-forward against an existing branch
+
+      - name: Create or advance the release-line branch
+        env:
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # Derive release/vMAJOR.MINOR from the tag. Prefix-match tolerates
+          # pre-release suffixes (v1.2.0-rc1 → release/v1.2), keeping the whole
+          # 1.2 line on one branch.
+          if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+            echo "::notice::Tag '$TAG' is not vMAJOR.MINOR.PATCH — skipping release-branch creation."
+            exit 0
+          fi
+          BRANCH="release/v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+          echo "Release-line branch: $BRANCH (tag $TAG @ $SHA)"
+
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            # Branch exists — an earlier patch release on this line, or a branch
+            # already carrying hotfix commits. Only fast-forward it to the tagged
+            # commit; never force-push, which would discard those hotfix commits.
+            # Compare against FETCH_HEAD: `git fetch` always writes it, whereas the
+            # origin/$BRANCH remote-tracking ref may not exist under checkout's
+            # narrow fetch refspec.
+            git fetch origin "$BRANCH"
+            if git merge-base --is-ancestor FETCH_HEAD "$SHA"; then
+              echo "Fast-forwarding $BRANCH to $SHA"
+              if ! git push origin "$SHA:refs/heads/$BRANCH"; then
+                echo "::warning::Failed to push $BRANCH to $SHA (branch may have moved). Leaving it untouched."
+              fi
+            else
+              echo "::warning::$BRANCH has diverged from $SHA (likely carries hotfix commits). Leaving it untouched — reconcile manually if this release should advance the line."
+            fi
+          else
+            echo "Creating $BRANCH at $SHA"
+            if ! git push origin "$SHA:refs/heads/$BRANCH"; then
+              echo "::warning::Failed to create $BRANCH at $SHA."
+            fi
+          fi

@@ -126,7 +126,7 @@ jobs:
         with:
           node-version: "20"
       - name: Install Phala CLI
-        run: npm install -g phala
+        run: npm install -g phala@1.1.19
       - name: Set deployment target
         id: set
         env:
@@ -280,6 +280,7 @@ jobs:
             lit-core/
             otel-collector/
             Dockerfile.lit-actions
+            Dockerfile.lit-actions-gvisor
             Dockerfile.lit-api-server
             Dockerfile.otel-collector
             docker-compose.phala.yml
@@ -311,6 +312,8 @@ jobs:
         include:
           - service: lit-actions
             dockerfile: Dockerfile.lit-actions
+          - service: lit-actions-gvisor
+            dockerfile: Dockerfile.lit-actions-gvisor
           - service: lit-api-server
             dockerfile: Dockerfile.lit-api-server
           - service: otel-collector
@@ -377,16 +380,19 @@ jobs:
       - name: Prepare docker-compose for deployment (digest-pinned)
         run: |
           DIGEST_LIT_ACTIONS=$(cat digest-lit-actions.txt | tr -d '\n' | sed 's/}[}]*$//')
+          DIGEST_LIT_ACTIONS_GVISOR=$(cat digest-lit-actions-gvisor.txt | tr -d '\n' | sed 's/}[}]*$//')
           DIGEST_LIT_API_SERVER=$(cat digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
           DIGEST_OTEL_COLLECTOR=$(cat digest-otel-collector.txt | tr -d '\n' | sed 's/}[}]*$//')
           DOMAIN="${{ needs.determine-target.outputs.domain }}"
           sed \
             -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|${{ vars.DOCKER_IMAGE }}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
+            -e "s|\${DOCKER_IMAGE_LIT_ACTIONS_GVISOR}|${{ vars.DOCKER_IMAGE }}-lit-actions-gvisor@${DIGEST_LIT_ACTIONS_GVISOR}|g" \
             -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|${{ vars.DOCKER_IMAGE }}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
             -e "s|\${DOCKER_IMAGE_OTEL_COLLECTOR}|${{ vars.DOCKER_IMAGE }}-otel-collector@${DIGEST_OTEL_COLLECTOR}|g" \
             -e "s|\${GCP_PROJECT_ID}|${{ needs.determine-target.outputs.gcp_project_id }}|g" \
             -e "s|\${CERTBOT_DOMAIN}|${DOMAIN}|g" \
             -e "s|\${CERTBOT_AWS_REGION}|${{ vars.CERTBOT_AWS_REGION }}|g" \
+            -e "s|\${LIT_GVISOR_ENABLED}|true|g" \
             docker-compose.phala.yml > docker-compose.deploy.yml
 
       - name: Setup Node.js
@@ -395,7 +401,7 @@ jobs:
           node-version: "20"
 
       - name: Install Phala CLI
-        run: npm install -g phala
+        run: npm install -g phala@1.1.19
 
       - name: Deploy to Phala Cloud
         env:
@@ -569,7 +575,7 @@ jobs:
         with:
           node-version: "20"
       - name: Install Phala CLI
-        run: npm install -g phala
+        run: npm install -g phala@1.1.19
       - name: Stop the old instance — only if the domain has moved OFF it
         # Guard against stranding the public domain: resolve the live domain's
         # CNAME and refuse to stop OLD if the domain still points at OLD's gateway
@@ -638,7 +644,7 @@ jobs:
           node-version: "20"
       - name: Install Phala CLI + AWS CLI
         run: |
-          npm install -g phala
+          npm install -g phala@1.1.19
           # AWS CLI v2 via the official installer (no Python dependency). The old
           # `pip install --user awscli` fails on the runner's externally-managed
           # Python (PEP 668: "externally-managed-environment"). Guarded so a

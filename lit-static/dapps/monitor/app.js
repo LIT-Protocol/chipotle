@@ -32,6 +32,21 @@ const ACCOUNT_CONFIG_VIEW_ABI = [
   },
   {
     inputs: [],
+    name: 'configOperator',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    // ERC-173 owner() — served by the diamond's OwnershipFacet.
+    inputs: [],
+    name: 'owner',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
     name: 'adminApiPayerAccount',
     outputs: [{ internalType: 'address', name: '', type: 'address' }],
     stateMutability: 'view',
@@ -468,7 +483,7 @@ async function getNodeChainConfig(serverUrl) {
 
   if (errEl) errEl.style.display = 'none';
   if (resultsEl) resultsEl.style.display = 'block';
-  ['cc-chain-name','cc-chain-id','cc-is-evm','cc-testnet','cc-token','cc-contract-address']
+  ['cc-chain-name','cc-chain-id','cc-is-evm','cc-testnet','cc-token','cc-contract-address','ver-contract-address']
     .forEach(id => setValue(id, '…', false));
   const rpcUrlInput = el('cc-rpc-url');
   if (rpcUrlInput) rpcUrlInput.value = '';
@@ -492,12 +507,14 @@ async function getNodeChainConfig(serverUrl) {
     if (rpcInput) rpcInput.value = rpcUrl;
 
     setValue('cc-contract-address', cfg.contract_address ?? '—', !cfg.contract_address);
+    setValue('ver-contract-address', cfg.contract_address ?? '—', !cfg.contract_address);
 
     const contractInput = el('contract-address');
     if (contractInput && cfg.contract_address) contractInput.value = cfg.contract_address;
   } catch (e) {
     const rpcInput = el('cc-rpc-url');
     if (rpcInput) rpcInput.value = '';
+    setValue('ver-contract-address', '—', true);
     if (resultsEl) resultsEl.style.display = 'none';
     if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
   }
@@ -566,15 +583,16 @@ async function getApiPayers(serverUrl) {
   }
 }
 
+// Renders into the horizontal version bar just above the Pool Health bar.
 async function fetchVersion(serverUrl) {
-  const resultsEl = el('version-results');
   const errEl = el('version-error');
+  const submodulesEl = el('ver-submodules');
 
   if (errEl) errEl.style.display = 'none';
+  setValue('ver-name', '…', false);
   setValue('ver-version', '…', false);
-  const submodulesEl = el('ver-submodules');
+  setValue('ver-commit-version', '…', false);
   if (submodulesEl) submodulesEl.innerHTML = '';
-  if (resultsEl) resultsEl.style.display = 'block';
 
   try {
     const res = await fetch(`${serverUrl}/version`);
@@ -586,23 +604,15 @@ async function fetchVersion(serverUrl) {
     setValue('ver-commit-version', data.commit_version ?? '—', !data.commit_version);
 
     if (submodulesEl) {
-      const rows = (data.submodule_versions ?? []);
-      if (rows.length === 0) {
-        submodulesEl.innerHTML = '<span style="color:var(--muted);font-size:0.85rem">None</span>';
-      } else {
-        submodulesEl.innerHTML =
-          `<table>` +
-            `<thead><tr><th>Submodule</th><th>Version</th></tr></thead>` +
-            `<tbody>` +
-              rows.map(([name, ver]) =>
-                `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(ver)}</td></tr>`
-              ).join('') +
-            `</tbody>` +
-          `</table>`;
-      }
+      submodulesEl.innerHTML = (data.submodule_versions ?? []).map(([name, ver]) =>
+        `<div class="health-bar-item">` +
+          `<span class="health-bar-label">${escapeHtml(name)}</span>` +
+          `<span class="health-bar-value">${escapeHtml(ver)}</span>` +
+        `</div>`
+      ).join('');
     }
   } catch (e) {
-    if (resultsEl) resultsEl.style.display = 'none';
+    ['ver-name', 'ver-version', 'ver-commit-version'].forEach(id => setValue(id, '—', true));
     if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
   }
 }
@@ -630,8 +640,11 @@ async function fetchContractValues() {
   }
 
   hideError();
+  setValue('val-contract-owner', '…', false);
   setValue('val-pricing-operator', '…', false);
   setValue('val-pricing-operator-balance', '', false);
+  setValue('val-config-operator', '…', false);
+  setValue('val-config-operator-balance', '', false);
   setValue('val-admin-api-payer', '…', false);
   setValue('val-admin-api-payer-balance', '', false);
   setValue('val-payer-count', '…', false);
@@ -655,6 +668,30 @@ async function fetchContractValues() {
 
     setValue('val-pricing-operator', pricingOperator ?? '—', !pricingOperator);
     setValue('val-admin-api-payer', adminApiPayer ?? '—', !adminApiPayer);
+
+    // configOperator() may be absent on older diamonds — fetch separately so a
+    // missing selector doesn't blank the rest of the card.
+    contract.configOperator()
+      .then(addr => {
+        setValue('val-config-operator', addr ?? '—', !addr);
+        if (addr && addr !== ethers.ZeroAddress) {
+          provider.getBalance(addr).then(wei => {
+            const node = el('val-config-operator-balance');
+            if (node) {
+              node.textContent = parseFloat(ethers.formatEther(wei)).toFixed(6) + ' ETH';
+              node.style.color = '';
+            }
+          }).catch(() => {});
+        }
+      })
+      .catch(() => setValue('val-config-operator', '—', true));
+
+    // owner() lives on the OwnershipFacet — fetch it separately so a diamond
+    // deployed without that facet doesn't blank the rest of the card.
+    contract.owner()
+      .then(owner => setValue('val-contract-owner', owner ?? '—', !owner))
+      .catch(() => setValue('val-contract-owner', '—', true));
+
     setValue('val-payer-count', String(apiPayerCount), false);
     setValue('val-requested-api-payer-count', String(requestedApiPayerCount), false);
     setValue('val-rebalance-amount', ethers.formatEther(rebalanceAmountWei) + ' ETH', false);
@@ -767,7 +804,19 @@ async function connectWallet() {
     try {
       _wcProvider = await EthereumProvider.init({
         projectId: WALLETCONNECT_PROJECT_ID,
-        chains: [chainId],
+        // CRITICAL: use `optionalChains`, NOT `chains`. @walletconnect/ethereum-provider
+        // turns `chains` into a *requiredNamespaces* entry. A Gnosis Safe (and any
+        // smart-contract wallet) only supports the single chain it was deployed to, and
+        // Reown's own guidance is explicit that required namespaces "cause issues" with
+        // such wallets: the session pairs successfully (the Safe app opens) but the
+        // eth_sendTransaction request never routes to the wallet, so the transaction to
+        // sign silently disappears. Declaring the chain as *optional* keeps EOA wallets
+        // (MetaMask, Rabby) working while letting the Safe negotiate its single chain.
+        // Methods intentionally left unset → they default to the full OPTIONAL_METHODS
+        // set (includes eth_sendTransaction), which the wallet echoes into the approved
+        // namespace so signing routes to the wallet rather than the read-only RPC.
+        // See https://docs.reown.com/advanced/providers/ethereum ("Smart Contract Wallets").
+        optionalChains: [chainId],
         rpcMap: rpcUrl ? { [chainId]: rpcUrl } : undefined,
         showQrModal: true,
       });
@@ -789,12 +838,17 @@ async function connectWallet() {
 
 // ── fetchChainConfigKeys ────────────────────────────────────────────────
 
+// Populates the Node Configuration key dropdown with the ConfigKeys variants
+// the node reads from chain (GET /get_chain_config_keys).
 async function fetchChainConfigKeys(serverUrl) {
-  const listEl = el('chain-config-keys-list');
-  const errEl = el('chain-config-keys-error');
+  const select = el('node-config-key');
+  const errEl = el('node-config-keys-error');
 
   if (errEl) errEl.style.display = 'none';
-  if (listEl) listEl.innerHTML = '<span style="color:var(--muted)">Loading…</span>';
+  if (!select) return;
+
+  const previous = select.value;
+  select.innerHTML = '<option value="" disabled selected>Loading keys…</option>';
 
   try {
     const res = await fetch(`${serverUrl}/get_chain_config_keys`);
@@ -802,13 +856,12 @@ async function fetchChainConfigKeys(serverUrl) {
     const data = await res.json();
     const keys = data.keys ?? [];
 
-    if (listEl) {
-      listEl.innerHTML = keys.length === 0
-        ? '<span style="color:var(--muted)">No keys returned.</span>'
-        : keys.map(k => `<div class="result-row"><span class="result-value">${escapeHtml(k)}</span></div>`).join('');
-    }
+    select.innerHTML =
+      '<option value="" disabled selected>Select a key…</option>' +
+      keys.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('');
+    if (previous && keys.includes(previous)) select.value = previous;
   } catch (e) {
-    if (listEl) listEl.innerHTML = '';
+    select.innerHTML = '<option value="" disabled selected>Failed to load keys</option>';
     if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
   }
 }
@@ -878,6 +931,233 @@ async function fetchNodeConfigValues() {
   } catch (e) {
     if (tableEl) tableEl.innerHTML = '';
     if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
+  }
+}
+
+/* ═══ System dashboard — runtimes, CVM memory, caches, languages (CPL-353) ═══ */
+
+function fmtBytes(bytes) {
+  if (bytes == null || isNaN(bytes)) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let v = Number(bytes);
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return (i === 0 ? String(v) : v.toFixed(1)) + ' ' + units[i];
+}
+
+function fmtKb(kb) {
+  return kb == null ? '—' : fmtBytes(Number(kb) * 1024);
+}
+
+function fmtCount(n) {
+  return n == null ? '—' : Number(n).toLocaleString('en-US');
+}
+
+async function fetchJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status} ${res.statusText}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+// Older nodes 404 on the new endpoints — show a soft hint rather than an error.
+function setCardError(bodyId, errId, e) {
+  const body = el(bodyId);
+  const errEl = el(errId);
+  if (e?.status === 404) {
+    if (body) body.innerHTML = '<span class="sys-empty">Not supported by this node version yet.</span>';
+    if (errEl) errEl.style.display = 'none';
+    return;
+  }
+  if (body) body.innerHTML = '';
+  if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
+}
+
+function runtimeRow(name, sub, state, text, socketPath) {
+  return `<div class="sys-row"${socketPath ? ` title="${escapeHtml(socketPath)}"` : ''}>` +
+    `<span class="health-dot ${state}"></span>` +
+    `<span>${escapeHtml(name)}</span>` +
+    `<span class="badge">${escapeHtml(sub)}</span>` +
+    `<span class="sys-value">${escapeHtml(text)}</span>` +
+  `</div>`;
+}
+
+function renderRuntimes(health, stats) {
+  const body = el('runtimes-body');
+  if (!body) return;
+  const runner = name => stats?.runners?.find(r => r.name === name);
+  const js = runner('js');
+  const gv = runner('gvisor');
+  const rows = [];
+
+  // JS runner — /health probes its socket with a real gRPC connect.
+  const jsUp = health?.lit_actions_reachable;
+  rows.push(runtimeRow(
+    'JS runner', 'Deno / V8 isolate',
+    jsUp == null ? 'unknown' : jsUp ? 'healthy' : 'critical',
+    jsUp == null ? 'unknown' : jsUp ? 'reachable' : 'unreachable',
+    js?.socket_path,
+  ));
+
+  // gVisor runner — prefer the /health connect probe once nodes ship it
+  // (#558); until then fall back to socket presence from /get_system_stats.
+  let gvState = 'unknown';
+  let gvText = 'unknown';
+  if (typeof health?.lit_actions_gvisor_reachable === 'boolean') {
+    gvState = health.lit_actions_gvisor_reachable ? 'healthy' : 'critical';
+    gvText = health.lit_actions_gvisor_reachable ? 'reachable' : 'unreachable';
+  } else if (gv) {
+    gvState = gv.socket_present ? 'healthy' : 'unknown';
+    gvText = gv.socket_present ? 'socket present' : 'not deployed';
+  }
+  rows.push(runtimeRow('gVisor runner', 'any-language sandbox', gvState, gvText, gv?.socket_path));
+
+  if (health) {
+    rows.push(runtimeRow(
+      'CPU', 'request admission',
+      health.cpu_available ? 'healthy' : 'critical',
+      health.cpu_available ? 'available' : 'overloaded',
+      null,
+    ));
+    rows.push(runtimeRow(
+      'Billing keys', 'Stripe configuration',
+      health.billing_keys_present ? 'healthy' : 'unknown',
+      health.billing_keys_present ? 'present' : 'absent',
+      null,
+    ));
+  }
+  body.innerHTML = rows.join('');
+}
+
+function renderMemory(mem) {
+  const body = el('memory-body');
+  if (!body) return;
+  // Fields are independently nullable — render whatever procfs provided
+  // rather than blanking the card when only /proc/meminfo is missing.
+  if (!mem || (mem.total_kb == null && mem.process_rss_kb == null)) {
+    body.innerHTML = '<span class="sys-empty">Memory figures unavailable (no procfs on this node).</span>';
+    return;
+  }
+  const parts = [];
+  if (mem.total_kb != null) {
+    const pct = mem.used_kb != null ? (Number(mem.used_kb) / Number(mem.total_kb)) * 100 : null;
+    const cls = pct == null ? '' : pct >= 85 ? 'critical' : pct >= 70 ? 'warning' : '';
+    parts.push(
+      `<div class="sys-row" style="border-bottom:none;padding-bottom:0">` +
+        `<span class="sys-label">Used</span>` +
+        `<span class="sys-value">${fmtKb(mem.used_kb)} / ${fmtKb(mem.total_kb)}${pct != null ? ` (${pct.toFixed(1)}%)` : ''}</span>` +
+      `</div>`,
+      `<div class="gauge"><div class="gauge-fill ${cls}" style="width:${pct == null ? 0 : Math.min(100, pct).toFixed(1)}%"></div></div>`,
+      `<div class="sys-row"><span class="sys-label">Available</span><span class="sys-value">${fmtKb(mem.available_kb)}</span></div>`
+    );
+  } else {
+    parts.push('<div class="sys-empty" style="margin-bottom:0.35rem">CVM totals unavailable (no /proc/meminfo on this node).</div>');
+  }
+  if (mem.process_rss_kb != null) {
+    parts.push(`<div class="sys-row"><span class="sys-label">API server RSS</span><span class="sys-value">${fmtKb(mem.process_rss_kb)}</span></div>`);
+  }
+  body.innerHTML = parts.join('');
+}
+
+function renderCaches(caches) {
+  const body = el('caches-body');
+  if (!body) return;
+  if (!Array.isArray(caches) || caches.length === 0) {
+    body.innerHTML = '<span class="sys-empty">No cache statistics reported.</span>';
+    return;
+  }
+  const totalEntries = caches.reduce((s, c) => s + (c.entry_count ?? 0), 0);
+  const totalBytes = caches.reduce((s, c) => s + (c.approx_bytes ?? 0), 0);
+  body.innerHTML =
+    `<table><thead><tr><th>Cache</th><th class="eth">Entries</th><th class="eth">Size</th></tr></thead><tbody>` +
+    caches.map(c =>
+      `<tr title="${escapeHtml(c.description ?? '')}">` +
+        `<td>${escapeHtml(c.name)}</td>` +
+        `<td class="eth">${fmtCount(c.entry_count)}</td>` +
+        `<td class="eth">${c.approx_bytes != null ? fmtBytes(c.approx_bytes) : '—'}</td>` +
+      `</tr>`
+    ).join('') +
+    `</tbody></table>` +
+    `<div class="sys-row" style="border-bottom:none;margin-top:0.5rem">` +
+      `<span class="sys-label">Total</span>` +
+      `<span class="sys-value">${fmtCount(totalEntries)} entries &middot; ${fmtBytes(totalBytes)} tracked</span>` +
+    `</div>`;
+}
+
+function renderLanguages(languages) {
+  const body = el('languages-body');
+  if (!body) return;
+  if (!Array.isArray(languages) || languages.length === 0) {
+    body.innerHTML = '<span class="sys-empty">No languages advertised.</span>';
+    return;
+  }
+  body.innerHTML = languages.map(lang => {
+    const isGvisor = lang.execution_model === 'gvisor';
+    const runtimes = (lang.runtimes ?? []).map(rt =>
+      `<span class="badge${rt.is_default ? ' accent' : ''}" title="${escapeHtml(rt.version ?? '')}${rt.prewarmed ? ' · prewarmed' : ''}">${escapeHtml(rt.id)}${rt.is_default ? ' ★' : ''}</span>`
+    ).join(' ');
+    const methods = (lang.methods ?? []).map(m => `<span class="badge">${escapeHtml(m)}</span>`).join(' ');
+    return `<div class="sys-row" style="flex-wrap:wrap">` +
+      `<span>${escapeHtml(lang.display_name ?? lang.name)}</span>` +
+      `<span class="badge${isGvisor ? ' accent' : ''}">${isGvisor ? 'gVisor sandbox' : 'Deno / V8'}</span>` +
+      `<span class="sys-value" style="display:flex;gap:0.35rem;flex-wrap:wrap;justify-content:flex-end">${runtimes} ${methods}</span>` +
+    `</div>`;
+  }).join('');
+}
+
+// /health intentionally answers 503 with a JSON body when unhealthy, so parse
+// the body regardless of status.
+async function fetchHealth(serverUrl) {
+  const res = await fetch(`${serverUrl}/health`);
+  try {
+    return await res.json();
+  } catch {
+    const err = new Error(`HTTP ${res.status} ${res.statusText}`);
+    err.status = res.status;
+    throw err;
+  }
+}
+
+async function refreshSystemDashboard(serverUrl) {
+  const [healthResult, statsResult] = await Promise.allSettled([
+    fetchHealth(serverUrl),
+    fetchJson(`${serverUrl}/get_system_stats`),
+  ]);
+  const health = healthResult.status === 'fulfilled' ? healthResult.value : null;
+  const stats = statsResult.status === 'fulfilled' ? statsResult.value : null;
+
+  if (health == null && stats == null) {
+    setCardError('runtimes-body', 'runtimes-error', healthResult.reason ?? statsResult.reason);
+  } else {
+    const errEl = el('runtimes-error');
+    if (errEl) errEl.style.display = 'none';
+    renderRuntimes(health, stats);
+  }
+
+  if (stats) {
+    for (const id of ['memory-error', 'caches-error']) {
+      const errEl = el(id);
+      if (errEl) errEl.style.display = 'none';
+    }
+    renderMemory(stats.memory);
+    renderCaches(stats.caches);
+  } else {
+    setCardError('memory-body', 'memory-error', statsResult.reason);
+    setCardError('caches-body', 'caches-error', statsResult.reason);
+  }
+}
+
+async function fetchSupportedLanguages(serverUrl) {
+  try {
+    const data = await fetchJson(`${serverUrl}/get_supported_languages`);
+    const errEl = el('languages-error');
+    if (errEl) errEl.style.display = 'none';
+    renderLanguages(data.languages);
+  } catch (e) {
+    setCardError('languages-body', 'languages-error', e);
   }
 }
 
@@ -955,6 +1235,8 @@ async function loadNetwork() {
     fetchNodeConfigValues(),
     fetchLitActionClientConfig(serverUrl),
     fetchChainConfigKeys(serverUrl),
+    refreshSystemDashboard(serverUrl),
+    fetchSupportedLanguages(serverUrl),
   ]);
   updateHealthSummary(); // pick up admin reserve after fetchContractValues
   loadThresholdInputs();
@@ -970,6 +1252,8 @@ async function refreshBalances() {
       getApiPayers(serverUrl),
       fetchContractValues(),
       fetchNodeConfigValues(),
+      refreshSystemDashboard(serverUrl),
+      fetchSupportedLanguages(serverUrl),
     ]);
     updateHealthSummary(); // pick up admin reserve after fetchContractValues
   } finally {
@@ -1174,7 +1458,7 @@ el('btn-set-node-config')?.addEventListener('click', async () => {
     return;
   }
   if (!key) {
-    showStatus('node-config-status', 'Enter a configuration key.', true);
+    showStatus('node-config-status', 'Select a configuration key.', true);
     return;
   }
 
@@ -1274,6 +1558,12 @@ el('btn-set-payer-count')?.addEventListener('click', async () => {
 });
 
 /* ═══ Initialization ═════════════════════════════════════════════════════════ */
+
+el('ver-contract-address')?.addEventListener('click', () => {
+  const node = el('ver-contract-address');
+  const text = (node?.textContent || '').trim();
+  if (text && text !== '—' && text !== '…') copyText(text, node);
+});
 
 (function () {
   const select = el('network');

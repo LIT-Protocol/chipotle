@@ -37,12 +37,21 @@ impl Client {
                 return Ok(());
             }
             tracing::debug!(seconds, "execution::flush_unbilled_seconds: charging");
-            crate::stripe::charge_lit_action_time(&self.api_key, seconds, stripe)
-                .await
-                .map_err(|e| {
-                    warn!("Failed to bill remaining {seconds} seconds at end of action: {e}");
-                    anyhow!("Billing failed for {seconds} seconds of execution: {e}")
-                })?;
+            crate::stripe::charge_lit_action_time(
+                &self.api_key,
+                seconds,
+                // Derived CID of the action — always set on the billed execution
+                // path (raw code is hashed the same way registered actions are).
+                // `charge` normalizes an empty CID away, so no filtering here.
+                Some(self.ipfs_id.as_str()),
+                self.request_id.as_deref(),
+                stripe,
+            )
+            .await
+            .map_err(|e| {
+                warn!("Failed to bill remaining {seconds} seconds at end of action: {e}");
+                anyhow!("Billing failed for {seconds} seconds of execution: {e}")
+            })?;
             self.state.unbilled_seconds = 0;
         }
         Ok(())
@@ -83,6 +92,7 @@ impl Client {
             let execution = Box::pin(self.execute_js_inner(
                 opts.code.clone(),
                 opts.globals.clone(),
+                opts.startup_script.clone(),
                 // &auth_context,
                 0,
             ));
@@ -164,6 +174,7 @@ impl Client {
         &mut self,
         code: String,
         globals: Option<serde_json::Value>,
+        startup_script: Option<String>,
         // auth_context: &models::AuthContext,
         call_depth: u32,
     ) -> Result<ExecutionState> {
@@ -173,13 +184,15 @@ impl Client {
             .transpose()
             .context("failed to serialize js_params")?;
         let js_params_len = js_params_bytes.as_ref().map_or(0, Vec::len);
-        let combined_len = code.len() + js_params_len;
+        let startup_script_len = startup_script.as_ref().map_or(0, String::len);
+        let combined_len = code.len() + js_params_len + startup_script_len;
         if combined_len > self.max_code_length as usize {
             bail!(
-                "Combined code + js_params payload is too large ({} bytes: {} code + {} js_params). Max combined size is {} bytes.",
+                "Combined code + js_params + startup_script payload is too large ({} bytes: {} code + {} js_params + {} startup_script). Max combined size is {} bytes.",
                 combined_len,
                 code.len(),
                 js_params_len,
+                startup_script_len,
                 self.max_code_length,
             );
         }
@@ -234,6 +247,7 @@ impl Client {
                     } else {
                         Some(self.ipfs_id.clone())
                     },
+                    startup_script,
                 }
                 .into(),
             )

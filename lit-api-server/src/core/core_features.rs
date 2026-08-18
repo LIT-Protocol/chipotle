@@ -8,9 +8,12 @@ use crate::actions::client::{
     MAX_MAX_RETRIES, MAX_MEMORY_LIMIT_MB, MAX_TIMEOUT_MS,
 };
 use crate::actions::grpc::GrpcClientPool;
+use crate::core::cache_metadata::CacheMetadataIndex;
 use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::{LitActionRequest, LitBinaryActionRequest};
-use crate::core::v1::models::response::{LitActionClientConfigResponse, LitActionResponse};
+use crate::core::v1::models::response::{
+    CacheEntryMetadataItem, CacheMetadataResponse, LitActionClientConfigResponse, LitActionResponse,
+};
 use crate::observability::RequestSpan;
 use crate::stripe::StripeState;
 use crate::utils::parse_with_hash::ipfs_cid_to_u256;
@@ -32,6 +35,7 @@ pub async fn lit_action(
     api_key: &str,
     grpc_client_pool: &GrpcClientPool<tonic::transport::Channel>,
     ipfs_cache: &Cache<String, Arc<String>>,
+    cache_metadata: Arc<CacheMetadataIndex>,
     http_client: &reqwest::Client,
     chain_config: Arc<ChainConfig>,
     stripe_state: Option<Arc<StripeState>>,
@@ -67,6 +71,33 @@ pub async fn lit_action(
         .insert(derived_ipfs_id.clone(), Arc::new(code_to_run.clone()))
         .await;
 
+    // CPL-351: correlate the cached binary with the caller's master account so
+    // its metadata can be surfaced by `GET /cache_metadata`. Spawned off the
+    // request path: resolving the account wallet is an uncached on-chain call,
+    // and this is best-effort bookkeeping that must add neither latency to nor
+    // failure modes for action execution. `record_execution` is eventually
+    // consistent — a slightly-late write only affects the metadata endpoint.
+    {
+        let cache_metadata = cache_metadata.clone();
+        let api_key = api_key.to_string();
+        let ipfs_id = derived_ipfs_id.clone();
+        let size_bytes = code_to_run.len() as u64;
+        tokio::spawn(async move {
+            match crate::accounts::get_account_wallet_address(&api_key).await {
+                Ok(account_address) => cache_metadata.record_execution(
+                    &ipfs_id,
+                    size_bytes,
+                    &account_address,
+                    std::time::SystemTime::now(),
+                ),
+                Err(e) => tracing::debug!(
+                    %ipfs_id,
+                    "cache_metadata: skipped recording (wallet lookup failed): {e}"
+                ),
+            }
+        });
+    }
+
     let deno_execution_env = DenoExecutionEnv {
         ipfs_cache: Some(moka::future::Cache::clone(ipfs_cache)),
         http_client: Some(reqwest::Client::clone(http_client)),
@@ -97,6 +128,7 @@ pub async fn lit_action(
         code: code_to_run,
         globals: js_params.clone(),
         action_ipfs_id: Some(derived_ipfs_id),
+        startup_script: None,
     };
 
     let result = match client
@@ -123,6 +155,69 @@ pub async fn lit_action(
     };
 
     Ok(lit_action_response)
+}
+
+/// CPL-351: metadata about the action code cached for the caller's master
+/// account. Resolves the API key to its on-chain account wallet address (the
+/// identity shared by the master key and all its usage keys) and returns the
+/// secondary-index metadata for that account. Never returns cached code.
+pub async fn get_cache_metadata(
+    api_key: &str,
+    cache_metadata: &CacheMetadataIndex,
+) -> Result<CacheMetadataResponse, ApiStatus> {
+    let account_address = crate::accounts::get_account_wallet_address(api_key)
+        .await
+        .map_err(|e| {
+            // An unknown/unregistered key is a credential failure, not a bad
+            // request — map it to 401 to match the billing path's convention
+            // (see accounts::UnknownApiKey). Anything else (RPC/contract
+            // failure) is a transient 500.
+            let msg = format!("{e}");
+            if msg.contains("no wallet address") || msg.contains("AccountDoesNotExist") {
+                ApiStatus::unauthorized("The provided API key is not registered.".to_string())
+            } else {
+                ApiStatus::internal_server_error(
+                    anyhow::anyhow!("failed to resolve account for API key: {e}"),
+                    "Could not resolve the account for the provided API key.",
+                )
+            }
+        })?;
+
+    let mut entries: Vec<CacheEntryMetadataItem> = cache_metadata
+        .entries_for_account(&account_address)
+        .into_iter()
+        .map(|m| CacheEntryMetadataItem {
+            ipfs_id: m.ipfs_id,
+            size_bytes: m.size_bytes,
+            created_at_ms: system_time_to_millis(m.created_at),
+            last_run_at_ms: system_time_to_millis(m.last_run_at),
+            run_count: m.run_count,
+            // The API-server IPFS cache is capacity-bounded (LRU), not
+            // time-expired, so there is no per-entry TTL to report.
+            ttl_seconds: None,
+        })
+        .collect();
+
+    // Most recently executed first.
+    entries.sort_by(|a, b| b.last_run_at_ms.cmp(&a.last_run_at_ms));
+
+    let total_size_bytes = entries.iter().map(|e| e.size_bytes).sum();
+
+    Ok(CacheMetadataResponse {
+        account_address,
+        entry_count: entries.len() as u64,
+        total_size_bytes,
+        entries,
+    })
+}
+
+/// Convert a `SystemTime` to Unix-epoch milliseconds. Pre-epoch times saturate
+/// to 0; a value beyond `u64::MAX` ms (~year 584 million) saturates to
+/// `u64::MAX` rather than silently truncating the `u128`.
+fn system_time_to_millis(t: std::time::SystemTime) -> u64 {
+    t.duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
 }
 
 /// Execute an any-language action **bundle** on the gVisor runner.
@@ -214,6 +309,13 @@ pub async fn lit_binary_action(
         code: code_for_runner,
         globals: request.js_params.clone(),
         action_ipfs_id: Some(checksum),
+        // Rides beside the bundle so different scripts reuse the runner's
+        // cached bundle; the runner falls back to the bundle's own
+        // startup.sh when absent.
+        startup_script: request
+            .startup_script
+            .clone()
+            .filter(|s| !s.trim().is_empty()),
     };
 
     let result = match client

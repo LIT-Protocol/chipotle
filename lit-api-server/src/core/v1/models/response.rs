@@ -29,6 +29,25 @@ pub struct CreateWalletWithSignatureResponse {
     pub derivation_path: String,
 }
 
+/// Returned by `POST /prepare_wallet`. Same shape as
+/// `CreateWalletWithSignatureResponse` but obtained with no owner signature and
+/// no API key. The client MUST follow up with an on-chain
+/// `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)`
+/// call — until that lands the PKP exists in MPC but is registered to no account,
+/// which makes an un-registered response equivalent to a discarded keypair.
+///
+/// NOT IDEMPOTENT: every call returns a brand-new wallet (a fresh random
+/// derivation path). Retrying does not return the previous address; concurrent
+/// callers each get a different wallet with no server-side dedup. See
+/// `docs/management/api_direct.mdx` for the full concurrency semantics.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct PrepareWalletResponse {
+    pub wallet_address: String,
+    /// 0x-prefixed lowercase hex (uint256). Pass through verbatim to
+    /// `registerWalletDerivation`'s `derivationPath` arg.
+    pub derivation_path: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct LitActionResponse {
     pub response: serde_json::Value,
@@ -182,6 +201,40 @@ pub struct NodeChainConfigResponse {
     pub contract_address: String,
 }
 
+/// One cached action-code entry in a `GET /cache_metadata` response (CPL-351).
+///
+/// Describes the cached data only — never the code/binary itself.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CacheEntryMetadataItem {
+    /// IPFS id (cache key) of the cached action code.
+    pub ipfs_id: String,
+    /// Size of the cached code in bytes.
+    pub size_bytes: u64,
+    /// Unix-epoch milliseconds when the entry was first cached.
+    pub created_at_ms: u64,
+    /// Unix-epoch milliseconds of the most recent execution.
+    pub last_run_at_ms: u64,
+    /// Number of executions recorded against this entry.
+    pub run_count: u64,
+    /// Time-to-live of the entry, in seconds. `None` for the API-server IPFS
+    /// cache, which is capacity-bounded (LRU) rather than time-expired.
+    pub ttl_seconds: Option<u64>,
+}
+
+/// GET /cache_metadata — metadata for the cached action code correlated to the
+/// authenticated master account. Excludes the cached binaries themselves.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CacheMetadataResponse {
+    /// On-chain account wallet address the caller's key resolves to.
+    pub account_address: String,
+    /// Number of cached entries correlated to this account.
+    pub entry_count: u64,
+    /// Sum of `size_bytes` across the returned entries.
+    pub total_size_bytes: u64,
+    /// The cached entries, sorted by most recent execution first.
+    pub entries: Vec<CacheEntryMetadataItem>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct VersionResponse {
     pub name: String,
@@ -195,4 +248,45 @@ pub struct VersionResponse {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SupportedLanguagesResponse {
     pub languages: Vec<crate::actions::languages::LanguageFeature>,
+}
+
+/// Returned by `/get_system_stats` — CVM memory usage and in-process cache
+/// statistics powering the monitor dapp's system dashboard.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SystemStatsResponse {
+    pub memory: MemoryStats,
+    pub caches: Vec<CacheStats>,
+    pub runners: Vec<RunnerInfo>,
+}
+
+/// CVM-level memory figures from `/proc/meminfo` plus this process's resident
+/// set from `/proc/self/status`. Fields are `None` on platforms without
+/// procfs (e.g. local macOS development).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct MemoryStats {
+    pub total_kb: Option<u64>,
+    pub available_kb: Option<u64>,
+    pub used_kb: Option<u64>,
+    pub process_rss_kb: Option<u64>,
+}
+
+/// Entry statistics for one in-process cache.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CacheStats {
+    pub name: String,
+    pub description: String,
+    pub entry_count: u64,
+    /// Approximate bytes held, for caches built with a byte weigher. `None`
+    /// when the cache only counts entries.
+    pub approx_bytes: Option<u64>,
+}
+
+/// Presence of a Lit Action runner's Unix socket. `socket_present` means the
+/// runner container has been deployed and created its socket — it is not a
+/// liveness probe (`/health` covers reachability).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct RunnerInfo {
+    pub name: String,
+    pub socket_path: String,
+    pub socket_present: bool,
 }

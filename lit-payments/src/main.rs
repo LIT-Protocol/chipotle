@@ -15,7 +15,7 @@ use lit_payments::{auth, chain, config, db, mail};
 use rocket::fs::{FileServer, NamedFile};
 use rocket::http::Status;
 use rocket::response::Redirect;
-use rocket::{get, routes};
+use rocket::{catchers, get, routes};
 
 #[rocket::launch]
 async fn rocket() -> _ {
@@ -33,6 +33,8 @@ async fn rocket() -> _ {
     let mailer =
         mail::Mailer::new(cfg.resend_api_key.clone(), cfg.mail_from.clone()).expect("mailer");
     let rate_limit = auth::rate_limit::RateLimiter::new();
+    // Per-client-IP throttle for the public customer-preview endpoint (CPL-376).
+    let preview_rate_limit = lit_payments::portal::rate_limit::PreviewRateLimiter::new();
     let stripe = StripeClient::new(cfg.stripe_secret_key.clone()).expect("stripe client");
     // In-process auth resolver — wallet-sig verification + on-chain
     // billing-wallet lookup, both running locally. Post-#448-glitch-followup
@@ -47,6 +49,9 @@ async fn rocket() -> _ {
     rate::spawn_rate_poller(pool.clone());
     let per_customer_mutex = PerCustomerMutex::new();
     lit_payments::auto_topup::reconciler::spawn(cfg.clone(), stripe.clone(), pool.clone());
+    // CPL-375: complete any LITKEY credit whose Stripe balance_transaction
+    // write was interrupted between the row INSERT and the credit landing.
+    lit_payments::litkey_reconciler::spawn(cfg.clone(), stripe.clone(), pool.clone());
     // Enterprise committed-use billing: monthly draft invoice + buffer regrant.
     // See plans/enterprise-committed-billing.md.
     lit_payments::enterprise::spawn(cfg.clone(), stripe.clone(), pool.clone(), mailer.clone());
@@ -88,6 +93,7 @@ async fn rocket() -> _ {
         .manage(cfg)
         .manage(mailer)
         .manage(rate_limit)
+        .manage(preview_rate_limit)
         .manage(stripe)
         .manage(auth_resolver)
         .manage(per_customer_mutex)
@@ -121,6 +127,10 @@ async fn rocket() -> _ {
             ],
         )
         .mount("/static", FileServer::from("static"))
+        .register(
+            "/",
+            catchers![lit_payments::portal::rate_limit::too_many_requests],
+        )
 }
 
 /// Translate platform-provided env vars (Fly.io and most container hosts set

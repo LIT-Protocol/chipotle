@@ -15,6 +15,7 @@ lit_actions_gvisor (this crate: Action service + sandbox supervisor)
 runsc sandbox
    • shared read-only base rootfs + per-exec in-memory overlay (--overlay2)
    • bundle mounted read-only at /action, tmpfs at /tmp
+   • fixed entrypoint: `bash /startup/startup.sh` (per-exec, read-only)
    • per-exec op socket bind-mounted at /run/lit/ops.sock (--host-uds=all)
    • preinstalled `lit` CLI exposes the ops to user code in any language
 ```
@@ -28,6 +29,9 @@ unmodified:
 - `ExecutionRequest.code` carries the **bundle**: base64-encoded `tar` or
   `tar.gz` bytes, or `cid:<id>` referencing a bundle this runner already has
   cached (the any-language analog of `ActionCodeCache`).
+- `ExecutionRequest.startup_script` optionally carries the **startup script**
+  (see below), sent separately from the bundle so different scripts reuse the
+  same cached bundle.
 - `ExecutionRequest.ipfs_id` is the server-derived content id used for
   permissions/key derivation; it also keys the bundle cache.
 - Ops (`Print`, `SetResponse`, `GetPrivateKey`, `AesEncrypt/Decrypt`, …) are
@@ -39,28 +43,52 @@ unmodified:
   same messages as the JS runner. Non-zero exit ⇒ failed `ExecutionResult`
   with a stderr tail.
 
-## Bundle format
+## Bundle format & the startup script (CPL-355)
 
-A tarball containing the action's files plus a `lit.json` manifest at the root:
+A bundle is a tarball of **payload** — binaries, scripts, data, in any
+language. The sandbox only ever executes one thing: **`bash startup.sh`**,
+with the bundle as the working directory. The script comes from (first wins):
+
+1. `ExecutionRequest.startup_script` — sent with the request, mounted
+   read-only at `/startup/startup.sh`. Because it travels separately from the
+   bundle, one cached bundle (e.g. a large compiled binary) serves any number
+   of different startup scripts with full cache hits.
+2. `startup.sh` at the bundle root — for self-contained bundles.
+
+Neither present ⇒ the execution fails before a sandbox is spawned.
+
+The startup script runs with the `lit` CLI on PATH and every **top-level
+js-param injected as an environment variable** (string values verbatim,
+everything else as compact JSON). Params are skipped — never renamed — when
+the name is not a valid env-var name or would shadow a runtime-owned variable
+(`PATH`, `HOME`, `TMPDIR`, `LIT_OP_SOCK`, `LIT_ACTION_IPFS_ID`), or when the
+value exceeds 64 KiB (1 MiB total); `lit params` always has the full data.
+Typical script: read params from the environment, fetch/decrypt keys via
+`lit`, then exec the bundle's binary.
+
+An optional `lit.json` manifest at the bundle root may carry metadata:
 
 ```json
 {
-  "entrypoint": ["python3", "main.py"],
   "runtime": "python3",
   "env": { "PYTHONUNBUFFERED": "1" }
 }
 ```
 
-- `entrypoint` — argv array executed verbatim, or a string treated as a shell
-  script path (run as `sh <path>`; no exec bit needed).
 - `runtime` — informational for now (the v1 base image ships all supported
   runtimes).
-- `env` — optional extra environment variables.
+- `env` — extra environment variables; these win over js-param injection,
+  but runtime-owned names (the reserved set above) are ignored here too.
+- A legacy `entrypoint` field is ignored: incoming bundles are re-written to
+  the startup-script contract.
+
+Note authorization keys on the **bundle** CID alone; the per-request startup
+script is authenticated by API-key authorization, not content-addressing.
 
 Execution semantics are serverless/CLI-style: **the run ends when the
-entrypoint exits**. `lit set-response` only *records* the response (api-server
-side); exit code 0 returns success with the last-recorded response, non-zero
-returns failure. No response set ⇒ empty response.
+startup script exits**. `lit set-response` only *records* the response
+(api-server side); exit code 0 returns success with the last-recorded
+response, non-zero returns failure. No response set ⇒ empty response.
 
 ## Guest `lit` CLI
 
@@ -130,25 +158,44 @@ v1 billing stays flat per-second via the unchanged `UpdateResourceUsage` path.
 Ship as a new container in the existing `docker-compose.phala.yml` (same CVM,
 same attested identity — no new cross-VM trust plumbing). It mounts the same
 `lit-socket` volume the JS runner uses and serves its own socket there. The
-container needs enough privilege to create nested sandboxes (the spikes used
-`privileged`; scope down before production). Not yet wired into compose —
-adding the service changes `compose_hash`, which is a governed change in
-production.
+container runs unprivileged (CPL-377): the spikes used `privileged`, but that
+grants the full capability set plus host-device access, so a runsc escape would
+mean near-total control of the CVM host (which also mounts `/var/run/dstack.sock`
+for key derivation). Dropping it leaves Docker's default (non-privileged)
+capability bounding set, to which we add only the two extra capabilities nested
+runsc needs on systrap/ptrace. Adding the service changes `compose_hash`, which
+is a governed change in production.
 
 ```yaml
   lit-actions-gvisor:
     image: <built from image/Dockerfile.runner>
-    command: ["lit_actions_gvisor", "--socket", "/var/run/lit/lit_actions_gvisor.sock",
+    command: ["lit_actions_gvisor", "--socket", "/tmp/lit_actions_gvisor.sock",
               "--rootfs", "/var/lib/lit/sandbox-rootfs"]
-    privileged: true            # nested runsc; scope down for production
-    volumes: [ "lit-socket:/var/run/lit" ]
+    # No privileged mode. cap_add ADDS to Docker's default (already reduced)
+    # cap set — SYS_ADMIN: mount/pivot_root/namespaces; NET_ADMIN: sandbox
+    # netstack. seccomp/apparmor unconfined: runsc's own syscalls (the Sentry is
+    # the boundary for guest code). No devices — the CVM has no /dev/kvm
+    # (systrap/ptrace only). Add SYS_PTRACE only if forcing the ptrace platform.
+    cap_add: [SYS_ADMIN, NET_ADMIN]
+    security_opt: [seccomp=unconfined, apparmor=unconfined]
+    volumes: [ "lit-socket:/tmp" ]
     cpus: 2
     mem_limit: 4g
     pids_limit: 2048
 ```
 
-lit-api-server connects to `/var/run/lit/lit_actions_gvisor.sock` the same way
-it connects to the JS runner's socket today (`actions/client/execution.rs`).
+A stricter `cap_drop: [ALL]` + explicit re-add is a further tightening, but runsc
+also leans on several Docker defaults (SETUID/SETGID for userns mapping,
+CHOWN/DAC_OVERRIDE/FOWNER for the overlay, KILL, SYS_CHROOT), so that allowlist
+must be validated in staging rather than assumed.
+
+Validate the scoped profile in staging (`LIT_GVISOR_ENABLED=true`) via the k6
+`gvisor-smoke` test before prod, where the runner is gated off
+(`LIT_GVISOR_ENABLED=false`). If that smoke test can spawn a nested sandbox, the
+capability set is sufficient.
+
+lit-api-server connects to `/tmp/lit_actions_gvisor.sock` the same way it
+connects to the JS runner's socket today (`actions/client/execution.rs`).
 
 ## Local development & tests
 
@@ -160,7 +207,12 @@ anywhere (macOS included):
 cargo test -p lit-actions-gvisor-server
 ```
 
-`image/` has the base-image Dockerfile; `examples/` has bundle examples.
+`image/` has the base-image Dockerfile; `examples/` has bundle examples —
+`shell`/`python` are minimal, and `claude` executes the official Claude
+Code installer script (`https://claude.ai/install.sh`) from its `startup.sh`
+onto the base rootfs (debian:bookworm-slim) and runs a headless
+prompt, demonstrating a startup script that provisions its own toolchain
+(needs sandbox network egress + an `ANTHROPIC_API_KEY` js-param).
 
 ## v1 non-goals / follow-ups
 
