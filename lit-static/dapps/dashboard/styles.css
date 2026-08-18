@@ -16,6 +16,7 @@
   --primary: #3c50e0;
   --primary-hover: #5a67d8;
   --danger: #dc2626;
+  --warning: #b45309;
   --success: #16a34a;
   --bg-muted: #f3f4f6;
   --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
@@ -38,6 +39,7 @@
   --primary: #6366f1;
   --primary-hover: #818cf8;
   --danger: #f87171;
+  --warning: #fbbf24;
   --success: #4ade80;
   --bg-muted: #1e293b;
   --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3);
@@ -988,6 +990,20 @@ body:not(.is-chainsecured) .is-chainsecured-only {
   background: color-mix(in srgb, var(--danger) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
   color: var(--danger);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+/* Listener-lag staleness notice — a warning (amber), not an error: the
+   dashboard still works, but reads served by a lagging instance may be a few
+   seconds out of date. Mirrors .abi-drift-banner's layout. */
+.listener-lag-banner {
+  padding: 0.75rem 1rem;
+  margin: 0 0 1rem;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+  color: var(--warning);
   font-size: 0.875rem;
   font-weight: 500;
 }

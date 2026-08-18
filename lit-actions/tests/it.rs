@@ -160,6 +160,22 @@ impl TestClient {
 
 #[ctor::ctor]
 fn init() {
+    // Cap the pre-warmed worker pool for the whole test process. Every
+    // `TestServer::start()` warms this many workers, and ~a dozen
+    // server-spawning tests run in parallel; at the production default (10)
+    // that is a ~120-way concurrent V8-snapshot bootstrap storm which, on a
+    // loaded/constrained CI runner, can starve the warmup gate so that not even
+    // one worker becomes ready within the timeout (see `wait_for_warmup`,
+    // `pool_warm_hit`, `pool_memory_limit_bypass`). A small pool still exercises
+    // pool hits, refills, and fallbacks. Respect an explicit override — e.g.
+    // `LIT_ACTIONS_POOL_SIZE=0` to run these tests with the pool disabled.
+    if std::env::var_os("LIT_ACTIONS_POOL_SIZE").is_none() {
+        // SAFETY: a `#[ctor]` runs once during process initialization, before
+        // any test thread, server, or worker exists, so there is no concurrent
+        // reader/writer of the environment here.
+        unsafe { std::env::set_var("LIT_ACTIONS_POOL_SIZE", "2") };
+    }
+
     // Set RUST_LOG to get logs during testing
     pretty_env_logger::init();
 
@@ -1096,14 +1112,14 @@ async fn wait_for_warmup(pool_health: &Arc<PoolHealth>, target: usize) {
     if target == 0 {
         return;
     }
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         if pool_health.ready() >= 1 {
             return;
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "no pre-warmed worker became ready within 15s (target={target})",
+            "no pre-warmed worker became ready within 30s (target={target})",
         );
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
@@ -1191,8 +1207,9 @@ async fn pool_memory_limit_bypass() {
     );
 }
 
-/// Concurrent execution: 20 in-flight requests against a pool of 10. Mix
-/// of pool hits and legacy fallbacks; all must succeed without deadlock.
+/// Concurrent execution: 20 in-flight requests against a small pre-warmed
+/// pool. Mix of pool hits and legacy fallbacks; all must succeed without
+/// deadlock, regardless of how many requests land on a warm worker.
 #[tokio::test]
 async fn pool_concurrent_exhaustion() {
     use deno_runtime::deno_core::futures::future::join_all;
