@@ -73,7 +73,20 @@ static BASE_PERMISSIONS: LazyLock<Permissions> = LazyLock::new(|| {
     Permissions::from_options(
         PERMISSION_DESC_PARSER.as_ref(),
         &PermissionsOptions {
+            // Empty `allow_net` = allow all outbound hosts (so `fetch()` works),
+            // but `deny_net` carves out internal address space that a malicious
+            // action must never reach (loopback, RFC1918, link-local incl. cloud
+            // metadata, …). Deny always wins over the allow-all grant. This only
+            // catches *literal-IP* URLs; hostnames that resolve into that space
+            // are handled by the egress-filtering DNS resolver wired in below.
+            // See `egress` module (CPL-295).
             allow_net: Some(vec![]),
+            deny_net: Some(
+                crate::egress::DENY_NET
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+            ),
             ..Default::default()
         },
     )
@@ -473,7 +486,11 @@ pub(crate) fn build_worker_base(shared: &PoolSharedState) -> Result<PreparedWork
             npm_process_state_provider: Default::default(),
             permissions: PermissionsContainer::new(desc_parser, perms),
             root_cert_store_provider: Default::default(),
-            fetch_dns_resolver: Default::default(),
+            // Resolve user `fetch()` hostnames through a filter that drops any
+            // address in internal space, so a hostname (or DNS-rebinding answer)
+            // pointing at loopback/RFC1918/link-local cannot be reached even
+            // though `deny_net` only inspects the URL host string (CPL-295).
+            fetch_dns_resolver: crate::egress::egress_filtered_resolver(),
             shared_array_buffer_store: Default::default(),
             compiled_wasm_module_store: Default::default(),
             v8_code_cache: Some(shared.v8_code_cache.clone()),

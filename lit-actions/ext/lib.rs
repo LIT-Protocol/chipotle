@@ -1,4 +1,5 @@
 pub mod bindings;
+pub mod egress;
 mod macros;
 
 // Export extension

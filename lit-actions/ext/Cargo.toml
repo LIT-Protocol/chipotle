@@ -25,5 +25,8 @@ percent-encoding = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots-no-provider"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { workspace = true }
+# Egress-filter DNS resolution for proxiedFetch (CPL-295): async getaddrinfo via
+# tokio's blocking pool, matching how reqwest/deno resolve.
+tokio = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }

@@ -5898,6 +5898,7 @@ dependencies = [
  "reqwest 0.12.24",
  "serde",
  "serde_json",
+ "tokio",
  "tonic",
  "tracing",
 ]
@@ -5961,6 +5962,7 @@ dependencies = [
  "deno_runtime",
  "flume",
  "futures",
+ "hyper-util",
  "indoc",
  "ipfs-hasher",
  "lit-actions-ext",
