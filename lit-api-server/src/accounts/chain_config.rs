@@ -31,6 +31,13 @@ pub enum ConfigKeys {
     LIT_ACTION_DEFAULT_MAX_RESPONSE_LENGTH,
     LIT_ACTION_DEFAULT_MAX_GET_KEYS_COUNT,
     LIT_ACTION_DEFAULT_MAX_RETRIES,
+    /// Contract-side gate for the gVisor any-language runner (CPL-361). This is
+    /// the third, independent axis of the gVisor gate: even on a node that
+    /// compiled the runner (`gvisor` cargo feature) and enabled it at run time
+    /// (`LIT_GVISOR_ENABLED`), `/lit_binary_action` stays disabled unless this
+    /// on-chain key is truthy. Absent/non-truthy => disabled (fail closed).
+    /// See `actions::gvisor`.
+    GVISOR_RUNNER_ENABLED,
 }
 
 /// Returns the display name of every `ConfigKeys` variant in declaration order.
@@ -162,18 +169,27 @@ pub async fn run_config_refresh_loop(snapshot: Arc<ArcSwap<ConfigValues>>, state
     }
 }
 
+/// Test-only constructor: build a [`ChainConfig`] from literal key/value pairs,
+/// bypassing the chain fetch. Crate-visible so other modules' tests (e.g. the
+/// gVisor guard in `actions::gvisor`) can wire a `ChainConfig` into a Rocket
+/// instance without touching the network.
+#[cfg(test)]
+pub(crate) fn from_pairs_for_test(pairs: &[(&str, &str)]) -> ChainConfig {
+    let map: ConfigValues = pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    ChainConfig {
+        snapshot: Arc::new(ArcSwap::from_pointee(map)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn config_from(pairs: &[(&str, &str)]) -> ChainConfig {
-        let map: ConfigValues = pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
-        ChainConfig {
-            snapshot: Arc::new(ArcSwap::from_pointee(map)),
-        }
+        from_pairs_for_test(pairs)
     }
 
     #[tokio::test]

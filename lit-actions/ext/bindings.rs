@@ -326,6 +326,61 @@ struct ProxiedFetchResponse {
 /// per-request proxy strings).
 const PROXIED_FETCH_CLIENT_POOL_MAX: usize = 16;
 
+/// Fallback permit count when no `ProxiedFetchLimiter` was installed in
+/// `OpState` (i.e. the op is driven outside the server's execution path, which
+/// always installs one sized to the isolate's memory budget). Mirrors the
+/// server's 64 MiB default budget / 10 MiB per fetch = 6, so a stray direct
+/// invocation is still bounded rather than running unbounded.
+const PROXIED_FETCH_FALLBACK_PERMITS: usize = 6;
+
+/// Per-execution cap on how many `op_lit_proxied_fetch` calls may be buffering a
+/// response body natively at the same time.
+///
+/// Each in-flight call holds up to `PROXIED_FETCH_MAX_BYTES` (10 MiB) in a native
+/// `Vec` that lives OUTSIDE the V8 heap, so it is invisible to the isolate's
+/// `add_near_heap_limit_callback` OOM guard. Without a concurrency cap,
+/// `Promise.all(N × proxiedFetch(bigUrl))` grows RSS to N × 10 MiB with nothing
+/// to stop it short of the host OOM killer (CPL-373). The permit is held across
+/// the request + streamed read and released on return, so excess concurrent
+/// fetches wait for a permit here instead of each pinning up to 10 MiB of
+/// off-heap RSS. Cloneable: the inner `Arc<Semaphore>` is shared, so every clone
+/// draws from the same permit pool.
+#[derive(Clone)]
+pub struct ProxiedFetchLimiter(Arc<tokio::sync::Semaphore>);
+
+impl ProxiedFetchLimiter {
+    /// Size the permit count so `permits × PROXIED_FETCH_MAX_BYTES` tracks the
+    /// isolate's heap budget: combined native buffering stays on the order of
+    /// the memory the isolate is already allowed and no more. Always at least
+    /// one permit so a lone fetch is never blocked, even for a tiny custom
+    /// `memory_limit_mb`.
+    pub fn for_memory_budget_mb(memory_limit_mb: usize) -> Self {
+        let budget_bytes = memory_limit_mb.saturating_mul(1024 * 1024);
+        let permits = (budget_bytes / PROXIED_FETCH_MAX_BYTES).max(1);
+        Self(Arc::new(tokio::sync::Semaphore::new(permits)))
+    }
+
+    /// Acquire one buffering slot, awaiting a free permit if all are in use.
+    /// The returned permit must be held for the lifetime of the native buffer;
+    /// dropping it frees the slot for a waiting fetch.
+    async fn acquire(&self) -> Result<tokio::sync::OwnedSemaphorePermit, JsErrorBox> {
+        // `acquire_owned` only errors if the semaphore is closed, which we never
+        // do — the limiter lives as long as the execution's OpState.
+        Arc::clone(&self.0)
+            .acquire_owned()
+            .await
+            .map_err(|_| JsErrorBox::generic("op_lit_proxied_fetch: fetch limiter unavailable"))
+    }
+}
+
+impl Default for ProxiedFetchLimiter {
+    fn default() -> Self {
+        Self(Arc::new(tokio::sync::Semaphore::new(
+            PROXIED_FETCH_FALLBACK_PERMITS,
+        )))
+    }
+}
+
 lazy_static::lazy_static! {
     /// One `reqwest::Client` per proxy URL ("" = direct). `Client` is an Arc
     /// around a connection pool, so reuse keeps TCP+TLS sessions warm across
@@ -420,9 +475,12 @@ fn proxied_fetch_client(proxy: Option<&str>) -> Result<reqwest::Client, JsErrorB
 /// destination is sent as an ordinary forward-proxy request, so the proxy sees
 /// the full URL/headers/body in cleartext — callers handling secrets must use
 /// `https://`. The per-action fetch quota is enforced by the JS wrapper calling
-/// `op_increment_fetch_count` before this op; the byte cap bounds memory the way
-/// `deno_fetch` does. Unlike the other ops here it does no gRPC round-trip to
-/// lit-node — the request is purely local.
+/// `op_increment_fetch_count` before this op; the byte cap bounds a single
+/// response the way `deno_fetch` does, and a per-execution `ProxiedFetchLimiter`
+/// caps how many responses buffer natively at once so concurrent calls can't
+/// amplify off-heap RSS past the isolate's memory budget (CPL-373). Unlike the
+/// other ops here it does no gRPC round-trip to lit-node — the request is purely
+/// local.
 //
 // NB: `async(lazy)`, not bare `async`: in edition 2024 a bare `async` keyword in
 // attribute position fails to parse ("expected `async(...)`"). The other async
@@ -432,6 +490,7 @@ fn proxied_fetch_client(proxy: Option<&str>) -> Result<reqwest::Client, JsErrorB
 #[op2(async(lazy))]
 #[serde]
 async fn op_lit_proxied_fetch(
+    state: Rc<RefCell<OpState>>,
     #[serde] req: ProxiedFetchRequest,
 ) -> Result<ProxiedFetchResponse, JsErrorBox> {
     ensure_not_blank!(req.url, "url");
@@ -441,13 +500,33 @@ async fn op_lit_proxied_fetch(
     // Egress filter (CPL-295): reject a request that would connect directly to
     // an internal literal IP. When proxied, the connect target is the proxy
     // host; otherwise it is the destination URL host. Hostname targets are
-    // caught later by the client's egress DNS resolver.
+    // caught later by the client's egress DNS resolver. Checked before taking a
+    // limiter permit so a blocked request fails fast without holding one.
     if crate::egress::connect_target_forbidden_ip(req.url.trim(), proxy) {
         return Err(JsErrorBox::generic(
             "op_lit_proxied_fetch: destination blocked: connecting to internal \
              address space (loopback / RFC1918 / link-local) is not permitted",
         ));
     }
+
+    // Bound concurrent native response buffering per execution (CPL-373). The
+    // server installs a `ProxiedFetchLimiter` sized to the isolate's memory
+    // budget; if one is somehow absent (a direct op call outside that path), we
+    // install a conservative default so all calls in this execution still share
+    // one permit pool rather than each running unbounded.
+    let limiter = {
+        let mut state = state.borrow_mut();
+        if let Some(limiter) = state.try_borrow::<ProxiedFetchLimiter>() {
+            limiter.clone()
+        } else {
+            let limiter = ProxiedFetchLimiter::default();
+            state.put(limiter.clone());
+            limiter
+        }
+    };
+    // Held until this op returns, gating both the in-flight request and the
+    // native read buffer below. Released on drop so a waiting fetch can proceed.
+    let _permit = limiter.acquire().await?;
 
     let client = proxied_fetch_client(proxy)?;
 
@@ -647,5 +726,69 @@ mod proxied_fetch_tests {
         // Guards the memory bound the op relies on; a silent bump here would let
         // a single response grow the native buffer past the documented limit.
         assert_eq!(PROXIED_FETCH_MAX_BYTES, 10 * 1024 * 1024);
+    }
+
+    #[test]
+    fn limiter_permits_track_memory_budget() {
+        // permits = budget / 10 MiB, so combined native buffering
+        // (permits × 10 MiB) stays on the order of the isolate's heap budget.
+        assert_eq!(
+            ProxiedFetchLimiter::for_memory_budget_mb(64)
+                .0
+                .available_permits(),
+            6 // 64 MiB / 10 MiB
+        );
+        assert_eq!(
+            ProxiedFetchLimiter::for_memory_budget_mb(128)
+                .0
+                .available_permits(),
+            12 // 128 MiB / 10 MiB
+        );
+    }
+
+    #[test]
+    fn limiter_floors_at_one_permit_for_tiny_budgets() {
+        // A budget below a single fetch's cap must still allow one fetch — a
+        // 0-permit semaphore would deadlock every proxied fetch forever.
+        assert_eq!(
+            ProxiedFetchLimiter::for_memory_budget_mb(8)
+                .0
+                .available_permits(),
+            1
+        );
+        assert_eq!(
+            ProxiedFetchLimiter::for_memory_budget_mb(0)
+                .0
+                .available_permits(),
+            1
+        );
+    }
+
+    #[test]
+    fn limiter_default_matches_fallback_permits() {
+        assert_eq!(
+            ProxiedFetchLimiter::default().0.available_permits(),
+            PROXIED_FETCH_FALLBACK_PERMITS
+        );
+    }
+
+    #[test]
+    fn limiter_blocks_once_permits_exhausted() {
+        // The concurrency bound that stops native-memory amplification
+        // (CPL-373): with one slot, a second concurrent fetch finds no permit
+        // and must wait until the first releases.
+        let limiter = ProxiedFetchLimiter::for_memory_budget_mb(8); // 1 permit
+        let held = Arc::clone(&limiter.0)
+            .try_acquire_owned()
+            .expect("first slot free");
+        assert!(
+            limiter.0.try_acquire().is_err(),
+            "second concurrent fetch must wait for a permit"
+        );
+        drop(held);
+        assert!(
+            limiter.0.try_acquire().is_ok(),
+            "permit is freed once the first fetch's buffer is released"
+        );
     }
 }
