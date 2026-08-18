@@ -478,10 +478,17 @@ fn build_rocket(
         Method::from_str("Patch").expect("Invalid method: Patch"),
     ]);
 
+    // CPL-379 L2: the API authenticates with the `X-Api-Key` / `Authorization`
+    // headers, never cookies, so CORS credentials are not needed. With
+    // `AllowedOrigins::all()`, `allow_credentials: true` makes rocket_cors 0.6
+    // reflect *any* Origin back with `Access-Control-Allow-Credentials: true`
+    // — a footgun the moment any cookie-based auth is added. Keep the wildcard
+    // origin (this is a public API) but disallow credentialed cross-origin
+    // requests.
     let cors = rocket_cors::CorsOptions {
         allowed_origins: AllowedOrigins::all(),
         allowed_methods,
-        allow_credentials: true,
+        allow_credentials: false,
         ..Default::default()
     }
     .to_cors()

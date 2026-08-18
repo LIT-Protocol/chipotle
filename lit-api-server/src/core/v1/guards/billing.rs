@@ -68,6 +68,28 @@ fn missing_key_outcome<T>(request: &Request<'_>) -> Outcome<T, ()> {
     Outcome::Error((Status::Unauthorized, ()))
 }
 
+/// Fail with 401 when the caller presents a precomputed `0x<64hex>` keccak256
+/// hash where a raw API key is required (CPL-379 L1).
+///
+/// The billing guards resolve identity through `check_credit` →
+/// `resolve_wallet_address`, which — for ChainSecured callers — accepts a bare
+/// wallet-derived hash (`keccak256(walletAddress)`) as an already-hashed
+/// identity (CPL-285). That hash is public, not a secret: treating it as a
+/// spendable key on a metered endpoint would let anyone who knows a wallet
+/// address present its hash. It is not currently exploitable (downstream
+/// re-hashing forces a contract revert before any charge settles), but the
+/// authenticating `BillingAuth` guard already rejects this shape, so these
+/// metered guards reject it too — a defense-in-depth split.
+fn precomputed_hash_outcome<T>(request: &Request<'_>) -> Outcome<T, ()> {
+    set_error_detail(
+        request,
+        "API key not recognized — it does not resolve to any account.",
+        "Send your raw API key (the value shown once at account creation), not a \
+         hashed wallet identity. Create an account with POST /core/v1/new_account.",
+    );
+    Outcome::Error((Status::Unauthorized, ()))
+}
+
 /// Map a [`BillingError`] to an HTTP status and attach a specific detail for
 /// the JSON catchers.
 fn billing_error_status(request: &Request<'_>, e: BillingError) -> Status {
@@ -144,6 +166,9 @@ impl<'r> FromRequest<'r> for BilledManagementApiKey {
         let Some(key) = extract_api_key(request) else {
             return missing_key_outcome(request);
         };
+        if crate::utils::parse_with_hash::is_precomputed_hash_shape(&key) {
+            return precomputed_hash_outcome(request);
+        }
 
         if let Some(state) = request.rocket().state::<Option<Arc<StripeState>>>()
             && let Some(stripe) = state.as_ref()
@@ -267,6 +292,9 @@ impl<'r> FromRequest<'r> for BilledLitActionApiKey {
         let Some(key) = extract_api_key(request) else {
             return missing_key_outcome(request);
         };
+        if crate::utils::parse_with_hash::is_precomputed_hash_shape(&key) {
+            return precomputed_hash_outcome(request);
+        }
 
         // If Stripe is configured, verify the customer has credits available.
         // Requiring 1 cent reproduces the old `balance >= 0 → reject` rule.

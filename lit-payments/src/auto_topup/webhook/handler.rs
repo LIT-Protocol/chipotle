@@ -317,9 +317,18 @@ async fn process_event(
     }
 
     // Step 8: Cap check. Sum amounts of all non-failed PIs this month.
-    let topup_amount = config
-        .topup_amount_cents
-        .expect("CHECK constraint enforces non-null when enabled");
+    // CPL-379 L9: the DB CHECK constraint makes this non-null whenever
+    // auto-top-up is enabled, but the crate forbids `.expect()` on the hot
+    // path — a NULL here would be an invariant violation that panics the
+    // webhook worker. Skip the charge and alert instead; a retry won't heal a
+    // constraint violation, so return Ok(()) rather than a transient error.
+    let Some(topup_amount) = config.topup_amount_cents else {
+        tracing::error!(
+            customer_id,
+            "auto top-up enabled but topup_amount_cents is NULL (DB CHECK invariant violated); skipping charge"
+        );
+        return Ok(());
+    };
     // monthly_cap_cents is optional — None = unlimited (only the
     // per-charge MAX_TOPUP_CENTS cap applies). When set, enforce the
     // soft cap as before.
@@ -347,10 +356,15 @@ async fn process_event(
     // retry window for an individual event would risk false hits, but
     // within a redelivery burst it's exactly what we want. Falls back
     // to a UUID if event_id is missing (only the unit-test paths).
-    let payment_method_id = config
-        .payment_method_id
-        .as_deref()
-        .expect("CHECK constraint enforces non-null when enabled");
+    // CPL-379 L9: same invariant as topup_amount above — non-null by DB CHECK
+    // when enabled, but never `.expect()` on the hot path.
+    let Some(payment_method_id) = config.payment_method_id.as_deref() else {
+        tracing::error!(
+            customer_id,
+            "auto top-up enabled but payment_method_id is NULL (DB CHECK invariant violated); skipping charge"
+        );
+        return Ok(());
+    };
     let wallet_address = config.wallet_address.as_str();
     let amount_str = topup_amount.to_string();
     let idempotency_key = if event_id.is_empty() {

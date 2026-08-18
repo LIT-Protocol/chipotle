@@ -20,13 +20,14 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
 # Copy full source (lit-api-server, lit-actions, lit-core)
 COPY . .
 
-# Build release binaries (no workspace root, so build each crate by manifest path)
-# RUN cargo build --release --manifest-path lit-api-server/Cargo.toml --bin lit-api-server
-# RUN cargo build --release --manifest-path lit-actions/Cargo.toml --bin lit_actions
+# Build release binaries (no workspace root, so build each crate by manifest path).
+# CPL-379 L11: build --release. Debug builds ship with `debug_assertions` on,
+# which in production would enable the cfg(debug_assertions)-gated dev auth
+# bypass (LIT_DEV_WALLET_BYPASS) among other debug-only paths.
 WORKDIR /app/lit-actions
-RUN cargo build --bin lit_actions
+RUN cargo build --release --bin lit_actions
 WORKDIR /app/lit-api-server
-RUN cargo build --bin lit-api-server
+RUN cargo build --release --bin lit-api-server
 
 # Runtime stage: minimal image with binaries and entrypoint
 FROM ubuntu:24.04 AS runtime
@@ -39,8 +40,8 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy built binaries into PATH
-COPY --from=builder /app/lit-api-server/target/debug/lit-api-server /usr/local/bin/
-COPY --from=builder /app/lit-actions/target/debug/lit_actions /usr/local/bin/
+COPY --from=builder /app/lit-api-server/target/release/lit-api-server /usr/local/bin/
+COPY --from=builder /app/lit-actions/target/release/lit_actions /usr/local/bin/
 
 
 # Copy static assets (served by lit-api-server)
@@ -53,5 +54,12 @@ COPY lit-api-server/${NODE_CONFIG} /app/NodeConfig.toml
 # Copy and set entrypoint script (starts lit_actions in background, then lit-api-server)
 COPY DockerEntryPoint.sh /usr/local/bin/DockerEntryPoint.sh
 RUN chmod +x /usr/local/bin/DockerEntryPoint.sh
+
+# CPL-379 L11: run as a non-root user (defense-in-depth — a container escape
+# from the API/actions process lands as an unprivileged user). Rocket binds a
+# non-privileged port (>=1024), so no root is needed at runtime.
+RUN useradd --system --create-home --uid 10001 lituser \
+    && chown -R lituser:lituser /app
+USER lituser
 
 ENTRYPOINT ["/usr/local/bin/DockerEntryPoint.sh"]

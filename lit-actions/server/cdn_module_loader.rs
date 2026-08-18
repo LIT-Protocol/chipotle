@@ -551,40 +551,50 @@ impl CdnModuleLoader {
                 );
             }
 
-            if let Some(ref path) = self.lockfile_path {
-                use std::io::Write;
-                let mut file = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(path)
-                    .map_err(|e| {
-                        error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to open integrity lockfile");
-                        JsErrorBox::generic(format!(
-                            "Failed to open integrity lockfile: {e}"
-                        ))
-                    })?;
-                writeln!(file, "{url} sha384-{actual_b64}").map_err(|e| {
-                    error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to write integrity lockfile");
-                    JsErrorBox::generic(format!(
-                        "Failed to write integrity lockfile: {e}"
-                    ))
-                })?;
-                file.flush().map_err(|e| {
-                    error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to flush integrity lockfile");
-                    JsErrorBox::generic(format!(
-                        "Failed to flush integrity lockfile: {e}"
-                    ))
-                })?;
-                info!(
-                    module_url = %url,
-                    hash = %format!("sha384-{actual_b64}"),
-                    lockfile = ?path,
-                    "TOFU: pinned new module to integrity lockfile"
-                );
-            }
-
+            // CPL-379 L4: pin the module under the integrity map's write lock.
+            // Holding the lock across the lockfile append serializes concurrent
+            // TOFU verifications so their `writeln!`s can't interleave into a
+            // torn line, and keeps the on-disk lockfile consistent with the
+            // in-memory map. Gating the append on `!contains_key` also makes it
+            // idempotent: a module verified concurrently by two requests is
+            // pinned exactly once instead of appending a duplicate line.
             if let Ok(mut map) = self.integrity.write() {
-                map.entry(url.clone()).or_insert(actual_b64.clone());
+                if !map.contains_key(&url) {
+                    if let Some(ref path) = self.lockfile_path {
+                        use std::io::Write;
+                        let mut file = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(path)
+                            .map_err(|e| {
+                                error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to open integrity lockfile");
+                                JsErrorBox::generic(format!(
+                                    "Failed to open integrity lockfile: {e}"
+                                ))
+                            })?;
+                        writeln!(file, "{url} sha384-{actual_b64}").map_err(|e| {
+                            error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to write integrity lockfile");
+                            JsErrorBox::generic(format!(
+                                "Failed to write integrity lockfile: {e}"
+                            ))
+                        })?;
+                        file.flush().map_err(|e| {
+                            error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to flush integrity lockfile");
+                            JsErrorBox::generic(format!(
+                                "Failed to flush integrity lockfile: {e}"
+                            ))
+                        })?;
+                        info!(
+                            module_url = %url,
+                            hash = %format!("sha384-{actual_b64}"),
+                            lockfile = ?path,
+                            "TOFU: pinned new module to integrity lockfile"
+                        );
+                    }
+                    map.insert(url.clone(), actual_b64.clone());
+                }
+            } else {
+                error!(module_url = %url, "TOFU: integrity lock poisoned; module not pinned to lockfile");
             }
         } else {
             info!(

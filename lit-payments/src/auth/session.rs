@@ -58,6 +58,37 @@ pub async fn delete(pool: &PgPool, token: &str) -> Result<()> {
     Ok(())
 }
 
+/// Atomically claim a magic-link token as used (CPL-379 L8).
+///
+/// Returns `Ok(true)` when this signature was recorded for the first time
+/// (the token may proceed) and `Ok(false)` when it was already present (a
+/// replay — the caller must reject it). `ON CONFLICT DO NOTHING` makes the
+/// claim race-safe: two concurrent verifies of the same link produce exactly
+/// one `true`.
+pub async fn claim_magic_link(pool: &PgPool, token_sig: &str, expires_unix: i64) -> Result<bool> {
+    let expires_at = OffsetDateTime::from_unix_timestamp(expires_unix)
+        .unwrap_or_else(|_| OffsetDateTime::now_utc());
+    let r = sqlx::query(
+        "INSERT INTO used_magic_links (token_sig, expires_at) VALUES ($1, $2) \
+         ON CONFLICT (token_sig) DO NOTHING",
+    )
+    .bind(token_sig)
+    .bind(expires_at)
+    .execute(pool)
+    .await?;
+    Ok(r.rows_affected() == 1)
+}
+
+/// Best-effort cleanup of expired single-use magic-link records. Rows past
+/// their expiry can never be replayed (the token itself is expired), so they
+/// are safe to drop.
+pub async fn purge_expired_magic_links(pool: &PgPool) -> Result<u64> {
+    let r = sqlx::query("DELETE FROM used_magic_links WHERE expires_at <= now()")
+        .execute(pool)
+        .await?;
+    Ok(r.rows_affected())
+}
+
 /// Best-effort cleanup of expired sessions. Called occasionally; not on
 /// every request.
 pub async fn purge_expired(pool: &PgPool) -> Result<u64> {

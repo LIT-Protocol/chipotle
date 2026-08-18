@@ -29,6 +29,12 @@ use crate::config::Config;
 const DEFAULT_GRANTS_LIMIT: i64 = 50;
 const MAX_GRANTS_LIMIT: i64 = 200;
 
+/// CPL-379 L5: advisory-lock namespace for the per-operator grant
+/// serialization lock. Uses the two-`int4` advisory-lock space, which Postgres
+/// keeps disjoint from the single-`bigint` space the gas-funder singleton lock
+/// uses, so the two never collide.
+const GRANT_CAP_LOCK_NS: i32 = 0x4c47_4341; // "LGCA"
+
 type ApiError = (Status, Json<ErrorResponse>);
 type ApiResult<T> = Result<Json<T>, ApiError>;
 
@@ -209,6 +215,12 @@ pub async fn preview_customer(
 
 /// `POST /api/grant` — apply a credit to a customer's Stripe balance.
 ///
+/// Authorized for any authenticated operator (the [`Operator`] guard admits
+/// both `mod` and `admin`). This is intentional (CPL-379 L6): the operators
+/// schema defines the `mod` role precisely to grant credits within the
+/// per-grant and daily caps enforced below, so — unlike the admin-only
+/// LITKEY-rate override — granting is deliberately not restricted to `admin`.
+///
 /// Flow:
 /// 1. Validate idempotency-key format + cents > 0.
 /// 2. Replay short-circuit: if a grant with this idempotency key already
@@ -261,6 +273,22 @@ pub async fn grant_credit(
             idempotent_replay: true,
         }));
     }
+
+    // CPL-379 L5: serialize concurrent grants for the same operator. The cap
+    // check (step 3) reads the 24h grant sum and the insert (step 6) writes a
+    // new grant row; with no serialization two concurrent requests both read a
+    // stale-low sum, both clear the daily cap, and the operator overshoots it.
+    // A per-operator `pg_advisory_xact_lock` held for the rest of the handler
+    // forces same-operator grants to run one at a time, so each cap check sees
+    // the previous grant already committed. The lock auto-releases when `tx`
+    // commits or (on any early `?`/return) rolls back.
+    let mut tx = pool.begin().await.map_err(server_err)?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
+        .bind(GRANT_CAP_LOCK_NS)
+        .bind(operator.id as i32)
+        .execute(&mut *tx)
+        .await
+        .map_err(server_err)?;
 
     // Step 3: cap check.
     let already_today = caps::cents_granted_last_24h(pool, operator.id)
@@ -342,6 +370,13 @@ pub async fn grant_credit(
             (existing.id, true)
         }
     };
+
+    // CPL-379 L5: the grant row is now durably committed via the pool
+    // connection above, so release the per-operator advisory lock. A waiting
+    // same-operator request will then re-read the 24h sum with this grant
+    // included. The remaining balance read is a plain Stripe GET and needs no
+    // lock.
+    tx.commit().await.map_err(server_err)?;
 
     // Step 7: read the post-credit balance for the UI.
     let balance_cents = balance::fetch(stripe, &stripe_customer_id)

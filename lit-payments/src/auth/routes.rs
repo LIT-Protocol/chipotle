@@ -111,6 +111,24 @@ pub async fn verify_link(
         }
     };
 
+    // CPL-379 L8: enforce single-use. The token is a stateless HMAC valid for
+    // its whole 15-minute TTL, so without this a link could be replayed to
+    // mint multiple sessions. Claim its signature atomically; a second verify
+    // of the same link finds the row already present and is rejected. The
+    // signature half always exists here because `token::verify` just parsed it.
+    let token_sig = token.rsplit_once('.').map(|(_, sig)| sig).unwrap_or(token);
+    match session::claim_magic_link(pool, token_sig, claims.expires_unix).await {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::info!("magic-link verify rejected: token already used");
+            return Err(Redirect::to("/login?error=invalid"));
+        }
+        Err(e) => {
+            tracing::warn!("magic-link single-use claim failed: {e}");
+            return Err(Redirect::to("/login?error=server"));
+        }
+    }
+
     let op = match operator::find_by_email(pool, &claims.email).await {
         Ok(Some(op)) => op,
         Ok(None) => {
