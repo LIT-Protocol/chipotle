@@ -131,13 +131,38 @@ pub struct IncomingWebhookMeta {
     headers: Vec<(String, String)>,
 }
 
+/// Resolve the client IP used to key the per-IP webhook rate limit.
+///
+/// Rocket's `client_ip()` trusts the forwarded header named by `ip_header`
+/// (default `X-Real-IP`) from *any* peer, so a direct caller could spoof it to
+/// land in a fresh rate-limit bucket every request. We only honor that header
+/// when the actual TCP peer (`remote()`) is a configured edge proxy
+/// (`WEBHOOK_TRUSTED_PROXIES`); from any other peer we key on the real socket
+/// address and ignore the header (CPL-379 L10). With no trusted proxies
+/// configured (the default) the header is never trusted.
+fn client_ip_for_rate_limit(request: &Request<'_>) -> Option<IpAddr> {
+    let peer = request.remote().map(|addr| addr.ip());
+    let trusted = request
+        .rocket()
+        .state::<Config>()
+        .map(|c| c.webhook_trusted_proxies.as_slice())
+        .unwrap_or(&[]);
+    match peer {
+        // Direct peer is a known edge proxy → trust its forwarded client IP
+        // (falling back to the peer when the header is absent/unparseable).
+        Some(p) if trusted.contains(&p) => request.client_ip().or(Some(p)),
+        // Untrusted (or unknown) peer → key on the real socket peer only.
+        other => other,
+    }
+}
+
 #[rocket::async_trait]
 impl<'r> FromRequest<'r> for IncomingWebhookMeta {
     type Error = ();
 
     async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
         Outcome::Success(Self {
-            ip: request.client_ip(),
+            ip: client_ip_for_rate_limit(request),
             headers: request
                 .headers()
                 .iter()

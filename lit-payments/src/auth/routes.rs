@@ -12,7 +12,7 @@ use time::OffsetDateTime;
 
 use super::operator::Operator;
 use super::rate_limit::RateLimiter;
-use super::{MAGIC_LINK_TTL_SECONDS, SESSION_COOKIE_NAME, operator, session, token};
+use super::{MAGIC_LINK_TTL_SECONDS, SESSION_COOKIE_NAME, operator, session, token, used_link};
 use crate::config::Config;
 use crate::mail::Mailer;
 
@@ -126,6 +126,26 @@ pub async fn verify_link(
             return Err(Redirect::to("/login?error=server"));
         }
     };
+
+    // Enforce single use (CPL-379 L8). The token is a stateless HMAC blob and
+    // would otherwise be replayable for its full TTL. Burn it now that we've
+    // confirmed a valid token for a real operator: `try_consume` returns false
+    // if it was already redeemed. Concurrent redemptions of the same token race
+    // safely on the table's primary key — only one wins.
+    let token_hash = token::token_hash(token);
+    let expires_at = OffsetDateTime::from_unix_timestamp(claims.expires_unix)
+        .unwrap_or_else(|_| OffsetDateTime::now_utc());
+    match used_link::try_consume(pool, &token_hash, &claims.email, expires_at).await {
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::info!("magic-link verify rejected: token already used");
+            return Err(Redirect::to("/login?error=invalid"));
+        }
+        Err(e) => {
+            tracing::warn!("magic-link single-use check failed: {e}");
+            return Err(Redirect::to("/login?error=server"));
+        }
+    }
 
     let session_token = session::generate_token();
     if let Err(e) = session::create(pool, &session_token, op.id).await {
