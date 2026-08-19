@@ -29,12 +29,6 @@ use crate::config::Config;
 const DEFAULT_GRANTS_LIMIT: i64 = 50;
 const MAX_GRANTS_LIMIT: i64 = 200;
 
-/// CPL-379 L5: advisory-lock namespace for the per-operator grant
-/// serialization lock. Uses the two-`int4` advisory-lock space, which Postgres
-/// keeps disjoint from the single-`bigint` space the gas-funder singleton lock
-/// uses, so the two never collide.
-const GRANT_CAP_LOCK_NS: i32 = 0x4c47_4341; // "LGCA"
-
 type ApiError = (Status, Json<ErrorResponse>);
 type ApiResult<T> = Result<Json<T>, ApiError>;
 
@@ -283,9 +277,15 @@ pub async fn grant_credit(
     // the previous grant already committed. The lock auto-releases when `tx`
     // commits or (on any early `?`/return) rolls back.
     let mut tx = pool.begin().await.map_err(server_err)?;
-    sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
-        .bind(GRANT_CAP_LOCK_NS)
-        .bind(operator.id as i32)
+    // Key the lock on `hashtext` of a namespaced operator string (the same
+    // per-entity advisory-lock idiom used for webhook admission), not a raw
+    // i64->i32 cast: a large operator id can't truncate into another
+    // operator's key. The same operator always maps to the same key, so
+    // same-operator grants still serialize; the worst a hash collision does is
+    // make two *different* operators wait on each other occasionally, which is
+    // harmless for the per-operator cap.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
+        .bind(format!("grant-cap:{}", operator.id))
         .execute(&mut *tx)
         .await
         .map_err(server_err)?;

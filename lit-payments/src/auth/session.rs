@@ -1,7 +1,7 @@
 //! Session token issuing + the Rocket request guard that loads an
 //! authenticated [`Operator`] from a session cookie.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use base64::Engine;
 use rand::RngCore;
 use rocket::http::Status;
@@ -66,8 +66,11 @@ pub async fn delete(pool: &PgPool, token: &str) -> Result<()> {
 /// claim race-safe: two concurrent verifies of the same link produce exactly
 /// one `true`.
 pub async fn claim_magic_link(pool: &PgPool, token_sig: &str, expires_unix: i64) -> Result<bool> {
+    // Fail closed if the expiry can't be represented: falling back to now()
+    // would let the boot purge drop the row immediately, re-opening the token
+    // to replay. In practice `expires_unix` is always our own 15-minute expiry.
     let expires_at = OffsetDateTime::from_unix_timestamp(expires_unix)
-        .unwrap_or_else(|_| OffsetDateTime::now_utc());
+        .context("magic-link expiry timestamp out of representable range")?;
     let r = sqlx::query(
         "INSERT INTO used_magic_links (token_sig, expires_at) VALUES ($1, $2) \
          ON CONFLICT (token_sig) DO NOTHING",
