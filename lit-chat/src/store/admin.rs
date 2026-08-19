@@ -247,8 +247,17 @@ pub async fn audit(
     Ok(())
 }
 
-/// List recent audit rows, verifying each row's MAC and its chain link.
-/// Returns (row, mac_valid, chain_valid).
+/// List recent audit rows, verifying each row's MAC, its self-consistent
+/// hash, AND its linkage to the immediately-preceding row. Returns
+/// (row, mac_valid, chain_valid).
+///
+/// `chain_valid` combines three checks so that an operator (who cannot forge
+/// a MAC) also cannot silently delete an *interior* row: per-row MAC + self
+/// hash catches edits; `prev_hash` linkage + `id` contiguity across the
+/// returned window catches interior deletions. Only truncation of the newest
+/// tail (or of a window boundary) remains undetectable — the disclosed
+/// section 4.4 caveat. Rows are fetched newest-first; linkage is checked
+/// against the next-older row present in the window.
 pub async fn audit_list(
     pool: &PgPool,
     audit_mac_key: &[u8; 32],
@@ -262,9 +271,11 @@ pub async fn audit_list(
     .bind(limit)
     .fetch_all(pool)
     .await?;
+    let n = rows.len();
     Ok(rows
-        .into_iter()
-        .map(|r| {
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
             let recomputed = audit_row_hash(
                 &r.prev_hash,
                 &r.actor_ref_hash,
@@ -273,9 +284,20 @@ pub async fn audit_list(
                 &r.detail,
                 r.created_at_unix,
             );
-            let chain_valid = constant_time_eq(&recomputed, &r.row_hash);
+            let self_valid = constant_time_eq(&recomputed, &r.row_hash);
+            // Link to the next-older row in the window (rows are id DESC).
+            let link_valid = if i + 1 < n {
+                let older = &rows[i + 1];
+                // Contiguous ids and prev_hash points at the older row_hash.
+                older.id + 1 == r.id && constant_time_eq(&r.prev_hash, &older.row_hash)
+            } else {
+                // Oldest row in the window: link is unverifiable here unless
+                // it is the genesis row (all-zero prev_hash). Treat a genesis
+                // prev_hash as linked; otherwise leave to the tail caveat.
+                r.prev_hash.iter().all(|b| *b == 0) || r.id > 1
+            };
             let mac_valid = constant_time_eq(&hmac_sha256(audit_mac_key, &r.row_hash), &r.mac);
-            (r, mac_valid, chain_valid)
+            (r.clone(), mac_valid, self_valid && link_valid)
         })
         .collect())
 }

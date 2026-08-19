@@ -12,7 +12,7 @@ use crate::crypto::{constant_time_eq, hmac_sha256};
 use crate::identity::{self, UserKind};
 use crate::mail::{code_email, Mailer};
 use crate::rate_limit::StreamRateLimit;
-use crate::routes::{err, ApiError, ChatUser, Csrf};
+use crate::routes::{err, ApiError, ChatUser, Csrf, SameOriginPost};
 use crate::session::{self, SESSION_COOKIE};
 use crate::store::{conversations, users};
 use crate::{envelope, user_kek, Keyring};
@@ -113,6 +113,7 @@ pub struct OkResponse {
 #[post("/api/session/anon")]
 pub async fn anon_session(
     _rate: StreamRateLimit,
+    _origin: SameOriginPost,
     pool: &State<PgPool>,
     keyring: &State<Keyring>,
     cookies: &CookieJar<'_>,
@@ -140,9 +141,11 @@ pub struct RequestCodeBody {
 }
 
 /// Start magic-link login. Always returns ok (no email enumeration).
+#[allow(clippy::too_many_arguments)] // Rocket guards + managed state are all parameters.
 #[post("/api/auth/request", format = "json", data = "<body>")]
 pub async fn request_code(
     _rate: StreamRateLimit,
+    _origin: SameOriginPost,
     body: Json<RequestCodeBody>,
     pool: &State<PgPool>,
     cfg: &State<Config>,

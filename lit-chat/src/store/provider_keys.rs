@@ -35,10 +35,12 @@ fn aad(id: Uuid, provider: &str, kind: &str) -> String {
 }
 
 /// Leading 8 + trailing 4 characters — the only representation that ever
-/// leaves the enclave.
+/// leaves the enclave. Fully masks anything short enough that head+tail would
+/// expose most of the key (need > 8+4 revealed chars AND a real gap between
+/// them, so require at least 20 chars before revealing any).
 pub fn mask(key: &str) -> String {
     let chars: Vec<char> = key.chars().collect();
-    if chars.len() <= 12 {
+    if chars.len() < 20 {
         return "****".to_string();
     }
     let head: String = chars[..8].iter().collect();
@@ -192,5 +194,9 @@ mod tests {
     fn short_keys_fully_masked() {
         assert_eq!(mask("short"), "****");
         assert_eq!(mask("sk-123456789"), "****");
+        // 19 chars: below the reveal threshold (head+tail would leak most of it).
+        assert_eq!(mask("sk-1234567890123456"), "****");
+        // 20 chars: minimum length that reveals only head8+tail4.
+        assert_eq!(mask("sk-or-v1-12345678wxyz"), "sk-or-v1...wxyz");
     }
 }

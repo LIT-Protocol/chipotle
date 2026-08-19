@@ -444,6 +444,20 @@ pub async fn stream(
         .await
         .map_err(|e| internal(e, "next seq"))?;
 
+    // List prices, used only to estimate cost when a stopped/disconnected
+    // stream never delivers OpenRouter's usage chunk (so the anon budget and
+    // the spend breaker still see a conservative charge).
+    let prices: Option<(Option<f64>, Option<f64>)> = sqlx::query_as(
+        "SELECT prompt_usd_per_mtok, completion_usd_per_mtok FROM model_catalog WHERE model_id = $1",
+    )
+    .bind(&model_id)
+    .fetch_optional(pool.inner())
+    .await
+    .map_err(|e| internal(e, "model prices"))?;
+    let (prompt_price, completion_price) = prices
+        .map(|(p, c)| (p.unwrap_or(0.0), c.unwrap_or(0.0)))
+        .unwrap_or((0.0, 0.0));
+
     let (tx, mut rx) = mpsc::channel::<StreamEvent>(64);
     let meta = json!({
         "conversation_id": conv_id,
@@ -474,6 +488,8 @@ pub async fn stream(
         needs_auto_title,
         first_user_content,
         max_tokens: cfg.max_tokens_cap,
+        prompt_price,
+        completion_price,
     };
     tokio::spawn(run_generation(gen, tx));
 
@@ -510,6 +526,13 @@ struct GenerationCtx {
     needs_auto_title: bool,
     first_user_content: Option<String>,
     max_tokens: i64,
+    prompt_price: f64,
+    completion_price: f64,
+}
+
+/// Rough token estimate for the stop/disconnect settle path (~4 chars/token).
+fn estimate_tokens(chars: usize) -> i64 {
+    chars.div_ceil(4) as i64
 }
 
 async fn run_generation(ctx: GenerationCtx, tx: mpsc::Sender<StreamEvent>) {
@@ -598,21 +621,38 @@ async fn run_generation(ctx: GenerationCtx, tx: mpsc::Sender<StreamEvent>) {
         }
     }
 
-    // Settle after, never mid-stream, never fatally (section 8.3).
-    if let Some(u) = usage {
-        let tokens = u.prompt_tokens + u.completion_tokens;
-        if let Err(e) = metering::settle(
-            &ctx.pool,
-            &ctx.cfg,
-            &ctx.kek,
-            &ctx.user_ref_hash,
-            u.cost_micro_usd,
-            tokens,
-        )
-        .await
-        {
-            tracing::warn!("meter settle failed (absorbed): {e}");
+    // Settle after, never mid-stream, never fatally (section 8.3). When the
+    // stream was stopped/disconnected before OpenRouter's usage chunk arrived,
+    // `usage` is None but a real, billable partial generation still happened —
+    // estimate a conservative cost from list prices so the anon budget and the
+    // global spend breaker both see the charge (otherwise start-then-stop is a
+    // free unmetered path, section 8.2/8.3).
+    let (cost_micro_usd, tokens) = match usage {
+        Some(u) => (u.cost_micro_usd, u.prompt_tokens + u.completion_tokens),
+        None => {
+            let prompt_chars: usize = ctx.history.iter().map(|m| m.content.chars().count()).sum();
+            let est_prompt = estimate_tokens(prompt_chars);
+            let est_completion = estimate_tokens(text.chars().count());
+            let cost = ((est_prompt as f64) * ctx.prompt_price
+                + (est_completion as f64) * ctx.completion_price)
+                / 1_000_000.0;
+            (
+                (cost * 1_000_000.0).ceil() as i64,
+                est_prompt + est_completion,
+            )
         }
+    };
+    if let Err(e) = metering::settle(
+        &ctx.pool,
+        &ctx.cfg,
+        &ctx.kek,
+        &ctx.user_ref_hash,
+        cost_micro_usd,
+        tokens,
+    )
+    .await
+    {
+        tracing::warn!("meter settle failed (absorbed): {e}");
     }
 }
 

@@ -27,6 +27,29 @@ pub struct ErrorResponse {
 
 pub type ApiError = rocket::response::status::Custom<Json<ErrorResponse>>;
 
+/// Cross-origin guard for the unauthenticated bootstrap POSTs
+/// (`/api/session/anon`, `/api/auth/request`), which carry no CSRF token
+/// because they run before a session exists. `Sec-Fetch-Site` is set by the
+/// browser and unforgeable by page script; we admit only same-origin/none
+/// (direct navigation) requests, blocking cross-site anon-session resets and
+/// sign-in email bombing. Requests without the header (old clients, curl) are
+/// admitted — these routes are individually rate-limited regardless.
+pub struct SameOriginPost;
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for SameOriginPost {
+    type Error = ();
+
+    async fn from_request(req: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        match req.headers().get_one("Sec-Fetch-Site") {
+            Some("same-origin") | Some("same-site") | Some("none") | None => {
+                Outcome::Success(SameOriginPost)
+            }
+            Some(_) => Outcome::Error((Status::Forbidden, ())),
+        }
+    }
+}
+
 pub fn err(status: Status, error: &'static str) -> ApiError {
     rocket::response::status::Custom(status, Json(ErrorResponse { error }))
 }

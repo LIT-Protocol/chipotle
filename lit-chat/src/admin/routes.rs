@@ -280,11 +280,28 @@ fn webauthn_user_uuid(user_ref_hash: &str) -> Uuid {
     }
 }
 
+/// Enforce the first-enrollment-only rule: a Pre2fa caller (holds only a
+/// magic-link code) may enroll a passkey ONLY when the account has none.
+/// Enrolling an additional passkey requires a Full, passkey-proven session —
+/// otherwise anyone holding a leaked code could self-enroll and bypass the
+/// mandatory second factor entirely.
+async fn ensure_may_enroll(pool: &PgPool, pending: &PendingAdmin) -> Result<(), ApiError> {
+    let count = admin_store::credential_count(pool, &pending.user_ref_hash)
+        .await
+        .map_err(|e| internal(e, "credential count"))?;
+    if count > 0 && pending.stage != AdminStage::Full {
+        return Err(err(Status::Forbidden, "passkey_step_up_required"));
+    }
+    Ok(())
+}
+
 #[post("/admin/api/webauthn/register/start")]
 pub async fn webauthn_register_start(
     pending: PendingAdmin,
+    pool: &State<PgPool>,
     wa: &State<WebauthnState>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    ensure_may_enroll(pool, &pending).await?;
     let uuid = webauthn_user_uuid(&pending.user_ref_hash);
     let label = format!("admin-{}", &pending.user_ref_hash[..8]);
     let (challenge, reg_state) = wa
@@ -312,6 +329,7 @@ pub async fn webauthn_register_finish(
     wa: &State<WebauthnState>,
     cookies: &CookieJar<'_>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    ensure_may_enroll(pool, &pending).await?;
     let Some(state_json) = wa.take_reg(&pending.sid).await else {
         return Err(err(Status::BadRequest, "no_registration_in_flight"));
     };
@@ -476,7 +494,7 @@ pub async fn import_key(
     if body.kind != "runtime" && body.kind != "provisioning" {
         return Err(err(Status::BadRequest, "bad_kind"));
     }
-    if body.key.len() < 16 || body.key.len() > 512 {
+    if body.key.len() < 20 || body.key.len() > 512 {
         return Err(err(Status::BadRequest, "bad_key"));
     }
     // Imported runtime keys start as standby (explicit promote); a new

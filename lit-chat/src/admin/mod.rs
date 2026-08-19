@@ -138,11 +138,15 @@ pub struct AdminUser {
     pub token_hash: String,
 }
 
-/// Pre-2FA admin: allowed to touch only the WebAuthn endpoints.
+/// Pre-2FA admin: allowed to touch only the WebAuthn endpoints. Carries the
+/// session stage so the register handlers can enforce first-enrollment-only
+/// at Pre2fa (a Pre2fa caller may enroll a passkey ONLY when the account has
+/// none; adding another requires a Full, passkey-proven session).
 pub struct PendingAdmin {
     pub user_ref: String,
     pub user_ref_hash: String,
     pub sid: String,
+    pub stage: AdminStage,
 }
 
 async fn extract_admin(
@@ -219,12 +223,15 @@ impl<'r> FromRequest<'r> for PendingAdmin {
     type Error = ();
 
     async fn from_request(req: &'r Request<'_>) -> Outcome<Self, Self::Error> {
-        // Accept either stage: a full admin may register additional passkeys.
+        // Accept either stage: a full admin may register additional passkeys
+        // (the register handlers enforce the first-enrollment-only rule using
+        // the stage carried here).
         match extract_admin(req, None).await {
             Ok((claims, _)) => Outcome::Success(PendingAdmin {
                 user_ref_hash: crate::identity::user_ref_hash(&claims.user_ref),
                 user_ref: claims.user_ref,
                 sid: claims.sid,
+                stage: claims.stage,
             }),
             Err(status) => Outcome::Error((status, ())),
         }

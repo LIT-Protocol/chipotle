@@ -13,6 +13,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc;
 
+/// Hard cap on a single un-terminated SSE line, to bound memory against a
+/// hostile upstream that never emits a newline.
+const MAX_SSE_LINE_BYTES: usize = 1024 * 1024;
+
 #[derive(Clone)]
 pub struct OpenRouterClient {
     http: reqwest::Client,
@@ -92,31 +96,48 @@ impl OpenRouterClient {
 
         let status = resp.status();
         if !status.is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            // Upstream error bodies can echo request content; log status only.
+            // Upstream error bodies can echo request content — never log them
+            // and never fold them into the returned error (section 7.3
+            // content-free logging gate). Drain the body without inspecting it.
+            let _ = resp.bytes().await;
             tracing::warn!(%status, "OpenRouter returned non-success");
             let _ = tx
                 .send(StreamEvent::Error(format!("upstream error ({status})")))
                 .await;
-            return Err(anyhow!(
-                "OpenRouter error {status}: {}",
-                truncate(&text, 200)
-            ));
+            return Err(anyhow!("OpenRouter error {status}"));
         }
 
         let mut full_text = String::new();
         let mut usage: Option<Usage> = None;
         let mut client_gone = false;
-        let mut buf = String::new();
+        // Byte-level accumulation: a multi-byte codepoint split across two TCP
+        // chunks must not be lossy-decoded independently (that corrupts stored
+        // history), so we buffer raw bytes and only decode complete lines.
+        let mut buf: Vec<u8> = Vec::new();
         let mut stream = resp.bytes_stream();
 
         'outer: while let Some(chunk) = stream.next().await {
             let chunk = chunk.context("OpenRouter stream read failed")?;
-            buf.push_str(&String::from_utf8_lossy(&chunk));
+            buf.extend_from_slice(&chunk);
+            // Bound the line buffer: a hostile/misbehaving upstream that never
+            // emits a newline must not grow memory without limit.
+            if buf.len() > MAX_SSE_LINE_BYTES {
+                tracing::warn!("OpenRouter SSE line exceeded cap; aborting stream");
+                let _ = tx
+                    .send(StreamEvent::Error("upstream framing error".to_string()))
+                    .await;
+                return Err(anyhow!(
+                    "OpenRouter SSE line exceeded {MAX_SSE_LINE_BYTES} bytes"
+                ));
+            }
             // SSE frames are separated by blank lines; process complete lines.
-            while let Some(pos) = buf.find('\n') {
-                let line = buf[..pos].trim_end_matches('\r').to_string();
-                buf.drain(..=pos);
+            while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+                let raw: Vec<u8> = buf.drain(..=pos).collect();
+                // raw includes the trailing '\n'; decode the line lossily now
+                // that it is a complete, codepoint-aligned unit.
+                let line = String::from_utf8_lossy(&raw[..raw.len() - 1])
+                    .trim_end_matches('\r')
+                    .to_string();
                 let Some(data) = line.strip_prefix("data: ") else {
                     continue; // comments (": OPENROUTER PROCESSING") and blanks
                 };
@@ -285,10 +306,6 @@ fn parse_usage(u: &serde_json::Value) -> Usage {
         // over-billing bug (section 8.2).
         cost_micro_usd: (cost * 1_000_000.0).floor() as i64,
     }
-}
-
-fn truncate(s: &str, n: usize) -> String {
-    s.chars().take(n).collect()
 }
 
 #[cfg(test)]
