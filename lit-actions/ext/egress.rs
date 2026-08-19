@@ -37,10 +37,17 @@ fn is_forbidden_ipv4(ip: Ipv4Addr) -> bool {
     ip.is_loopback()            // 127.0.0.0/8
         || ip.is_private()      // 10/8, 172.16/12, 192.168/16
         || ip.is_link_local()   // 169.254.0.0/16, incl. cloud metadata
-        || ip.is_unspecified()  // 0.0.0.0
+        || is_this_network(ip)  // 0.0.0.0/8 (incl. 0.0.0.0; connect() to 0.x.x.x maps to localhost)
         || ip.is_broadcast()    // 255.255.255.255
         || is_shared_cgnat(ip)  // 100.64.0.0/10
         || is_benchmarking(ip) // 198.18.0.0/15
+}
+
+/// 0.0.0.0/8 — "this host on this network" (RFC 1122). Not a valid public
+/// destination; the OS routes a connect() to `0.x.x.x` to loopback, so the whole
+/// /8 (not just the unspecified `0.0.0.0`) must be blocked to match `DENY_NET`.
+fn is_this_network(ip: Ipv4Addr) -> bool {
+    ip.octets()[0] == 0
 }
 
 fn is_forbidden_ipv6(ip: Ipv6Addr) -> bool {
@@ -181,7 +188,9 @@ mod tests {
             "192.168.1.1",
             "100.64.0.1", // CGNAT
             "198.18.0.1", // benchmarking
-            "0.0.0.0",
+            "0.0.0.0",    // unspecified
+            "0.0.0.1",    // 0.0.0.0/8 — connect() maps to localhost
+            "0.1.2.3",    // 0.0.0.0/8, non-zero tail
             "255.255.255.255",
             "::1",
             "::",
