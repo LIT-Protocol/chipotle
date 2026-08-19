@@ -208,10 +208,11 @@ pub async fn grant_credit(
     // lock makes the second request block until the first commits its grants
     // row, so its cap re-check (Step 3) sees the already-applied grant. The lock
     // key is the operator id, so distinct operators never contend. The lock (and
-    // the pooled connection) is held across the Stripe calls in steps 4-5; this
-    // endpoint is admin-only and low-volume, so that is an acceptable tradeoff
-    // for making the cap authoritative. `pg_advisory_xact_lock` auto-releases on
-    // commit or rollback.
+    // the pooled connection) is held across the Stripe calls in steps 4-5;
+    // grants come only from the low-volume admin portal (any operator role —
+    // see the handler docs), so that is an acceptable tradeoff for making the
+    // cap authoritative. `pg_advisory_xact_lock` auto-releases on commit or
+    // rollback.
     let mut tx = pool.begin().await.map_err(server_err)?;
     sqlx::query("SELECT pg_advisory_xact_lock($1)")
         .bind(operator.id)
