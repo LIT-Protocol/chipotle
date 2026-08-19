@@ -6,7 +6,7 @@
 //! second presentation conflicts on the primary key and is rejected.
 
 use anyhow::Result;
-use sqlx::PgPool;
+use sqlx::{PgExecutor, PgPool};
 use time::OffsetDateTime;
 
 /// Atomically record a magic-link token as consumed. Returns `true` if this is
@@ -19,8 +19,12 @@ use time::OffsetDateTime;
 /// its own. The `INSERT ... ON CONFLICT DO NOTHING RETURNING` is a single
 /// atomic statement, so concurrent redemptions of the same token race safely:
 /// exactly one sees the insert (`true`), the rest see the conflict (`false`).
+///
+/// Takes any `PgExecutor` so the caller can run this inside the transaction
+/// that also creates the session; if that later insert fails the whole
+/// transaction rolls back and the token is left unconsumed (CPL-379 L8).
 pub async fn try_consume(
-    pool: &PgPool,
+    executor: impl PgExecutor<'_>,
     token_hash: &str,
     email: &str,
     expires_at: OffsetDateTime,
@@ -34,7 +38,7 @@ pub async fn try_consume(
     .bind(token_hash)
     .bind(email)
     .bind(expires_at)
-    .fetch_optional(pool)
+    .fetch_optional(executor)
     .await?;
     Ok(inserted.is_some())
 }

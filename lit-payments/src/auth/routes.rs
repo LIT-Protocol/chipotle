@@ -127,29 +127,52 @@ pub async fn verify_link(
         }
     };
 
-    // Enforce single use (CPL-379 L8). The token is a stateless HMAC blob and
-    // would otherwise be replayable for its full TTL. Burn it now that we've
-    // confirmed a valid token for a real operator: `try_consume` returns false
-    // if it was already redeemed. Concurrent redemptions of the same token race
-    // safely on the table's primary key — only one wins.
+    // Enforce single use (CPL-379 L8), atomically with session creation. The
+    // token is a stateless HMAC blob, replayable for its full TTL otherwise, so
+    // we record its hash in `used_magic_links` before minting a session.
+    // Recording the consume and inserting the session in ONE transaction means a
+    // failed session insert (e.g. a transient DB error) rolls the consume back,
+    // so the link is not burned and the user can retry the same email link.
+    // Concurrent redemptions of the same token still serialize on the table's
+    // primary key: the second transaction blocks on the first's uncommitted row,
+    // then sees the conflict (`try_consume` → false) once it commits, so exactly
+    // one login can succeed — single use holds.
     let token_hash = token::token_hash(token);
     let expires_at = OffsetDateTime::from_unix_timestamp(claims.expires_unix)
         .unwrap_or_else(|_| OffsetDateTime::now_utc());
-    match used_link::try_consume(pool, &token_hash, &claims.email, expires_at).await {
+    let session_token = session::generate_token();
+
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::warn!("magic-link verify: begin tx failed: {e}");
+            return Err(Redirect::to("/login?error=server"));
+        }
+    };
+    match used_link::try_consume(&mut *tx, &token_hash, &claims.email, expires_at).await {
         Ok(true) => {}
         Ok(false) => {
+            let _ = tx.rollback().await;
             tracing::info!("magic-link verify rejected: token already used");
             return Err(Redirect::to("/login?error=invalid"));
         }
         Err(e) => {
+            let _ = tx.rollback().await;
             tracing::warn!("magic-link single-use check failed: {e}");
             return Err(Redirect::to("/login?error=server"));
         }
     }
-
-    let session_token = session::generate_token();
-    if let Err(e) = session::create(pool, &session_token, op.id).await {
+    if let Err(e) = session::create(&mut *tx, &session_token, op.id).await {
+        // Roll back so the token stays unconsumed and the link is retryable.
+        let _ = tx.rollback().await;
         tracing::warn!("session create failed for operator {}: {e}", op.id);
+        return Err(Redirect::to("/login?error=server"));
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::warn!(
+            "magic-link verify: commit failed for operator {}: {e}",
+            op.id
+        );
         return Err(Redirect::to("/login?error=server"));
     }
     operator::touch_last_login(pool, op.id).await;
