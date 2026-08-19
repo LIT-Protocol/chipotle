@@ -18,13 +18,14 @@ The headline user promise, privacy first, phrased at exactly the strength the ar
 
 Why the post-quantum claim is honest: the storage path is *symmetric-only* — AES-256-GCM envelope encryption under enclave-derived KEKs (keccak/HKDF derivation), with no public-key cryptography anywhere at rest — which is quantum-resistant under current NIST guidance. The claim is scoped to stored history; the TLS channel and TDX attestation signatures are classical (see §7.2). Supporting line for the verify page: *the code that could read your history is attested and auditable.*
 
-The product is three parts, mapping to the request:
+The product is four parts — the first three mapping to the request, plus the operational plane that keeps part 2 alive:
 
 | Part | What | Where |
 |---|---|---|
 | 1 | Chat web UI (conversations, streaming, model picker) | Served from inside the chat CVM |
 | 2 | Inference: OpenRouter proxy (P1) → in-enclave model (P3) | Dedicated Phala CVM (`lit-chat`) |
 | 3 | Encrypted session/history store | Off-TEE Postgres, ciphertext-only |
+| 4 | Admin console: OpenRouter key add/rotate/remove, spend & health ops | Separate small app + separate endpoint in the chat CVM (§4.4) |
 
 It is also a flagship demonstration of what the Chipotle platform is for — and, via Lit Action tool-calling (P2), the first chat assistant with governed wallet powers.
 
@@ -89,7 +90,7 @@ A separate CVM gives lit-chat its **own dstack app root**: chat keys and platfor
 - `otel-collector` — subject to the logging rules in §7.3.
 
 **OpenRouter integration**
-- The OpenRouter provisioning key is a Phala `encrypted_env` secret, sealed to the CVM — it never exists client-side or in the repo.
+- The OpenRouter provisioning key arrives as a Phala `encrypted_env` secret, sealed to the CVM — it never exists client-side or in the repo. `encrypted_env` is the **bootstrap only**: on first boot the key is imported into the encrypted `provider_keys` store and runtime custody moves there, so rotation never requires a redeploy (§4.4).
 - Upstream calls use OpenRouter's SSE; lit-chat forwards tokens to the client as it encrypts-and-buffers the completed message for storage.
 - **Catalog policy (hard requirement, not a badge)**: default routing restricted to OpenRouter zero-data-retention-eligible providers; per-model retention/training metadata surfaced in the picker; models that can't meet ZDR are excluded or explicitly labeled opt-in.
 - Cost controls: OpenRouter provisioning-key spend caps, per-session daily token budgets, per-IP token-bucket rate limits (the CPL-367 `RateLimiter` pattern), and a global daily spend circuit breaker that degrades to "account holders only" before hard-off.
@@ -135,6 +136,46 @@ magic_links    (token_hash PK, expires_at, used_at)
 
 **Deletion honesty**: "Delete conversation" hard-deletes the conversation row and its messages immediately — no `deleted_at` tombstone, because a soft-deleted row still holds the ciphertext and its wrapped DEK, which is a weaker guarantee than the one the UI states. Encrypted copies persist in database backups until backup expiry (window to be stated in the privacy policy, target ≤ 30 days), and remain decryptable only inside the enclave by the key holder's session. **We do not use the phrase "crypto-shred"**: the KEK is statelessly re-derivable by design (that's what makes the system recoverable), so no key destruction event exists.
 
+### 4.4 Part 4 — Admin console (`lit-chat-admin`): OpenRouter key operations
+
+**A second, deliberately small web app for the operational plumbing that keeps the OpenRouter integration running: adding, disabling, and rotating API keys; watching credit balance and spend; managing caps and the circuit breaker.** It is a separate service on a separate, protected endpoint — not a set of routes behind a flag inside the consumer app.
+
+**Isolation model (the separation is load-bearing, not cosmetic)**
+- Own container in the chat CVM compose — still inside the attested `compose_hash` — with its own port and its own TLS exposure. The CVM's single 443 belongs to the consumer app (§4.2: one dstack-ingress, one `TARGET_ENDPOINT`), so the admin plane publishes on a second port through its own ingress instance (e.g. `https://chat.litprotocol.com:8443`, or an admin subdomain on that port), with source-IP allowlisting at the ingress as an optional hardening layer. An ugly URL is a feature on an admin plane. Admin traffic never transits the consumer service's process.
+- **Zero user-data routes.** The admin service has no code path that touches conversations, messages, or user KEKs: it uses different dstack purpose strings than the chat KEK derivations, and connects to Postgres as a separate role (`lit_chat_admin`) whose grants cover only the admin tables below — `SELECT` on `messages`/`conversations` is not granted. A fully compromised admin plane can spend money and break inference; **it cannot read chats**. Every §7.2 claim survives this addition unchanged — that is a property to actively preserve in review, not an accident.
+- Same launch gates as the consumer app: content-free logging (§7.3), strict CSP / no CDN assets, TEE-signed sessions.
+
+**Key custody: keys live in the encrypted store, and rotation never needs a redeploy**
+- OpenRouter credentials move out of deploy-time `encrypted_env` (bootstrap only, §4.2) into the off-TEE DB, encrypted like everything else in this design: ciphertext under a **service KEK** `get_key("chat/v1/provider-keys", "chat-svc")`, AAD = `(key_id, provider, kind)`. The DB operator sees ciphertext; the enclave is the only decryptor.
+- `lit-chat` consumes the active key set through a short-TTL cache keyed on a `version` column (the CPL-364 `(ciphertext, version)` shape again) — key swaps take effect within seconds, no restart, no compose change.
+
+**Write-only keys; masked display everywhere (hard UI rule)**
+- A key's plaintext crosses the admin boundary exactly once: on **import** (pasted in by an admin) or on **mint** (returned by OpenRouter's provisioning API directly to the enclave — the browser never sees it). At write time the enclave stores the ciphertext plus a `masked_hint` — leading and trailing characters only, per convention (`sk-or-v1-…wxyz`, first 8 / last 4) — and that hint is the *only* representation any API response, log line, audit row, or UI element ever renders.
+- **There is no reveal endpoint.** Not even admins can read a stored key back — humans never need the plaintext again, because the enclave is the only caller of OpenRouter.
+
+**Rotation & lifecycle (the OpenRouter-specific part)**
+- OpenRouter separates the **provisioning key** (manages keys) from **runtime keys** (make inference calls). The console drives OpenRouter's key-management API with the stored provisioning key, so routine rotation is fully in-console: mint a new runtime key (with a per-key spend limit) → promote to `active` → demote the old key to `retiring` (grace window so in-flight streams finish) → delete upstream and mark `disabled`. Key states: `active | standby | retiring | disabled`.
+- Rotating the provisioning key itself is the rare, manual path: generate in the OpenRouter dashboard, paste in (write-only), delete the old one upstream. Scheduled rotation reminders come from the console.
+- The rest of "keep the instance running," all in-console: credit-balance polling with low-balance alerts, per-key and global daily spend caps, circuit-breaker status and manual override (§4.2), ZDR model-catalog refresh (§4.2's catalog policy is data the console maintains), and per-key health probes (cheapest-model ping) with recent error-rate readout from lit-chat's metrics.
+
+**Admin identity: the roster is in the data store, but TEE-MAC'd — §5.1 discipline applied to roles**
+- Admins are ordinary account users (§5.3 magic-link) with a **mandatory second factor** (passkey/WebAuthn registered at first admin login), short admin sessions (15 min idle / 8 h absolute), and a separate session-MAC key (`get_key("chat/v1/admin-session-mac", "chat-svc")`) so consumer and admin sessions are unforgeable across each other.
+- The store classifies certain users as admins — `admins(user_ref_hash, role, granted_by, granted_at, mac)` — but a bare DB row is never the root of trust, for exactly the reason sessions aren't DB-rooted (§5.1): an operator with DB write access could insert one. Each roster row therefore carries an enclave MAC over `(user_ref_hash, role, granted_by, granted_at)` under `get_key("chat/v1/admin-roster-mac", "chat-svc")`, verified on every admin request; rows without a valid MAC are ignored. The bootstrap admin set ships in `encrypted_env` (sealed, part of the governed deploy); runtime grants and revocations are performed by an existing admin and MAC'd at write.
+- Honest bound: forging admin is as hard as forging a session — and even a successful forge lands inside the zero-user-data-routes box above: spend and availability damage, capped by per-key limits and the breaker, never content.
+
+**Audit log** — append-only `admin_audit_log`; every mutation (key import/mint/rotate/disable, cap change, breaker flip, roster grant/revoke) records actor, action, subject, and the **masked hint only** — never key material. Each row is TEE-MAC'd, and rows are hash-chained to their predecessor for tamper-evidence, with the same honesty caveat as §4.3: a DB operator can truncate the tail; the chain makes *edits* evident, not deletions.
+
+**Admin-plane schema** (same DB, separate role's grant set; content columns ciphertext or masked):
+
+```sql
+provider_keys   (id PK, provider {openrouter}, kind {provisioning,runtime},
+                 enc_key, masked_hint, status {active,standby,retiring,disabled},
+                 spend_limit_usd, version, created_by, created_at, rotated_at)
+admins          (user_ref_hash PK, role, granted_by, granted_at, mac)
+admin_audit_log (id PK, actor_ref_hash, action, subject, detail,
+                 prev_hash, mac, created_at)
+```
+
 ## 5. Identity, sessions, and keys
 
 ### 5.1 Sessions are TEE-signed, never DB-rooted
@@ -168,6 +209,8 @@ On upgrade, within one enclave operation: authenticate both refs (live anon sess
 | **Payment processor (Stripe)** (paying accounts) | Sees account identity, charge amounts, and flush timestamps — never content, never model or conversation identifiers (§8.4). Unavoidable for paid usage; avoidable entirely by staying on the free tier. | Same. |
 | **Cookie thief / shared device** | Full access to that user's chat (anon: non-revocable; account: revoke via re-login/revocation list). | Same. |
 | **XSS / malicious model output** | Primary practical risk; CSP + sanitization + no-CDN + human-approved tool calls (§4.1, §4.2). | Same. |
+| **Admin credential thief** | Can rotate/disable provider keys, change caps, flip the breaker — spend and availability damage, bounded by per-key spend limits and the audit trail. Cannot reach content: the admin plane has zero user-data routes and a DB role with no grants on chat tables (§4.4). Passkey second factor + short admin sessions bound the window. | Same. |
+| **Operator forging an admin role (DB write)** | Roster rows are enclave-MAC'd (§4.4); an inserted row without a valid MAC is ignored, so this reduces to the session-forgery bound of §5.1. Residual on success is the same bounded box as the row above — never content. | Same. |
 | **Network observer** | TLS end-to-end into the CVM; sees traffic shape only. | Same. |
 
 Explicitly out of scope: compromised end-user device/browser; TDX silicon-level attacks; availability guarantees against a malicious storage operator.
@@ -277,8 +320,8 @@ Arithmetic worth doing before a number goes on a page:
 
 | Phase | Scope | Exit criteria |
 |---|---|---|
-| **P1 — MVP** (own CVM from day one) | `lit-chat` service + SSE OpenRouter proxy (ZDR catalog) + anonymous sessions (TEE-signed) + envelope-encrypted Postgres (AAD) + web UI + attestation endpoints + logging gate + rate limits/spend breaker. Free tier only — no payment path, but the µUSD cost accumulator (§8.2) runs in shadow mode from day one so the markup is set from measured costs, not guesses. Staging → prod on chat's own governance. | Anonymous user chats privately end-to-end; verify page live; security review (incl. log-hygiene + XSS) passed; key-continuity test (§7.5) passed; ≥2 weeks of shadow cost data. |
-| **P2 — Accounts & tools** | Magic-link accounts, multi-device, anon→account rewrap, data export/deletion, BYOK, Lit Action tool calls with human-in-the-loop approvals, per-session attestation nonce UX. Billing goes live with accounts (§8) — an anonymous user has no ledger to charge. | Upgrade flow ships; first wallet-tool demo; counsel sign-off on §7.4 posture; markup + LITKEY decision (§8.5) made and metering reconciled against an OpenRouter invoice. |
+| **P1 — MVP** (own CVM from day one) | `lit-chat` service + SSE OpenRouter proxy (ZDR catalog) + anonymous sessions (TEE-signed) + envelope-encrypted Postgres (AAD) + web UI + attestation endpoints + logging gate + rate limits/spend breaker. Free tier only — no payment path, but the µUSD cost accumulator (§8.2) runs in shadow mode from day one so the markup is set from measured costs, not guesses. OpenRouter keys live in the encrypted `provider_keys` store from day one (bootstrap-imported from `encrypted_env`, §4.4) so redeploy-free rotation exists before the console UI does. Staging → prod on chat's own governance. | Anonymous user chats privately end-to-end; verify page live; security review (incl. log-hygiene + XSS) passed; key-continuity test (§7.5) passed; ≥2 weeks of shadow cost data. |
+| **P2 — Accounts & tools** | Magic-link accounts, multi-device, anon→account rewrap, data export/deletion, BYOK, Lit Action tool calls with human-in-the-loop approvals, per-session attestation nonce UX. Billing goes live with accounts (§8) — an anonymous user has no ledger to charge. The `lit-chat-admin` console ships (§4.4): key lifecycle UI, spend caps, balance alerts, audit log, TEE-MAC'd admin roster. | Upgrade flow ships; first wallet-tool demo; counsel sign-off on §7.4 posture; markup + LITKEY decision (§8.5) made and metering reconciled against an OpenRouter invoice; ≥1 rehearsed in-console runtime-key rotation with zero dropped streams. |
 | **P3 — In-enclave inference & hardening** | llama.cpp container with baked-in small model (attested weights), confidential-GPU research spike, optional conversation hash-chaining, moderation decision for local models. | ≥1 in-enclave model in the picker with the "prompts never leave the enclave" badge. |
 
 Cut from earlier drafts (deliberately): a gVisor binary-action PoC phase — outbound-LLM-call feasibility is already proven in-repo by the `claude` gVisor example, and UX validation doesn't need a TEE; the week goes to the `lit-chat` skeleton instead.
@@ -292,6 +335,7 @@ Cut from earlier drafts (deliberately): a gVisor binary-action PoC phase — out
 6. **The markup number** (§8): 5% is a placeholder. Does chat instead carry a higher markup, a larger minimum top-up, or a subscription for heavy users — and does the 25% LITKEY funding discount apply to chat metering at all? Below-cost is the default outcome if this is left unanswered.
 7. Whether the frontend stays no-build vanilla JS at this feature size (streaming markdown + sanitization + SSE state) or becomes the repo's first build-step frontend — team taste decision.
 8. Open-source timing: template from day one, or after security review?
+9. Admin-plane exposure (§4.4): second published port vs admin subdomain vs allowlist/VPN-only — and does OpenRouter's provisioning API cover the full rotation lifecycle we need (per-key spend limits, disable-before-delete), or does any gap force manual dashboard steps beyond provisioning-key rotation?
 
 ## 12. Competitive comparison: Venice.ai
 
@@ -340,6 +384,6 @@ Sources: [Venice privacy architecture](https://venice.ai/blog/venice-ai-privacy-
 
 **Exists and is reused directly**: dstack `get_key` stateless derivation + keccak wrap; `aes.rs` AES-256-GCM construction (extended with AAD); dstack-ingress TLS-in-TEE; `/attestation` + `/info` endpoints and the CI verifier; Phala `encrypted_env` sealed secrets; per-IP token-bucket rate limiting (CPL-367); magic-link auth code shape (lit-triggers); Railway Postgres ops (lit-payments); digest-pinned, Sigstore-signed image pipeline; the whole credit ledger and its funding paths (`lit-billing-core` Stripe customer-balance credits, card/crypto/LITKEY top-ups, auto top-up, starter credits, the background-settle-with-retry charge path).
 
-**New builds**: the `lit-chat` service and CVM (compose, CI lanes, domain); SSE proxy with encrypt-on-completion; AAD extension to the AES helper; TEE-signed session tokens; the sub-cent µUSD metering accumulator and cost-plus markup (§8.2 — the existing ledger bottoms out at $0.01, so this is the one billing piece that cannot be reused); a chat Stripe customer keyed by the opaque `user_ref_hash` rather than a wallet address; the chat schema and envelope-encryption layer (first implementation of the CPL-364 off-TEE ciphertext pattern — the plan exists, the code does not); the chat frontend; identity→derivation-path mapping (documented in `auth-model.md` as the Stytch shape, previously unimplemented).
+**New builds**: the `lit-chat` service and CVM (compose, CI lanes, domain); SSE proxy with encrypt-on-completion; AAD extension to the AES helper; TEE-signed session tokens; the sub-cent µUSD metering accumulator and cost-plus markup (§8.2 — the existing ledger bottoms out at $0.01, so this is the one billing piece that cannot be reused); a chat Stripe customer keyed by the opaque `user_ref_hash` rather than a wallet address; the chat schema and envelope-encryption layer (first implementation of the CPL-364 off-TEE ciphertext pattern — the plan exists, the code does not); the chat frontend; identity→derivation-path mapping (documented in `auth-model.md` as the Stytch shape, previously unimplemented); the `lit-chat-admin` console (§4.4 — write-only key custody with masked hints, TEE-MAC'd admin roster and audit chain, OpenRouter provisioning-API rotation, second ingress exposure).
 
 **Explicitly not used for inference**: `/lit_action` and `/lit_binary_action` (no streaming, 1 MB response cap, no persistence ops, per-second billing, prod-gated gVisor). Lit Actions enter as the P2 tool-calling layer, which is where they're strong: governed, on-chain-permissioned, attested side effects.
