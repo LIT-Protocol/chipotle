@@ -1,0 +1,129 @@
+# Lit Chat CVM (plans/tee-chat-app.md section 4.2): a DEDICATED Phala dstack
+# CVM with its own compose_hash, its own attestation, its own domain, and its
+# own dstack app root — chat keys and platform PKP keys live in disjoint
+# derivation universes by construction.
+#
+# Image placeholders (DOCKER_IMAGE_*) are substituted with @sha256: digests by
+# the deploy workflow so the deployed compose references are immutable and
+# verifiable against compose_hash. Mutable tags are never deployed.
+#
+# Secrets (DATABASE_URL, RESEND_API_KEY, OPENROUTER_*, LIT_CHAT_*) are passed
+# as `phala deploy -e KEY=VALUE` encrypted env — sealed to the CVM, resolved
+# inside the TEE at container start. They never appear in this file.
+
+services:
+  # Consumer app: static frontend + auth + chat CRUD + SSE OpenRouter proxy.
+  lit-chat:
+    image: ${DOCKER_IMAGE_LIT_CHAT}
+    command: ["/app/lit-chat"]
+    working_dir: /app
+    ports:
+      - "8000:8000"
+    environment:
+      RUST_LOG: "info"                    # content-free logging gate (7.3); never trace
+      ROCKET_ADDRESS: "0.0.0.0"
+      ROCKET_PORT: "8000"
+      PUBLIC_BASE_URL: "https://${CHAT_DOMAIN}"
+      DATABASE_URL: ${LIT_CHAT_DATABASE_URL}          # app role: lit_chat_app
+      LIT_CHAT_DB_CA_CERT: ${LIT_CHAT_DB_CA_CERT}     # pinned CA -> sslmode=verify-full
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      MAIL_FROM: ${MAIL_FROM}
+      # Bootstrap only: imported into the encrypted provider_keys store on
+      # first boot; runtime custody moves there (rotation needs no redeploy).
+      OPENROUTER_PROVISIONING_KEY: ${OPENROUTER_PROVISIONING_KEY}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      LIT_CHAT_DAILY_SPEND_CAP_MICRO_USD: ${LIT_CHAT_DAILY_SPEND_CAP_MICRO_USD}
+      LIT_CHAT_ANON_DAILY_TOKENS: ${LIT_CHAT_ANON_DAILY_TOKENS}
+      LIT_CHAT_MARKUP_BPS: "500"          # placeholder; section 8.5 says decide before pricing goes live
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+    restart: unless-stopped
+
+  # Admin console: separate container, separate port, separate ingress,
+  # separate DB role (db/roles.sql — no grants on chat tables). Zero
+  # user-data routes; a full compromise here cannot read chats.
+  lit-chat-admin:
+    image: ${DOCKER_IMAGE_LIT_CHAT}
+    command: ["/app/lit-chat-admin"]
+    working_dir: /app
+    ports:
+      - "8100:8100"
+    environment:
+      RUST_LOG: "info"
+      ROCKET_ADDRESS: "0.0.0.0"
+      ROCKET_PORT: "8100"
+      PUBLIC_BASE_URL: "https://${CHAT_DOMAIN}:8443"
+      DATABASE_URL: ${LIT_CHAT_ADMIN_DATABASE_URL}    # admin role: lit_chat_admin
+      LIT_CHAT_DB_CA_CERT: ${LIT_CHAT_DB_CA_CERT}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      MAIL_FROM: ${MAIL_FROM}
+      LIT_CHAT_ADMIN_RP_ID: "${CHAT_DOMAIN}"
+      LIT_CHAT_ADMIN_ORIGIN: "https://${CHAT_DOMAIN}:8443"
+      # Bootstrap admin roster (comma-separated emails), MAC'd at boot.
+      LIT_CHAT_BOOTSTRAP_ADMINS: ${LIT_CHAT_BOOTSTRAP_ADMINS}
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+    depends_on:
+      lit-chat:
+        condition: service_started   # consumer runs migrations first
+    restart: unless-stopped
+
+  # TLS termination in-TEE for the consumer app: 443 -> lit-chat:8000.
+  # SSE: PROXY_*_TIMEOUTs long; token streams keep the connection non-idle,
+  # so the dstack-gateway 10-minute idle close is a non-issue.
+  dstack-ingress:
+    image: dstacktee/dstack-ingress:1.4@sha256:11c0481ca1e2ef9c959187ff3c01c7f59c26d631c7717a571ad994b96203bb0b
+    ports:
+      - "443:443"
+    environment:
+      DOMAIN: "${CHAT_DOMAIN}"
+      GATEWAY_DOMAIN: "_.${DSTACK_GATEWAY_DOMAIN}"
+      DNS_PROVIDER: "route53"
+      TARGET_ENDPOINT: "http://lit-chat:8000"
+      CERTBOT_EMAIL: "admin@litprotocol.com"
+      SET_CAA: "true"
+      AWS_ACCESS_KEY_ID: "${CERTBOT_AWS_ACCESS_KEY_ID}"
+      AWS_SECRET_ACCESS_KEY: "${CERTBOT_AWS_SECRET_ACCESS_KEY}"
+      AWS_ROLE_ARN: "${CERTBOT_AWS_ROLE_ARN}"
+      AWS_REGION: "${CERTBOT_AWS_REGION}"
+      PROXY_READ_TIMEOUT: "900s"
+      PROXY_SEND_TIMEOUT: "900s"
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+      - cert-data:/etc/letsencrypt
+    depends_on:
+      lit-chat:
+        condition: service_started
+    restart: unless-stopped
+
+  # Second ingress instance for the admin plane: same domain, port 8443 ->
+  # lit-chat-admin. The ugly URL is a feature (section 4.4); add source-IP
+  # allowlisting here as optional hardening.
+  dstack-ingress-admin:
+    image: dstacktee/dstack-ingress:1.4@sha256:11c0481ca1e2ef9c959187ff3c01c7f59c26d631c7717a571ad994b96203bb0b
+    ports:
+      - "8443:443"
+    environment:
+      DOMAIN: "${CHAT_DOMAIN}"
+      GATEWAY_DOMAIN: "_.${DSTACK_GATEWAY_DOMAIN}"
+      DNS_PROVIDER: "route53"
+      TARGET_ENDPOINT: "http://lit-chat-admin:8100"
+      CERTBOT_EMAIL: "admin@litprotocol.com"
+      SET_CAA: "true"
+      AWS_ACCESS_KEY_ID: "${CERTBOT_AWS_ACCESS_KEY_ID}"
+      AWS_SECRET_ACCESS_KEY: "${CERTBOT_AWS_SECRET_ACCESS_KEY}"
+      AWS_ROLE_ARN: "${CERTBOT_AWS_ROLE_ARN}"
+      AWS_REGION: "${CERTBOT_AWS_REGION}"
+      PROXY_READ_TIMEOUT: "300s"
+      PROXY_SEND_TIMEOUT: "300s"
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+      - cert-data-admin:/etc/letsencrypt
+    depends_on:
+      lit-chat-admin:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  cert-data:
+  cert-data-admin:

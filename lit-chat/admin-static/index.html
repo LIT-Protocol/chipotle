@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'">
+  <title>Lit Chat Admin</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Login flow -->
+    <section id="login-view" class="card center-card">
+      <h1>Lit Chat Admin</h1>
+      <p class="muted">Operational plane: provider keys, spend, breaker. This console has no
+         access to user conversations — by construction.</p>
+      <div id="step-email">
+        <input id="email" type="email" placeholder="admin email" autocomplete="email">
+        <button id="btn-request" class="btn btn-primary">Email me a code</button>
+      </div>
+      <div id="step-code" class="hidden">
+        <input id="code" type="text" placeholder="one-time code" autocomplete="one-time-code"
+               spellcheck="false" maxlength="8">
+        <button id="btn-verify" class="btn btn-primary">Verify code</button>
+      </div>
+      <div id="step-passkey" class="hidden">
+        <p class="muted" id="passkey-msg"></p>
+        <button id="btn-passkey" class="btn btn-primary">Continue with passkey</button>
+      </div>
+      <div id="login-error" class="error hidden"></div>
+    </section>
+
+    <!-- Console -->
+    <section id="console-view" class="hidden">
+      <header class="topbar">
+        <span class="brand">Lit Chat Admin</span>
+        <span id="whoami" class="muted mono"></span>
+        <button id="btn-logout" class="btn btn-ghost">Log out</button>
+      </header>
+
+      <div class="grid">
+        <div class="card" id="status-card">
+          <h2>Status</h2>
+          <div id="status-body" class="kv"></div>
+          <div class="row">
+            <label for="breaker-select">Breaker</label>
+            <select id="breaker-select">
+              <option value="auto">auto (follow daily cap)</option>
+              <option value="forced_on">forced on</option>
+              <option value="forced_accounts_only">accounts only</option>
+              <option value="forced_off">forced off</option>
+            </select>
+            <button id="btn-breaker" class="btn">Apply</button>
+          </div>
+          <div class="row">
+            <label for="cap-usd">Daily cap $</label>
+            <input id="cap-usd" type="number" step="0.01" min="0">
+            <label for="anon-budget">Anon tokens/day</label>
+            <input id="anon-budget" type="number" min="0">
+            <button id="btn-caps" class="btn">Save caps</button>
+          </div>
+        </div>
+
+        <div class="card" id="keys-card">
+          <h2>OpenRouter keys</h2>
+          <p class="muted">Write-only custody: keys are shown masked, always. There is no
+             reveal — the enclave is the only caller of OpenRouter.</p>
+          <table id="keys-table">
+            <thead>
+              <tr><th>Key</th><th>Kind</th><th>Status</th><th>Limit</th><th>Actions</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div class="row">
+            <input id="mint-name" type="text" placeholder="key name (e.g. prod-2026-08)">
+            <input id="mint-limit" type="number" step="0.01" min="0" placeholder="spend limit $">
+            <button id="btn-mint" class="btn btn-primary">Mint runtime key</button>
+          </div>
+          <div class="row">
+            <input id="import-key" type="password" placeholder="paste key (import, write-only)"
+                   autocomplete="off">
+            <select id="import-kind">
+              <option value="runtime">runtime</option>
+              <option value="provisioning">provisioning</option>
+            </select>
+            <button id="btn-import" class="btn">Import</button>
+          </div>
+        </div>
+
+        <div class="card" id="models-card">
+          <h2>Model catalog (ZDR policy)</h2>
+          <table id="models-table">
+            <thead><tr><th>Model</th><th>ZDR</th><th>Enabled</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="card" id="admins-card">
+          <h2>Admin roster</h2>
+          <p class="muted">Rows are enclave-MAC'd; a row an operator inserts by hand is
+             ignored and shows as invalid here.</p>
+          <table id="admins-table">
+            <thead><tr><th>User (hash)</th><th>Granted by</th><th>MAC</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div class="row">
+            <input id="grant-email" type="email" placeholder="new admin email">
+            <button id="btn-grant" class="btn">Grant admin</button>
+          </div>
+        </div>
+
+        <div class="card wide" id="audit-card">
+          <h2>Audit log</h2>
+          <table id="audit-table">
+            <thead>
+              <tr><th>When</th><th>Actor</th><th>Action</th><th>Subject</th><th>Detail</th><th>Chain</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

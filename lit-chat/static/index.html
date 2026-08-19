@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- CSP is also enforced server-side (headers.rs); this meta is defense in
+       depth for any path that serves the file without the fairing. -->
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'">
+  <title>Lit Chat — private by architecture</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="brand">
+        <span class="brand-name">Lit Chat</span>
+        <span class="brand-tag">private by architecture</span>
+      </div>
+      <button id="new-chat" class="btn btn-primary">New chat</button>
+      <nav id="conversation-list" aria-label="Conversations"></nav>
+      <div class="sidebar-footer">
+        <div id="account-box">
+          <div id="account-status" class="muted">Anonymous session</div>
+          <button id="btn-login" class="btn btn-ghost">Save my history</button>
+          <button id="btn-logout" class="btn btn-ghost hidden">Log out</button>
+        </div>
+        <div class="footer-links">
+          <button id="btn-privacy" class="link-btn">Privacy &amp; trust</button>
+          <button id="btn-export" class="link-btn">Export</button>
+          <button id="btn-delete-account" class="link-btn danger">Delete all data</button>
+        </div>
+      </div>
+    </aside>
+
+    <main id="main">
+      <header id="topbar">
+        <div id="conv-title" class="conv-title">New conversation</div>
+        <div class="topbar-controls">
+          <select id="model-picker" aria-label="Model"></select>
+          <span id="model-badge" class="badge badge-external" title=""></span>
+        </div>
+      </header>
+
+      <section id="messages" aria-live="polite"></section>
+
+      <div id="empty-state" class="empty-state">
+        <h2>Your conversations are private — by architecture, not by policy.</h2>
+        <p>Your chat history is post-quantum encrypted at rest, and Lit cannot access it.
+           Models you pick here are routed only to zero-data-retention providers; prompts
+           do leave the enclave to the model provider while a response is generated.</p>
+        <p class="muted">Anonymous by default. Lose this browser's cookie and this history
+           is unreachable — by anyone. Use "Save my history" to attach an email.</p>
+      </div>
+
+      <footer id="composer">
+        <div id="budget-note" class="muted hidden"></div>
+        <div class="composer-row">
+          <textarea id="input" rows="1" placeholder="Message Lit Chat…"
+                    aria-label="Message"></textarea>
+          <button id="btn-send" class="btn btn-primary" title="Send">Send</button>
+          <button id="btn-stop" class="btn btn-danger hidden" title="Stop">Stop</button>
+        </div>
+        <div class="composer-hints muted">
+          <span id="privacy-hint">External model: prompts leave the enclave (ZDR providers only)</span>
+        </div>
+      </footer>
+    </main>
+  </div>
+
+  <!-- Login modal -->
+  <dialog id="login-modal">
+    <form method="dialog" class="modal-body" id="login-form">
+      <h3>Save your history</h3>
+      <p class="muted">We'll email you a one-time code. Your address is used to derive your
+         key inside the enclave — it is never stored in any database.</p>
+      <div id="login-step-email">
+        <input id="login-email" type="email" placeholder="you@example.com" required
+               autocomplete="email">
+        <button id="btn-send-code" class="btn btn-primary" type="button">Email me a code</button>
+      </div>
+      <div id="login-step-code" class="hidden">
+        <p class="muted">Enter the code from the email — in this tab (that's part of the
+           security model).</p>
+        <input id="login-code" type="text" placeholder="ABCD2345" autocomplete="one-time-code"
+               spellcheck="false" maxlength="8">
+        <button id="btn-verify-code" class="btn btn-primary" type="button">Verify</button>
+      </div>
+      <div id="login-error" class="error hidden"></div>
+      <button class="link-btn" value="cancel">Cancel</button>
+    </form>
+  </dialog>
+
+  <!-- Privacy panel -->
+  <dialog id="privacy-modal">
+    <div class="modal-body">
+      <h3>What's protected — and what isn't</h3>
+      <ul class="privacy-list">
+        <li><b>Protected:</b> your chat history is ciphertext everywhere outside the enclave.
+            Keys are derived inside the TEE from your session and never stored. The at-rest
+            envelope is symmetric-only (AES-256-GCM), which is why the stored-history claim is
+            post-quantum.</li>
+        <li><b>Protected:</b> sessions are signed inside the enclave. A database operator
+            cannot mint one.</li>
+        <li><b>Not protected:</b> while a response is generated, your prompt is sent to the
+            selected external model provider (zero-data-retention routes only). "Prompts never
+            leave the enclave" arrives with in-enclave models.</li>
+        <li><b>Not protected:</b> traffic metadata (timing, sizes) and — if you pay later —
+            payment records.</li>
+        <li><b>Anonymous sessions:</b> the cookie in this browser IS the capability. It cannot
+            be revoked or recovered. Deleting it orphans this history permanently.</li>
+        <li><b>Deletion:</b> deleting a conversation removes it immediately; encrypted copies
+            persist in database backups until backup expiry (target ≤ 30 days). We do not use
+            the phrase "crypto-shred".</li>
+      </ul>
+      <p><a href="/attestation" target="_blank" rel="noopener">Attestation quote</a> ·
+         <a href="/info" target="_blank" rel="noopener">Deployment info (compose hash)</a></p>
+      <p class="muted">The serving code is attested; changing it is a visible, governed event.</p>
+      <form method="dialog"><button class="btn btn-ghost">Close</button></form>
+    </div>
+  </dialog>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

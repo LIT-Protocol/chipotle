@@ -1,0 +1,54 @@
+[package]
+name = "lit-chat"
+version = "0.1.0"
+edition = "2021"
+description = "Lit Chat - private web chat served from a TEE (plans/tee-chat-app.md)"
+license = "Apache-2.0"
+
+[[bin]]
+name = "lit-chat"
+path = "src/bin/lit-chat.rs"
+
+[[bin]]
+name = "lit-chat-admin"
+path = "src/bin/lit-chat-admin.rs"
+
+[features]
+default = []
+# Production deploy (Phala CVM): hardcoded dstack socket, no env override,
+# no dev master-key fallback, no code echo.
+production = []
+
+[dependencies]
+anyhow = "1.0"
+aes-gcm = "0.10"
+base64 = "0.22"
+dstack-sdk = "0.1.2"
+futures = "0.3"
+hex = "0.4"
+hkdf = "0.12"
+hmac = "0.12"
+moka = { version = "0.12", features = ["future"] }
+rand = "0.8"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+rocket = { version = "0.5.1", features = ["json", "uuid"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+sha3 = "0.10"
+sqlx = { version = "0.8", features = [
+    "postgres",
+    "runtime-tokio",
+    "uuid",
+    "time",
+    "macros",
+    "tls-rustls-ring-webpki",
+] }
+subtle = "2.6"
+time = { version = "0.3", features = ["serde", "formatting", "macros"] }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+webauthn-rs = { version = "0.5", features = ["danger-allow-state-serialisation"] }
