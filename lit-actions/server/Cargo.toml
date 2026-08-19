@@ -19,6 +19,9 @@ deno_resolver = { workspace = true }
 deno_runtime = { workspace = true }
 flume = { workspace = true }
 futures = "0.3"
+# `client-legacy` exposes `connect::dns::Name`, the argument type of
+# deno_fetch's custom-DNS `Resolve` trait used by the egress filter (CPL-295).
+hyper-util = { version = "0.1", features = ["client-legacy"] }
 indoc = { workspace = true }
 ipfs-hasher = "0.13.0"
 lit-actions-ext = { workspace = true }
