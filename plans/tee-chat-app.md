@@ -106,7 +106,7 @@ A separate CVM gives lit-chat its **own dstack app root**: chat keys and platfor
 **Envelope encryption**
 - **User KEK** (32 bytes): `get_key("chat/v1/user/{user_ref}", "chat-kek")` against the chat CVM's own dstack socket, keccak-wrapped per the platform discipline. Derived on demand, never stored, never leaves the enclave.
 - **Per-conversation DEK**: random 32 bytes minted in-enclave at conversation creation; stored wrapped by the KEK.
-- All content encryption is AES-256-GCM (the `aes.rs` construction) **extended with AAD** — this is a hard requirement, not an optimization:
+- All content encryption is AES-256-GCM (based on `lit-api-server/src/actions/aes.rs`, but **must be extended to support Additional Authenticated Data (AAD)**) — this is a hard requirement, not an optimization:
   - message ciphertext AAD = `(conversation_id, message_id, seq, role)`
   - `wrapped_dek` AAD = `(user_ref_hash, conversation_id)`
   - `enc_title` AAD = `conversation_id`
