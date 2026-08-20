@@ -68,6 +68,30 @@ fn missing_key_outcome<T>(request: &Request<'_>) -> Outcome<T, ()> {
     Outcome::Error((Status::Unauthorized, ()))
 }
 
+/// Reject an API-key header whose shape is a precomputed 32-byte account hash
+/// (`0x<64hex>`). Such identities must arrive only through the verified
+/// `X-Wallet-Auth` (EIP-712) path: `usage_api_key_to_hash` passes this shape
+/// through as an already-hashed identity (CPL-285), so a caller who sends
+/// `X-Api-Key: 0x{keccak256(walletAddress)}` would resolve straight to a
+/// victim's on-chain billing account without proving ownership. `BillingAuth`
+/// in lit-billing-core already rejects this on its legacy API-key path; the
+/// two Billed* guards did not. Not currently exploitable end-to-end (downstream
+/// re-hashing → contract revert → no charge), but this closes the gap at the
+/// request boundary as defense in depth (CPL-379 L1).
+fn reject_precomputed_hash_shape<T>(request: &Request<'_>) -> Outcome<T, ()> {
+    tracing::warn!(
+        "rejecting API-key header that looks like a precomputed account hash; \
+         ChainSecured callers must use X-Wallet-Auth"
+    );
+    set_error_detail(
+        request,
+        "API key looks like a precomputed account hash, not a raw key.",
+        "ChainSecured callers must authenticate with X-Wallet-Auth (EIP-712 signature), \
+         not by sending the account hash as an API key.",
+    );
+    Outcome::Error((Status::Unauthorized, ()))
+}
+
 /// Map a [`BillingError`] to an HTTP status and attach a specific detail for
 /// the JSON catchers.
 fn billing_error_status(request: &Request<'_>, e: BillingError) -> Status {
@@ -144,6 +168,9 @@ impl<'r> FromRequest<'r> for BilledManagementApiKey {
         let Some(key) = extract_api_key(request) else {
             return missing_key_outcome(request);
         };
+        if crate::utils::parse_with_hash::is_precomputed_hash_shape(&key) {
+            return reject_precomputed_hash_shape(request);
+        }
 
         if let Some(state) = request.rocket().state::<Option<Arc<StripeState>>>()
             && let Some(stripe) = state.as_ref()
@@ -267,6 +294,9 @@ impl<'r> FromRequest<'r> for BilledLitActionApiKey {
         let Some(key) = extract_api_key(request) else {
             return missing_key_outcome(request);
         };
+        if crate::utils::parse_with_hash::is_precomputed_hash_shape(&key) {
+            return reject_precomputed_hash_shape(request);
+        }
 
         // If Stripe is configured, verify the customer has credits available.
         // Requiring 1 cent reproduces the old `balance >= 0 → reject` rule.
@@ -310,5 +340,87 @@ impl<'r> OpenApiFromRequest<'r> for BilledLitActionApiKey {
             },
             extensions: Object::default(),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rocket::http::Header;
+    use rocket::local::asynchronous::Client;
+    use rocket::{get, routes};
+
+    /// A lowercase 0x-prefixed 32-byte hex string — the precomputed-hash shape
+    /// that must never be accepted as a raw API key (CPL-379 L1 / CPL-285).
+    const HASH_KEY: &str = "0x0000000000000000000000000000000000000000000000000000000000000001";
+
+    #[get("/lit-action")]
+    fn lit_action_probe(key: BilledLitActionApiKey) -> String {
+        key.0
+    }
+
+    #[get("/management")]
+    fn management_probe(key: BilledManagementApiKey) -> String {
+        key.0
+    }
+
+    /// With no `StripeState` managed, both guards short-circuit the billing
+    /// check and succeed for a normal key — so these tests isolate the
+    /// precomputed-hash rejection from any Stripe interaction.
+    async fn client() -> Client {
+        let rocket = rocket::build().mount("/", routes![lit_action_probe, management_probe]);
+        Client::tracked(rocket).await.expect("valid rocket")
+    }
+
+    #[tokio::test]
+    async fn lit_action_guard_rejects_precomputed_hash_in_x_api_key() {
+        let c = client().await;
+        let resp = c
+            .get("/lit-action")
+            .header(Header::new("X-Api-Key", HASH_KEY))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn lit_action_guard_rejects_precomputed_hash_in_bearer() {
+        let c = client().await;
+        let resp = c
+            .get("/lit-action")
+            .header(Header::new("Authorization", format!("Bearer {HASH_KEY}")))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn management_guard_rejects_precomputed_hash() {
+        let c = client().await;
+        let resp = c
+            .get("/management")
+            .header(Header::new("X-Api-Key", HASH_KEY))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn guards_accept_a_normal_raw_key() {
+        // A raw key is not hash-shaped; with Stripe unconfigured the guard
+        // admits it (no charge) and the probe echoes it back unchanged.
+        let c = client().await;
+        for path in ["/lit-action", "/management"] {
+            let resp = c
+                .get(path)
+                .header(Header::new("X-Api-Key", "a-normal-raw-api-key"))
+                .dispatch()
+                .await;
+            assert_eq!(resp.status(), Status::Ok, "path {path}");
+            assert_eq!(
+                resp.into_string().await.unwrap_or_default(),
+                "a-normal-raw-api-key"
+            );
+        }
     }
 }

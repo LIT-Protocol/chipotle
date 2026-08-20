@@ -1,10 +1,18 @@
 //! Per-grant and per-operator-per-day cap enforcement.
 
 use anyhow::Result;
-use sqlx::PgPool;
+use sqlx::PgExecutor;
 
 /// Sum of cents granted by this operator in the last 24 hours.
-pub async fn cents_granted_last_24h(pool: &PgPool, operator_id: i64) -> Result<i64> {
+///
+/// Accepts any `PgExecutor` so the caller can run this inside the same
+/// transaction that holds the per-operator advisory lock (CPL-379 L5): reading
+/// the total and inserting the grant under one lock makes the cap check
+/// atomic against concurrent grants by the same operator.
+pub async fn cents_granted_last_24h(
+    executor: impl PgExecutor<'_>,
+    operator_id: i64,
+) -> Result<i64> {
     // PostgreSQL returns SUM(bigint) as NUMERIC, which sqlx will not decode into
     // i64 directly. Cast after COALESCE so both the empty and non-empty cases
     // return INT8 for Rust.
@@ -14,7 +22,7 @@ pub async fn cents_granted_last_24h(pool: &PgPool, operator_id: i64) -> Result<i
          WHERE operator_id = $1 AND created_at > now() - interval '24 hours'",
     )
     .bind(operator_id)
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await?;
     Ok(cents)
 }

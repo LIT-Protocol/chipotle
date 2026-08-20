@@ -478,10 +478,17 @@ fn build_rocket(
         Method::from_str("Patch").expect("Invalid method: Patch"),
     ]);
 
+    // CORS: allow any origin, but NOT with credentials. rocket_cors reflects the
+    // request Origin into `Access-Control-Allow-Origin`; pairing that reflection
+    // with `Access-Control-Allow-Credentials: true` (the prior config) lets any
+    // site make credentialed cross-origin requests. This API authenticates via
+    // the `X-Api-Key` / `Authorization` headers, never cookies (no CookieJar
+    // usage anywhere in the crate), so credential mode is unnecessary. Keeping it
+    // off avoids the footgun should cookie auth ever be added (CPL-379 L2).
     let cors = rocket_cors::CorsOptions {
         allowed_origins: AllowedOrigins::all(),
         allowed_methods,
-        allow_credentials: true,
+        allow_credentials: false,
         ..Default::default()
     }
     .to_cors()

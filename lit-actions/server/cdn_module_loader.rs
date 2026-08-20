@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use base64::Engine;
@@ -65,6 +65,17 @@ pub(crate) const MAX_MODULE_COUNT: usize = 100;
 
 /// Thread-safe cache for fetched and integrity-verified module sources.
 pub type ModuleCache = Arc<RwLock<HashMap<String, Vec<u8>>>>;
+
+/// Serializes appends to the shared on-disk integrity lockfile across every
+/// worker runtime in this process (CPL-379 L4). The lockfile (and the module
+/// cache it mirrors) is process-wide shared state built once at startup, so
+/// concurrent action executions can otherwise race to append — duplicating a
+/// URL's pin line or interleaving with a concurrent reader. Appends happen only
+/// on the first fetch of a new module (TOFU pin), so a single process-wide lock
+/// has no meaningful contention cost. (Cross-process writers sharing one file
+/// on disk would additionally need an OS advisory lock; that is outside the
+/// supported single-process-per-node deployment.)
+static LOCKFILE_APPEND_LOCK: Mutex<()> = Mutex::new(());
 
 // Re-export from ext crate for convenience.
 pub use lit_actions_ext::bindings::{LoadedModuleInfo, LoadedModules};
@@ -553,6 +564,13 @@ impl CdnModuleLoader {
 
             if let Some(ref path) = self.lockfile_path {
                 use std::io::Write;
+                // Serialize the open+append+flush against other workers pinning
+                // concurrently (CPL-379 L4). Recover from a poisoned lock rather
+                // than propagating the panic — a prior writer's panic must not
+                // permanently wedge all future pins.
+                let _lock_guard = LOCKFILE_APPEND_LOCK
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 let mut file = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)

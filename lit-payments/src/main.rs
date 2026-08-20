@@ -29,6 +29,10 @@ async fn rocket() -> _ {
     if let Err(e) = auth::session::purge_expired(&pool).await {
         tracing::warn!("session purge on boot failed: {e}");
     }
+    // Same for consumed magic-link single-use records past their expiry.
+    if let Err(e) = auth::used_link::purge_expired(&pool).await {
+        tracing::warn!("used magic-link purge on boot failed: {e}");
+    }
 
     let mailer =
         mail::Mailer::new(cfg.resend_api_key.clone(), cfg.mail_from.clone()).expect("mailer");
