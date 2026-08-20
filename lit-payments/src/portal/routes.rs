@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 use super::caps::{self, CapCheck};
 use super::db;
+use super::rate_limit::PreviewRateLimit;
 use super::types::{
     CustomerMatch, CustomerPreviewResponse, ErrorResponse, GrantRequest, GrantResponse, GrantRow,
     GrantsResponse, LookupResponse,
@@ -126,13 +127,62 @@ pub async fn lookup_customer(
     }
 }
 
+/// Mask an email for the public preview endpoint (CPL-376).
+///
+/// `GET /api/customer/preview` is unauthenticated, so returning raw emails lets
+/// anyone enumerate on-chain wallets and harvest a wallet↔email de-anonymization
+/// dataset. Masking preserves enough shape for the legitimate payer — who
+/// already knows the account email — to recognize it on the pay page, while
+/// destroying the value of a scraped dataset:
+///
+/// - `brendon@litprotocol.com` → `b***n@l***l.com`
+/// - `a@b.co`                  → `a***@b***.co`
+///
+/// Anything without a usable `local@domain` shape is fully masked to `***`
+/// rather than risk echoing a raw string.
+pub fn mask_email(email: &str) -> String {
+    let email = email.trim();
+    match email.rsplit_once('@') {
+        Some((local, domain)) if !local.is_empty() && !domain.is_empty() => {
+            format!("{}@{}", mask_segment(local), mask_domain(domain))
+        }
+        _ => "***".to_string(),
+    }
+}
+
+/// Reveal the first (and, when long enough, last) character of a segment and
+/// replace the interior with a fixed `***` so the exact length isn't leaked.
+fn mask_segment(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    match chars.len() {
+        0 => "***".to_string(),
+        // 1–2 chars: revealing both ends would expose the whole segment.
+        1 | 2 => format!("{}***", chars[0]),
+        _ => format!("{}***{}", chars[0], chars[chars.len() - 1]),
+    }
+}
+
+/// Mask a domain, keeping the (low-value, public) TLD intact and masking the
+/// registrable label. `litprotocol.com` → `l***l.com`.
+fn mask_domain(domain: &str) -> String {
+    match domain.rsplit_once('.') {
+        Some((name, tld)) if !name.is_empty() && !tld.is_empty() => {
+            format!("{}.{}", mask_segment(name), tld)
+        }
+        _ => mask_segment(domain),
+    }
+}
+
 /// `GET /api/customer/preview?wallet=…`
 ///
 /// Public wallet-only customer preview for the pay-with-LITKEY page. Exposes
 /// only the account identity the user is about to credit; never exposes Stripe
-/// customer ids or balances.
+/// customer ids or balances. The email is **masked** (CPL-376) so the endpoint
+/// can't be scraped into a wallet↔email dataset, and it's throttled per client
+/// IP by the [`PreviewRateLimit`] guard, which runs before the Stripe lookup.
 #[get("/api/customer/preview?<wallet>")]
 pub async fn preview_customer(
+    _rate_limit: PreviewRateLimit,
     wallet: Option<&str>,
     stripe: &State<StripeClient>,
 ) -> ApiResult<CustomerPreviewResponse> {
@@ -146,7 +196,7 @@ pub async fn preview_customer(
     Ok(Json(match summary {
         Some(summary) => CustomerPreviewResponse {
             found: true,
-            email: summary.email,
+            email: summary.email.as_deref().map(mask_email),
             wallet_address: summary.wallet_address.or(Some(wallet)),
         },
         None => CustomerPreviewResponse {
@@ -376,5 +426,31 @@ mod tests {
     fn canonical_wallet_param_rejects_non_addresses() {
         assert!(canonical_wallet_param("not-a-wallet").is_err());
         assert!(canonical_wallet_param("0x1234").is_err());
+    }
+
+    #[test]
+    fn mask_email_masks_local_and_domain_but_keeps_tld() {
+        assert_eq!(mask_email("brendon@litprotocol.com"), "b***n@l***l.com");
+        assert_eq!(mask_email("a@b.co"), "a***@b***.co");
+    }
+
+    #[test]
+    fn mask_email_never_reveals_short_segments_whole() {
+        // 1–2 char local/label must not be echoed in full.
+        assert_eq!(mask_email("jo@hi.io"), "j***@h***.io");
+        assert!(!mask_email("jo@example.com").contains("jo@"));
+    }
+
+    #[test]
+    fn mask_email_fully_masks_malformed_input() {
+        assert_eq!(mask_email("no-at-sign"), "***");
+        assert_eq!(mask_email("@nolocal.com"), "***");
+        assert_eq!(mask_email("nodomain@"), "***");
+        assert_eq!(mask_email(""), "***");
+    }
+
+    #[test]
+    fn mask_email_trims_before_masking() {
+        assert_eq!(mask_email("  brendon@litprotocol.com  "), "b***n@l***l.com");
     }
 }
