@@ -124,27 +124,53 @@ yanked = "warn"
 #   tar 0.4.45 -> 0.4.46 was attempted but BLOCKED: deno_npm_cache requires
 #   =0.4.45, so GHSA-3pv8 (tar PAX desync) stays Dependabot-dismissed until deno
 #   bumps. No RUSTSEC id assigned, so no ignore entry needed here.
+# - 2026-08-19: two advisories published on 2026-08-18 turned every Rust CI job
+#   red at once (all six matrix workspaces). Neither is fixable in-house:
+#   * RUSTSEC-2026-0258 (h2 unbounded empty DATA frames, low severity). Two h2
+#     lines were in the graph. The hyper-1.x line was bumped 0.4.12/0.4.13/
+#     0.4.14 -> 0.4.16 (the patched release) in lit-actions, lit-core,
+#     lit-api-server, lit-billing-core, lit-payments and lit-triggers —
+#     lockfile-only, and h2 0.4.16's dep set and MSRV (1.63) are identical to
+#     0.4.14, so it is a version+checksum edit with no graph change. h2 0.3.27
+#     stays: it is the FINAL 0.3.x and got no backport, so no bump exists. Held
+#     by rocket 0.5.1 -> rocket_http -> hyper ^0.14 everywhere, plus the zerossl
+#     fork's reqwest 0.11.27 in lit-actions/lit-core/lit-api-server.
+#     TRAP for whoever does the next bump: `cargo update -p h2 --precise 0.4.16`
+#     under cargo 1.91 also downgrades socket2 0.6.x -> 0.5.10 and shuffles
+#     windows-sys/syn, because the MSRV-aware resolver re-resolves the whole
+#     graph against 1.91 while these lockfiles were written by a newer cargo.
+#     Bump the one package in isolation and prove it with `cargo metadata
+#     --locked` instead of accepting the resolver's cascade.
+#   * RUSTSEC-2026-0249 (smartstring unmaintained; repo archived 2026-05-03, all
+#     versions affected, no successor release). lit-actions only, sole path
+#     swc_ecma_lexer 26.0.0 <- deno_ast =0.53.2 — the deno pin again.
+#   Both entries added below.
 #
 # ── BLOCKER SUMMARY (2026-06-09 audit) ───────────────────────────────────────
 # Every remaining entry is held by a source we cannot move without either
 # forking an upstream dep or waiting for an upstream release. Grouped by blocker:
 #
-#   deno (frozen transitive pins, lit-actions)      9 entries:
+#   deno (frozen transitive pins, lit-actions)     10 entries:
 #       2026-0009 (time 0.3.44 <- swc/serde), 2026-0049/0098/0099/0104
 #       (rustls-webpki 0.102.8 <- rustls =0.23.40), 2026-0118/0119
 #       (hickory 0.25.2), 2026-0097 (rand =0.8.5), 2025-0141 (bincode 1.x),
-#       2023-0071 (rsa 0.9.9). Fix = a deno release that bumps these, or
-#       forking deno (explicitly rejected — see 2026-06-09 deno note above).
-#   rocket 0.5.1 (no released rustls-0.23 build)    co-blocks 4 entries:
-#       2026-0098/0099/0104 (webpki 0.101.7), 2025-0134 (rustls-pemfile).
-#       Only 0.6.0-dev (git) uses rustls 0.23; a framework swap clears NONE of
-#       these alone because deno also fires the webpki trio. Not worth it.
+#       2023-0071 (rsa 0.9.9), 2026-0249 (smartstring <- swc_ecma_lexer).
+#       Fix = a deno release that bumps these, or forking deno (explicitly
+#       rejected — see 2026-06-09 deno note above).
+#   rocket 0.5.1 (frozen rustls 0.21 + hyper 0.14)  co-blocks 5 entries:
+#       2026-0098/0099/0104 (webpki 0.101.7), 2025-0134 (rustls-pemfile),
+#       2026-0258 (h2 0.3.27 <- hyper ^0.14). Only 0.6.0-dev (git) is on
+#       rustls 0.23 + hyper 1.x. A framework swap clears NONE of the webpki
+#       trio alone (deno fires those too), but it WOULD clear 2026-0258 in
+#       lit-billing-core/lit-payments/lit-triggers — the three with no
+#       zerossl/reqwest-0.11 chain. Still not worth it on its own.
 #   Alloy                                            2 entries:
 #       2026-0173 (proc-macro-error2), part of 2024-0436 (paste).
-#   no upstream fix exists at all                    4 entries:
+#   no upstream fix exists at all                    6 entries:
 #       2023-0071 (rsa Marvin, no const-time impl), 2026-0118 (hickory, only
 #       0.26-beta), 2024-0436 (paste, crate abandoned), 2025-0141 (bincode 1.x
-#       EOL). These stay even if every framework above moves.
+#       EOL), 2026-0249 (smartstring, repo archived), 2026-0258 (h2 0.3.x got
+#       no backport). These stay even if every framework above moves.
 #   (groups overlap: e.g. rsa/hickory/bincode are both deno-pinned AND fixless.)
 #
 # CONCLUSION: without forking deno/rocket/Alloy, NO further entry can be
@@ -163,6 +189,7 @@ ignore = [
     { id = "RUSTSEC-2026-0104", reason = "rustls-webpki CRL parsing panic — fixed in 0.103. TWO blockers: deno_tls's 0.102.8 (lit-actions) AND rocket 0.5.1's rustls 0.21 -> rustls-webpki 0.101.7 (lit-core/lit-api-server). WAITING ON: deno (rustls >0.23.40) AND a rocket release on rustls 0.23 (only in unreleased 0.6.0-dev). Not removable without forking deno and/or git-pinning rocket." },
     { id = "RUSTSEC-2026-0118", reason = "hickory NSEC3 unbounded loop — NO stable fix released (only 0.26.0-beta.1+). hickory-proto 0.25.2 via deno_net (lit-actions). BLOCKER: no stable hickory fix + deno transitive. WAITING ON: hickory 0.26 stable AND deno adopting it. Not removable." },
     { id = "RUSTSEC-2026-0119", reason = "hickory DNS O(n^2) name compression — fixed in >=0.26.1. hickory-proto 0.25.2 via deno_net (lit-actions). BLOCKER: deno's hickory 0.25 pin. WAITING ON: deno adopting hickory 0.26. Not removable without forking deno." },
+    { id = "RUSTSEC-2026-0258", reason = "h2 unbounded empty DATA frames (low severity) — fixed in >=0.4.16 ONLY; 0.3.27 is the final 0.3.x release and the fix was never backported. The hyper-1.x side was bumped 0.4.12/0.4.13/0.4.14 -> 0.4.16 in all six h2-bearing lockfiles, so the only remaining hit is h2 0.3.27 under hyper 0.14.32. TWO blockers: rocket 0.5.1 -> rocket_http -> hyper ^0.14 (all six workspaces) AND the zerossl fork's reqwest 0.11.27 (lit-actions/lit-core/lit-api-server). WAITING ON: a rocket release on hyper 1.x (only in unreleased 0.6.0-dev) + bumping zerossl's reqwest to 0.12. Same blocker pair as RUSTSEC-2025-0134. Not removable without git-pinning rocket and re-forking zerossl." },
 
     # ── unsound ───────────────────────────────────────────────────────────────
     { id = "RUSTSEC-2026-0097", reason = "rand RngCore fill_bytes unsound — fixed in >=0.8.6 / >=0.9.3. Fires only in lit-actions: rand =0.8.5 hard-pinned by deno_crypto/deno_kv/deno_ast. Cleared in lit-api-server/payments (0.8.6/0.9.4) and the generator workspace (lockfile bumped 0.8.5->0.8.6, 0.9.2->0.9.4 via alloy-signer-local). BLOCKER: deno's rand =0.8.5 pin. WAITING ON: deno bumping rand. Not removable without forking deno." },
@@ -172,6 +199,7 @@ ignore = [
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained (folded into rustls-pki-types) — rustls-pemfile 1.0.4 via rocket_http 0.5.1 AND the zerossl fork's reqwest 0.11.27 (lit-core/lit-actions). BLOCKER: rocket has no released rustls-0.23 version. WAITING ON: a rocket release on rustls 0.23 (unreleased 0.6) + bumping zerossl's reqwest to 0.12. Not removable without git-pinning rocket." },
     { id = "RUSTSEC-2025-0141", reason = "bincode 1.x unmaintained (2.x is a non-drop-in rewrite) — bincode 1.3.3 via deno_kv (lit-actions). BLOCKER: deno_kv's bincode 1.x pin. WAITING ON: deno_kv migrating to bincode 2.x. Not removable without forking deno." },
     { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 unmaintained — via alloy-sol-macro/alloy-sol-macro-expander (lit-api-server/generator/payments). BLOCKER: Alloy's proc-macro-error2 dep. WAITING ON: Alloy dropping proc-macro-error2. Not removable without forking Alloy." },
+    { id = "RUSTSEC-2026-0249", reason = "smartstring unmaintained — repo archived 2026-05-03, ALL versions affected, no successor release (the advisory's suggested compact_str/smol_str swap is an upstream change, not ours). Fires only in lit-actions: smartstring 1.0.1 via swc_ecma_lexer 26.0.0 <- deno_ast =0.53.2. Absent from every other lockfile. BLOCKER: deno_ast's swc pin + no fixed release exists. WAITING ON: swc dropping smartstring AND deno bumping deno_ast. Not removable without forking deno/swc." },
 ]
 
 [sources]
