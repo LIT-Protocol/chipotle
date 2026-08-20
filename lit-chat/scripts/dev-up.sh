@@ -9,6 +9,7 @@
 #   ./scripts/dev-up.sh                # start everything, tail logs (ctrl-c stops apps)
 #   ./scripts/dev-up.sh --reconfigure  # re-run the prompts, keep the master key
 #   ./scripts/dev-up.sh --down         # stop apps and the Postgres container
+#   ./scripts/dev-up.sh --code         # print the most recent sign-in code
 #
 # Sign-in codes: with no mailer configured, codes are printed to the logs
 # (LIT_CHAT_DEV_ECHO_CODES). Watch the tail output for "sign-in code".
@@ -29,6 +30,20 @@ ADMIN_PORT=8100
 
 say()  { printf '\033[1;36m[dev-up]\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m[dev-up]\033[0m %s\n' "$*" >&2; exit 1; }
+
+# ---------------------------------------------------------------------------
+# --code: print the most recent echoed sign-in code (chat or admin) and exit.
+
+if [ "${1:-}" = "--code" ]; then
+  line=$(grep -h "sign-in code" "$LOG_DIR"/*.log 2>/dev/null | tail -1)
+  if [ -n "$line" ]; then
+    printf '%s\n' "$line" | sed 's/.*sign-in code: /code: /'
+    say "codes are single-use and expire after 15 minutes; request a fresh one if it's stale."
+  else
+    fail "no sign-in code found yet — submit your email in the app first."
+  fi
+  exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # --down: stop everything and exit.
@@ -129,7 +144,9 @@ mkdir -p "$LOG_DIR"
 
 export DATABASE_URL="postgres://postgres:postgres@localhost:$PG_PORT/postgres"
 export LIT_CHAT_DEV_ECHO_CODES=true
-export RUST_LOG="${RUST_LOG:-info}"
+# Quiet Rocket's per-request spam (4+ lines per health poll / asset fetch) so
+# app lines — especially echoed sign-in codes — are actually visible in the tail.
+export RUST_LOG="${RUST_LOG:-info,rocket=warn}"
 
 cleanup() {
   say "stopping apps (postgres keeps running; './scripts/dev-up.sh --down' stops it too)"
