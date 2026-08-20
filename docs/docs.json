@@ -12,30 +12,23 @@
       {
         "tab": "Building on Lit Protocol",
         "pages": [
-          "index",
-          "quickstart",
           {
-            "group": "Management",
-            "pages": [
-              "management/dashboard",
-              "management/api_direct",
-              "management/account_modes",
-              "management/pricing",
-              "management/crypto",
-              "management/litkey",
-              "management/api_keys",
-              "management/errors"
-            ]
+            "group": "Get Started",
+            "pages": ["index", "quickstart", "concepts"]
+          },
+          {
+            "group": "Build for Your Use Case",
+            "pages": ["guides/signing", "guides/encryption"]
           },
           {
             "group": "Lit Actions",
             "pages": [
               "lit-actions/index",
-              "lit-actions/imports",
-              "lit-actions/wasm",
               "lit-actions/examples",
               "lit-actions/patterns",
               "lit-actions/secrets",
+              "lit-actions/imports",
+              "lit-actions/wasm",
               "lit-actions/limits",
               {
                 "group": "Migration",
@@ -55,6 +48,19 @@
             ]
           },
           {
+            "group": "Administration",
+            "pages": [
+              "management/dashboard",
+              "management/api_direct",
+              "management/api_keys",
+              "management/account_modes",
+              "management/pricing",
+              "management/crypto",
+              "management/litkey",
+              "management/errors"
+            ]
+          },
+          {
             "group": "Architecture",
             "pages": [
               "architecture/index",
@@ -66,19 +72,19 @@
               {
                 "group": "Security & Verification",
                 "pages": [
-                  "architecture/verification/attestation",
-                  "architecture/verification/quick-verify",
                   "architecture/verification/index",
+                  "architecture/verification/quick-verify",
+                  "architecture/verification/attestation",
                   "architecture/verification/onchain-kms",
                   "architecture/verification/upgrade-governance",
-                  "architecture/verification/full-verification",
-                  "architecture/verification/chain-of-trust"
+                  "architecture/verification/chain-of-trust",
+                  "architecture/verification/full-verification"
                 ]
               }
             ]
           },
           {
-            "group": "Actions Reference",
+            "group": "Reference",
             "pages": ["lit-actions/chipotle"]
           }
         ]

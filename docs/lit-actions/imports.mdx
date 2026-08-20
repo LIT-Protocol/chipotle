@@ -279,7 +279,7 @@ The first time the network sees this version it is fetched from jsDelivr, double
 
 Because the import specifier (including the version) is part of your action's source, the version you pin is baked into the action's IPFS CID:
 
-- A published npm version is **immutable** — npm will not let you republish different bytes under the same version number. So a pinned import always resolves to the same code, which keeps your action's CID — and therefore its [action-derived identity key](/lit-actions/patterns#action-identity-signing-immutable-proofs) — stable.
+- A published npm version is **immutable** — npm will not let you republish different bytes under the same version number. So a pinned import always resolves to the same code, which keeps your action's CID — and therefore its [action-derived identity key](/lit-actions/patterns#action-identity-signing--immutable-proofs) — stable.
 - Bumping the version (`@1.0.0` → `@1.1.0`) changes the action source, which produces a new CID and a new action identity. Treat a dependency bump like any other change to action code: re-deploy, re-permission, and — if you rely on action-identity signing — update any verifier that pins the old address.
 
 This is a feature: anyone verifying your action can read the import statement and see exactly which version of your logic it runs.
@@ -345,7 +345,7 @@ Module imports operate under the same security model as the rest of the Lit Acti
 
 Module imports are subject to the same [resource limits](/lit-actions/limits) as the rest of your action:
 
-- **Memory** — Imported modules count toward the action's memory limit (default 128 MB).
+- **Memory** — Imported modules count toward the action's memory limit (default 64 MB).
 - **Timeout** — Module fetch time counts toward the action's execution timeout (default 15 minutes).
 - **Network** — Module fetches use a separate HTTP client from the action's `fetch()` API and do not count toward the per-action fetch limit. However, they share the same execution timeout.
 - **Module size** — Individual modules are capped at 10 MB.
