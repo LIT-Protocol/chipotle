@@ -124,17 +124,17 @@ yanked = "warn"
 #   tar 0.4.45 -> 0.4.46 was attempted but BLOCKED: deno_npm_cache requires
 #   =0.4.45, so GHSA-3pv8 (tar PAX desync) stays Dependabot-dismissed until deno
 #   bumps. No RUSTSEC id assigned, so no ignore entry needed here.
-# - 2026-08-18: added RUSTSEC-2026-0258 (h2 unbounded empty DATA frames, Low),
-#   a new advisory published today that fails cargo-deny across every Rust
-#   workspace. Fires on two h2 copies: 0.3.27 (rocket 0.5.1's hyper 0.14 +
-#   reqwest 0.11 / ipfs-api chain — no patched 0.3.x exists) and 0.4.x (fixed
-#   at 0.4.16, bump-able via `cargo update -p h2` in a Tier-1 follow-up). The
-#   0.3.x copy is the unremovable blocker, so the advisory is ignored.
-# - 2026-08-18: added RUSTSEC-2026-0249 (smartstring unmaintained, lit-actions
-#   only). New advisory published today; smartstring 1.0.1 is deno/swc-pinned
-#   (swc_ecma_lexer/parser <- deno_ast 0.53.2) with no safe upgrade (crate
-#   archived), so it's ignored — same deno-transitive blocker family as the
-#   time/bincode/hickory entries.
+#
+# - 2026-08-18: two new advisories surfaced across the deny matrix.
+#   * RUSTSEC-2026-0258 (h2 unbounded empty DATA frames, low sev): cleared the
+#     fixable half via lockfile bump h2 0.4.{12,13,14}->0.4.16 in all six Rust
+#     workspaces (the alloy/reqwest outbound-HTTP path). The other half — h2
+#     0.3.27 via rocket 0.5.1 -> hyper 0.14 (inbound server) — has no 0.3-line
+#     patch and stays ignored below, same rocket-0.5.1/hyper-0.14 blocker as the
+#     rocket rustls-webpki entries.
+#   * RUSTSEC-2026-0249 (smartstring unmaintained): deno-pinned via
+#     swc_ecma_lexer -> deno_ast (lit-actions), archived with no successor -> new
+#     ignore entry below (same deno/swc blocker class as RUSTSEC-2026-0009).
 #
 # ── BLOCKER SUMMARY (2026-06-09 audit) ───────────────────────────────────────
 # Every remaining entry is held by a source we cannot move without either
@@ -174,7 +174,7 @@ ignore = [
     { id = "RUSTSEC-2026-0104", reason = "rustls-webpki CRL parsing panic — fixed in 0.103. TWO blockers: deno_tls's 0.102.8 (lit-actions) AND rocket 0.5.1's rustls 0.21 -> rustls-webpki 0.101.7 (lit-core/lit-api-server). WAITING ON: deno (rustls >0.23.40) AND a rocket release on rustls 0.23 (only in unreleased 0.6.0-dev). Not removable without forking deno and/or git-pinning rocket." },
     { id = "RUSTSEC-2026-0118", reason = "hickory NSEC3 unbounded loop — NO stable fix released (only 0.26.0-beta.1+). hickory-proto 0.25.2 via deno_net (lit-actions). BLOCKER: no stable hickory fix + deno transitive. WAITING ON: hickory 0.26 stable AND deno adopting it. Not removable." },
     { id = "RUSTSEC-2026-0119", reason = "hickory DNS O(n^2) name compression — fixed in >=0.26.1. hickory-proto 0.25.2 via deno_net (lit-actions). BLOCKER: deno's hickory 0.25 pin. WAITING ON: deno adopting hickory 0.26. Not removable without forking deno." },
-    { id = "RUSTSEC-2026-0258", reason = "h2 unbounded empty DATA frames (unbounded memory / length-overflow panic if streams aren't drained) — LOW severity, fixed in >=0.4.16. Fires on TWO copies in every Rust workspace: h2 0.3.27 (hyper 0.14.32 <- rocket_http 0.5.1, the zerossl fork's reqwest 0.11.27, and ipfs-api-backend-hyper) and h2 0.4.12/0.4.13/0.4.14 (hyper 1.6 <- reqwest 0.12.28 / tonic / opentelemetry). The 0.4 line is bump-able to 0.4.16 via `cargo update -p h2` (Tier-1 follow-up); the 0.3 line has no patched release and is pinned by rocket 0.5.1's hyper 0.14 + the reqwest-0.11/ipfs-api chain. BLOCKER: no patched h2 0.3.x + rocket 0.5.1's hyper 0.14 pin. WAITING ON: a rocket release on hyper 1.x (unreleased 0.6) + bumping the zerossl reqwest to 0.12. Not removable without git-pinning rocket." },
+    { id = "RUSTSEC-2026-0258", reason = "h2 unbounded empty DATA frames (low severity) — fixed in >=0.4.16. The h2 0.4.x line was cleared to 0.4.16 via a lockfile bump in every workspace; only h2 0.3.27 remains, pulled by rocket 0.5.1 -> hyper 0.14 (the inbound server, all Rocket crates). BLOCKER: rocket 0.5.1's hyper 0.14 pins h2 0.3.x and there is no 0.3-line patch (fix is 0.4.16 only). WAITING ON: a rocket release on hyper 1.x. Not removable without git-pinning rocket." },
 
     # ── unsound ───────────────────────────────────────────────────────────────
     { id = "RUSTSEC-2026-0097", reason = "rand RngCore fill_bytes unsound — fixed in >=0.8.6 / >=0.9.3. Fires only in lit-actions: rand =0.8.5 hard-pinned by deno_crypto/deno_kv/deno_ast. Cleared in lit-api-server/payments (0.8.6/0.9.4) and the generator workspace (lockfile bumped 0.8.5->0.8.6, 0.9.2->0.9.4 via alloy-signer-local). BLOCKER: deno's rand =0.8.5 pin. WAITING ON: deno bumping rand. Not removable without forking deno." },
@@ -184,7 +184,7 @@ ignore = [
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained (folded into rustls-pki-types) — rustls-pemfile 1.0.4 via rocket_http 0.5.1 AND the zerossl fork's reqwest 0.11.27 (lit-core/lit-actions). BLOCKER: rocket has no released rustls-0.23 version. WAITING ON: a rocket release on rustls 0.23 (unreleased 0.6) + bumping zerossl's reqwest to 0.12. Not removable without git-pinning rocket." },
     { id = "RUSTSEC-2025-0141", reason = "bincode 1.x unmaintained (2.x is a non-drop-in rewrite) — bincode 1.3.3 via deno_kv (lit-actions). BLOCKER: deno_kv's bincode 1.x pin. WAITING ON: deno_kv migrating to bincode 2.x. Not removable without forking deno." },
     { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 unmaintained — via alloy-sol-macro/alloy-sol-macro-expander (lit-api-server/generator/payments). BLOCKER: Alloy's proc-macro-error2 dep. WAITING ON: Alloy dropping proc-macro-error2. Not removable without forking Alloy." },
-    { id = "RUSTSEC-2026-0249", reason = "smartstring unmaintained (repo archived 2026-05-03; ALL versions affected, NO safe upgrade — recommended successors compact_str/smol_str). smartstring 1.0.1 via swc_ecma_lexer/swc_ecma_parser <- deno_ast 0.53.2 <- deno_node/deno_runtime (lit-actions only). BLOCKER: swc's smartstring dep + crate abandoned. WAITING ON: swc migrating to compact_str/smol_str AND deno adopting it. Not removable without forking deno/swc." },
+    { id = "RUSTSEC-2026-0249", reason = "smartstring unmaintained — NO safe upgrade available (crate archived). smartstring 1.0.1 via swc_ecma_lexer -> deno_ast =0.53.2 (lit-actions). BLOCKER: swc/deno_ast's smartstring dep + no successor release. WAITING ON: swc dropping smartstring AND deno adopting it. Not removable without forking deno/swc." },
 ]
 
 [sources]

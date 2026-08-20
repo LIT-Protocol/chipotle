@@ -317,18 +317,12 @@ async fn process_event(
     }
 
     // Step 8: Cap check. Sum amounts of all non-failed PIs this month.
-    // CPL-379 L9: the DB CHECK constraint makes this non-null whenever
-    // auto-top-up is enabled, but the crate forbids `.expect()` on the hot
-    // path — a NULL here would be an invariant violation that panics the
-    // webhook worker. Skip the charge and alert instead; a retry won't heal a
-    // constraint violation, so return Ok(()) rather than a transient error.
-    let Some(topup_amount) = config.topup_amount_cents else {
-        tracing::error!(
-            customer_id,
-            "auto top-up enabled but topup_amount_cents is NULL (DB CHECK invariant violated); skipping charge"
-        );
-        return Ok(());
-    };
+    // A DB CHECK constraint keeps this non-null whenever auto top-up is enabled;
+    // if that invariant is ever violated, fail the webhook rather than panic in
+    // the hot path (crate no-panic rule; CPL-379 L9).
+    let topup_amount = config.topup_amount_cents.context(
+        "auto top-up enabled but topup_amount_cents is null (DB CHECK invariant violated)",
+    )?;
     // monthly_cap_cents is optional — None = unlimited (only the
     // per-charge MAX_TOPUP_CENTS cap applies). When set, enforce the
     // soft cap as before.
@@ -356,15 +350,11 @@ async fn process_event(
     // retry window for an individual event would risk false hits, but
     // within a redelivery burst it's exactly what we want. Falls back
     // to a UUID if event_id is missing (only the unit-test paths).
-    // CPL-379 L9: same invariant as topup_amount above — non-null by DB CHECK
-    // when enabled, but never `.expect()` on the hot path.
-    let Some(payment_method_id) = config.payment_method_id.as_deref() else {
-        tracing::error!(
-            customer_id,
-            "auto top-up enabled but payment_method_id is NULL (DB CHECK invariant violated); skipping charge"
-        );
-        return Ok(());
-    };
+    // Same DB CHECK invariant as topup_amount above — propagate instead of
+    // panicking if it is ever violated (crate no-panic rule; CPL-379 L9).
+    let payment_method_id = config.payment_method_id.as_deref().context(
+        "auto top-up enabled but payment_method_id is null (DB CHECK invariant violated)",
+    )?;
     let wallet_address = config.wallet_address.as_str();
     let amount_str = topup_amount.to_string();
     let idempotency_key = if event_id.is_empty() {

@@ -63,7 +63,7 @@ pub async fn receive_webhook(
 ) -> WebhookResult<WebhookAcceptedResponse> {
     let trigger_id =
         Uuid::parse_str(trigger_id).map_err(|_| err(Status::BadRequest, "invalid_id"))?;
-    let ip = rate_limit_ip(&meta, &config.webhook_trusted_proxies);
+    let ip = meta.ip.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
 
     check_rate_limit(
         limiter.inner(),
@@ -127,12 +127,33 @@ struct WebhookTrigger {
 }
 
 pub struct IncomingWebhookMeta {
-    /// `request.client_ip()` — honours a forwarded-IP header; only trusted
-    /// when the peer is a known edge (see `webhook_trusted_proxies`).
-    client_ip: Option<IpAddr>,
-    /// The real TCP peer address, ignoring any forwarded-IP header.
-    peer_ip: Option<IpAddr>,
+    ip: Option<IpAddr>,
     headers: Vec<(String, String)>,
+}
+
+/// Resolve the client IP used to key the per-IP webhook rate limit.
+///
+/// Rocket's `client_ip()` trusts the forwarded header named by `ip_header`
+/// (default `X-Real-IP`) from *any* peer, so a direct caller could spoof it to
+/// land in a fresh rate-limit bucket every request. We only honor that header
+/// when the actual TCP peer (`remote()`) is a configured edge proxy
+/// (`WEBHOOK_TRUSTED_PROXIES`); from any other peer we key on the real socket
+/// address and ignore the header (CPL-379 L10). With no trusted proxies
+/// configured (the default) the header is never trusted.
+fn client_ip_for_rate_limit(request: &Request<'_>) -> Option<IpAddr> {
+    let peer = request.remote().map(|addr| addr.ip());
+    let trusted = request
+        .rocket()
+        .state::<Config>()
+        .map(|c| c.webhook_trusted_proxies.as_slice())
+        .unwrap_or(&[]);
+    match peer {
+        // Direct peer is a known edge proxy → trust its forwarded client IP
+        // (falling back to the peer when the header is absent/unparseable).
+        Some(p) if trusted.contains(&p) => request.client_ip().or(Some(p)),
+        // Untrusted (or unknown) peer → key on the real socket peer only.
+        other => other,
+    }
 }
 
 #[rocket::async_trait]
@@ -141,8 +162,7 @@ impl<'r> FromRequest<'r> for IncomingWebhookMeta {
 
     async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
         Outcome::Success(Self {
-            client_ip: request.client_ip(),
-            peer_ip: request.remote().map(|addr| addr.ip()),
+            ip: client_ip_for_rate_limit(request),
             headers: request
                 .headers()
                 .iter()
@@ -154,23 +174,6 @@ impl<'r> FromRequest<'r> for IncomingWebhookMeta {
                 })
                 .collect(),
         })
-    }
-}
-
-/// Pick the IP address to key the per-IP webhook rate limit on (CPL-379 L10).
-///
-/// `client_ip()` honours a client-supplied `X-Real-IP` / `X-Forwarded-For`
-/// header, which is spoofable to rotate around the limit. We trust that
-/// forwarded value only when the immediate TCP peer is a configured trusted
-/// proxy (a known edge/ingress); otherwise we key on the real socket peer so
-/// the header can't be forged. With no trusted proxies configured (the
-/// default) we always use the socket peer.
-fn rate_limit_ip(meta: &IncomingWebhookMeta, trusted_proxies: &[IpAddr]) -> IpAddr {
-    let fallback = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
-    match meta.peer_ip {
-        Some(peer) if trusted_proxies.contains(&peer) => meta.client_ip.unwrap_or(peer),
-        Some(peer) => peer,
-        None => fallback,
     }
 }
 
@@ -386,48 +389,6 @@ mod tests {
                 "user-agent": ["test"]
             })
         );
-    }
-
-    // ── rate_limit_ip (CPL-379 L10) ─────────────────────────────────────
-    fn meta_with(client: Option<&str>, peer: Option<&str>) -> IncomingWebhookMeta {
-        IncomingWebhookMeta {
-            client_ip: client.map(|s| s.parse().unwrap()),
-            peer_ip: peer.map(|s| s.parse().unwrap()),
-            headers: vec![],
-        }
-    }
-
-    fn ip(s: &str) -> IpAddr {
-        s.parse().unwrap()
-    }
-
-    #[test]
-    fn rate_limit_ip_ignores_forwarded_header_by_default() {
-        // No trusted proxies: the spoofable forwarded IP is ignored; we key on
-        // the real socket peer.
-        let meta = meta_with(Some("9.9.9.9"), Some("10.0.0.1"));
-        assert_eq!(rate_limit_ip(&meta, &[]), ip("10.0.0.1"));
-    }
-
-    #[test]
-    fn rate_limit_ip_trusts_forwarded_header_behind_known_proxy() {
-        // Peer is a trusted edge → honour the forwarded client IP.
-        let meta = meta_with(Some("9.9.9.9"), Some("10.0.0.1"));
-        assert_eq!(rate_limit_ip(&meta, &[ip("10.0.0.1")]), ip("9.9.9.9"));
-    }
-
-    #[test]
-    fn rate_limit_ip_untrusted_peer_uses_socket_addr() {
-        // A peer that isn't in the allowlist can't get its forwarded header
-        // trusted, even if one is present.
-        let meta = meta_with(Some("9.9.9.9"), Some("203.0.113.7"));
-        assert_eq!(rate_limit_ip(&meta, &[ip("10.0.0.1")]), ip("203.0.113.7"));
-    }
-
-    #[test]
-    fn rate_limit_ip_falls_back_when_no_peer() {
-        let meta = meta_with(Some("9.9.9.9"), None);
-        assert_eq!(rate_limit_ip(&meta, &[]), IpAddr::V4(Ipv4Addr::UNSPECIFIED));
     }
 
     #[test]

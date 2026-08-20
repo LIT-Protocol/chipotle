@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use base64::Engine;
@@ -65,6 +65,17 @@ pub(crate) const MAX_MODULE_COUNT: usize = 100;
 
 /// Thread-safe cache for fetched and integrity-verified module sources.
 pub type ModuleCache = Arc<RwLock<HashMap<String, Vec<u8>>>>;
+
+/// Serializes appends to the shared on-disk integrity lockfile across every
+/// worker runtime in this process (CPL-379 L4). The lockfile (and the module
+/// cache it mirrors) is process-wide shared state built once at startup, so
+/// concurrent action executions can otherwise race to append — duplicating a
+/// URL's pin line or interleaving with a concurrent reader. Appends happen only
+/// on the first fetch of a new module (TOFU pin), so a single process-wide lock
+/// has no meaningful contention cost. (Cross-process writers sharing one file
+/// on disk would additionally need an OS advisory lock; that is outside the
+/// supported single-process-per-node deployment.)
+static LOCKFILE_APPEND_LOCK: Mutex<()> = Mutex::new(());
 
 // Re-export from ext crate for convenience.
 pub use lit_actions_ext::bindings::{LoadedModuleInfo, LoadedModules};
@@ -551,50 +562,47 @@ impl CdnModuleLoader {
                 );
             }
 
-            // CPL-379 L4: pin the module under the integrity map's write lock.
-            // Holding the lock across the lockfile append serializes concurrent
-            // TOFU verifications so their `writeln!`s can't interleave into a
-            // torn line, and keeps the on-disk lockfile consistent with the
-            // in-memory map. Gating the append on `!contains_key` also makes it
-            // idempotent: a module verified concurrently by two requests is
-            // pinned exactly once instead of appending a duplicate line.
+            if let Some(ref path) = self.lockfile_path {
+                use std::io::Write;
+                // Serialize the open+append+flush against other workers pinning
+                // concurrently (CPL-379 L4). Recover from a poisoned lock rather
+                // than propagating the panic — a prior writer's panic must not
+                // permanently wedge all future pins.
+                let _lock_guard = LOCKFILE_APPEND_LOCK
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let mut file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                    .map_err(|e| {
+                        error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to open integrity lockfile");
+                        JsErrorBox::generic(format!(
+                            "Failed to open integrity lockfile: {e}"
+                        ))
+                    })?;
+                writeln!(file, "{url} sha384-{actual_b64}").map_err(|e| {
+                    error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to write integrity lockfile");
+                    JsErrorBox::generic(format!(
+                        "Failed to write integrity lockfile: {e}"
+                    ))
+                })?;
+                file.flush().map_err(|e| {
+                    error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to flush integrity lockfile");
+                    JsErrorBox::generic(format!(
+                        "Failed to flush integrity lockfile: {e}"
+                    ))
+                })?;
+                info!(
+                    module_url = %url,
+                    hash = %format!("sha384-{actual_b64}"),
+                    lockfile = ?path,
+                    "TOFU: pinned new module to integrity lockfile"
+                );
+            }
+
             if let Ok(mut map) = self.integrity.write() {
-                if !map.contains_key(&url) {
-                    if let Some(ref path) = self.lockfile_path {
-                        use std::io::Write;
-                        let mut file = std::fs::OpenOptions::new()
-                            .create(true)
-                            .append(true)
-                            .open(path)
-                            .map_err(|e| {
-                                error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to open integrity lockfile");
-                                JsErrorBox::generic(format!(
-                                    "Failed to open integrity lockfile: {e}"
-                                ))
-                            })?;
-                        writeln!(file, "{url} sha384-{actual_b64}").map_err(|e| {
-                            error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to write integrity lockfile");
-                            JsErrorBox::generic(format!(
-                                "Failed to write integrity lockfile: {e}"
-                            ))
-                        })?;
-                        file.flush().map_err(|e| {
-                            error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to flush integrity lockfile");
-                            JsErrorBox::generic(format!(
-                                "Failed to flush integrity lockfile: {e}"
-                            ))
-                        })?;
-                        info!(
-                            module_url = %url,
-                            hash = %format!("sha384-{actual_b64}"),
-                            lockfile = ?path,
-                            "TOFU: pinned new module to integrity lockfile"
-                        );
-                    }
-                    map.insert(url.clone(), actual_b64.clone());
-                }
-            } else {
-                error!(module_url = %url, "TOFU: integrity lock poisoned; module not pinned to lockfile");
+                map.entry(url.clone()).or_insert(actual_b64.clone());
             }
         } else {
             info!(

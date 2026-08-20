@@ -15,20 +15,18 @@ pub struct Config {
     pub usage_key_encryption_key: Vec<u8>,
     pub chipotle_api_base_url: String,
     pub webhook_max_body_bytes: usize,
-    /// CPL-379 L10: TCP peers whose forwarded-IP header (`X-Real-IP` /
-    /// `X-Forwarded-For`, surfaced by `client_ip()`) we trust for the per-IP
-    /// webhook rate limit. `client_ip()` otherwise honours a client-supplied
-    /// forwarded header, so an attacker could rotate it to evade the limit.
-    /// The rate limiter uses the forwarded client IP only when the immediate
-    /// peer is in this allowlist (a known edge/ingress); for any other peer it
-    /// falls back to the real socket address. Empty (the default) means never
-    /// trust the header — key strictly on the socket peer. Set via
-    /// `WEBHOOK_TRUSTED_PROXIES` (comma-separated IPs).
-    pub webhook_trusted_proxies: Vec<IpAddr>,
     pub webhook_ip_max_requests_per_minute: u32,
     pub webhook_user_max_requests_per_minute: u32,
     pub webhook_trigger_max_requests_per_minute: u32,
     pub webhook_default_max_queued_runs: u32,
+    /// Direct-peer IPs allowed to set the forwarded client-IP header
+    /// (Rocket's `ip_header`, default `X-Real-IP`). The webhook per-IP rate
+    /// limit only honors that header when the TCP peer is one of these edge
+    /// proxies; from any other peer the header is ignored and the real socket
+    /// peer is used. Empty (the default) means never trust the header
+    /// (CPL-379 L10). Set `WEBHOOK_TRUSTED_PROXIES` to a comma-separated list
+    /// of edge-proxy IPs when deployed behind one.
+    pub webhook_trusted_proxies: Vec<IpAddr>,
     pub chain_poll_interval_secs: u64,
     pub chain_confirmation_depth: u64,
     pub chain_max_block_range: u64,
@@ -114,7 +112,6 @@ impl Config {
                 .trim_end_matches('/')
                 .to_string(),
             webhook_max_body_bytes: optional_parse("WEBHOOK_MAX_BODY_BYTES", 256 * 1024)?,
-            webhook_trusted_proxies: parse_ip_list("WEBHOOK_TRUSTED_PROXIES")?,
             webhook_ip_max_requests_per_minute: optional_parse(
                 "WEBHOOK_IP_MAX_REQUESTS_PER_MINUTE",
                 60,
@@ -131,6 +128,7 @@ impl Config {
                 "WEBHOOK_DEFAULT_MAX_QUEUED_RUNS",
                 100,
             )?,
+            webhook_trusted_proxies: optional_ip_list("WEBHOOK_TRUSTED_PROXIES")?,
             chain_poll_interval_secs: optional_parse_min("CHAIN_POLL_INTERVAL_SECS", 15, 1)?,
             chain_confirmation_depth: optional_parse("CHAIN_CONFIRMATION_DEPTH", 12)?,
             chain_max_block_range: optional_parse_min("CHAIN_MAX_BLOCK_RANGE", 500, 1)?,
@@ -177,22 +175,22 @@ where
     Ok(value)
 }
 
-/// Parse a comma-separated list of IP addresses from an env var (CPL-379 L10).
-/// Absent or empty → empty list. Whitespace around entries is trimmed; a
-/// malformed entry is a hard error so a misconfigured allowlist can't silently
-/// fail open.
-fn parse_ip_list(name: &str) -> Result<Vec<IpAddr>> {
-    let Some(raw) = optional(name) else {
-        return Ok(Vec::new());
-    };
-    raw.split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| {
-            s.parse::<IpAddr>()
-                .with_context(|| format!("env var {name} has invalid IP address: {s:?}"))
-        })
-        .collect()
+/// Parse a comma-separated list of IP addresses from an env var. Absent or
+/// empty → an empty list. Whitespace around each entry is trimmed; a malformed
+/// entry is a hard error so a typo can't silently widen who is trusted.
+fn optional_ip_list(name: &str) -> Result<Vec<IpAddr>> {
+    match optional(name) {
+        None => Ok(Vec::new()),
+        Some(raw) => raw
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| {
+                s.parse::<IpAddr>()
+                    .map_err(|e| anyhow::anyhow!("env var {name} has invalid IP '{s}': {e}"))
+            })
+            .collect(),
+    }
 }
 
 fn parse_b64_key(name: &str) -> Result<Vec<u8>> {

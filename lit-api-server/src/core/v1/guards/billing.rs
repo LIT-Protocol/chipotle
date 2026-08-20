@@ -68,24 +68,26 @@ fn missing_key_outcome<T>(request: &Request<'_>) -> Outcome<T, ()> {
     Outcome::Error((Status::Unauthorized, ()))
 }
 
-/// Fail with 401 when the caller presents a precomputed `0x<64hex>` keccak256
-/// hash where a raw API key is required (CPL-379 L1).
-///
-/// The billing guards resolve identity through `check_credit` →
-/// `resolve_wallet_address`, which — for ChainSecured callers — accepts a bare
-/// wallet-derived hash (`keccak256(walletAddress)`) as an already-hashed
-/// identity (CPL-285). That hash is public, not a secret: treating it as a
-/// spendable key on a metered endpoint would let anyone who knows a wallet
-/// address present its hash. It is not currently exploitable (downstream
-/// re-hashing forces a contract revert before any charge settles), but the
-/// authenticating `BillingAuth` guard already rejects this shape, so these
-/// metered guards reject it too — a defense-in-depth split.
-fn precomputed_hash_outcome<T>(request: &Request<'_>) -> Outcome<T, ()> {
+/// Reject an API-key header whose shape is a precomputed 32-byte account hash
+/// (`0x<64hex>`). Such identities must arrive only through the verified
+/// `X-Wallet-Auth` (EIP-712) path: `usage_api_key_to_hash` passes this shape
+/// through as an already-hashed identity (CPL-285), so a caller who sends
+/// `X-Api-Key: 0x{keccak256(walletAddress)}` would resolve straight to a
+/// victim's on-chain billing account without proving ownership. `BillingAuth`
+/// in lit-billing-core already rejects this on its legacy API-key path; the
+/// two Billed* guards did not. Not currently exploitable end-to-end (downstream
+/// re-hashing → contract revert → no charge), but this closes the gap at the
+/// request boundary as defense in depth (CPL-379 L1).
+fn reject_precomputed_hash_shape<T>(request: &Request<'_>) -> Outcome<T, ()> {
+    tracing::warn!(
+        "rejecting API-key header that looks like a precomputed account hash; \
+         ChainSecured callers must use X-Wallet-Auth"
+    );
     set_error_detail(
         request,
-        "API key not recognized — it does not resolve to any account.",
-        "Send your raw API key (the value shown once at account creation), not a \
-         hashed wallet identity. Create an account with POST /core/v1/new_account.",
+        "API key looks like a precomputed account hash, not a raw key.",
+        "ChainSecured callers must authenticate with X-Wallet-Auth (EIP-712 signature), \
+         not by sending the account hash as an API key.",
     );
     Outcome::Error((Status::Unauthorized, ()))
 }
@@ -167,7 +169,7 @@ impl<'r> FromRequest<'r> for BilledManagementApiKey {
             return missing_key_outcome(request);
         };
         if crate::utils::parse_with_hash::is_precomputed_hash_shape(&key) {
-            return precomputed_hash_outcome(request);
+            return reject_precomputed_hash_shape(request);
         }
 
         if let Some(state) = request.rocket().state::<Option<Arc<StripeState>>>()
@@ -293,7 +295,7 @@ impl<'r> FromRequest<'r> for BilledLitActionApiKey {
             return missing_key_outcome(request);
         };
         if crate::utils::parse_with_hash::is_precomputed_hash_shape(&key) {
-            return precomputed_hash_outcome(request);
+            return reject_precomputed_hash_shape(request);
         }
 
         // If Stripe is configured, verify the customer has credits available.
@@ -338,5 +340,87 @@ impl<'r> OpenApiFromRequest<'r> for BilledLitActionApiKey {
             },
             extensions: Object::default(),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rocket::http::Header;
+    use rocket::local::asynchronous::Client;
+    use rocket::{get, routes};
+
+    /// A lowercase 0x-prefixed 32-byte hex string — the precomputed-hash shape
+    /// that must never be accepted as a raw API key (CPL-379 L1 / CPL-285).
+    const HASH_KEY: &str = "0x0000000000000000000000000000000000000000000000000000000000000001";
+
+    #[get("/lit-action")]
+    fn lit_action_probe(key: BilledLitActionApiKey) -> String {
+        key.0
+    }
+
+    #[get("/management")]
+    fn management_probe(key: BilledManagementApiKey) -> String {
+        key.0
+    }
+
+    /// With no `StripeState` managed, both guards short-circuit the billing
+    /// check and succeed for a normal key — so these tests isolate the
+    /// precomputed-hash rejection from any Stripe interaction.
+    async fn client() -> Client {
+        let rocket = rocket::build().mount("/", routes![lit_action_probe, management_probe]);
+        Client::tracked(rocket).await.expect("valid rocket")
+    }
+
+    #[tokio::test]
+    async fn lit_action_guard_rejects_precomputed_hash_in_x_api_key() {
+        let c = client().await;
+        let resp = c
+            .get("/lit-action")
+            .header(Header::new("X-Api-Key", HASH_KEY))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn lit_action_guard_rejects_precomputed_hash_in_bearer() {
+        let c = client().await;
+        let resp = c
+            .get("/lit-action")
+            .header(Header::new("Authorization", format!("Bearer {HASH_KEY}")))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn management_guard_rejects_precomputed_hash() {
+        let c = client().await;
+        let resp = c
+            .get("/management")
+            .header(Header::new("X-Api-Key", HASH_KEY))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn guards_accept_a_normal_raw_key() {
+        // A raw key is not hash-shaped; with Stripe unconfigured the guard
+        // admits it (no charge) and the probe echoes it back unchanged.
+        let c = client().await;
+        for path in ["/lit-action", "/management"] {
+            let resp = c
+                .get(path)
+                .header(Header::new("X-Api-Key", "a-normal-raw-api-key"))
+                .dispatch()
+                .await;
+            assert_eq!(resp.status(), Status::Ok, "path {path}");
+            assert_eq!(
+                resp.into_string().await.unwrap_or_default(),
+                "a-normal-raw-api-key"
+            );
+        }
     }
 }

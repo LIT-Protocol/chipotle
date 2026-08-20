@@ -1,12 +1,12 @@
 //! Session token issuing + the Rocket request guard that loads an
 //! authenticated [`Operator`] from a session cookie.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use base64::Engine;
 use rand::RngCore;
 use rocket::http::Status;
 use rocket::request::{FromRequest, Outcome, Request};
-use sqlx::PgPool;
+use sqlx::{PgExecutor, PgPool};
 use time::OffsetDateTime;
 
 use super::operator::{self, Operator};
@@ -20,13 +20,17 @@ pub fn generate_token() -> String {
 }
 
 /// Insert a new session row.
-pub async fn create(pool: &PgPool, token: &str, operator_id: i64) -> Result<()> {
+///
+/// Takes any `PgExecutor` so the caller can create the session inside the same
+/// transaction that records the magic-link token as consumed — so a failed
+/// insert rolls the consume back and leaves the link retryable (CPL-379 L8).
+pub async fn create(executor: impl PgExecutor<'_>, token: &str, operator_id: i64) -> Result<()> {
     let expires_at = OffsetDateTime::now_utc() + time::Duration::seconds(SESSION_TTL_SECONDS);
     sqlx::query("INSERT INTO sessions (token, operator_id, expires_at) VALUES ($1, $2, $3)")
         .bind(token)
         .bind(operator_id)
         .bind(expires_at)
-        .execute(pool)
+        .execute(executor)
         .await?;
     Ok(())
 }
@@ -56,40 +60,6 @@ pub async fn delete(pool: &PgPool, token: &str) -> Result<()> {
         .execute(pool)
         .await?;
     Ok(())
-}
-
-/// Atomically claim a magic-link token as used (CPL-379 L8).
-///
-/// Returns `Ok(true)` when this signature was recorded for the first time
-/// (the token may proceed) and `Ok(false)` when it was already present (a
-/// replay — the caller must reject it). `ON CONFLICT DO NOTHING` makes the
-/// claim race-safe: two concurrent verifies of the same link produce exactly
-/// one `true`.
-pub async fn claim_magic_link(pool: &PgPool, token_sig: &str, expires_unix: i64) -> Result<bool> {
-    // Fail closed if the expiry can't be represented: falling back to now()
-    // would let the boot purge drop the row immediately, re-opening the token
-    // to replay. In practice `expires_unix` is always our own 15-minute expiry.
-    let expires_at = OffsetDateTime::from_unix_timestamp(expires_unix)
-        .context("magic-link expiry timestamp out of representable range")?;
-    let r = sqlx::query(
-        "INSERT INTO used_magic_links (token_sig, expires_at) VALUES ($1, $2) \
-         ON CONFLICT (token_sig) DO NOTHING",
-    )
-    .bind(token_sig)
-    .bind(expires_at)
-    .execute(pool)
-    .await?;
-    Ok(r.rows_affected() == 1)
-}
-
-/// Best-effort cleanup of expired single-use magic-link records. Rows past
-/// their expiry can never be replayed (the token itself is expired), so they
-/// are safe to drop.
-pub async fn purge_expired_magic_links(pool: &PgPool) -> Result<u64> {
-    let r = sqlx::query("DELETE FROM used_magic_links WHERE expires_at <= now()")
-        .execute(pool)
-        .await?;
-    Ok(r.rows_affected())
 }
 
 /// Best-effort cleanup of expired sessions. Called occasionally; not on

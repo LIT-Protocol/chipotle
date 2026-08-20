@@ -29,9 +29,9 @@ async fn rocket() -> _ {
     if let Err(e) = auth::session::purge_expired(&pool).await {
         tracing::warn!("session purge on boot failed: {e}");
     }
-    // Best-effort cleanup of expired single-use magic-link records (CPL-379 L8).
-    if let Err(e) = auth::session::purge_expired_magic_links(&pool).await {
-        tracing::warn!("magic-link purge on boot failed: {e}");
+    // Same for consumed magic-link single-use records past their expiry.
+    if let Err(e) = auth::used_link::purge_expired(&pool).await {
+        tracing::warn!("used magic-link purge on boot failed: {e}");
     }
 
     let mailer =
