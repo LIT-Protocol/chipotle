@@ -49,8 +49,23 @@ One crate, two binaries, one image:
 
 ## Local development
 
-Requires Postgres and either a dstack simulator socket or the dev master key
-(non-production builds only):
+One command on macOS with Docker installed:
+
+```bash
+./scripts/dev-up.sh
+```
+
+First run prompts for an optional OpenRouter API key and an optional admin
+email, persists them (plus a generated dev master key) to a gitignored
+`.env.local`, starts Postgres in Docker (`lit-chat-postgres`, port 5433,
+named volume), builds both binaries without `--features production`, and
+serves chat on http://localhost:8000 and the admin console on
+http://localhost:8100. Sign-in codes print to the tailed logs (no email
+needed). `--reconfigure` re-runs the prompts (keeping the master key — it
+anchors every KEK and MAC, so regenerating it orphans local history);
+`--down` stops the apps and the Postgres container.
+
+Manual equivalent, if you'd rather drive it yourself:
 
 ```bash
 export DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres
