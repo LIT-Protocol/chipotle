@@ -64,11 +64,11 @@ update_anvil: compile
 
 update_sepolia: compile
 	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
-	$(DEPLOYER_BIN) --action=update --network=base-sepolia --abifolder=artifacts/contracts --secret=$(DEPLOYER_SECRET) --address=$(address)
+	$(DEPLOYER_BIN) --action=update --network=base-sepolia --abifolder=artifacts/contracts --secret=$(DEPLOYER_SECRET) --address=$(address) --removals=diamond-removals.json
 
 update_base: compile
 	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
-	$(DEPLOYER_BIN) --action=update --network=base --abifolder=artifacts/contracts --secret=$(BASE_DEPLOYER_SECRET) --address=$(address)
+	$(DEPLOYER_BIN) --action=update --network=base --abifolder=artifacts/contracts --secret=$(BASE_DEPLOYER_SECRET) --address=$(address) --removals=diamond-removals.json
 
 # Propose diamond update via Safe multisig (Base mainnet).
 # Usage: make propose_update_base address=0x... safe=0x...
@@ -78,7 +78,8 @@ propose_update_base: compile
 		--abifolder=artifacts/contracts \
 		--secret=$(BASE_DEPLOYER_SECRET) \
 		--address=$(address) \
-		--output=diamond_cut_proposal.json
+		--output=diamond_cut_proposal.json \
+		--removals=diamond-removals.json
 	npx hardhat propose-diamond-cut \
 		--safe $(safe) \
 		--proposal diamond_cut_proposal.json \
@@ -92,7 +93,8 @@ propose_update_sepolia: compile
 		--abifolder=artifacts/contracts \
 		--secret=$(DEPLOYER_SECRET) \
 		--address=$(address) \
-		--output=diamond_cut_proposal.json
+		--output=diamond_cut_proposal.json \
+		--removals=diamond-removals.json
 	npx hardhat propose-diamond-cut \
 		--safe $(safe) \
 		--proposal diamond_cut_proposal.json \
