@@ -1,0 +1,37 @@
+[package]
+name = "lit-secrets"
+version = "0.1.0"
+edition = "2021"
+description = "Lit Protocol programmable credential access — policy-gated secrets for agents, powered by Chipotle"
+license = "Apache-2.0"
+
+[dependencies]
+anyhow = "1.0"
+aes-gcm = "0.10"
+alloy-primitives = { version = "1", default-features = false, features = ["std", "k256"] }
+base64 = "0.22"
+hex = "0.4"
+hmac = "0.12"
+ipfs-hasher = "0.13.0"
+k256 = { version = "0.13", features = ["ecdsa"] }
+moka = { version = "0.12", features = ["future"] }
+rand = "0.8"
+regex = "1"
+reqwest = { version = "0.12", features = ["json"] }
+rocket = { version = "0.5.1", features = ["json", "secrets"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+sqlx = { version = "0.8", features = [
+    "postgres",
+    "runtime-tokio",
+    "uuid",
+    "time",
+    "json",
+    "macros",
+] }
+time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
