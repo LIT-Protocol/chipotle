@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lit Secrets</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Lit Secrets</div>
+    <div class="topbar-right">
+      <span id="me" class="muted"></span>
+      <button id="logout" class="ghost">Sign out</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card" id="vault-card">
+      <div class="trigger-title">
+        <h2>Vault</h2>
+        <span id="vault-status" class="pill">loading…</span>
+      </div>
+      <p class="muted">
+        Secrets are sealed to a vault PKP inside the Chipotle TEE. This dashboard never sees plaintext after you submit it;
+        agents read <code>plaintext</code>-tier secrets straight from Chipotle via the reader action.
+      </p>
+      <dl class="kv" id="vault-kv"></dl>
+      <div id="vault-stale" class="error hidden">Reader action for this deployment is not attached to your vault group yet — grants will fail until an operator re-attaches it.</div>
+    </section>
+
+    <section class="card">
+      <div class="trigger-title">
+        <h2>Secrets</h2>
+        <button id="new-secret-btn">+ Add secret</button>
+      </div>
+      <form id="secret-form" class="form hidden">
+        <label>Name <input name="name" required placeholder="OPENAI_API_KEY" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" /></label>
+        <label>Value <textarea name="value" required rows="3" placeholder="sk-…"></textarea></label>
+        <div class="row">
+          <label>Kind <input name="kind" value="api_key" /></label>
+          <label>Environment <input name="environment" value="production" /></label>
+          <label>Release
+            <select name="release">
+              <option value="plaintext">plaintext — agents may read</option>
+              <option value="in_tee_only">in_tee_only — only permitted actions, in-TEE</option>
+            </select>
+          </label>
+        </div>
+        <div class="row">
+          <label>Max reads / day <input name="max_reads_per_day" type="number" min="1" placeholder="unlimited" /></label>
+          <label>Not after <input name="not_after" type="datetime-local" /></label>
+        </div>
+        <div class="row">
+          <button type="submit">Seal &amp; save</button>
+          <button type="button" class="ghost" id="secret-cancel">Cancel</button>
+        </div>
+        <div class="error" id="secret-error"></div>
+      </form>
+      <div id="secrets" class="trigger-list"></div>
+    </section>
+
+    <section class="card">
+      <div class="trigger-title">
+        <h2>Agents</h2>
+        <form id="agent-form" class="inline-form">
+          <input name="name" required placeholder="agent name, e.g. payments-bot" />
+          <button type="submit">Mint key</button>
+        </form>
+      </div>
+      <p class="muted">Each agent is a scoped Chipotle usage key. It authenticates to this API and runs the reader action. Shown once.</p>
+      <div id="agent-new" class="notice hidden"></div>
+      <div id="agents" class="trigger-list"></div>
+    </section>
+
+    <section class="card">
+      <div class="trigger-title">
+        <h2>Permitted actions (in-TEE-only tier)</h2>
+        <form id="action-form" class="inline-form">
+          <input name="cid" required placeholder="IPFS CID of your Lit Action" />
+          <input name="name" placeholder="label" />
+          <button type="submit">Attach</button>
+        </form>
+      </div>
+      <p class="muted">Actions attached here can <code>Lit.Actions.Decrypt</code> any ciphertext in your vault, inside the TEE. Attach only code you've audited.</p>
+      <div id="actions" class="trigger-list"></div>
+    </section>
+
+    <section class="card">
+      <div class="trigger-title">
+        <h2>Access log</h2>
+        <button id="audit-refresh" class="ghost">Refresh</button>
+      </div>
+      <table class="table" id="audit">
+        <thead><tr><th>When</th><th>Event</th><th>Secret</th><th>Agent</th><th>Decision</th><th>Reason</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Use from an agent</h2>
+<pre><code>import { LitSecrets } from '<span class="origin"></span>/sdk/lit-secrets.js';
+const secrets = new LitSecrets({ usageApiKey: process.env.LIT_SECRETS_KEY, baseUrl: '<span class="origin"></span>' });
+const key = await secrets.get('OPENAI_API_KEY');</code></pre>
+      <p class="muted">Agent playbook: <a href="/SKILL.md">/SKILL.md</a></p>
+    </section>
+  </main>
+
+  <script src="/static/app.js" type="module"></script>
+</body>
+</html>
