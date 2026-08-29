@@ -93,6 +93,22 @@ Agent routes (`Authorization: Bearer <usage api key>`):
 
 Client: `sdk/lit-secrets.js` (served at `/sdk/lit-secrets.js`). Agent playbook: `SKILL.md`.
 
+## Deployment (Railway)
+
+Project **Lit Secrets** (`5da0f592-403d-4acd-bf1e-7194139cd33c`), service `lit-secrets`,
+Postgres plugin, environment `production`. Source: `LIT-Protocol/chipotle`, root
+directory `lit-secrets` (set via the API — the CLI has no flag for it), Dockerfile
+build, healthcheck `/health`, sleeping disabled. Current URL:
+`https://lit-secrets-production.up.railway.app` (custom domain
+`secrets.litprotocol.com` TODO: `railway domain secrets.litprotocol.com` + CNAME).
+
+Variables set: everything in the table above plus `ROCKET_SECRET_KEY`, `ROCKET_ADDRESS`,
+`RUST_LOG`; `DATABASE_URL` is the `${{Postgres.DATABASE_URL}}` reference. The
+`GRANT_SIGNING_KEY` is the production reader identity — never regenerate it casually.
+
+After the PR merges, switch the branch: `railway service source connect --repo
+LIT-Protocol/chipotle --branch main --service lit-secrets`.
+
 ## Verified against prod Chipotle (2026-08-27)
 
 Full flow tested with a real account: provision (create_wallet → add_group →
