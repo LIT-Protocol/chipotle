@@ -40,13 +40,19 @@ doesn't describe endpoints the released server lacks.
 
 ### Fixed
 - Write endpoints (`new_account`, `create_wallet`, …) can no longer hang
-  indefinitely after an RPC outage. On-chain sends now pin a freshly fetched
-  nonce (instead of trusting alloy's optimistic nonce cache, which is never
-  rolled back after a dropped broadcast), receipt waits are bounded at 30s,
-  and a signer whose lease is force-freed as stale rotates to the back of the
-  pool instead of monopolizing the front of the lease queue. Root-caused from
-  the 2026-09-03 prod incident where two wedged payer wallets absorbed nearly
-  all signer leases and `POST /new_account` timed out for days.
+  indefinitely after an RPC outage. On-chain sends now pin nonces from a
+  locally managed per-signer cache that is invalidated on any send failure or
+  receipt timeout (alloy's optimistic nonce cache is never rolled back after a
+  dropped broadcast, so a poisoned signer could never recover), receipt waits
+  are bounded at 30s, and a signer whose lease is force-freed as stale rotates
+  to the back of the pool instead of monopolizing the front of the lease
+  queue. Root-caused from the 2026-09-03 prod incident where two wedged payer
+  wallets absorbed nearly all signer leases and `POST /new_account` timed out
+  for days.
+- On-chain writes confirm ~2-5s sooner: the RPC receipt poller now ticks every
+  2s (matching block time on the configured chains) instead of alloy's 7s
+  default for HTTP transports, which also shortens how long each signer lease
+  is held.
 
 ### Security
 - `registerWalletDerivation` now enforces a global first-owner binding
