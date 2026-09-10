@@ -1,0 +1,99 @@
+# Lit Secrets — full reference for LLMs and agents
+
+> Policy-gated secret storage for AI agents, built on the Lit Protocol (Chipotle) TEE network. This file is the complete machine-readable reference: concepts, every API endpoint, the policy schema, the grant format, error codes, limits, and the security model. For a step-by-step onboarding playbook, fetch /SKILL.md. For the JS client, fetch /sdk/lit-secrets.js.
+
+## Concepts
+
+- **Tenant**: one per user account. Provisioned automatically on first use: a vault key (PKP) inside the TEE plus an on-chain permission group on the Lit network. All of the tenant's secrets are sealed to this vault.
+- **Secret**: a named, versioned ciphertext with metadata (`kind`, `environment`), a **release tier**, and a **policy**. Values are AES-256-GCM encrypted under a key derived inside the TEE; this service stores only ciphertext.
+- **Release tiers**:
+  - `plaintext` (default): authorized agents may read the value via the grant flow below.
+  - `in_tee_only`: no grants are ever issued. Only Lit Action programs the owner has explicitly attached (by IPFS CID) can decrypt, and only inside the TEE.
+- **Agent**: a runtime identity. Minting an agent returns a **usage API key** (shown once) that authenticates to this API *and* to the Chipotle TEE API. Revoking the agent removes the key at the TEE network too.
+- **Grant**: a short-lived (default 120s) EIP-191-signed JSON document `{v, tenant, name, version, pkpId, ciphertextHash, release, agent, iat, exp}` issued after policy evaluation. The pinned reader program in the TEE verifies the signature, expiry, vault and ciphertext hash before decrypting. Within its TTL a grant is bearer-redeemable by the tenant's agents, so treat it as sensitive and never cache it.
+- **Setup token (agent access token)**: a bearer token a *setup* agent uses to act as the human user (full management access). Authorized once by the logged-in user via /agent/authorize. Distinct from runtime usage keys — runtime agents should never hold one.
+
+## Authentication
+
+Two principals:
+
+1. **User** — session cookie (email magic link via /login) OR `Authorization: Bearer <setup token>`. Full management access.
+2. **Agent** — `Authorization: Bearer <usage api key>` (or `X-Api-Key`). Can only request grants and references.
+
+## Management API (User auth)
+
+- `GET /api/me` → `{id, email}` — verify auth.
+- `GET /api/tenant` → vault status: `{provisioned, tenant_id, pkp_id, group_id, reader_cid, encrypt_cid, grant_signer, chipotle_api_base_url, reader_cid_stale}`.
+- `POST /api/tenant/provision` → force tenant provisioning (otherwise automatic on first secret; takes ~30–60s, several on-chain transactions).
+- `POST /api/secrets` body `{name, value, kind?, environment?, release?, policy?}` → create + seal. `name` matches `[A-Za-z0-9][A-Za-z0-9_.-]{0,127}`; `value` ≤ 16 KB; `release` is `plaintext` | `in_tee_only`.
+- `GET /api/secrets` → list (metadata only, never values).
+- `GET /api/secrets/<name>` → detail + version list (`ciphertext_hash` per version).
+- `PUT /api/secrets/<name>` body `{value}` → rotate: seals a new version and makes it current. Older versions stay readable by explicit version number.
+- `PATCH /api/secrets/<name>` body any of `{kind, environment, release, policy, disabled}` → partial update; omitted fields are untouched.
+- `DELETE /api/secrets/<name>` → hard-delete the secret and all versions.
+- `POST /api/agents` body `{name}` → mint runtime agent. Response includes `usage_api_key` exactly once. Store it securely; it cannot be re-fetched.
+- `GET /api/agents` → list agents (`id, name, created_at, last_seen_at, revoked_at`).
+- `DELETE /api/agents/<id>` → revoke: removes the key on the TEE network and marks it revoked here. Effective at the network within ≤5 minutes across replicas.
+- `POST /api/actions` body `{cid, name?}` → attach a customer Lit Action (by IPFS CID) to the vault group so it can decrypt in-TEE (`in_tee_only` tier). Attach only audited code: any attached action can decrypt ANY ciphertext in this tenant's vault.
+- `GET /api/actions`, `DELETE /api/actions/<id>` → list / detach.
+- `GET /api/audit?limit=100` → access log: every grant/reference decision with `event`, `decision` (allow|deny), `reason`, secret and agent names, timestamp.
+
+## Agent API (usage-key auth)
+
+- `POST /api/grants` body `{name, version?}` → policy check, then:
+  `{name, version, grant, signature, ciphertext, pkp_id, expires_at, chipotle_api_base_url, action: {cid, code}, js_params}`.
+  Redeem with: `POST {chipotle_api_base_url}/core/v1/lit_action` with headers `Authorization: Bearer <same usage key>` and JSON body `{"code": action.code, "js_params": js_params}`. Success → `{"response": {"name", "version", "value"}, "has_error": false}`. The decrypt happens inside the TEE; the value returns only to this HTTP caller.
+  Denied → 403 `{error}` with one of: `secret_disabled`, `release_not_plaintext`, `agent_not_allowed`, `policy_expired`, `rate_limited`. Grants expire in ~120s — request a fresh one per read; do not cache.
+- `GET /api/reference/<name>?version=` → `{name, version, release, ciphertext, ciphertext_hash, pkp_id, group_id, chipotle_api_base_url}`. For `in_tee_only`: pass `pkpId` + `ciphertext` as `js_params` to your own attached action, which calls `Lit.Actions.Decrypt({pkpId, ciphertext})` inside the TEE.
+
+Note on TEE errors: Chipotle reports action throws (e.g. "grant expired", "grant signature invalid") as HTTP 500 with a JSON *string* body containing the message. The SDK extracts the reason.
+
+## Policy schema (per secret, JSON)
+
+```json
+{
+  "allowed_agents": ["<agent uuid>", "..."],   // omit = all of the tenant's agents
+  "max_reads_per_day": 100,                     // rolling 24h cap on successful grants
+  "not_after": "2026-12-31T00:00:00Z"          // hard expiry (RFC 3339); applies to grants and references
+}
+```
+
+Unknown fields are rejected. Policy is evaluated at grant time and is editable for the life of the secret.
+
+## Limits and errors
+
+- 500 secrets per tenant (`secret_limit_reached`, HTTP 429), 100 active agents per tenant (`agent_limit_reached`, HTTP 429).
+- Secret values ≤ 16 KB (`value_too_large`). Names/labels validated (`invalid_name`, `invalid_label`, `invalid_policy`).
+- `409 secret_exists` on duplicate create; `404 not_found` / `version_not_found`.
+- `502` with detail = upstream Chipotle failure (safe to retry management calls); `503 reader_not_attached` = deployment's reader program not yet attached to this tenant (operator issue).
+
+## SDK (JavaScript, zero dependencies)
+
+```js
+import { LitSecrets } from 'https://secrets.litprotocol.com/sdk/lit-secrets.js';
+const secrets = new LitSecrets({
+  usageApiKey: process.env.LIT_SECRETS_KEY,
+  // baseUrl, fetch, timeoutMs (default 30000) are optional
+});
+const value = await secrets.get('OPENAI_API_KEY');          // grant + TEE redeem
+const g = await secrets.grant('OPENAI_API_KEY');            // grant only
+const ref = await secrets.reference('DB_PASSWORD');          // in_tee_only ciphertext
+// All methods accept { version, signal } (AbortSignal).
+// Errors: LitSecretsError with .status, .code (policy denial code), .body.
+```
+
+## Security model (summary)
+
+- Plaintext flows: owner → this service → TEE **once at import/rotation** (sealing); thereafter TEE → agent only. The control plane cannot decrypt: the vault key exists only inside the enclave and is usable only by on-chain-permitted programs.
+- The reader and encrypt programs are content-addressed (IPFS CID) and publicly auditable; on-chain group membership decides which code may touch which vault.
+- A database breach yields ciphertexts and hashed keys only.
+- Grants are bearer within a tenant during their ≤120s TTL (binding to the exact calling agent awaits a platform op — see the repository issue tracker); keep TTLs short and treat grant responses as sensitive.
+- `in_tee_only` secrets are never released by this service under any policy.
+- The enclave is remotely attestable via the Lit network's attestation endpoints (see developer.litprotocol.com).
+
+## Typical agent onboarding (condensed; full version in /SKILL.md)
+
+1. A setup agent generates a random token, shows the user `/agent/authorize?challenge=<urlsafe-b64 sha256(token)>`, and the user approves after magic-link login. The token now works as a User bearer.
+2. Setup agent: `POST /api/secrets {"name":"OPENAI_API_KEY","value":"sk-...","policy":{"max_reads_per_day":100}}`.
+3. Setup agent: `POST /api/agents {"name":"my-runtime-bot"}` → give `usage_api_key` to the runtime agent as `LIT_SECRETS_KEY`.
+4. Runtime agent: `await new LitSecrets({usageApiKey}).get('OPENAI_API_KEY')`.

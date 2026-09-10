@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lit Secrets — Sign in</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="card">
+    <h1>Lit Secrets</h1>
+    <p class="subtitle">Sign in to manage policy-gated secrets for your agents.</p>
+    <p class="agent-doc-link"><a href="/SKILL.md">Give this to your agent to get started</a></p>
+
+    <form id="request-form">
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" autocomplete="email" required autofocus>
+      <button type="submit" id="submit-btn">Send sign-in link</button>
+    </form>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+    <p id="next-note" class="note hidden">After sign-in, you will return to the agent authorization page.</p>
+  </main>
+
+  <script>
+    const form = document.getElementById('request-form');
+    const status = document.getElementById('status');
+    const button = document.getElementById('submit-btn');
+
+    const params = new URLSearchParams(window.location.search);
+    const next = params.get('next') || '';
+    if (next) document.getElementById('next-note').classList.remove('hidden');
+    if (params.get('error') === 'invalid') {
+      status.textContent = 'That link is invalid or expired. Request a new one.';
+      status.className = 'status error';
+    } else if (params.get('error') === 'server') {
+      status.textContent = 'Server error. Try again in a moment.';
+      status.className = 'status error';
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value.trim();
+      if (!email) return;
+      button.disabled = true;
+      status.textContent = '';
+      status.className = 'status';
+      try {
+        const body = new URLSearchParams({ email });
+        if (next) body.set('next', next);
+        const resp = await fetch('/auth/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body,
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        status.textContent = 'A sign-in link is on its way. Check your inbox.';
+        status.className = 'status ok';
+      } catch (err) {
+        status.textContent = 'Something went wrong. Try again.';
+        status.className = 'status error';
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
