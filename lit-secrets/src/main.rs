@@ -54,6 +54,8 @@ async fn rocket() -> _ {
                 login_page,
                 health,
                 skill_doc,
+                llms_txt,
+                llms_full_txt,
                 agent_authorize_page,
                 auth_routes::request_link,
                 auth_routes::verify_link,
@@ -115,6 +117,22 @@ async fn skill_doc() -> Result<NamedFile, Status> {
         .map_err(|_| Status::NotFound)
 }
 
+/// Machine-readable site index per the llms.txt convention (llmstxt.org).
+#[get("/llms.txt")]
+async fn llms_txt() -> Result<NamedFile, Status> {
+    NamedFile::open(static_path("llms.txt"))
+        .await
+        .map_err(|_| Status::NotFound)
+}
+
+/// Complete API + concepts reference for LLM consumption.
+#[get("/llms-full.txt")]
+async fn llms_full_txt() -> Result<NamedFile, Status> {
+    NamedFile::open(static_path("llms-full.txt"))
+        .await
+        .map_err(|_| Status::NotFound)
+}
+
 #[get("/agent/authorize?<challenge>")]
 async fn agent_authorize_page(
     user: Option<auth::User>,
@@ -138,12 +156,16 @@ async fn agent_authorize_page(
 
 #[get("/")]
 async fn index(user: Option<auth::User>) -> Result<NamedFile, Redirect> {
-    match user {
-        Some(_) => NamedFile::open(static_path("index.html"))
-            .await
-            .map_err(|_| Redirect::to("/login?error=missing_static")),
-        None => Err(Redirect::to("/login")),
-    }
+    // Logged-in users land on the dashboard; everyone else gets the marketing
+    // landing page (sign-in lives at /login).
+    let page = if user.is_some() {
+        "index.html"
+    } else {
+        "home.html"
+    };
+    NamedFile::open(static_path(page))
+        .await
+        .map_err(|_| Redirect::to("/login?error=missing_static"))
 }
 
 #[get("/login")]

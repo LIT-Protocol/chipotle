@@ -1,0 +1,27 @@
+# Lit Secrets
+
+> A password manager for machines: policy-gated secret storage for AI agents and services. Secrets (API keys, tokens, credentials) are sealed inside a TEE (trusted execution environment) on the Lit Protocol network. Agents read them under per-secret policies (allowlists, read quotas, expiry) via short-lived signed grants — or, in the `in_tee_only` tier, the value can only ever be used inside the enclave by explicitly approved programs and is never revealed to anyone.
+
+Key facts for agents:
+
+- One credential per runtime agent: a "usage API key" that authenticates to both this API (`Authorization: Bearer <key>`) and the Lit/Chipotle TEE network.
+- Reading a plaintext secret is two HTTP calls: `POST /api/grants` here (policy check → signed grant + ciphertext + reader program), then `POST {chipotle}/core/v1/lit_action` to redeem it; plaintext returns directly to the caller. Or use the SDK's `get()` which does both.
+- Management (creating secrets, minting agent keys, editing policy) requires a user session or an authorized setup token — see the skill file.
+- Grant denials return 403 with a JSON `error` code: `secret_disabled`, `release_not_plaintext`, `agent_not_allowed`, `policy_expired`, `rate_limited`.
+- Per-tenant limits: 500 secrets, 100 active agents (`secret_limit_reached`, `agent_limit_reached`).
+
+## Docs
+
+- [Agent skill / setup playbook](/SKILL.md): step-by-step instructions for agents — authorize as the user, store secrets, mint runtime keys, read secrets at runtime, in-TEE-only usage.
+- [Full API and concepts reference](/llms-full.txt): every endpoint, the policy schema, the grant format, the security model, and worked curl examples.
+- [JavaScript SDK](/sdk/lit-secrets.js): zero-dependency ES module (Node 18+, Deno, Bun, browsers). `new LitSecrets({ usageApiKey }); await secrets.get('NAME')`.
+
+## Underlying platform
+
+- [Lit Protocol developer docs](https://developer.litprotocol.com): the Chipotle TEE network this service is built on — Lit Actions, PKPs, groups, attestation.
+- [Lit Protocol](https://litprotocol.com): company site.
+
+## Optional
+
+- [Sign-in page](/login): email magic-link login for the human dashboard.
+- [Health check](/health): returns `ok`.

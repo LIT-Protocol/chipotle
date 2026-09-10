@@ -82,8 +82,9 @@ curl -X POST https://secrets.litprotocol.com/api/agents \
 ```
 
 Give `usage_api_key` to the runtime agent (env var). Revoke with
-`DELETE /api/agents/<id>` — this removes the key on Chipotle too, so it stops
-working immediately everywhere.
+`DELETE /api/agents/<id>` — this removes the key on Chipotle too. It stops
+working here immediately; allow up to ~5 minutes for every Chipotle replica's
+authorization cache to catch up.
 
 ## 4. Runtime agent: read a secret
 
@@ -110,7 +111,8 @@ curl -s -X POST "$(echo "$G" | jq -r .chipotle_api_base_url)/core/v1/lit_action"
 
 Denial codes: `secret_disabled`, `release_not_plaintext`, `agent_not_allowed`,
 `policy_expired`, `rate_limited`. Grants expire after ~2 minutes; request a
-fresh one per read, don't cache them.
+fresh one per read, don't cache them (a grant is bearer-redeemable within the
+tenant until it expires — treat the response as sensitive).
 
 ## 5. In-TEE-only secrets
 
@@ -121,6 +123,19 @@ them as `js_params` to that action, which calls
 `Lit.Actions.Decrypt({ pkpId, ciphertext })` and uses the value in-TEE. Any
 action in the tenant's group can decrypt any of the tenant's ciphertexts, so
 only attach code you've audited.
+
+## Limits
+
+- 500 secrets and 100 active agents per tenant (`secret_limit_reached` /
+  `agent_limit_reached`, HTTP 429). Revoke unused agents rather than minting
+  fresh ones per run.
+- Secret values ≤ 16 KB. Names match `[A-Za-z0-9][A-Za-z0-9_.-]{0,127}`.
+
+## Machine-readable docs
+
+- `GET /llms.txt` — site index in the llms.txt convention.
+- `GET /llms-full.txt` — the complete API + concepts reference (every endpoint,
+  policy schema, grant format, error codes). Fetch it before improvising.
 
 ## Notes
 
