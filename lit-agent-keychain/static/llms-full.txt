@@ -70,7 +70,7 @@ Unknown fields are rejected. Policy is evaluated at grant time and is editable f
 ## SDK (JavaScript, zero dependencies)
 
 ```js
-import { LitAgentKeychain } from 'https://secrets.litprotocol.com/sdk/lit-agent-keychain.js';
+import { LitAgentKeychain } from 'https://keychain.litprotocol.com/sdk/lit-agent-keychain.js';
 const keychain = new LitAgentKeychain({
   usageApiKey: process.env.LIT_AGENT_KEYCHAIN_KEY,
   // baseUrl, fetch, timeoutMs (default 30000) are optional

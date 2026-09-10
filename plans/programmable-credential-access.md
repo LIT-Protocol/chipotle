@@ -111,7 +111,7 @@ group authz, the Deno sandbox, scoped usage keys, `add_action_to_group` /
 - Reader-CID rotation job: when `GRANT_SIGNING_KEY` changes, attach the new
   reader CID to every tenant group (currently `/api/tenant.reader_cid_stale`
   + `503 reader_not_attached`).
-- Deploy: `secrets.litprotocol.com` on Railway, root dir `lit-agent-keychain`.
+- Deploy: `keychain.litprotocol.com` on Railway, root dir `lit-agent-keychain`.
 
 ### Phase 2 — approvals & agent identity (Turnkey's 3 patterns)
 

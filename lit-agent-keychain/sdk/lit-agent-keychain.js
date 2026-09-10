@@ -4,7 +4,7 @@
 // dashboard). It authenticates to the lit-agent-keychain control plane *and* to
 // Chipotle. Plaintext travels Chipotle -> agent only.
 //
-//   import { LitAgentKeychain } from 'https://secrets.litprotocol.com/sdk/lit-agent-keychain.js';
+//   import { LitAgentKeychain } from 'https://keychain.litprotocol.com/sdk/lit-agent-keychain.js';
 //   const keychain = new LitAgentKeychain({ usageApiKey: process.env.LIT_AGENT_KEYCHAIN_KEY });
 //   const openaiKey = await keychain.get('OPENAI_API_KEY');
 
@@ -18,7 +18,7 @@ export class LitAgentKeychain {
    *   stalled or trickling upstream otherwise leaves credential loading hung
    *   forever, blocking agent startup.
    */
-  constructor({ usageApiKey, baseUrl = 'https://secrets.litprotocol.com', fetch: f, timeoutMs = 30000 } = {}) {
+  constructor({ usageApiKey, baseUrl = 'https://keychain.litprotocol.com', fetch: f, timeoutMs = 30000 } = {}) {
     if (!usageApiKey) throw new Error('usageApiKey is required');
     this.usageApiKey = usageApiKey;
     this.baseUrl = baseUrl.replace(/\/+$/, '');

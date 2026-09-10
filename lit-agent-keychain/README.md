@@ -44,7 +44,7 @@ See `plans/programmable-credential-access.md` at the repo root for the design.
 | `MAGIC_LINK_SIGNING_KEY` | base64, ≥32 bytes (`openssl rand -base64 32`) |
 | `USAGE_KEY_ENCRYPTION_KEY` | base64, ≥32 bytes — AES key for stored Chipotle usage keys |
 | `RESEND_API_KEY`, `MAIL_FROM` | magic-link email |
-| `PUBLIC_BASE_URL` | e.g. `https://secrets.litprotocol.com` |
+| `PUBLIC_BASE_URL` | e.g. `https://keychain.litprotocol.com` |
 | `CHIPOTLE_API_BASE_URL` | default `https://api.chipotle.litprotocol.com` |
 | `CHIPOTLE_MASTER_API_KEY` | master key of the operator's Chipotle account (must be funded) |
 | `GRANT_SIGNING_KEY` | hex secp256k1 private key (`openssl rand -hex 32`) |
@@ -101,8 +101,8 @@ pre-rename `lit-secrets` name; renaming them is cosmetic and optional.) Source:
 `LIT-Protocol/chipotle`, root directory **`lit-agent-keychain`** (was `lit-secrets` before
 the rename — must be updated via the Railway API, the CLI has no flag for it, or deploys
 from `main` will fail), Dockerfile build, healthcheck `/health`, sleeping disabled.
-Current URL: `https://lit-secrets-production.up.railway.app` (custom domain
-`secrets.litprotocol.com` TODO: `railway domain secrets.litprotocol.com` + CNAME).
+Canonical URL: `https://keychain.litprotocol.com` (custom domain, live; `PUBLIC_BASE_URL` set to
+match). Railway default URL `https://lit-secrets-production.up.railway.app` still resolves.
 
 Variables set: everything in the table above plus `ROCKET_SECRET_KEY`, `ROCKET_ADDRESS`,
 `RUST_LOG`; `DATABASE_URL` is the `${{Postgres.DATABASE_URL}}` reference. The
