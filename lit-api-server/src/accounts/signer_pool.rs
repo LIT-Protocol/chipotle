@@ -9,7 +9,7 @@ use anyhow::Result;
 
 use crate::accounts::decode_revert::decode_contract_revert;
 use crate::accounts::signable_contract::{
-    SigningClient, get_admin_api_payer_contract, get_admin_api_signer,
+    SigningClient, TX_RECEIPT_TIMEOUT, get_admin_api_payer_contract, get_admin_api_signer,
     get_read_only_account_config_contract,
 };
 use crate::accounts::{get_api_payer_count, get_rebalance_amount};
@@ -293,6 +293,13 @@ async fn release_stale_leases(entries: &mut [SigningPoolEntry]) {
             );
             entry.in_use = false;
             entry.in_use_since = None;
+            // Rotate a force-freed signer to the back of the LRU order.
+            // last_request is otherwise only updated on a clean release, so a
+            // signer whose borrower hangs keeps the oldest last_request and is
+            // re-granted first — during the 2026-09-03 incident two wedged
+            // payers absorbed nearly all lease grants this way, hanging every
+            // write endpoint they were handed to.
+            entry.last_request = now;
         }
     }
 }
@@ -333,7 +340,11 @@ async fn rebalance_entries(
         let tx = entry.client.send_transaction(req).await;
         match tx {
             Ok(tx) => {
-                tx.get_receipt().await?;
+                // Bounded wait: rebalancing runs inside the pool task's select
+                // loop, so an unmined tx here would stall every lease grant.
+                tx.with_timeout(Some(TX_RECEIPT_TIMEOUT))
+                    .get_receipt()
+                    .await?;
                 tracing::info!(
                     "signer_pool: repatriated funds to admin wallet from {:?}",
                     entry.address
@@ -359,7 +370,9 @@ async fn rebalance_entries(
         let tx = admin_signer.send_transaction(req).await;
         match tx {
             Ok(tx) => {
-                tx.get_receipt().await?;
+                tx.with_timeout(Some(TX_RECEIPT_TIMEOUT))
+                    .get_receipt()
+                    .await?;
                 tracing::info!("signer_pool: funded {:?}", entry.address);
             }
             Err(e) => {
@@ -369,4 +382,66 @@ async fn rebalance_entries(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy::providers::ProviderBuilder;
+
+    fn entry(
+        address_byte: u8,
+        in_use: bool,
+        in_use_since: Option<Instant>,
+        last_request: Instant,
+    ) -> SigningPoolEntry {
+        // The provider is never dialed in these tests; any URL works.
+        let client = ProviderBuilder::new()
+            .connect_http("http://127.0.0.1:1".parse().expect("static url"))
+            .erased();
+        SigningPoolEntry {
+            client,
+            address: Address::repeat_byte(address_byte),
+            in_use,
+            in_use_since,
+            last_request,
+        }
+    }
+
+    #[tokio::test]
+    async fn stale_lease_is_freed_and_rotated_to_back_of_lru() {
+        let now = Instant::now();
+        let long_ago = now
+            .checked_sub(Duration::from_secs(STALE_LEASE_SECS * 3))
+            .expect("test clock underflow");
+        let mut entries = vec![
+            // Wedged signer: borrowed long ago, never released.
+            entry(0x11, true, Some(long_ago), long_ago),
+            // Healthy signer released recently.
+            entry(0x22, false, None, now),
+        ];
+
+        release_stale_leases(&mut entries).await;
+
+        assert!(!entries[0].in_use, "stale lease must be freed");
+        assert!(entries[0].in_use_since.is_none());
+        // The freed signer must not keep the oldest last_request, or run_pool
+        // (which grants the oldest-last_request idle signer first) would hand
+        // it every subsequent request.
+        assert!(
+            entries[0].last_request >= entries[1].last_request,
+            "force-freed signer must rotate behind the healthy one"
+        );
+    }
+
+    #[tokio::test]
+    async fn fresh_lease_is_left_alone() {
+        let now = Instant::now();
+        let mut entries = vec![entry(0x11, true, Some(now), now)];
+
+        release_stale_leases(&mut entries).await;
+
+        assert!(entries[0].in_use, "fresh lease must not be freed");
+        assert!(entries[0].in_use_since.is_some());
+    }
 }

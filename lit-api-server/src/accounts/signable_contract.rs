@@ -6,7 +6,7 @@ pub use crate::utils::chain_info::Chain;
 pub use alloy::contract::CallBuilder;
 pub use alloy::network::{Ethereum, TransactionBuilder, TxSigner};
 pub use alloy::primitives::{Address, B256};
-pub use alloy::providers::{DynProvider, Provider, ProviderBuilder};
+pub use alloy::providers::{DynProvider, PendingTransactionBuilder, Provider, ProviderBuilder};
 pub use alloy::rpc::types::BlockNumberOrTag;
 pub use alloy::rpc::types::TransactionRequest;
 use alloy::signers::Signer;
@@ -14,11 +14,22 @@ pub use alloy::signers::local::PrivateKeySigner;
 pub use anyhow::Result;
 pub use lit_core::utils::binary::hex_to_bytes;
 use std::sync::OnceLock;
+use std::time::Duration;
+
+/// Upper bound on waiting for a broadcast transaction to be mined. The
+/// configured chains mine ~2s blocks, so a healthy transaction confirms in
+/// seconds; without a bound, a dropped or nonce-gapped transaction pins the
+/// calling HTTP request (and its signer lease) forever. During the 2026-09-03
+/// prod incident an RPC outage left two payers sending nonce-gapped
+/// transactions, and every request that borrowed them hung until the client
+/// gave up.
+pub(crate) const TX_RECEIPT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The shared signing client. A single instance is held for the lifetime of
-/// the process so Alloy's recommended fillers (including `NonceFiller`) can
-/// manage nonces across concurrent requests. Signer-pool leasing still serializes
-/// normal use per payer, while the oldest-lease fallback remains non-blocking.
+/// the process. Nonces are pinned explicitly per send (see [`pending_nonce`])
+/// rather than left to Alloy's `NonceFiller` cache. Signer-pool leasing still
+/// serializes normal use per payer, while the oldest-lease fallback remains
+/// non-blocking.
 pub(crate) type SigningClient = DynProvider<Ethereum>;
 pub(crate) type AccountConfigInstance = AccountConfig::AccountConfigInstance<SigningClient>;
 
@@ -135,6 +146,43 @@ fn receipt_to_result(receipt: alloy::rpc::types::TransactionReceipt) -> Result<b
     }
 }
 
+/// Fetch the signer's pending-block nonce directly from the RPC.
+///
+/// Every send pins this instead of trusting alloy's `NonceFiller` cache: the
+/// cache increments optimistically and is never rolled back after a failed or
+/// dropped broadcast, so one RPC outage mid-send leaves the signer emitting
+/// nonce-gapped transactions that can never mine (2026-09-03 prod incident).
+/// Re-fetching per send self-heals. The signer-pool lease keeps concurrent use
+/// of one payer rare; a collision surfaces as "nonce too low", which the retry
+/// in `send_transaction` recovers.
+async fn pending_nonce(
+    client: &SigningClient,
+    signer_address: Address,
+) -> alloy::transports::TransportResult<u64> {
+    client
+        .get_transaction_count(signer_address)
+        .block_id(alloy::eips::BlockId::Number(BlockNumberOrTag::Pending))
+        .await
+}
+
+/// Wait for a broadcast transaction to be mined, bounded by
+/// [`TX_RECEIPT_TIMEOUT`], and convert the receipt into a success/failure
+/// result. The bound is what keeps a transaction that never mines from
+/// hanging the HTTP request forever.
+async fn wait_for_receipt(tx: PendingTransactionBuilder<Ethereum>) -> Result<bool> {
+    let tx_hash = *tx.tx_hash();
+    match tx
+        .with_timeout(Some(TX_RECEIPT_TIMEOUT))
+        .get_receipt()
+        .await
+    {
+        Ok(receipt) => receipt_to_result(receipt),
+        Err(e) => Err(anyhow::anyhow!(
+            "no receipt for transaction {tx_hash:#x} within {TX_RECEIPT_TIMEOUT:?}: {e}"
+        )),
+    }
+}
+
 pub async fn send_transaction<D>(
     function_call: CallBuilder<&SigningClient, D, Ethereum>,
     signer_pool: std::sync::Arc<SignerPool>,
@@ -142,7 +190,7 @@ pub async fn send_transaction<D>(
     client: SigningClient,
 ) -> Result<bool>
 where
-    D: alloy::contract::CallDecoder,
+    D: alloy::contract::CallDecoder + Clone,
 {
     // Call-before-send: dry-run via eth_call so any revert surfaces as a
     // decoded, human-readable error before we broadcast. No nonce is consumed
@@ -155,12 +203,19 @@ where
         return Err(anyhow::anyhow!("Simulation failed: {decoded}"));
     }
 
-    let first_err = match function_call.send().await {
+    let nonce = match pending_nonce(&client, signer_address).await {
+        Ok(nonce) => nonce,
+        Err(nonce_err) => {
+            signer_pool.release(signer_address).await?;
+            return Err(anyhow::anyhow!(
+                "Failed to send transaction (nonce fetch failed): {nonce_err}"
+            ));
+        }
+    };
+
+    let first_err = match function_call.clone().nonce(nonce).send().await {
         Ok(tx) => {
-            let result = match tx.get_receipt().await {
-                Ok(receipt) => receipt_to_result(receipt),
-                Err(e) => Err(anyhow::Error::from(e)),
-            };
+            let result = wait_for_receipt(tx).await;
             signer_pool.release(signer_address).await?;
             return result;
         }
@@ -192,17 +247,9 @@ where
         return Err(anyhow::anyhow!("Failed to send transaction: {decoded}"));
     }
 
-    // Alloy's recommended `NonceFiller` uses `SimpleNonceManager`: it caches a
-    // per-address nonce, increments it atomically before send, and clears/re-syncs
-    // the cache when `prepare` observes an RPC error. Unlike ethers'
-    // `NonceManagerMiddleware`, there is no public counter setter and no internal
-    // send retry after a broadcast failure, so we preserve explicit recovery here:
-    // fetch the pending nonce and pin it on the retry call.
-    let fresh_nonce = match client
-        .get_transaction_count(signer_address)
-        .block_id(alloy::eips::BlockId::Number(BlockNumberOrTag::Pending))
-        .await
-    {
+    // Another sender raced us to this nonce (only possible via the pool's
+    // all-busy fallback, where a lease can be shared). Re-fetch and retry once.
+    let fresh_nonce = match pending_nonce(&client, signer_address).await {
         Ok(nonce) => nonce,
         Err(nonce_err) => {
             tracing::warn!("nonce resync failed: {nonce_err}");
@@ -223,11 +270,7 @@ where
         }
     };
 
-    let result = match tx.get_receipt().await {
-        Ok(receipt) => receipt_to_result(receipt),
-        Err(e) => Err(e.into()),
-    };
-
+    let result = wait_for_receipt(tx).await;
     signer_pool.release(signer_address).await?;
     result
 }

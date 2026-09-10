@@ -38,6 +38,16 @@ doesn't describe endpoints the released server lacks.
 - `max_get_keys_count` is now enforced in the key handlers; oversized
   `get_keys` requests are rejected.
 
+### Fixed
+- Write endpoints (`new_account`, `create_wallet`, …) can no longer hang
+  indefinitely after an RPC outage. On-chain sends now pin a freshly fetched
+  nonce (instead of trusting alloy's optimistic nonce cache, which is never
+  rolled back after a dropped broadcast), receipt waits are bounded at 30s,
+  and a signer whose lease is force-freed as stale rotates to the back of the
+  pool instead of monopolizing the front of the lease queue. Root-caused from
+  the 2026-09-03 prod incident where two wedged payer wallets absorbed nearly
+  all signer leases and `POST /new_account` timed out for days.
+
 ### Security
 - `registerWalletDerivation` now enforces a global first-owner binding
   (`pkpId → master account`): a wallet address can only ever be registered —
