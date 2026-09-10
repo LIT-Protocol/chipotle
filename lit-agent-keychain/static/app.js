@@ -1,4 +1,4 @@
-// Lit Secrets dashboard. Vanilla JS, no build step.
+// Lit Agent Keychain dashboard. Vanilla JS, no build step.
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -176,7 +176,7 @@ $('#agent-form').addEventListener('submit', async (e) => {
     const box = $('#agent-new');
     box.classList.remove('hidden');
     box.innerHTML = `<b>Key for ${esc(a.name)} — copy it now, it will not be shown again:</b><pre><code>${esc(a.usage_api_key)}</code></pre>
-      <div class="muted">Set as <code>LIT_SECRETS_KEY</code> for the agent. Chipotle: <code>${esc(a.chipotle_api_base_url)}</code></div>`;
+      <div class="muted">Set as <code>LIT_AGENT_KEYCHAIN_KEY</code> for the agent. Chipotle: <code>${esc(a.chipotle_api_base_url)}</code></div>`;
     e.target.reset();
     await Promise.all([loadAgents(), loadVault()]);
   } catch (err) { alert(err.message); } finally { btn.disabled = false; }

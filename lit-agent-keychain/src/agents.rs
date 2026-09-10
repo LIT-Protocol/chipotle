@@ -161,8 +161,8 @@ pub async fn create_agent(
     let usage_key = chipotle
         .add_usage_api_key(
             &cfg.chipotle_master_api_key,
-            &format!("lit-secrets agent: {name}"),
-            &format!("Agent key for tenant {} (lit-secrets)", tenant.id),
+            &format!("lit-agent-keychain agent: {name}"),
+            &format!("Agent key for tenant {} (lit-agent-keychain)", tenant.id),
             &[tenant.group_id_u64()],
         )
         .await

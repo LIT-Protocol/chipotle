@@ -1,7 +1,7 @@
-// lit-secrets reader action (plaintext release tier).
+// lit-agent-keychain reader action (plaintext release tier).
 //
 // An agent calls this action directly on Chipotle with its own usage API key,
-// passing a short-lived grant issued by the lit-secrets control plane. The
+// passing a short-lived grant issued by the lit-agent-keychain control plane. The
 // grant is an EIP-191 signed JSON document from GRANT_SIGNER. This action
 // verifies the grant, checks it matches the supplied ciphertext + vault PKP,
 // decrypts inside the TEE, and returns the plaintext to the caller.

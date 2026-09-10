@@ -1,4 +1,4 @@
-# Agent Context: lit-secrets (Rust)
+# Agent Context: lit-agent-keychain (Rust)
 
 ## Purpose
 Programmable credential access control plane on top of Chipotle. Users sign in

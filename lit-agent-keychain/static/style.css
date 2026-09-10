@@ -235,7 +235,7 @@ button.danger { color: var(--danger); border-color: var(--danger); }
   button.compact { width: 100%; }
 }
 
-/* --- lit-secrets additions --- */
+/* --- lit-agent-keychain additions --- */
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 8px 0; }
 .kv dt { color: #777; }
 .kv dd { margin: 0; word-break: break-all; }

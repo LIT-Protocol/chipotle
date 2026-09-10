@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use lit_secrets::auth::routes as auth_routes;
-use lit_secrets::{
+use lit_agent_keychain::auth::routes as auth_routes;
+use lit_agent_keychain::{
     actions, agents, audit, auth, chipotle, config, db, grants, mail, secrets, signer, tenants,
 };
 use rocket::fs::{FileServer, NamedFile};
@@ -35,7 +35,7 @@ async fn rocket() -> _ {
         reader_cid = %action_set.reader_cid,
         encrypt_cid = %action_set.encrypt_cid,
         chipotle = %cfg.chipotle_api_base_url,
-        "lit-secrets starting"
+        "lit-agent-keychain starting"
     );
 
     rocket::build()

@@ -1,5 +1,5 @@
 [package]
-name = "lit-secrets"
+name = "lit-agent-keychain"
 version = "0.1.0"
 edition = "2021"
 description = "Lit Protocol programmable credential access — policy-gated secrets for agents, powered by Chipotle"

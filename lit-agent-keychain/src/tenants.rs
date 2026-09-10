@@ -171,8 +171,8 @@ async fn provision(
     let group_id = chipotle
         .add_group(
             master,
-            &format!("lit-secrets:{short}"),
-            &format!("lit-secrets vault group for user {user_id}"),
+            &format!("lit-agent-keychain:{short}"),
+            &format!("lit-agent-keychain vault group for user {user_id}"),
             std::slice::from_ref(&pkp_id),
         )
         .await
@@ -183,7 +183,7 @@ async fn provision(
         cfg,
         chipotle,
         &actions.encrypt_cid,
-        "lit-secrets encrypt",
+        "lit-agent-keychain encrypt",
         "Seals a secret value to a tenant vault PKP",
     )
     .await?;
@@ -192,7 +192,7 @@ async fn provision(
         cfg,
         chipotle,
         &actions.reader_cid,
-        "lit-secrets reader",
+        "lit-agent-keychain reader",
         &format!(
             "Grant-gated plaintext reader (grant signer {})",
             actions.grant_signer
@@ -209,7 +209,7 @@ async fn provision(
     let service_key = chipotle
         .add_usage_api_key(
             master,
-            &format!("lit-secrets service {short}"),
+            &format!("lit-agent-keychain service {short}"),
             "Control-plane key: runs the encrypt action for this tenant",
             &[group_id],
         )
@@ -363,7 +363,7 @@ pub async fn add_tenant_action(
         chipotle,
         &cid,
         &name,
-        "tenant action (lit-secrets)",
+        "tenant action (lit-agent-keychain)",
     )
     .await?;
     chipotle

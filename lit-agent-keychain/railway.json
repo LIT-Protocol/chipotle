@@ -5,7 +5,7 @@
     "dockerfilePath": "Dockerfile"
   },
   "deploy": {
-    "startCommand": "/app/lit-secrets",
+    "startCommand": "/app/lit-agent-keychain",
     "numReplicas": 1,
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300,

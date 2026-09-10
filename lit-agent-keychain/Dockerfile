@@ -1,17 +1,17 @@
-# Dockerfile for lit-secrets.
-# Build with the Docker build context set to this `lit-secrets/` directory.
-# On Railway, configure the service root directory to `lit-secrets` so this
+# Dockerfile for lit-agent-keychain.
+# Build with the Docker build context set to this `lit-agent-keychain/` directory.
+# On Railway, configure the service root directory to `lit-agent-keychain` so this
 # Dockerfile, railway.json, static assets, and migrations are all in-context.
 
 FROM rust:1.91-bookworm AS builder
-WORKDIR /build/lit-secrets
+WORKDIR /build/lit-agent-keychain
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 COPY . .
-RUN cargo build --release --bin lit-secrets
+RUN cargo build --release --bin lit-agent-keychain
 
 FROM debian:bookworm-slim AS runtime
 WORKDIR /app
@@ -20,7 +20,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates libssl3 \
  && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /build/lit-secrets/target/release/lit-secrets /app/lit-secrets
+COPY --from=builder /build/lit-agent-keychain/target/release/lit-agent-keychain /app/lit-agent-keychain
 COPY SKILL.md ./SKILL.md
 COPY static ./static
 COPY sdk ./sdk
@@ -29,4 +29,4 @@ COPY migrations ./migrations
 ENV ROCKET_ADDRESS=0.0.0.0
 EXPOSE 8000
 
-ENTRYPOINT ["/app/lit-secrets"]
+ENTRYPOINT ["/app/lit-agent-keychain"]
