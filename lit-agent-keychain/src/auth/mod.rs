@@ -7,6 +7,6 @@ pub mod user;
 
 pub use user::User;
 
-pub const SESSION_COOKIE_NAME: &str = "lit_secrets_session";
+pub const SESSION_COOKIE_NAME: &str = "lit_agent_keychain_session";
 pub const MAGIC_LINK_TTL_SECONDS: i64 = 15 * 60;
 pub const SESSION_TTL_SECONDS: i64 = 7 * 24 * 60 * 60;

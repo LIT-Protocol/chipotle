@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Lit Secrets — a password manager for machines</title>
+  <title>Lit Agent Keychain — a password manager for machines</title>
   <meta name="description" content="Policy-gated secrets for AI agents. API keys and credentials sealed in a TEE, released only under policies you control — or never released at all.">
-  <meta property="og:title" content="Lit Secrets">
+  <meta property="og:title" content="Lit Agent Keychain">
   <meta property="og:description" content="Policy-gated secrets for AI agents, sealed in a TEE. Powered by Lit Protocol.">
   <style>
     :root {
@@ -100,7 +100,7 @@
 <body>
   <div class="wrap">
     <nav>
-      <div class="brand">Lit&nbsp;Secrets<span class="dot">.</span></div>
+      <div class="brand">Lit&nbsp;Agent&nbsp;Keychain<span class="dot">.</span></div>
       <div class="nav-links">
         <a href="#how" class="hide-sm">How it works</a>
         <a href="#tiers" class="hide-sm">Release tiers</a>
@@ -127,15 +127,15 @@
       </div>
       <div class="hero-code">
         <div class="bar"><i></i><i></i><i></i></div>
-        <pre><span class="c-kw">import</span> { LitSecrets } <span class="c-kw">from</span> <span class="c-str">'./sdk/lit-secrets.js'</span>;
+        <pre><span class="c-kw">import</span> { LitAgentKeychain } <span class="c-kw">from</span> <span class="c-str">'./sdk/lit-agent-keychain.js'</span>;
 
-<span class="c-kw">const</span> secrets = <span class="c-kw">new</span> <span class="c-fn">LitSecrets</span>({
-  usageApiKey: process.env.<span class="c-fn">LIT_SECRETS_KEY</span>,
+<span class="c-kw">const</span> keychain = <span class="c-kw">new</span> <span class="c-fn">LitAgentKeychain</span>({
+  usageApiKey: process.env.<span class="c-fn">LIT_AGENT_KEYCHAIN_KEY</span>,
 });
 
 <span class="c-cm">// Policy checked, decrypted in the TEE,</span>
 <span class="c-cm">// returned straight to this agent.</span>
-<span class="c-kw">const</span> key = <span class="c-kw">await</span> secrets.<span class="c-fn">get</span>(<span class="c-str">'OPENAI_API_KEY'</span>);</pre>
+<span class="c-kw">const</span> key = <span class="c-kw">await</span> keychain.<span class="c-fn">get</span>(<span class="c-str">'OPENAI_API_KEY'</span>);</pre>
       </div>
     </header>
 
@@ -209,7 +209,7 @@
       <div class="grid3">
         <div class="card"><h3><a href="/llms.txt">/llms.txt</a></h3><p>Machine-readable index of everything on this site, in the llms.txt standard.</p></div>
         <div class="card"><h3><a href="/SKILL.md">/SKILL.md</a></h3><p>An agent playbook: authorize, store secrets, mint runtime keys, read at runtime.</p></div>
-        <div class="card"><h3><a href="/sdk/lit-secrets.js">/sdk/lit-secrets.js</a></h3><p>Zero-dependency ES module for Node 18+, Deno, Bun, and browsers.</p></div>
+        <div class="card"><h3><a href="/sdk/lit-agent-keychain.js">/sdk/lit-agent-keychain.js</a></h3><p>Zero-dependency ES module for Node 18+, Deno, Bun, and browsers.</p></div>
       </div>
     </section>
 

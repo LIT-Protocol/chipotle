@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Lit Secrets</title>
+  <title>Lit Agent Keychain</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">Lit Secrets</div>
+    <div class="brand">Lit Agent Keychain</div>
     <div class="topbar-right">
       <span id="me" class="muted"></span>
       <button id="logout" class="ghost">Sign out</button>
@@ -99,9 +99,9 @@
 
     <section class="card">
       <h2>Use from an agent</h2>
-<pre><code>import { LitSecrets } from '<span class="origin"></span>/sdk/lit-secrets.js';
-const secrets = new LitSecrets({ usageApiKey: process.env.LIT_SECRETS_KEY, baseUrl: '<span class="origin"></span>' });
-const key = await secrets.get('OPENAI_API_KEY');</code></pre>
+<pre><code>import { LitAgentKeychain } from '<span class="origin"></span>/sdk/lit-agent-keychain.js';
+const keychain = new LitAgentKeychain({ usageApiKey: process.env.LIT_AGENT_KEYCHAIN_KEY, baseUrl: '<span class="origin"></span>' });
+const key = await keychain.get('OPENAI_API_KEY');</code></pre>
       <p class="muted">Agent playbook: <a href="/SKILL.md">/SKILL.md</a></p>
     </section>
   </main>

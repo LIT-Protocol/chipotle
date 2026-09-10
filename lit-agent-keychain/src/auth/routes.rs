@@ -1,4 +1,4 @@
-//! Magic-link auth routes for public lit-secrets users.
+//! Magic-link auth routes for public lit-agent-keychain users.
 
 use rocket::form::Form;
 use rocket::http::{Cookie, CookieJar, SameSite, Status};
@@ -62,12 +62,12 @@ pub async fn request_link(
     {
         Ok(()) => {
             let link = format!("{}/auth/verify?token={tok}", config.public_base_url);
-            let subject = "Sign in to Lit Secrets";
+            let subject = "Sign in to Lit Agent Keychain";
             let text = format!(
-                "Click to sign in to Lit Secrets (link expires in 15 minutes):\n\n{link}\n\nIf you didn't request this, you can ignore this email."
+                "Click to sign in to Lit Agent Keychain (link expires in 15 minutes):\n\n{link}\n\nIf you didn't request this, you can ignore this email."
             );
             let html = format!(
-                "<p>Click to sign in to Lit Secrets (link expires in 15 minutes):</p>\
+                "<p>Click to sign in to Lit Agent Keychain (link expires in 15 minutes):</p>\
                  <p><a href=\"{link}\">{link}</a></p>\
                  <p style=\"color: #777; font-size: 12px;\">If you didn't request this, you can ignore this email.</p>"
             );

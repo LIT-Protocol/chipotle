@@ -1,6 +1,6 @@
 ---
-name: lit-secrets
-description: "Use when an agent needs policy-gated access to secrets (API keys, tokens, credentials) stored in Lit Secrets at secrets.litprotocol.com: help the user store secrets and mint an agent key, then read secrets at runtime with a single credential."
+name: lit-agent-keychain
+description: "Use when an agent needs policy-gated access to secrets (API keys, tokens, credentials) stored in Lit Agent Keychain at keychain.litprotocol.com: help the user store secrets and mint an agent key, then read secrets at runtime with a single credential."
 version: 0.1.0
 author: Lit Protocol
 license: MIT
@@ -9,19 +9,19 @@ metadata:
     tags: [lit-protocol, chipotle, secrets, credentials, agents]
 ---
 
-# Lit Secrets
+# Lit Agent Keychain
 
-Lit Secrets is a password manager for machines. Secrets are sealed inside the
+Lit Agent Keychain is a password manager for machines. Secrets are sealed inside the
 Chipotle TEE; agents get **policy-gated** access with one credential. Two
 release tiers per secret:
 
 - `plaintext` (default) — an authorized agent can read the value. The value is
   decrypted inside the TEE by a pinned, auditable reader action and returned
-  straight to the agent. The Lit Secrets control plane never sees it.
+  straight to the agent. The Lit Agent Keychain control plane never sees it.
 - `in_tee_only` — only Lit Actions the user has explicitly permitted can decrypt
   the value, and only inside the TEE. Nobody can read it out.
 
-Base URL: `https://secrets.litprotocol.com`
+Base URL: `https://keychain.litprotocol.com`
 
 ## Two kinds of credential — don't mix them up
 
@@ -40,22 +40,22 @@ authorize URL in the user's browser:
 ```bash
 python3 - <<'PY'
 import base64, hashlib, pathlib, secrets, urllib.parse
-p = pathlib.Path.home() / '.lit-secrets' / 'agent-token'
+p = pathlib.Path.home() / '.lit-agent-keychain' / 'agent-token'
 p.parent.mkdir(exist_ok=True)
 if not p.exists():
     p.write_text(secrets.token_urlsafe(48)); p.chmod(0o600)
 raw = p.read_text().strip()
 challenge = base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest()).rstrip(b'=').decode()
-print('https://secrets.litprotocol.com/agent/authorize?' + urllib.parse.urlencode({'challenge': challenge}))
+print('https://keychain.litprotocol.com/agent/authorize?' + urllib.parse.urlencode({'challenge': challenge}))
 PY
 ```
 
-Then verify: `curl -H "Authorization: Bearer $TOKEN" https://secrets.litprotocol.com/api/me` → 200.
+Then verify: `curl -H "Authorization: Bearer $TOKEN" https://keychain.litprotocol.com/api/me` → 200.
 
 ## 2. Store secrets (setup agent)
 
 ```bash
-curl -X POST https://secrets.litprotocol.com/api/secrets \
+curl -X POST https://keychain.litprotocol.com/api/secrets \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"name":"OPENAI_API_KEY","value":"sk-...","kind":"api_key","environment":"production"}'
 ```
@@ -75,7 +75,7 @@ Other calls: `GET /api/secrets`, `GET /api/secrets/<name>` (versions),
 ## 3. Mint a runtime agent key (setup agent)
 
 ```bash
-curl -X POST https://secrets.litprotocol.com/api/agents \
+curl -X POST https://keychain.litprotocol.com/api/agents \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"name":"payments-bot"}'
 # -> { "id": "...", "usage_api_key": "…shown once…", "chipotle_api_base_url": "..." }
@@ -91,21 +91,21 @@ authorization cache to catch up.
 Easiest — the SDK (no dependencies):
 
 ```js
-import { LitSecrets } from 'https://secrets.litprotocol.com/sdk/lit-secrets.js';
-const secrets = new LitSecrets({ usageApiKey: process.env.LIT_SECRETS_KEY });
-const key = await secrets.get('OPENAI_API_KEY');
+import { LitAgentKeychain } from 'https://keychain.litprotocol.com/sdk/lit-agent-keychain.js';
+const keychain = new LitAgentKeychain({ usageApiKey: process.env.LIT_AGENT_KEYCHAIN_KEY });
+const key = await keychain.get('OPENAI_API_KEY');
 ```
 
 Manually, it's two requests:
 
 ```bash
 # (1) grant — policy is evaluated here; 403 with {"error": "<reason>"} if denied
-G=$(curl -s -X POST https://secrets.litprotocol.com/api/grants \
-  -H "Authorization: Bearer $LIT_SECRETS_KEY" -H 'Content-Type: application/json' \
+G=$(curl -s -X POST https://keychain.litprotocol.com/api/grants \
+  -H "Authorization: Bearer $LIT_AGENT_KEYCHAIN_KEY" -H 'Content-Type: application/json' \
   -d '{"name":"OPENAI_API_KEY"}')
 # (2) run the reader action on Chipotle with the same key; plaintext comes back to you
 curl -s -X POST "$(echo "$G" | jq -r .chipotle_api_base_url)/core/v1/lit_action" \
-  -H "Authorization: Bearer $LIT_SECRETS_KEY" -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $LIT_AGENT_KEYCHAIN_KEY" -H 'Content-Type: application/json' \
   -d "$(echo "$G" | jq '{code: .action.code, js_params: .js_params}')" | jq -r '.response.value // .response'
 ```
 
@@ -140,6 +140,6 @@ only attach code you've audited.
 ## Notes
 
 - Never log or echo `usage_api_key` or secret values.
-- Chipotle executions are billed to the Lit Secrets operator account; expect
+- Chipotle executions are billed to the Lit Agent Keychain operator account; expect
   ~0.5–2s per read.
 - `GET /api/audit` (setup agent) lists every grant/reference decision.

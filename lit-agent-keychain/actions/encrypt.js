@@ -1,7 +1,7 @@
-// lit-secrets encrypt action.
+// lit-agent-keychain encrypt action.
 //
 // Seals a secret value to the tenant's vault PKP inside the Chipotle TEE.
-// Run by the lit-secrets control plane with the tenant's service usage key
+// Run by the lit-agent-keychain control plane with the tenant's service usage key
 // whenever a secret is created or rotated. Returns only the ciphertext.
 const main = async ({ pkpId, value }) => {
   if (typeof pkpId !== 'string' || typeof value !== 'string') {

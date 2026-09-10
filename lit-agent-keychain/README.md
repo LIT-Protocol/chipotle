@@ -1,4 +1,4 @@
-# lit-secrets
+# lit-agent-keychain
 
 Programmable credential access on top of Chipotle — a Turnkey-Secrets-style
 "password manager for machines". Control plane only: it stores **ciphertexts**
@@ -10,7 +10,7 @@ See `plans/programmable-credential-access.md` at the repo root for the design.
 ## How it works
 
 ```
-                 ┌─────────────── lit-secrets (this service, Railway) ───────────────┐
+                 ┌─────────────── lit-agent-keychain (this service, Railway) ───────────────┐
   user ──login──▶│ secrets CRUD · agents (usage keys) · policy · grants · audit      │
                  │ Postgres: ciphertext, policy, hashes   (no plaintext, ever)       │
                  └────────────┬────────────────────────────────────┬─────────────────┘
@@ -44,7 +44,7 @@ See `plans/programmable-credential-access.md` at the repo root for the design.
 | `MAGIC_LINK_SIGNING_KEY` | base64, ≥32 bytes (`openssl rand -base64 32`) |
 | `USAGE_KEY_ENCRYPTION_KEY` | base64, ≥32 bytes — AES key for stored Chipotle usage keys |
 | `RESEND_API_KEY`, `MAIL_FROM` | magic-link email |
-| `PUBLIC_BASE_URL` | e.g. `https://secrets.litprotocol.com` |
+| `PUBLIC_BASE_URL` | e.g. `https://keychain.litprotocol.com` |
 | `CHIPOTLE_API_BASE_URL` | default `https://api.chipotle.litprotocol.com` |
 | `CHIPOTLE_MASTER_API_KEY` | master key of the operator's Chipotle account (must be funded) |
 | `GRANT_SIGNING_KEY` | hex secp256k1 private key (`openssl rand -hex 32`) |
@@ -59,8 +59,8 @@ return `503 reader_not_attached` until the new reader is attached to each group
 ## Run locally
 
 ```bash
-createdb lit_secrets
-export DATABASE_URL=postgres://localhost/lit_secrets
+createdb lit_agent_keychain
+export DATABASE_URL=postgres://localhost/lit_agent_keychain
 export MAGIC_LINK_SIGNING_KEY=$(openssl rand -base64 32)
 export USAGE_KEY_ENCRYPTION_KEY=$(openssl rand -base64 32)
 export GRANT_SIGNING_KEY=$(openssl rand -hex 32)
@@ -91,16 +91,18 @@ Agent routes (`Authorization: Bearer <usage api key>`):
 | `POST` | `/api/grants` `{name, version?}` | policy → signed grant + ciphertext + reader code + ready `js_params` |
 | `GET` | `/api/reference/<name>?version=` | ciphertext + `pkp_id` for in-TEE use |
 
-Client: `sdk/lit-secrets.js` (served at `/sdk/lit-secrets.js`). Agent playbook: `SKILL.md`.
+Client: `sdk/lit-agent-keychain.js` (served at `/sdk/lit-agent-keychain.js`). Agent playbook: `SKILL.md`.
 
 ## Deployment (Railway)
 
 Project **Lit Secrets** (`5da0f592-403d-4acd-bf1e-7194139cd33c`), service `lit-secrets`,
-Postgres plugin, environment `production`. Source: `LIT-Protocol/chipotle`, root
-directory `lit-secrets` (set via the API — the CLI has no flag for it), Dockerfile
-build, healthcheck `/health`, sleeping disabled. Current URL:
-`https://lit-secrets-production.up.railway.app` (custom domain
-`secrets.litprotocol.com` TODO: `railway domain secrets.litprotocol.com` + CNAME).
+Postgres plugin, environment `production`. (Railway project/service/URL still carry the
+pre-rename `lit-secrets` name; renaming them is cosmetic and optional.) Source:
+`LIT-Protocol/chipotle`, root directory **`lit-agent-keychain`** (was `lit-secrets` before
+the rename — must be updated via the Railway API, the CLI has no flag for it, or deploys
+from `main` will fail), Dockerfile build, healthcheck `/health`, sleeping disabled.
+Canonical URL: `https://keychain.litprotocol.com` (custom domain, live; `PUBLIC_BASE_URL` set to
+match). Railway default URL `https://lit-secrets-production.up.railway.app` still resolves.
 
 Variables set: everything in the table above plus `ROCKET_SECRET_KEY`, `ROCKET_ADDRESS`,
 `RUST_LOG`; `DATABASE_URL` is the `${{Postgres.DATABASE_URL}}` reference. The

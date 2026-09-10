@@ -1,4 +1,4 @@
-# Programmable Credential Access on Chipotle (`lit-secrets`)
+# Programmable Credential Access on Chipotle (`lit-agent-keychain`)
 
 Clone of Turnkey's "programmable credential access" (their Secrets API, closed
 beta: https://docs.turnkey.com/solutions/key-management/programmable-credential-access),
@@ -34,7 +34,7 @@ and only the requester receives the value.
 ## Architecture: control plane vs. data plane
 
 ```
-                 ┌─────────────── lit-secrets (Railway, Postgres) ────────────────────┐
+                 ┌─────────────── lit-agent-keychain (Railway, Postgres) ────────────────────┐
   user ──login──▶│ secrets CRUD · agents (usage keys) · policy · grants · audit       │
                  │ stores: ciphertext, policy, key hashes — never plaintext           │
                  └────────────┬───────────────────────────────────┬──────────────────┘
@@ -53,7 +53,7 @@ whoever invoked it, and only agents invoke it.
 
 ### Concept map
 
-| Turnkey | lit-secrets |
+| Turnkey | lit-agent-keychain |
 |---|---|
 | Organization | Tenant (one per user; vault PKP + Chipotle group on the operator account) |
 | Secret + classification | `secrets` row: name, `kind`, `environment`, `release`, versioned ciphertext |
@@ -80,7 +80,7 @@ group authz, the Deno sandbox, scoped usage keys, `add_action_to_group` /
 
 ## Status
 
-### Phase 1 — shipped in `lit-secrets/` (this branch)
+### Phase 1 — shipped in `lit-agent-keychain/` (this branch)
 
 - Rocket + Postgres service, magic-link auth + agent access tokens (from lit-triggers).
 - Tenant provisioning: `create_wallet` → `add_group` → `add_action`/`add_action_to_group`
@@ -95,14 +95,14 @@ group authz, the Deno sandbox, scoped usage keys, `add_action_to_group` /
   decrypts, returns value. Signer address baked in ⇒ CID pinned per deployment.
 - Reference endpoint for `in_tee_only`; tenant action attach/detach.
 - Access log for every allow/deny; dashboard (`static/`), agent SDK
-  (`sdk/lit-secrets.js`), `SKILL.md`, Dockerfile + railway.json.
+  (`sdk/lit-agent-keychain.js`), `SKILL.md`, Dockerfile + railway.json.
 - Unit tests: signer recovery vector, policy matrix, grant canonical form,
   CID/hash helpers, group-id parsing.
 
 ### Phase 1 follow-ups before prod
 
 - ~~Live smoke test~~ **done 2026-08-27 against prod Chipotle** (see
-  `lit-secrets/README.md`): provisioning, seal, grant, redeem, rotate, policy
+  `lit-agent-keychain/README.md`): provisioning, seal, grant, redeem, rotate, policy
   denials, in-TEE-only via customer action, forged/tampered/expired grants
   rejected in-TEE, revoke. `pkp_ids_permitted` accepts wallet addresses.
   Found + filed: usage-key revocation lags ≤300s across Chipotle replicas.
@@ -111,7 +111,7 @@ group authz, the Deno sandbox, scoped usage keys, `add_action_to_group` /
 - Reader-CID rotation job: when `GRANT_SIGNING_KEY` changes, attach the new
   reader CID to every tenant group (currently `/api/tenant.reader_cid_stale`
   + `503 reader_not_attached`).
-- Deploy: `secrets.litprotocol.com` on Railway, root dir `lit-secrets`.
+- Deploy: `keychain.litprotocol.com` on Railway, root dir `lit-agent-keychain`.
 
 ### Phase 2 — approvals & agent identity (Turnkey's 3 patterns)
 

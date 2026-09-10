@@ -1,4 +1,4 @@
-# Lit Secrets
+# Lit Agent Keychain
 
 > A password manager for machines: policy-gated secret storage for AI agents and services. Secrets (API keys, tokens, credentials) are sealed inside a TEE (trusted execution environment) on the Lit Protocol network. Agents read them under per-secret policies (allowlists, read quotas, expiry) via short-lived signed grants — or, in the `in_tee_only` tier, the value can only ever be used inside the enclave by explicitly approved programs and is never revealed to anyone.
 
@@ -14,7 +14,7 @@ Key facts for agents:
 
 - [Agent skill / setup playbook](/SKILL.md): step-by-step instructions for agents — authorize as the user, store secrets, mint runtime keys, read secrets at runtime, in-TEE-only usage.
 - [Full API and concepts reference](/llms-full.txt): every endpoint, the policy schema, the grant format, the security model, and worked curl examples.
-- [JavaScript SDK](/sdk/lit-secrets.js): zero-dependency ES module (Node 18+, Deno, Bun, browsers). `new LitSecrets({ usageApiKey }); await secrets.get('NAME')`.
+- [JavaScript SDK](/sdk/lit-agent-keychain.js): zero-dependency ES module (Node 18+, Deno, Bun, browsers). `new LitAgentKeychain({ usageApiKey }); await keychain.get('NAME')`.
 
 ## Underlying platform
 

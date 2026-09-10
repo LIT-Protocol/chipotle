@@ -1,24 +1,24 @@
-// lit-secrets agent SDK (zero-dependency, works in Node 18+, Deno, Bun, browsers).
+// lit-agent-keychain agent SDK (zero-dependency, works in Node 18+, Deno, Bun, browsers).
 //
-// One credential: the agent's usage API key (minted in the lit-secrets
-// dashboard). It authenticates to the lit-secrets control plane *and* to
+// One credential: the agent's usage API key (minted in the lit-agent-keychain
+// dashboard). It authenticates to the lit-agent-keychain control plane *and* to
 // Chipotle. Plaintext travels Chipotle -> agent only.
 //
-//   import { LitSecrets } from 'https://secrets.litprotocol.com/sdk/lit-secrets.js';
-//   const secrets = new LitSecrets({ usageApiKey: process.env.LIT_SECRETS_KEY });
-//   const openaiKey = await secrets.get('OPENAI_API_KEY');
+//   import { LitAgentKeychain } from 'https://keychain.litprotocol.com/sdk/lit-agent-keychain.js';
+//   const keychain = new LitAgentKeychain({ usageApiKey: process.env.LIT_AGENT_KEYCHAIN_KEY });
+//   const openaiKey = await keychain.get('OPENAI_API_KEY');
 
-export class LitSecrets {
+export class LitAgentKeychain {
   /**
    * @param {object} opts
    * @param {string} opts.usageApiKey  Agent key from POST /api/agents.
-   * @param {string} [opts.baseUrl]    lit-secrets base URL.
+   * @param {string} [opts.baseUrl]    lit-agent-keychain base URL.
    * @param {typeof fetch} [opts.fetch] Custom fetch (tests, proxies).
    * @param {number} [opts.timeoutMs]  Per-request deadline (default 30000). A
    *   stalled or trickling upstream otherwise leaves credential loading hung
    *   forever, blocking agent startup.
    */
-  constructor({ usageApiKey, baseUrl = 'https://secrets.litprotocol.com', fetch: f, timeoutMs = 30000 } = {}) {
+  constructor({ usageApiKey, baseUrl = 'https://keychain.litprotocol.com', fetch: f, timeoutMs = 30000 } = {}) {
     if (!usageApiKey) throw new Error('usageApiKey is required');
     this.usageApiKey = usageApiKey;
     this.baseUrl = baseUrl.replace(/\/+$/, '');
@@ -41,7 +41,7 @@ export class LitSecrets {
       return await this.fetch(url, { ...opts, signal: ac.signal });
     } catch (e) {
       if (ac.signal.aborted) {
-        throw new LitSecretsError(`lit-secrets request aborted: ${ac.signal.reason?.message || 'timeout'}`, 0, null);
+        throw new LitAgentKeychainError(`lit-agent-keychain request aborted: ${ac.signal.reason?.message || 'timeout'}`, 0, null);
       }
       throw e;
     } finally {
@@ -50,7 +50,7 @@ export class LitSecrets {
   }
 
   /**
-   * Read a plaintext secret. Two hops: (1) lit-secrets issues a signed grant
+   * Read a plaintext secret. Two hops: (1) lit-agent-keychain issues a signed grant
    * after policy evaluation, (2) Chipotle runs the reader action in the TEE and
    * returns the value straight to us.
    * @param {object} [opts]
@@ -74,14 +74,14 @@ export class LitSecrets {
       // Chipotle reports action throws (e.g. "grant expired", "grant signature
       // invalid") as a 500 whose body is a JSON *string*; surface the reason.
       const reason = typeof body === 'string' ? extractActionError(body) : `HTTP ${res.status}`;
-      throw new LitSecretsError(`chipotle lit_action failed: ${reason}`, res.status, body);
+      throw new LitAgentKeychainError(`chipotle lit_action failed: ${reason}`, res.status, body);
     }
     if (body.has_error) {
-      throw new LitSecretsError('reader action threw', res.status, body);
+      throw new LitAgentKeychainError('reader action threw', res.status, body);
     }
     const out = typeof body.response === 'string' ? safeParse(body.response) : body.response;
     if (!out || typeof out.value !== 'string') {
-      throw new LitSecretsError('reader action returned no value', res.status, body);
+      throw new LitAgentKeychainError('reader action returned no value', res.status, body);
     }
     return out.value;
   }
@@ -112,16 +112,16 @@ export class LitSecrets {
     const parsed = await parseJson(res);
     if (!res.ok) {
       const code = parsed && parsed.error ? parsed.error : `http_${res.status}`;
-      throw new LitSecretsError(`lit-secrets ${method} ${path} failed: ${code}`, res.status, parsed);
+      throw new LitAgentKeychainError(`lit-agent-keychain ${method} ${path} failed: ${code}`, res.status, parsed);
     }
     return parsed;
   }
 }
 
-export class LitSecretsError extends Error {
+export class LitAgentKeychainError extends Error {
   constructor(message, status, body) {
     super(message);
-    this.name = 'LitSecretsError';
+    this.name = 'LitAgentKeychainError';
     this.status = status;
     this.body = body;
     /** Policy denial code (e.g. "rate_limited") when the control plane refused. */
@@ -148,4 +148,4 @@ function safeParse(text) {
   }
 }
 
-export default LitSecrets;
+export default LitAgentKeychain;

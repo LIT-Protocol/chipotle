@@ -1,6 +1,6 @@
-# Lit Secrets — full reference for LLMs and agents
+# Lit Agent Keychain — full reference for LLMs and agents
 
-> Policy-gated secret storage for AI agents, built on the Lit Protocol (Chipotle) TEE network. This file is the complete machine-readable reference: concepts, every API endpoint, the policy schema, the grant format, error codes, limits, and the security model. For a step-by-step onboarding playbook, fetch /SKILL.md. For the JS client, fetch /sdk/lit-secrets.js.
+> Policy-gated secret storage for AI agents, built on the Lit Protocol (Chipotle) TEE network. This file is the complete machine-readable reference: concepts, every API endpoint, the policy schema, the grant format, error codes, limits, and the security model. For a step-by-step onboarding playbook, fetch /SKILL.md. For the JS client, fetch /sdk/lit-agent-keychain.js.
 
 ## Concepts
 
@@ -70,16 +70,16 @@ Unknown fields are rejected. Policy is evaluated at grant time and is editable f
 ## SDK (JavaScript, zero dependencies)
 
 ```js
-import { LitSecrets } from 'https://secrets.litprotocol.com/sdk/lit-secrets.js';
-const secrets = new LitSecrets({
-  usageApiKey: process.env.LIT_SECRETS_KEY,
+import { LitAgentKeychain } from 'https://keychain.litprotocol.com/sdk/lit-agent-keychain.js';
+const keychain = new LitAgentKeychain({
+  usageApiKey: process.env.LIT_AGENT_KEYCHAIN_KEY,
   // baseUrl, fetch, timeoutMs (default 30000) are optional
 });
-const value = await secrets.get('OPENAI_API_KEY');          // grant + TEE redeem
+const value = await keychain.get('OPENAI_API_KEY');          // grant + TEE redeem
 const g = await secrets.grant('OPENAI_API_KEY');            // grant only
 const ref = await secrets.reference('DB_PASSWORD');          // in_tee_only ciphertext
 // All methods accept { version, signal } (AbortSignal).
-// Errors: LitSecretsError with .status, .code (policy denial code), .body.
+// Errors: LitAgentKeychainError with .status, .code (policy denial code), .body.
 ```
 
 ## Security model (summary)
@@ -95,5 +95,5 @@ const ref = await secrets.reference('DB_PASSWORD');          // in_tee_only ciph
 
 1. A setup agent generates a random token, shows the user `/agent/authorize?challenge=<urlsafe-b64 sha256(token)>`, and the user approves after magic-link login. The token now works as a User bearer.
 2. Setup agent: `POST /api/secrets {"name":"OPENAI_API_KEY","value":"sk-...","policy":{"max_reads_per_day":100}}`.
-3. Setup agent: `POST /api/agents {"name":"my-runtime-bot"}` → give `usage_api_key` to the runtime agent as `LIT_SECRETS_KEY`.
-4. Runtime agent: `await new LitSecrets({usageApiKey}).get('OPENAI_API_KEY')`.
+3. Setup agent: `POST /api/agents {"name":"my-runtime-bot"}` → give `usage_api_key` to the runtime agent as `LIT_AGENT_KEYCHAIN_KEY`.
+4. Runtime agent: `await new LitAgentKeychain({usageApiKey}).get('OPENAI_API_KEY')`.
