@@ -1,2 +1,5 @@
 /target
 .env
+/sdk/dist/
+/sdk/node_modules/
+/sdk/*.tgz

@@ -93,6 +93,25 @@ Agent routes (`Authorization: Bearer <usage api key>`):
 
 Client: `sdk/lit-agent-keychain.js` (served at `/sdk/lit-agent-keychain.js`). Agent playbook: `SKILL.md`.
 
+### npm SDK
+
+```sh
+npm install @lit-protocol/keychain
+```
+
+```js
+import { LitAgentKeychain } from '@lit-protocol/keychain';
+
+const keychain = new LitAgentKeychain({
+  usageApiKey: process.env.LIT_AGENT_KEYCHAIN_KEY,
+});
+const openaiKey = await keychain.get('OPENAI_API_KEY');
+```
+
+To release the SDK, run `./publish.sh` from this directory. It logs into npm,
+builds, then publishes the public package. See [SDK documentation](sdk/README.md)
+for options and version bumps.
+
 ## Deployment (Railway)
 
 Project **Lit Secrets** (`5da0f592-403d-4acd-bf1e-7194139cd33c`), service `lit-secrets`,
