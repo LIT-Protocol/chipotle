@@ -154,10 +154,30 @@ pub async fn issue_grant(
     let (tenant, secret, ver) =
         load_for_agent(pool, &agent, name, req.version, Event::Grant).await?;
 
-    let reads = audit::grants_last_24h(pool, secret.id)
+    if tenant.reader_cid != actions.reader_cid {
+        // Signer rotated since this tenant was provisioned; the reader this
+        // deployment would hand out isn't in the tenant's group yet.
+        tracing::error!(tenant_id = %tenant.id, "reader CID stale for tenant; refusing grant");
+        return Err(err(Status::ServiceUnavailable, "reader_not_attached"));
+    }
+
+    // Quota check + allow-record are one transaction under a per-secret
+    // advisory lock, so concurrent requests can't all read the same count and
+    // collectively blow past max_reads_per_day, and a grant is never issued
+    // without its audit row (codex findings, 2026-09-10).
+    let now = OffsetDateTime::now_utc();
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| internal("tx_begin_failed", e))?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(audit::secret_lock_key(secret.id))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| internal("quota_lock_failed", e))?;
+    let reads = audit::grants_last_24h(&mut *tx, secret.id)
         .await
         .map_err(|e| internal("audit_count_failed", e))?;
-    let now = OffsetDateTime::now_utc();
     let ctx = GrantContext {
         disabled: secret.disabled,
         release: secret.release,
@@ -166,6 +186,7 @@ pub async fn issue_grant(
         now,
     };
     if let Err(d) = policy::evaluate_grant(&secret.policy, &ctx) {
+        drop(tx);
         audit::record(
             pool,
             tenant.id,
@@ -178,12 +199,12 @@ pub async fn issue_grant(
         .await;
         return Err(deny(d));
     }
-    if tenant.reader_cid != actions.reader_cid {
-        // Signer rotated since this tenant was provisioned; the reader this
-        // deployment would hand out isn't in the tenant's group yet.
-        tracing::error!(tenant_id = %tenant.id, "reader CID stale for tenant; refusing grant");
-        return Err(err(Status::ServiceUnavailable, "reader_not_attached"));
-    }
+    audit::record_allow_tx(&mut tx, tenant.id, secret.id, agent.id, Event::Grant)
+        .await
+        .map_err(|e| internal("audit_insert_failed", e))?;
+    tx.commit()
+        .await
+        .map_err(|e| internal("tx_commit_failed", e))?;
 
     let exp = now + time::Duration::seconds(cfg.grant_ttl_secs);
     let grant = Grant {
@@ -204,17 +225,6 @@ pub async fn issue_grant(
     let signature = signer
         .sign_message(&grant_json)
         .map_err(|e| internal("grant_sign_failed", e))?;
-
-    audit::record(
-        pool,
-        tenant.id,
-        Some(secret.id),
-        Some(agent.id),
-        Event::Grant,
-        true,
-        None,
-    )
-    .await;
 
     let js_params = serde_json::json!({
         "grant": grant_json,
@@ -249,7 +259,12 @@ pub async fn get_reference(
 ) -> ApiResult<ReferenceResponse> {
     let (tenant, secret, ver) =
         load_for_agent(pool, &agent, name.trim(), version, Event::Reference).await?;
-    if let Err(d) = policy::evaluate_reference(&secret.policy, secret.disabled, agent.id) {
+    if let Err(d) = policy::evaluate_reference(
+        &secret.policy,
+        secret.disabled,
+        agent.id,
+        OffsetDateTime::now_utc(),
+    ) {
         audit::record(
             pool,
             tenant.id,

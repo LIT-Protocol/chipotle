@@ -54,15 +54,46 @@ pub async fn record(
     }
 }
 
+/// Mandatory allow-record insert used inside the grant-issuance transaction:
+/// unlike [`record`], a failure here propagates so a grant is never handed out
+/// without its audit/quota row.
+pub async fn record_allow_tx(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: Uuid,
+    secret_id: Uuid,
+    agent_id: Uuid,
+    event: Event,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO access_log (id, tenant_id, secret_id, agent_id, event, decision, reason)
+         VALUES ($1, $2, $3, $4, $5, 'allow', NULL)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(tenant_id)
+    .bind(secret_id)
+    .bind(agent_id)
+    .bind(event.as_str())
+    .execute(tx)
+    .await?;
+    Ok(())
+}
+
+/// Stable per-secret advisory-lock key (first 8 bytes of the UUID). Used with
+/// `pg_advisory_xact_lock` to serialize quota checks and version allocation.
+pub fn secret_lock_key(secret_id: Uuid) -> i64 {
+    let b = secret_id.as_bytes();
+    i64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
+}
+
 /// Successful grants for a secret in the trailing 24 hours (policy rate window).
-pub async fn grants_last_24h(pool: &PgPool, secret_id: Uuid) -> Result<i64> {
+pub async fn grants_last_24h<'e, E: sqlx::PgExecutor<'e>>(ex: E, secret_id: Uuid) -> Result<i64> {
     let (n,): (i64,) = sqlx::query_as(
         "SELECT count(*) FROM access_log
          WHERE secret_id = $1 AND event = 'grant' AND decision = 'allow'
            AND created_at > now() - interval '24 hours'",
     )
     .bind(secret_id)
-    .fetch_one(pool)
+    .fetch_one(ex)
     .await?;
     Ok(n)
 }

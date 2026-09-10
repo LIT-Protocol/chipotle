@@ -9,6 +9,10 @@
 // The control plane never sees the plaintext: the only path from ciphertext
 // to value is this code, executing in the TEE, on a vault PKP that is only
 // usable by CIDs in the tenant's group.
+//
+// NOTE: this file's bytes are the pinned reader CID — do NOT edit (even
+// comments) without planning a reader-CID re-attach across every tenant group.
+// Known grant-binding limitation (Chipotle #630) is documented in README.md.
 const GRANT_SIGNER = '__GRANT_SIGNER__';
 
 const main = async ({ grant, signature, ciphertext, pkpId }) => {

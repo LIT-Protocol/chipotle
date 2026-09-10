@@ -50,19 +50,28 @@ pub async fn authorize_hash(
         .filter(|s| !s.is_empty())
         .unwrap_or("local-agent");
 
-    sqlx::query(
+    // A token hash may only ever be (re-)bound by the user it already belongs
+    // to. Without the WHERE guard, an attacker who obtains a victim's
+    // authorize URL could submit its challenge while logged in as themselves,
+    // silently re-pointing the victim's setup token at the attacker's account
+    // (codex finding, 2026-09-10). Same-user re-authorization (including
+    // un-revoking) stays allowed.
+    let result = sqlx::query(
         "INSERT INTO agent_access_tokens (token_hash, user_id, label)
          VALUES ($1, $2, $3)
          ON CONFLICT (token_hash) DO UPDATE
-           SET user_id = EXCLUDED.user_id,
-               label = EXCLUDED.label,
-               revoked_at = NULL",
+           SET label = EXCLUDED.label,
+               revoked_at = NULL
+         WHERE agent_access_tokens.user_id = EXCLUDED.user_id",
     )
     .bind(token_hash)
     .bind(user_id)
     .bind(label)
     .execute(pool)
     .await?;
+    if result.rows_affected() == 0 {
+        anyhow::bail!("agent token is already bound to a different user");
+    }
     Ok(())
 }
 

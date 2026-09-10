@@ -90,13 +90,23 @@ $('#secrets').addEventListener('click', async (e) => {
     } else if (act === 'agents') {
       const agents = await api('GET', '/api/agents');
       const live = agents.filter((a) => !a.revoked_at);
-      const pick = prompt(`Comma-separated agent names allowed to read ${name} (blank = all):\n${live.map((a) => a.name).join(', ')}`);
+      const pick = prompt(`Comma-separated agent names allowed to read ${name}.\nType * to allow all agents.\n${live.map((a) => a.name).join(', ')}`);
       if (pick === null) return;
-      const names = pick.split(',').map((s) => s.trim()).filter(Boolean);
-      const ids = live.filter((a) => names.includes(a.name)).map((a) => a.id);
       const detail = await api('GET', `/api/secrets/${encodeURIComponent(name)}`);
       const policy = { ...detail.policy };
-      if (ids.length) policy.allowed_agents = ids; else delete policy.allowed_agents;
+      if (pick.trim() === '*') {
+        // Explicit "allow all" is the only way to clear the restriction.
+        delete policy.allowed_agents;
+      } else {
+        const names = pick.split(',').map((s) => s.trim()).filter(Boolean);
+        // Reject unknown names instead of silently widening access: a typo must
+        // never turn "restrict" into "allow everyone" (codex finding).
+        const byName = new Map(live.map((a) => [a.name, a.id]));
+        const unknown = names.filter((n) => !byName.has(n));
+        if (!names.length) { alert('No names entered. Type * to allow all agents, or Cancel.'); return; }
+        if (unknown.length) { alert(`Unknown agent name(s): ${unknown.join(', ')}. Nothing changed.`); return; }
+        policy.allowed_agents = [...new Set(names.map((n) => byName.get(n)))];
+      }
       await api('PATCH', `/api/secrets/${encodeURIComponent(name)}`, { policy });
     } else if (act === 'delete') {
       if (!confirm(`Delete ${name} and all its versions?`)) return;

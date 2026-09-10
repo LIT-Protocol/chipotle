@@ -21,6 +21,10 @@ use crate::config::Config;
 use crate::crypto;
 use crate::tenants::{self, ProvisionLock};
 
+/// Ceiling on non-revoked agents per tenant (each one is an operator-funded
+/// Chipotle usage key).
+const MAX_AGENTS_PER_TENANT: i64 = 100;
+
 /// Request guard: an agent authenticating with its Chipotle usage API key.
 #[derive(Debug, Clone)]
 pub struct AgentKey {
@@ -135,6 +139,25 @@ pub async fn create_agent(
     }
     let tenant = tenants::ensure_tenant(pool, cfg, chipotle, actions, lock, user.id).await?;
 
+    // Cap live keys per tenant: each agent is an operator-funded Chipotle
+    // usage key, so an unbounded mint loop is a direct spend/abuse vector on
+    // the shared account (codex finding, 2026-09-10).
+    let (live,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM agents WHERE tenant_id = $1 AND revoked_at IS NULL")
+            .bind(tenant.id)
+            .fetch_one(pool.inner())
+            .await
+            .map_err(|e| internal("agents_count_failed", e))?;
+    if live >= MAX_AGENTS_PER_TENANT {
+        return Err(err_detail(
+            Status::TooManyRequests,
+            "agent_limit_reached",
+            format!(
+                "a tenant may have at most {MAX_AGENTS_PER_TENANT} active agents; revoke one first"
+            ),
+        ));
+    }
+
     let usage_key = chipotle
         .add_usage_api_key(
             &cfg.chipotle_master_api_key,
@@ -225,10 +248,21 @@ pub async fn revoke_agent(
     let usage_key = crypto::decrypt_usage_key(&cfg.usage_key_encryption_key, &nonce, &ct)
         .map_err(|e| internal("agent_key_decrypt_failed", e))?;
 
-    chipotle
+    // Chipotle-first so the key is dead upstream before we mark it revoked
+    // locally. If a previous attempt already removed it (lost response, retry),
+    // Chipotle rejects the removal of an unknown key — treat that as success or
+    // the retry can never converge and the agent stays "active" here forever
+    // (codex finding, 2026-09-10).
+    match chipotle
         .remove_usage_api_key(&cfg.chipotle_master_api_key, &usage_key)
         .await
-        .map_err(|e| upstream("chipotle_remove_usage_api_key_failed", &e))?;
+    {
+        Ok(()) => {}
+        Err(e) if e.is_not_found() => {
+            tracing::warn!(agent_id = %id, "usage key already gone on Chipotle; marking revoked");
+        }
+        Err(e) => return Err(upstream("chipotle_remove_usage_api_key_failed", &e)),
+    }
 
     sqlx::query("UPDATE agents SET revoked_at = now() WHERE id = $1")
         .bind(id)

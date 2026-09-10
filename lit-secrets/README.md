@@ -147,3 +147,41 @@ Known Chipotle behaviors to be aware of:
   membership; treat like a cloud root credential.
 - `in_tee_only` secrets are never released by this service under any policy;
   the only decryptors are CIDs the user attached themselves.
+
+## Known limitations (from adversarial review, 2026-09-10)
+
+An adversarial codex review (gpt-6-astra) found several issues. The exploitable
+ones are fixed (cross-user setup-token reassignment, PATCH lost-update race,
+concurrent-quota bypass, audit/quota atomicity, dashboard allowlist clearing on
+a typo, rotation version-allocation race, magic-link table growth, SDK deadline,
+idempotent revocation retry, per-tenant agent/secret caps). These remain by
+design or need upstream (Chipotle) support — track before GA:
+
+- **Grants are bearer tokens within a tenant.** The reader can't yet check
+  *which* agent is calling (Chipotle has no requester-identity op — issue #630),
+  so a leaked grant is redeemable by any of that tenant's agents until it
+  expires, and is replayable within its TTL. Mitigation today: short
+  `GRANT_TTL_SECS` (default 120). Full fix: bind the grant to
+  `requesterApiKeyHash()` in the reader once #630 lands.
+- **Import/rotation pass plaintext through the control plane.** Values are
+  sealed by calling the encrypt action, so a compromised control-plane process
+  could observe them at import time. Closing this needs client-side sealing /
+  sealed import (Phase 3 in the plan).
+- **`in_tee_only` use isn't policy-revocable.** Once an agent holds a
+  reference, Chipotle enforces group/action permission, not the secret's
+  current policy — disabling the secret or tightening its allowlist doesn't stop
+  in-TEE decryption by an already-permitted action. Revoke by detaching the
+  action or rotating the vault.
+- **Signer rotation is not self-healing.** Changing `GRANT_SIGNING_KEY` leaves
+  the old reader attached to every tenant group and doesn't update
+  `tenants.reader_cid`; a holder of the old key keeps working. The reader-CID
+  re-attach job (plan TODO) must also *remove* old readers and persist the new
+  CID per tenant.
+- **Setup (agent-access) tokens have no expiry or mounted revocation route.** A
+  stolen setup token keeps full control-plane access. Owner-facing listing +
+  revocation + expiry is a follow-up.
+- **Provisioning isn't durably checkpointed.** Upstream resources (wallet,
+  group, keys) are created before the tenant row is written and the mutex is
+  process-local, so a crash mid-provision can orphan resources and multiple
+  replicas could duplicate them. Needs per-user distributed locking +
+  reconciliation before multi-replica deploy.

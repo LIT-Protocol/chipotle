@@ -58,6 +58,22 @@ impl ChipotleError {
             .unwrap_or_default();
         text.contains("already") || text.contains("exists")
     }
+
+    /// True when Chipotle reports the entity doesn't exist (e.g. removing a
+    /// usage key that was already removed on a previous, half-failed attempt).
+    /// Lets revocation retries converge instead of wedging on the upstream
+    /// "does not exist" rejection.
+    pub fn is_not_found(&self) -> bool {
+        let text = self
+            .body
+            .as_ref()
+            .map(|b| b.to_string().to_lowercase())
+            .unwrap_or_default();
+        text.contains("not found")
+            || text.contains("does not exist")
+            || text.contains("doesnotexist")
+            || text.contains("unknown key")
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -358,5 +374,27 @@ mod tests {
             body: Some(json!({"error": "insufficient balance"})),
         };
         assert!(!e2.is_already_exists());
+    }
+
+    #[test]
+    fn not_found_detection() {
+        for msg in [
+            "Usage key does not exist",
+            "key not found",
+            "UsageApiKeyDoesNotExist",
+        ] {
+            let e = ChipotleError {
+                message: String::new(),
+                status: None,
+                body: Some(json!({ "error": msg })),
+            };
+            assert!(e.is_not_found(), "{msg} should read as not-found");
+        }
+        let other = ChipotleError {
+            message: String::new(),
+            status: None,
+            body: Some(json!({"error": "insufficient balance"})),
+        };
+        assert!(!other.is_not_found());
     }
 }

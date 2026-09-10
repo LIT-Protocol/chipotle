@@ -58,6 +58,17 @@ pub async fn purge_expired(pool: &PgPool) -> Result<u64> {
     let r = sqlx::query("DELETE FROM sessions WHERE expires_at <= now()")
         .execute(pool)
         .await?;
+    // Also drop consumed/expired magic links so an attacker varying email
+    // addresses can't grow that table without bound (codex finding). They are
+    // useless once expired or consumed.
+    if let Err(e) = sqlx::query(
+        "DELETE FROM magic_links WHERE expires_at <= now() - interval '1 day' OR consumed_at IS NOT NULL",
+    )
+    .execute(pool)
+    .await
+    {
+        tracing::warn!("magic_links purge failed: {e}");
+    }
     Ok(r.rows_affected())
 }
 

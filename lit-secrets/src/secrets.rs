@@ -21,6 +21,10 @@ use crate::config::Config;
 use crate::policy::{Policy, Release};
 use crate::tenants::{self, ProvisionLock, Tenant};
 
+/// Ceiling on secrets per tenant (each create/rotate is a billed Chipotle
+/// execution on the operator account).
+const MAX_SECRETS_PER_TENANT: i64 = 500;
+
 static NAME_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}$").expect("valid regex"));
 
@@ -294,6 +298,21 @@ pub async fn create_secret(
     {
         return Err(err(Status::Conflict, "secret_exists"));
     }
+    // Every create/rotate is a billed Chipotle execution on the operator
+    // account; cap per-tenant volume so signup can't be farmed into unbounded
+    // spend (codex finding, 2026-09-10).
+    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM secrets WHERE tenant_id = $1")
+        .bind(tenant.id)
+        .fetch_one(pool.inner())
+        .await
+        .map_err(|e| internal("secrets_count_failed", e))?;
+    if count >= MAX_SECRETS_PER_TENANT {
+        return Err(err_detail(
+            Status::TooManyRequests,
+            "secret_limit_reached",
+            format!("a tenant may have at most {MAX_SECRETS_PER_TENANT} secrets"),
+        ));
+    }
 
     let (ciphertext, hash) = seal_value(cfg, chipotle, actions, &tenant, &req.value).await?;
     let policy_json =
@@ -423,6 +442,14 @@ pub async fn rotate_secret(
         .begin()
         .await
         .map_err(|e| internal("tx_begin_failed", e))?;
+    // Serialize version allocation per secret so two concurrent rotations
+    // can't both compute MAX(version)+1 and one die on the unique constraint
+    // after its Chipotle encryption already ran (codex finding, 2026-09-10).
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(crate::audit::secret_lock_key(secret.id))
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| internal("version_lock_failed", e))?;
     let (next,): (i32,) = sqlx::query_as(
         "SELECT COALESCE(MAX(version), 0) + 1 FROM secret_versions WHERE secret_id = $1",
     )
@@ -466,27 +493,40 @@ pub async fn update_secret(
 ) -> ApiResult<SecretResponse> {
     let req = req.into_inner();
     let (_, secret) = load_owned(pool, user.id, name).await?;
-    let kind = req.kind.unwrap_or(secret.kind);
-    let environment = req.environment.unwrap_or(secret.environment);
-    validate_label("kind", &kind)?;
-    validate_label("environment", &environment)?;
-    let release = req.release.unwrap_or(secret.release);
-    let policy = req.policy.unwrap_or(secret.policy);
-    validate_policy(&policy)?;
-    let disabled = req.disabled.unwrap_or(secret.disabled);
-    let policy_json =
-        serde_json::to_value(&policy).map_err(|e| internal("policy_encode_failed", e))?;
+    // Validate only the fields the caller supplied, and update only those
+    // columns (COALESCE keeps the DB value for NULL binds). A read-modify-write
+    // of the whole row would let two concurrent PATCHes silently undo each
+    // other — e.g. a kind-only update resurrecting disabled=false or a broader
+    // allowlist from its stale snapshot (codex finding, 2026-09-10).
+    if let Some(kind) = &req.kind {
+        validate_label("kind", kind)?;
+    }
+    if let Some(environment) = &req.environment {
+        validate_label("environment", environment)?;
+    }
+    if let Some(policy) = &req.policy {
+        validate_policy(policy)?;
+    }
+    let policy_json = match &req.policy {
+        Some(p) => Some(serde_json::to_value(p).map_err(|e| internal("policy_encode_failed", e))?),
+        None => None,
+    };
 
     let row = sqlx::query(&format!(
-        "UPDATE secrets SET kind = $2, environment = $3, release = $4, policy = $5, disabled = $6, updated_at = now()
+        "UPDATE secrets SET kind = COALESCE($2, kind),
+                            environment = COALESCE($3, environment),
+                            release = COALESCE($4, release),
+                            policy = COALESCE($5, policy),
+                            disabled = COALESCE($6, disabled),
+                            updated_at = now()
          WHERE id = $1 RETURNING {SECRET_COLS}"
     ))
     .bind(secret.id)
-    .bind(&kind)
-    .bind(&environment)
-    .bind(release.as_str())
+    .bind(req.kind.as_deref())
+    .bind(req.environment.as_deref())
+    .bind(req.release.map(Release::as_str))
     .bind(policy_json)
-    .bind(disabled)
+    .bind(req.disabled)
     .fetch_one(pool.inner())
     .await
     .map_err(|e| internal("secret_update_failed", e))?;

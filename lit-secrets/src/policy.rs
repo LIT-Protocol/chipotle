@@ -122,10 +122,22 @@ pub fn evaluate_grant(policy: &Policy, ctx: &GrantContext) -> Result<(), Denial>
 }
 
 /// Decide whether an agent may fetch the ciphertext reference (any tier).
-/// Ciphertext is public-safe, so only the agent allowlist and disabled flag apply.
-pub fn evaluate_reference(policy: &Policy, disabled: bool, agent_id: Uuid) -> Result<(), Denial> {
+/// Ciphertext is public-safe, so the agent allowlist, disabled flag, and
+/// policy expiry apply; quotas don't (a reference alone can't be decrypted
+/// outside the tenant's permitted actions).
+pub fn evaluate_reference(
+    policy: &Policy,
+    disabled: bool,
+    agent_id: Uuid,
+    now: OffsetDateTime,
+) -> Result<(), Denial> {
     if disabled {
         return Err(Denial::SecretDisabled);
+    }
+    if let Some(not_after) = policy.not_after {
+        if now >= not_after {
+            return Err(Denial::PolicyExpired);
+        }
     }
     if let Some(allowed) = &policy.allowed_agents {
         if !allowed.contains(&agent_id) {
@@ -165,7 +177,10 @@ mod tests {
             Err(Denial::ReleaseNotPlaintext)
         );
         // …but references are fine.
-        assert_eq!(evaluate_reference(&Policy::default(), false, a), Ok(()));
+        assert_eq!(
+            evaluate_reference(&Policy::default(), false, a, c.now),
+            Ok(())
+        );
     }
 
     #[test]
@@ -179,7 +194,7 @@ mod tests {
         assert_eq!(evaluate_grant(&p, &ctx(a)), Ok(()));
         assert_eq!(evaluate_grant(&p, &ctx(b)), Err(Denial::AgentNotAllowed));
         assert_eq!(
-            evaluate_reference(&p, false, b),
+            evaluate_reference(&p, false, b, ctx(b).now),
             Err(Denial::AgentNotAllowed)
         );
     }
@@ -202,6 +217,22 @@ mod tests {
     }
 
     #[test]
+    fn reference_honors_not_after() {
+        let a = Uuid::new_v4();
+        let p = Policy {
+            not_after: Some(OffsetDateTime::from_unix_timestamp(1_800_000_001).unwrap()),
+            ..Default::default()
+        };
+        let before = OffsetDateTime::from_unix_timestamp(1_800_000_000).unwrap();
+        let after = OffsetDateTime::from_unix_timestamp(1_800_000_001).unwrap();
+        assert_eq!(evaluate_reference(&p, false, a, before), Ok(()));
+        assert_eq!(
+            evaluate_reference(&p, false, a, after),
+            Err(Denial::PolicyExpired)
+        );
+    }
+
+    #[test]
     fn disabled_wins() {
         let a = Uuid::new_v4();
         let mut c = ctx(a);
@@ -211,7 +242,7 @@ mod tests {
             Err(Denial::SecretDisabled)
         );
         assert_eq!(
-            evaluate_reference(&Policy::default(), true, a),
+            evaluate_reference(&Policy::default(), true, a, c.now),
             Err(Denial::SecretDisabled)
         );
     }
