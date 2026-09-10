@@ -109,7 +109,16 @@ Variables set: everything in the table above plus `ROCKET_SECRET_KEY`, `ROCKET_A
 After the PR merges, switch the branch: `railway service source connect --repo
 LIT-Protocol/chipotle --branch main --service lit-secrets`.
 
-## Verified against prod Chipotle (2026-08-27)
+## Verified against prod Chipotle (2026-08-27 local, 2026-08-29 on Railway)
+
+The identical suite was re-run against the deployed Railway service
+(`lit-secrets-production.up.railway.app`) after a real magic-link login +
+agent-authorize: provision (~50s), seal, grant + redeem (~2s via SDK from a
+laptop), rotate, `rate_limited` / `release_not_plaintext` denials, in-TEE-only
+via customer action, forged + expired grants rejected in-TEE, revoke (Chipotle
+rejected the revoked key immediately that run), audit log complete.
+
+## Original local run detail (2026-08-27)
 
 Full flow tested with a real account: provision (create_wallet → add_group →
 add_action ×2 → add_action_to_group ×2 → service key) ≈ 25s; seal ≈ 0.3s;
