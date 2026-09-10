@@ -1,6 +1,6 @@
 pub use crate::accounts::contracts::account_config_contract::AccountConfig;
 use crate::accounts::decode_revert::decode_contract_revert;
-use crate::accounts::signer_pool::SignerPool;
+use crate::accounts::signer_pool::{SignerLease, SignerPool};
 use crate::config::GLOBAL_NODE_CONFIG;
 pub use crate::utils::chain_info::Chain;
 pub use alloy::contract::CallBuilder;
@@ -25,6 +25,19 @@ use std::time::Duration;
 /// transactions, and every request that borrowed them hung until the client
 /// gave up.
 pub(crate) const TX_RECEIPT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Grace added to [`TX_RECEIPT_TIMEOUT`] for the *outer* deadline around
+/// `get_receipt()`. Alloy's `with_timeout` only bounds the watcher's
+/// `select!`; the receipt-fetch RPC awaits in `get_receipt` sit outside it
+/// (see alloy heart.rs), so a blackholed RPC could outlast the watcher
+/// timeout. The outer `tokio::time::timeout` is the hard bound.
+pub(crate) const TX_RECEIPT_GRACE: Duration = Duration::from_secs(10);
+
+/// Hard deadline for each single RPC round-trip in the send pipeline
+/// (simulation, nonce fetch, broadcast). Alloy's HTTP transport sets no
+/// request timeout of its own, so without this a blackholed RPC pins the
+/// request forever even though the receipt wait is bounded.
+pub(crate) const RPC_STEP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How often the receipt watcher polls for a pending transaction. Alloy
 /// defaults non-local HTTP transports to 7s, but the configured chains mine
@@ -74,15 +87,15 @@ pub async fn init_chain_clients() -> Result<()> {
 
 pub(crate) async fn get_signable_account_config_contract(
     signer_pool: std::sync::Arc<SignerPool>,
-) -> Result<(AccountConfigInstance, Address, SigningClient), anyhow::Error> {
+) -> Result<(AccountConfigInstance, SignerLease, SigningClient), anyhow::Error> {
     let signer_handle = signer_pool.request().await?;
     let client = signer_handle
         .client
         .ok_or(anyhow::anyhow!("No signer available"))?;
-    let signer_address = signer_handle.address;
+    let lease = signer_handle.lease;
     let contract = get_account_config_contract(client.clone()).await?;
 
-    Ok((contract, signer_address, client))
+    Ok((contract, lease, client))
 }
 
 pub async fn get_account_config_contract(client: SigningClient) -> Result<AccountConfigInstance> {
@@ -102,6 +115,14 @@ pub async fn get_admin_api_payer_contract() -> Result<AccountConfigInstance> {
 }
 
 pub async fn get_admin_api_signer() -> Result<SigningClient> {
+    Ok(get_admin_api_signer_with_address().await?.0)
+}
+
+/// The admin signing client together with its own address. Callers that
+/// broadcast from the admin wallet need the sender address to pin an
+/// explicitly fetched nonce (all sends in this crate pin nonces; alloy's
+/// `NonceFiller` stays installed but inert).
+pub(crate) async fn get_admin_api_signer_with_address() -> Result<(SigningClient, Address)> {
     let node_config = GLOBAL_NODE_CONFIG
         .get()
         .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))?;
@@ -111,8 +132,9 @@ pub async fn get_admin_api_signer() -> Result<SigningClient> {
         .map_err(|e| anyhow::anyhow!("Failed to get admin api payer key: {e}"))?;
     let wallet = PrivateKeySigner::from_bytes(&B256::from_slice(&secret))?
         .with_chain_id(Some(chain_info.chain_id));
+    let address = wallet.address();
 
-    signer_provider(wallet)
+    Ok((signer_provider(wallet)?, address))
 }
 
 /// The shared read-only provider for the node's configured chain. Used by
@@ -157,15 +179,24 @@ fn receipt_to_result(receipt: alloy::rpc::types::TransactionReceipt) -> Result<b
     }
 }
 
-/// Per-signer nonce cache, replacing alloy's `NonceFiller`.
+/// Per-signer nonce allocator, replacing alloy's `NonceFiller`.
 ///
-/// The `NonceFiller` cache increments optimistically and is never rolled back
-/// after a failed or dropped broadcast, so one RPC outage mid-send leaves the
-/// signer emitting nonce-gapped transactions that can never mine (2026-09-03
-/// prod incident). This cache keeps the happy path free of extra RPC calls
-/// (hit → no fetch) but is **invalidated on any send failure or receipt
-/// timeout**, so the next send re-derives the nonce from the chain and the
-/// signer self-heals.
+/// Differs from `NonceFiller` in two ways that both mattered in production:
+///
+/// 1. **Invalidated on failure.** `NonceFiller` increments optimistically and
+///    is never rolled back after a failed or dropped broadcast, so one RPC
+///    outage mid-send leaves the signer emitting nonce-gapped transactions
+///    that can never mine (2026-09-03 prod incident). Here any broadcast
+///    failure or receipt timeout removes the entry, and the next send
+///    re-derives the nonce from the chain — the signer self-heals.
+/// 2. **Reserved at read time.** `reserve`/`reserve_seeded` hand out a nonce
+///    and advance the counter in the same locked operation, so two concurrent
+///    borrowers of one signer (possible via the pool's all-busy fallback or a
+///    force-freed stale lease) get *distinct* nonces instead of colliding on
+///    the same one.
+///
+/// The happy path costs no RPC (reservation is a map lookup); a fetch happens
+/// only on a cold or invalidated entry.
 pub(crate) struct NonceCache(Mutex<HashMap<Address, u64>>);
 
 impl NonceCache {
@@ -179,23 +210,34 @@ impl NonceCache {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn get(&self, signer: Address) -> Option<u64> {
-        self.lock().get(&signer).copied()
-    }
-
-    /// Record a *mined* nonce (a reverted tx still consumes its nonce). Uses
-    /// max() so a late write from a slower concurrent sender (possible only
-    /// via the pool's all-busy shared-lease fallback) can't regress the
-    /// counter; mined nonces are chain truth, so max can never poison it.
-    fn advance(&self, signer: Address, mined_nonce: u64) {
+    /// Atomically take the signer's next nonce and advance the counter.
+    /// `None` on a cold/invalidated entry — the caller must fetch the pending
+    /// nonce and call [`Self::reserve_seeded`].
+    fn reserve(&self, signer: Address) -> Option<u64> {
         let mut map = self.lock();
-        let next = map.entry(signer).or_insert(0);
-        *next = (*next).max(mined_nonce + 1);
+        let next = map.get_mut(&signer)?;
+        let taken = *next;
+        *next = taken + 1;
+        Some(taken)
     }
 
-    /// Forget the signer's nonce after a failed broadcast or a receipt
+    /// Seed from a freshly fetched pending nonce and reserve in one locked
+    /// step. `max(entry, fetched)` resolves both races: a concurrent cold-start
+    /// borrower who fetched the same pending nonce gets the next slot instead
+    /// of a duplicate, and a stale-low entry (the chain advanced behind our
+    /// back) is corrected by the fetch.
+    fn reserve_seeded(&self, signer: Address, fetched: u64) -> u64 {
+        let mut map = self.lock();
+        let entry = map.entry(signer).or_insert(fetched);
+        let taken = (*entry).max(fetched);
+        *entry = taken + 1;
+        taken
+    }
+
+    /// Forget the signer's counter after a failed broadcast or a receipt
     /// timeout, when we can't know whether the nonce was consumed. The next
-    /// send falls back to fetching the pending nonce from the RPC.
+    /// send falls back to fetching the pending nonce from the RPC. In-flight
+    /// reservations already handed out are unaffected.
     fn invalidate(&self, signer: Address) {
         self.lock().remove(&signer);
     }
@@ -203,44 +245,72 @@ impl NonceCache {
 
 static NONCE_CACHE: LazyLock<NonceCache> = LazyLock::new(NonceCache::new);
 
-/// Fetch the signer's pending-block nonce from the RPC. Only needed on a
-/// [`NONCE_CACHE`] miss: a signer's first send after startup, after a failure
-/// invalidated its entry, or on the nonce-collision retry.
-async fn pending_nonce(
-    client: &SigningClient,
-    signer_address: Address,
-) -> alloy::transports::TransportResult<u64> {
-    client
-        .get_transaction_count(signer_address)
-        .block_id(alloy::eips::BlockId::Number(BlockNumberOrTag::Pending))
-        .await
+/// Drop a signer's nonce counter so the next send re-derives it from the
+/// chain. For callers outside this module (e.g. the pool's rebalancer) after
+/// a failed broadcast.
+pub(crate) fn invalidate_nonce(signer: Address) {
+    NONCE_CACHE.invalidate(signer);
 }
 
-/// Wait for a broadcast transaction to be mined, bounded by
-/// [`TX_RECEIPT_TIMEOUT`], and convert the receipt into a success/failure
-/// result. The bound is what keeps a transaction that never mines from
-/// hanging the HTTP request forever. Updates [`NONCE_CACHE`] with the outcome:
-/// mined (even reverted) advances the signer's nonce, no-receipt invalidates
-/// it.
-async fn wait_for_receipt(
+/// Fetch the signer's pending-block nonce from the RPC, bounded by
+/// [`RPC_STEP_TIMEOUT`].
+pub(crate) async fn fetch_pending_nonce(client: &SigningClient, signer: Address) -> Result<u64> {
+    let fetch = client
+        .get_transaction_count(signer)
+        .block_id(alloy::eips::BlockId::Number(BlockNumberOrTag::Pending));
+    match tokio::time::timeout(RPC_STEP_TIMEOUT, fetch).await {
+        Ok(Ok(nonce)) => Ok(nonce),
+        Ok(Err(e)) => Err(anyhow::anyhow!(
+            "pending-nonce fetch for {signer} failed: {e}"
+        )),
+        Err(_) => Err(anyhow::anyhow!(
+            "pending-nonce fetch for {signer} timed out after {RPC_STEP_TIMEOUT:?}"
+        )),
+    }
+}
+
+/// Reserve the signer's next nonce: from the cache when warm (no RPC), else
+/// from a bounded pending-nonce fetch seeded into the cache.
+pub(crate) async fn reserve_nonce(client: &SigningClient, signer: Address) -> Result<u64> {
+    if let Some(nonce) = NONCE_CACHE.reserve(signer) {
+        return Ok(nonce);
+    }
+    let fetched = fetch_pending_nonce(client, signer).await?;
+    Ok(NONCE_CACHE.reserve_seeded(signer, fetched))
+}
+
+/// Wait for a broadcast transaction to be mined and convert the receipt into
+/// a success/failure result. Two nested bounds: alloy's watcher timeout
+/// (`with_timeout`) and an outer `tokio::time::timeout` — the watcher timeout
+/// alone does not bound the receipt-fetch RPC awaits inside `get_receipt`
+/// (they sit outside its `select!`), so a blackholed RPC could otherwise hang
+/// past it. On any failure the signer's nonce counter is invalidated (the
+/// nonce may or may not have been consumed); a mined receipt — even a revert,
+/// which still consumes its nonce — needs no cache update because the nonce
+/// was reserved up front.
+pub(crate) async fn wait_for_receipt(
     tx: PendingTransactionBuilder<Ethereum>,
     signer_address: Address,
-    nonce: u64,
 ) -> Result<bool> {
     let tx_hash = *tx.tx_hash();
-    match tx
-        .with_timeout(Some(TX_RECEIPT_TIMEOUT))
-        .get_receipt()
-        .await
-    {
-        Ok(receipt) => {
-            NONCE_CACHE.advance(signer_address, nonce);
-            receipt_to_result(receipt)
-        }
-        Err(e) => {
+    let hard_bound = TX_RECEIPT_TIMEOUT + TX_RECEIPT_GRACE;
+    let outcome = tokio::time::timeout(
+        hard_bound,
+        tx.with_timeout(Some(TX_RECEIPT_TIMEOUT)).get_receipt(),
+    )
+    .await;
+    match outcome {
+        Ok(Ok(receipt)) => receipt_to_result(receipt),
+        Ok(Err(e)) => {
             NONCE_CACHE.invalidate(signer_address);
             Err(anyhow::anyhow!(
                 "no receipt for transaction {tx_hash:#x} within {TX_RECEIPT_TIMEOUT:?}: {e}"
+            ))
+        }
+        Err(_) => {
+            NONCE_CACHE.invalidate(signer_address);
+            Err(anyhow::anyhow!(
+                "no receipt for transaction {tx_hash:#x}: receipt wait exceeded hard bound of {hard_bound:?}"
             ))
         }
     }
@@ -249,49 +319,66 @@ async fn wait_for_receipt(
 pub async fn send_transaction<D>(
     function_call: CallBuilder<&SigningClient, D, Ethereum>,
     signer_pool: std::sync::Arc<SignerPool>,
-    signer_address: Address,
+    lease: SignerLease,
     client: SigningClient,
 ) -> Result<bool>
 where
     D: alloy::contract::CallDecoder + Clone,
 {
+    let signer_address = lease.address;
+
     // Call-before-send: dry-run via eth_call so any revert surfaces as a
     // decoded, human-readable error before we broadcast. No nonce is consumed
     // and no gas is spent on a failed simulation.
-    if let Err(sim_err) = function_call.call().await {
-        let decoded = decode_contract_revert(&sim_err);
-        if let Err(release_err) = signer_pool.release(signer_address).await {
-            tracing::warn!("signer release after sim failure failed: {release_err}");
+    match tokio::time::timeout(RPC_STEP_TIMEOUT, function_call.call()).await {
+        Ok(Ok(_)) => {}
+        Ok(Err(sim_err)) => {
+            let decoded = decode_contract_revert(&sim_err);
+            if let Err(release_err) = signer_pool.release(&lease).await {
+                tracing::warn!("signer release after sim failure failed: {release_err}");
+            }
+            return Err(anyhow::anyhow!("Simulation failed: {decoded}"));
         }
-        return Err(anyhow::anyhow!("Simulation failed: {decoded}"));
+        Err(_) => {
+            signer_pool.release(&lease).await?;
+            return Err(anyhow::anyhow!(
+                "Simulation timed out after {RPC_STEP_TIMEOUT:?}"
+            ));
+        }
     }
 
-    let nonce = match NONCE_CACHE.get(signer_address) {
-        Some(nonce) => nonce,
-        None => match pending_nonce(&client, signer_address).await {
-            Ok(nonce) => nonce,
-            Err(nonce_err) => {
-                signer_pool.release(signer_address).await?;
-                return Err(anyhow::anyhow!(
-                    "Failed to send transaction (nonce fetch failed): {nonce_err}"
-                ));
-            }
-        },
+    let nonce = match reserve_nonce(&client, signer_address).await {
+        Ok(nonce) => nonce,
+        Err(nonce_err) => {
+            signer_pool.release(&lease).await?;
+            return Err(anyhow::anyhow!("Failed to send transaction: {nonce_err}"));
+        }
     };
 
-    let first_err = match function_call.clone().nonce(nonce).send().await {
-        Ok(tx) => {
-            let result = wait_for_receipt(tx, signer_address, nonce).await;
-            signer_pool.release(signer_address).await?;
-            return result;
-        }
-        Err(e) => {
-            // The broadcast failed after the nonce was chosen; whether it was
-            // consumed is unknowable here, so make the next send re-derive it.
-            NONCE_CACHE.invalidate(signer_address);
-            e
-        }
-    };
+    let first_err =
+        match tokio::time::timeout(RPC_STEP_TIMEOUT, function_call.clone().nonce(nonce).send())
+            .await
+        {
+            Ok(Ok(tx)) => {
+                let result = wait_for_receipt(tx, signer_address).await;
+                signer_pool.release(&lease).await?;
+                return result;
+            }
+            Ok(Err(e)) => {
+                // The broadcast failed after the nonce was reserved; whether it
+                // was consumed is unknowable here, so make the next send
+                // re-derive it.
+                NONCE_CACHE.invalidate(signer_address);
+                e
+            }
+            Err(_) => {
+                NONCE_CACHE.invalidate(signer_address);
+                signer_pool.release(&lease).await?;
+                return Err(anyhow::anyhow!(
+                    "Transaction broadcast timed out after {RPC_STEP_TIMEOUT:?}"
+                ));
+            }
+        };
 
     let is_nonce_too_low = |err: &dyn std::error::Error| -> bool {
         let mut current = err;
@@ -314,35 +401,49 @@ where
 
     if !is_nonce_too_low(&first_err) {
         let decoded = decode_contract_revert(&first_err);
-        signer_pool.release(signer_address).await?;
+        signer_pool.release(&lease).await?;
         return Err(anyhow::anyhow!("Failed to send transaction: {decoded}"));
     }
 
-    // Another sender raced us to this nonce (only possible via the pool's
-    // all-busy fallback, where a lease can be shared). Re-fetch and retry once.
-    let fresh_nonce = match pending_nonce(&client, signer_address).await {
+    // Another sender raced us to this nonce (a shared lease from the pool's
+    // all-busy fallback, or a nonce consumed outside this process). Reserve a
+    // fresh one and retry once; the cache was invalidated above, so this
+    // re-derives from the chain unless a concurrent borrower re-seeded it.
+    let fresh_nonce = match reserve_nonce(&client, signer_address).await {
         Ok(nonce) => nonce,
         Err(nonce_err) => {
             tracing::warn!("nonce resync failed: {nonce_err}");
-            signer_pool.release(signer_address).await?;
+            signer_pool.release(&lease).await?;
             return Err(anyhow::anyhow!(
                 "Failed to send transaction (nonce resync failed): original error: {first_err}, nonce fetch error: {nonce_err}"
             ));
         }
     };
 
-    let retry_call = function_call.nonce(fresh_nonce);
-    let tx = match retry_call.send().await {
-        Ok(tx) => tx,
-        Err(retry_err) => {
+    let tx = match tokio::time::timeout(RPC_STEP_TIMEOUT, function_call.nonce(fresh_nonce).send())
+        .await
+    {
+        Ok(Ok(tx)) => tx,
+        Ok(Err(retry_err)) => {
+            // The retry's reservation is dead too — a concurrent borrower may
+            // have re-seeded the cache since the first invalidation, so this
+            // second invalidation is not redundant.
+            NONCE_CACHE.invalidate(signer_address);
             let decoded = decode_contract_revert(&retry_err);
-            signer_pool.release(signer_address).await?;
+            signer_pool.release(&lease).await?;
             return Err(anyhow::anyhow!("Failed to send transaction: {decoded}"));
+        }
+        Err(_) => {
+            NONCE_CACHE.invalidate(signer_address);
+            signer_pool.release(&lease).await?;
+            return Err(anyhow::anyhow!(
+                "Transaction retry broadcast timed out after {RPC_STEP_TIMEOUT:?}"
+            ));
         }
     };
 
-    let result = wait_for_receipt(tx, signer_address, fresh_nonce).await;
-    signer_pool.release(signer_address).await?;
+    let result = wait_for_receipt(tx, signer_address).await;
+    signer_pool.release(&lease).await?;
     result
 }
 
@@ -351,38 +452,50 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nonce_cache_advances_past_mined_nonce() {
+    fn nonce_cache_cold_reserve_misses_then_seeded_reserves_advance() {
         let cache = NonceCache::new();
         let signer = Address::repeat_byte(0x11);
 
-        assert_eq!(cache.get(signer), None, "cold cache must miss");
-        cache.advance(signer, 100);
-        assert_eq!(cache.get(signer), Some(101));
+        assert_eq!(cache.reserve(signer), None, "cold cache must miss");
+        assert_eq!(cache.reserve_seeded(signer, 100), 100);
+        assert_eq!(cache.reserve(signer), Some(101));
+        assert_eq!(cache.reserve(signer), Some(102));
     }
 
     #[test]
-    fn nonce_cache_never_regresses_on_out_of_order_advance() {
+    fn nonce_cache_concurrent_cold_starts_get_distinct_nonces() {
         let cache = NonceCache::new();
         let signer = Address::repeat_byte(0x11);
 
-        cache.advance(signer, 101);
-        // A slower concurrent sender reporting an older mined nonce last
-        // (possible via the pool's shared-lease fallback) must not rewind.
-        cache.advance(signer, 100);
-        assert_eq!(cache.get(signer), Some(102));
+        // Two borrowers both miss the cold cache and fetch the same pending
+        // nonce from the RPC. Seeding must hand out distinct values.
+        assert_eq!(cache.reserve_seeded(signer, 100), 100);
+        assert_eq!(cache.reserve_seeded(signer, 100), 101);
     }
 
     #[test]
-    fn nonce_cache_invalidate_forces_refetch() {
+    fn nonce_cache_seed_corrects_stale_low_entry() {
+        let cache = NonceCache::new();
+        let signer = Address::repeat_byte(0x11);
+
+        cache.reserve_seeded(signer, 100); // counter now 101
+        // The chain advanced past our counter (e.g. an external tx from the
+        // same payer): a fresh fetch wins over the stale entry.
+        assert_eq!(cache.reserve_seeded(signer, 105), 105);
+        assert_eq!(cache.reserve(signer), Some(106));
+    }
+
+    #[test]
+    fn nonce_cache_invalidate_forces_refetch_and_is_per_signer() {
         let cache = NonceCache::new();
         let signer = Address::repeat_byte(0x11);
         let other = Address::repeat_byte(0x22);
 
-        cache.advance(signer, 100);
-        cache.advance(other, 200);
+        cache.reserve_seeded(signer, 100);
+        cache.reserve_seeded(other, 200);
         cache.invalidate(signer);
 
-        assert_eq!(cache.get(signer), None, "invalidated signer must miss");
-        assert_eq!(cache.get(other), Some(201), "other signers unaffected");
+        assert_eq!(cache.reserve(signer), None, "invalidated signer must miss");
+        assert_eq!(cache.reserve(other), Some(201), "other signers unaffected");
     }
 }

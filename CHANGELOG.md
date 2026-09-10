@@ -41,14 +41,22 @@ doesn't describe endpoints the released server lacks.
 ### Fixed
 - Write endpoints (`new_account`, `create_wallet`, …) can no longer hang
   indefinitely after an RPC outage. On-chain sends now pin nonces from a
-  locally managed per-signer cache that is invalidated on any send failure or
-  receipt timeout (alloy's optimistic nonce cache is never rolled back after a
-  dropped broadcast, so a poisoned signer could never recover), receipt waits
-  are bounded at 30s, and a signer whose lease is force-freed as stale rotates
-  to the back of the pool instead of monopolizing the front of the lease
-  queue. Root-caused from the 2026-09-03 prod incident where two wedged payer
+  locally managed per-signer allocator that *reserves* the nonce at read time
+  (concurrent borrowers of one signer get distinct nonces instead of
+  colliding) and is invalidated on any send failure or receipt timeout
+  (alloy's optimistic nonce cache is never rolled back after a dropped
+  broadcast, so a poisoned signer could never recover). Every RPC step in the
+  send pipeline — simulation, nonce fetch, broadcast, receipt wait — now has a
+  hard deadline, including an outer bound on `get_receipt` (alloy's own
+  watcher timeout does not cover its receipt-fetch RPC awaits). Signer leases
+  carry an id, so a slow borrower whose lease was force-freed can no longer
+  free the next borrower's lease; the stale threshold now exceeds the
+  worst-case bounded send so cleanup is purely leak recovery; and the pool's
+  rebalancer pins nonces from the same allocator, runs off the dispatcher
+  task, and no longer aborts remaining wallets after one failure.
+  Root-caused from the 2026-09-03 prod incident where two wedged payer
   wallets absorbed nearly all signer leases and `POST /new_account` timed out
-  for days.
+  for days; hardened further after an adversarial cross-model review.
 - On-chain writes confirm ~2-5s sooner: the RPC receipt poller now ticks every
   2s (matching block time on the configured chains) instead of alloy's 7s
   default for HTTP transports, which also shortens how long each signer lease
