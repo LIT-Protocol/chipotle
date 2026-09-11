@@ -120,6 +120,13 @@ The image runs as an unprivileged user. For Railway, use repository root as the 
 context and `lit-agent-keychain/railway.json` as the config path; the Dockerfile path
 is relative to the repository root.
 
+Publish the agent SDK with `./publish.sh`. It builds, compares the packed contents
+with what npm serves for the current version, bumps the patch version only when
+they differ (`--bump minor|major` to choose), commits and tags
+`keychain-sdk-v<version>`, then publishes. `--dry-run` shows the decision without
+committing or publishing. A local `before=` cooldown in `~/.npmrc` does not affect
+it; the published tarball is fetched directly and integrity-checked.
+
 This is a prelaunch, incompatible replacement. Migration `20260911000001` drops the
 legacy Keychain tables and their contents. Stop the old service before applying it.
 It does not delete upstream PKPs/usage keys from the old Lit account; retire those
