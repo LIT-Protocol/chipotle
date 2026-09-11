@@ -144,6 +144,13 @@ export interface LitActionRequest {
 }
 
 /**
+ * Public secp256k1 identity of an exact immutable action CID. This endpoint discloses no private key and grants no execution or decryption permission.
+ */
+export interface LitActionPublicKeyResponse {
+  public_key: string;
+}
+
+/**
  * Parameters passed to the action: exposed to guest code via `lit params`, and top-level values are injected into the sandbox environment.
  * @nullable
  */
@@ -669,8 +676,7 @@ export type ConvertToChainSecuredAccountHeaders = {
 };
 
 export type ConvertToChainSecuredAccountDefault =
-  | AccountOpResponse
-  | ErrMessage;
+  AccountOpResponse | ErrMessage;
 
 export type AccountExistsHeaders = {
   /**
@@ -700,8 +706,7 @@ export type CreateWalletPostHeaders = {
 export type CreateWalletPostDefault = CreateWalletResponse | ErrMessage;
 
 export type CreateWalletWithSignatureDefault =
-  | CreateWalletWithSignatureResponse
-  | ErrMessage;
+  CreateWalletWithSignatureResponse | ErrMessage;
 
 export type PrepareWalletDefault = PrepareWalletResponse | ErrMessage;
 
@@ -722,6 +727,8 @@ export type LitActionHeaders = {
 };
 
 export type LitActionDefault = LitActionResponse | ErrMessage;
+
+export type LitActionPublicKeyDefault = LitActionPublicKeyResponse | ErrMessage;
 
 export type LitBinaryActionHeaders = {
   /**
@@ -807,8 +814,7 @@ export type AddUsageApiKeyHeaders = {
 export type AddUsageApiKeyDefault = AddUsageApiKeyResponse | ErrMessage;
 
 export type AddUsageApiKeyWithSignatureDefault =
-  | AddUsageApiKeyWithSignatureResponse
-  | ErrMessage;
+  AddUsageApiKeyWithSignatureResponse | ErrMessage;
 
 export type UpdateUsageApiKeyHeaders = {
   /**
@@ -957,8 +963,7 @@ export type GetNodeChainConfigDefault = NodeChainConfigResponse | ErrMessage;
 export type GetChainConfigKeysDefault = ChainConfigKeysResponse | ErrMessage;
 
 export type GetLitActionClientConfigDefault =
-  | LitActionClientConfigResponse
-  | ErrMessage;
+  LitActionClientConfigResponse | ErrMessage;
 
 export type GetCacheMetadataHeaders = {
   /**
@@ -970,8 +975,7 @@ export type GetCacheMetadataHeaders = {
 export type GetCacheMetadataDefault = CacheMetadataResponse | ErrMessage;
 
 export type GetSupportedLanguagesDefault =
-  | SupportedLanguagesResponse
-  | ErrMessage;
+  SupportedLanguagesResponse | ErrMessage;
 
 export type GetApiPayersDefault = string[] | ErrMessage;
 
@@ -996,8 +1000,7 @@ export type BillingCreatePaymentIntentHeaders = {
 };
 
 export type BillingCreatePaymentIntentDefault =
-  | CreatePaymentIntentResponse
-  | ErrMessage;
+  CreatePaymentIntentResponse | ErrMessage;
 
 export type BillingConfirmPaymentHeaders = {
   /**
@@ -1467,6 +1470,42 @@ NOT IDEMPOTENT: every call returns a brand-new wallet (a fresh random derivation
       response,
       data,
       operationId: "lit_action",
+    };
+  }
+
+  /**
+   * Discover an action's public identity directly over authenticated Lit TLS. Allows clients to verify action-signed encrypted results without trusting an application proxy's claimed public key. No API key or billing required.
+   */
+  litActionPublicKey(
+    cid: string,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: LitActionPublicKeyDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/lit_action_public_key/${cid}`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "GET",
+      k6url.toString(),
+      undefined,
+      mergedRequestParameters,
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "lit_action_public_key",
     };
   }
 
