@@ -58,6 +58,8 @@ that can be exhausted; and strict-mode credentials requiring original-value reim
 new action code. These are stated in the UI and SECURITY.md where relevant.
 
 No unresolved authorization bypass was found within this model. This does not establish
-absence of bugs. Live OAuth configuration, the intended production Lit derivation root's
-stability across restart/upgrade, and live Stripe/TEE execution still require deployment
-validation. The PR neither deploys services nor resets a production database.
+absence of bugs. Live OAuth configuration and live Stripe/TEE execution through
+Chipotle's API still require deployment validation. Keychain relies on Chipotle for
+runtime security and derivation-root continuity across provider restarts/upgrades;
+direct infrastructure access is not an application validation prerequisite. The PR
+neither deploys services nor resets a production database.

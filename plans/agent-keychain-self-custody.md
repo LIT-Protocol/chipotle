@@ -188,7 +188,7 @@ Suggested schema concepts: `accounts`, `owner_credentials`, `vault_manifests`, `
 
 ## Platform checks required before asserting the guarantee
 
-- Confirm action-key stability across intended network/runtime upgrades and document recovery assumptions.
+- Document reliance on Chipotle for action-key continuity across network/runtime upgrades and the associated recovery assumptions. Infrastructure qualification belongs to the platform; Keychain validation uses Chipotle's API without direct TEE infrastructure access.
 - Verify the runtime chooses the private-key derivation CID, never a caller-supplied alternate CID.
 - Establish trusted public-key/CID bootstrap and exact attestation/channel properties.
 - Ensure no private action keys, data keys, plaintext, or bearer proofs reach telemetry. Current `lit-actions/ext/bindings.rs` annotates `op_get_lit_action_private_key` with `#[instrument(skip_all, ret)]`; investigate/remove sensitive return-value tracing as part of validating this design. Logging behavior has not been reproduced here.
@@ -213,7 +213,9 @@ Suggested schema concepts: `accounts`, `owner_credentials`, `vault_manifests`, `
 - Backups preserve current ciphertext and signed credential/policy settings. Restoration
   is idempotent and cannot overwrite an existing vault's credential settings or policies.
 - Local browser, Postgres, SDK and actual Deno runtime validation are automated. Live
-  provider configuration and production key continuity remain deployment checks.
+  OAuth configuration and encrypted lifecycle/Stripe validation use Chipotle's API.
+  Production runtime security and derivation-root continuity remain provider trust
+  assumptions; direct TEE infrastructure access is not required by Keychain.
 
 Earlier proposal language above records the design discussion; the implementation
 README and SECURITY.md specify the final protocol and guarantees.

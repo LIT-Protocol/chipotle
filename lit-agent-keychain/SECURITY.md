@@ -128,5 +128,10 @@ Local tests use real WebCrypto, browser WebAuthn, the actual Deno worker and Pos
 with synthetic Lit keys and Google issuance fixtures. They do not prove live Google
 OAuth configuration, production TEE measurements, or future Lit root-key continuity.
 Before launch, deploy the public-key/telemetry changes, configure Google and wallet
-providers, run a live import/read/rotation/restart smoke test against the intended Lit
-network, and retain an independent recovery copy of the original strict-mode credential.
+providers, and run live import/read/rotation/revocation/recovery and Stripe balance
+tests through the intended Chipotle API. Keychain uses Chipotle for all TEE execution
+and action public-key discovery; application validation requires no direct TEE
+infrastructure access. Runtime security and derivation-root continuity across provider
+restarts/upgrades remain Chipotle trust assumptions, with infrastructure qualification
+owned by the platform. Retain an independent recovery copy of the original strict-mode
+credential.
