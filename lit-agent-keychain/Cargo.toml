@@ -1,12 +1,15 @@
 [package]
 name = "lit-agent-keychain"
 version = "2.0.0"
+default-run = "lit-agent-keychain"
 edition = "2021"
 description = "Owner-authorized, action-bound encrypted credentials for agents"
 license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1.0"
+aes-gcm = "0.10"
+hmac = "0.12"
 hex = "0.4"
 ipfs-hasher = "0.13.0"
 k256 = { version = "0.13", features = ["ecdsa"] }
@@ -17,8 +20,9 @@ rocket = { version = "0.5.1", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
+sha3 = "0.10"
 sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "time", "json", "macros"] }
-time = { version = "0.3", features = ["serde", "formatting"] }
+time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

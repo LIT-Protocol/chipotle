@@ -10,7 +10,7 @@
 //!   - Wallet has a Stripe customer → 200 + `client_secret` + Stripe
 //!     SetupIntent reflects `usage=off_session, customer=cus_*`.
 //!   - Wallet has no Stripe customer → 400 `no_stripe_customer`.
-//!   - API-key caller → 501 (Phase 3 ships wallet-sig only).
+//!   - Master API-key caller reaches the same flow as the wallet owner.
 //!
 //! NOT covered here (intentional): `stripe.confirmCardSetup` 3DS flow —
 //! that needs a browser and is the Phase 8 manual test checkpoint.
@@ -281,6 +281,9 @@ async fn setup_intent_returns_400_when_no_customer() {
 #[tokio::test]
 #[serial_test::serial]
 async fn setup_intent_api_key_caller_proceeds_to_normal_flow() {
+    // Base64 of 32 bytes of 0x07, with its corresponding Ethereum wallet.
+    const MASTER_KEY: &str = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";
+    const MASTER_WALLET: &str = "0x4a62316623ad457f02cdc5d997ded67a383ec569";
     let Some(key) = stripe_key() else {
         eprintln!("STRIPE_SECRET_KEY not set — skipping Stripe-backed test");
         return;
@@ -290,10 +293,10 @@ async fn setup_intent_api_key_caller_proceeds_to_normal_flow() {
     // That's the canonical success signal for "API-key path works": we
     // got past the old 501 short-circuit and hit the same code the
     // wallet-sig path hits.
-    let client = build_client(key, TEST_WALLET_NO_CUSTOMER).await;
+    let client = build_client(key, MASTER_WALLET).await;
     let resp = client
         .post("/billing/setup_intent")
-        .header(Header::new("X-Api-Key", "some-raw-api-key"))
+        .header(Header::new("X-Api-Key", MASTER_KEY))
         .dispatch()
         .await;
     assert_eq!(resp.status(), Status::BadRequest);

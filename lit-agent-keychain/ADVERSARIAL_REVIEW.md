@@ -22,12 +22,36 @@ old signed policy records. The latter explicitly models accepted revocation roll
 | An unverified recovery-owner list could trick a client into approving attacker-chosen additional owners.                   | SDK validates current credential receipts against the pinned authority before presenting/composing changes. Forged credential policy tests fail.                                                                                                                         |
 | Expiring owner membership together with a session could lock out all owners.                                               | Membership defaults to explicit indefinite validity, while Google sessions and all agent policies retain separate bounded lifetimes. Proof/credential expiry is rechecked after asynchronous lookups.                                                                    |
 | Concurrent secret creation/policy writes could bypass caps or lose revocations.                                            | Vault row locks, compare-and-swap revisions and transactional audit. Postgres tests race creates, reject stale policies and prove atomic sponsorship limits.                                                                                                             |
-| Listing full signed policies could exceed client response limits at supported vault capacity.                              | Return compact list summaries; verify complete receipts when opening a secret. Vault capacity is bounded to the backup protocol limit of 500.                                                                                                                            |
+| Listing full signed policies could exceed client response limits at supported vault capacity.                              | Return compact list summaries; verify complete receipts when opening a secret. Paginated summaries and backup iteration support Standard (1,000) and bounded custom plans.                                                                                               |
 | Retrying a partial restore could fail forever or roll a current policy back.                                               | Exact existing envelopes are idempotent no-ops, including older versions after rotation. Conflicts remain errors. Integration tests restore twice at the resource cap and preserve newer ciphertext/policy.                                                              |
 | Ciphertext backups alone omitted the credentials needed by recovery owners after complete database loss.                   | Backups include the signed credential policy. A verified bootstrap can initialize only a missing vault; it never changes an existing vault. Tests recover with a delegated owner and reject forged/rollback replacements.                                                |
 | Header-only HTTP deadlines left body reads vulnerable to stalls.                                                           | End-to-end deadlines, redirect rejection and byte limits; real local HTTP timeout/oversize/redirect tests.                                                                                                                                                               |
 | Transient anonymous challenge/budget state could grow indefinitely.                                                        | Global challenge/execution caps precede per-identity allocation, and periodic cleanup removes expired transient state without resetting active budget windows.                                                                                                           |
 | Injected wallets were absent from RainbowKit without WalletConnect configuration.                                          | Use RainbowKit's injected connector metadata. Chromium connects an injected EOA and completes EIP-712 authorization.                                                                                                                                                     |
+
+## Subscription and direct-execution review
+
+- Usage keys inherited parent billing-management access. Added a shared billing-owner
+  guard on funding, card and auto-recharge routes in both platform services. A resolved
+  child key fails even though the normal billing identity guard accepts it.
+- A bulk group update can carry only ten CIDs. Use incremental idempotent grants and
+  separate recovery/secret groups; cancellation and renewal change a key's group
+  permissions. API tests enroll more than ten actual actions against a capped adapter.
+- Remote grant/revocation success followed by a lost response could diverge from the
+  DB. Commit enrollment intent before granting; persist pending key revocation before
+  removal. Confirm ambiguous removal with the master's paginated key inventory.
+- Forged or reordered payment events could enable unpaid access. Verify raw-body HMAC,
+  freshness and mode; re-fetch Stripe state under the same vault lock; enforce the
+  configured price, quantity, metadata, active status and paid invoice. Checkout is
+  idempotent and cannot accept a caller-selected customer or price.
+- Concurrent creation could exceed paid capacity. Race the last slot at 999 secrets;
+  exactly one succeeds. Rotation at 1,000 preserves the count. Cancellation preserves
+  ciphertext backups and owner revocation. Renewal restores scoped execution.
+
+Shared parent-account spending with no per-user execution/dollar cap is explicitly
+accepted. Stripe subscriptions enforce storage and sponsorship entitlement, not secret
+access authorization. Fair use has no automatic overage charges. See BILLING.md for
+scope-reconciliation delay and required platform deployment order.
 
 ## Attacks exercised
 
@@ -58,8 +82,11 @@ that can be exhausted; and strict-mode credentials requiring original-value reim
 new action code. These are stated in the UI and SECURITY.md where relevant.
 
 No unresolved authorization bypass was found within this model. This does not establish
-absence of bugs. Live OAuth configuration and live Stripe/TEE execution through
-Chipotle's API still require deployment validation. Keychain relies on Chipotle for
+absence of bugs. Live Chipotle compatibility passed with temporary scoped keys: public discovery,
+full secret-action encryption-key binding, stable derivation across calls, arbitrary
+code denial, and secret-group permission removal/restoration. The test key/groups were
+removed. Live owner/agent lifecycle on the deployed v2 registry and real Google OAuth
+remain deployment checks; this public-key test does not prove that full lifecycle. Keychain relies on Chipotle for
 runtime security and derivation-root continuity across provider restarts/upgrades;
 direct infrastructure access is not an application validation prerequisite. The PR
 neither deploys services nor resets a production database.

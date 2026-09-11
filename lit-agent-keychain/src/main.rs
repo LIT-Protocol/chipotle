@@ -1,4 +1,6 @@
-use lit_agent_keychain::{chipotle::Chipotle, config::Config, db, server};
+use lit_agent_keychain::{
+    chipotle::Chipotle, config::Config, db, server, sponsorship, stripe::Stripe, subscriptions,
+};
 #[rocket::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -35,8 +37,45 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     });
-    let lit = Chipotle::new(cfg.lit_api_url.clone(), cfg.lit_execution_key.clone())?;
-    let result = server::build(cfg, pool, lit).launch().await;
+    let lit = Chipotle::new(
+        cfg.lit_api_url.clone(),
+        cfg.lit_execution_key.clone(),
+        cfg.chipotle_master_key.clone(),
+    )?;
+    let stripe = Stripe::new(&cfg)?;
+    stripe.validate_configuration().await?;
+    let worker_pool = pool.clone();
+    let worker_stripe = stripe.clone();
+    let worker_lit = lit.clone();
+    let worker_cfg = cfg.clone();
+    let reconciler = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            let rows:Result<Vec<(String,bool)>,_>=sqlx::query_as("SELECT vault_id,customer_id IS NOT NULL AND reconcile_after<=now() FROM kc_subscriptions ORDER BY vault_id").fetch_all(&worker_pool).await;
+            let Ok(rows) = rows else {
+                tracing::warn!("billing reconciliation unavailable");
+                continue;
+            };
+            for (vault, due) in rows {
+                if due
+                    && subscriptions::refresh(&worker_pool, &worker_stripe, &vault)
+                        .await
+                        .is_err()
+                {
+                    tracing::warn!("subscription refresh failed");
+                }
+                if sponsorship::reconcile(&worker_pool, &worker_lit, &worker_cfg, &vault)
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!("execution scope reconciliation failed");
+                }
+            }
+        }
+    });
+    let result = server::build(cfg, pool, lit, stripe).launch().await;
+    reconciler.abort();
     cleanup.abort();
     result?;
     Ok(())

@@ -8,6 +8,7 @@ use serde::Serialize;
 const AUTHORITY: &str = include_str!("../generated/authority.js");
 const EXPORT: &str = include_str!("../generated/export.js");
 const STRIPE: &str = include_str!("../generated/stripe-balance.js");
+pub const PUBLIC_KEY: &str = include_str!("../actions/public-key.js");
 pub fn source<T: Serialize>(base: &str, manifest: &T) -> Result<String> {
     Ok(format!("{base}\nconst KEYCHAIN_MANIFEST={};\nasync function main(params){{return KeychainAction.run(KEYCHAIN_MANIFEST,params)}}\n", crypto::canonical(&serde_json::to_value(manifest)?)?))
 }

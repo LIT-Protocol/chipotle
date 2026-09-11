@@ -3,7 +3,8 @@
 The agent generates and holds an Ed25519 signing key. An owner authorizes its
 public key for exact secret versions. The SDK checks signed metadata, submits a
 recipient-bound signed request, and decrypts the action-signed HPKE response locally.
-Execution is sponsored by Keychain; billing credentials never reach the agent.
+Execution goes directly to Chipotle with a scoped, per-vault usage key funded by
+Keychain. That billing key does not authorize secret access by itself.
 
 ```sh
 npm install @lit-protocol/keychain
@@ -12,7 +13,9 @@ npx keychain init ./agent-identity.json
 
 Give the **public key** to the owner. In Keychain, approve it on a secret and download
 **Agent config**. Keep `agent-identity.json` private; it is created with mode 0600 and
-existing files are never overwritten. The config contains public locators, no private key.
+existing files are never overwritten. The config contains public locators and a
+**scoped billing key**. Keep both files private (mode 0600); do not commit them.
+The config contains no owner or agent signing private key.
 
 ```js
 import { readFile } from "node:fs/promises";
@@ -33,6 +36,10 @@ CLI reads write the requested result to stdout. Avoid sending credential output 
 ```sh
 keychain get ./agent-identity.json ./API_KEY.keychain.json API_KEY
 ```
+
+Set `CHIPOTLE_USAGE_API_KEY` for a CLI billing-key override, or pass
+`{ usageApiKey }` as the SDK constructor's third argument. After the owner replaces
+the execution key, update every agent using the old key.
 
 The config pins each action manifest/CID and an independently trusted Lit endpoint.
 Never replace that endpoint using a URL supplied by the Keychain API. V2 clients

@@ -140,6 +140,7 @@ function App() {
   const [client, setClient] = useState<OwnerClient>();
   const [recovery, setRecovery] = useState<Authority>();
   const [secrets, setSecrets] = useState<any[]>([]);
+  const [billing, setBilling] = useState<any>();
   const [selected, setSelected] = useState<SecretBundle>();
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -180,13 +181,21 @@ function App() {
     }
   };
   const refresh = async (c = client) => {
-    if (c) setSecrets((await c.api("/api/secrets")).secrets);
+    if (c) {
+      const [stored, billing] = await Promise.all([
+        c.listSecrets(),
+        c.api("/api/billing"),
+      ]);
+      setSecrets(stored);
+      setBilling(billing);
+    }
   };
   const signIn = async (identity: Identity, authority?: Authority) =>
     work("Verifying owner authorization…", async () => {
       const c = ownerClient(identity, settings.network, authority || recovery);
       await c.login();
       setClient(c);
+      await c.api("/api/billing/refresh", { method: "POST" });
       await refresh(c);
       const policy = await c.getCredentials();
       setRecoveryOwners(policy?.document.owners || [c.authority.owner]);
@@ -212,6 +221,7 @@ function App() {
     const config: AgentConfig = {
       v: 2,
       litApiUrl: LIT_URL,
+      usageApiKey: client!.lit.usageApiKey,
       secrets: {
         [bundle.envelope.document.metadata.name]: {
           manifest: m,
@@ -239,6 +249,7 @@ function App() {
         const agent = new Keychain(key.privateKey, {
           v: 2,
           litApiUrl: LIT_URL,
+          usageApiKey: client!.lit.usageApiKey,
           secrets: {
             [secretName]: {
               manifest: m,
@@ -279,9 +290,11 @@ function App() {
               onClick={() =>
                 work("Signing out…", async () => {
                   await fetch("/auth/logout", { method: "POST" });
+                  client.lit.usageApiKey = undefined;
                   setClient(undefined);
                   setSelected(undefined);
                   setSecrets([]);
+                  setBilling(undefined);
                   disconnect();
                 })
               }
@@ -354,6 +367,25 @@ function App() {
                 </p>
               </div>
             </div>
+            <section className="pricing-card" aria-label="Pricing">
+              <p className="eyebrow">SIMPLE PRICING</p>
+              <h2>
+                $10 <small>/ month</small>
+              </h2>
+              <p>
+                Up to 1,000 secrets per account. All sign-in methods, agent
+                access, rotation, and recovery included.
+              </p>
+              <p>
+                Execution included under fair use. No automatic overage charges.
+                Rotations do not use extra secret slots.
+              </p>
+              <a
+                href={`mailto:${encodeURIComponent(settings?.pricing?.contactEmail || "support@litprotocol.com")}?subject=Keychain%20custom%20plan`}
+              >
+                More secrets or high-volume usage? Contact us
+              </a>
+            </section>
           </section>
           <section className="login-card">
             <p className="eyebrow">GET STARTED</p>
@@ -394,6 +426,7 @@ function App() {
                   const c = ownerClient(identity, settings.network, recovery);
                   await c.login();
                   setClient(c);
+                  await c.api("/api/billing/refresh", { method: "POST" });
                   setRecoveryOwners([identity.owner]);
                   await refresh(c);
                 })
@@ -414,6 +447,7 @@ function App() {
                   );
                   await c.login();
                   setClient(c);
+                  await c.api("/api/billing/refresh", { method: "POST" });
                   await refresh(c);
                   const policy = await c.getCredentials();
                   setRecoveryOwners(
@@ -486,6 +520,123 @@ function App() {
             </p>
           </aside>
           <main className="dashboard">
+            <section className="billing-panel" aria-label="Subscription">
+              <div>
+                <strong>
+                  {billing?.subscription?.plan === "custom"
+                    ? "Custom plan"
+                    : "$10/month · Standard"}
+                </strong>
+                <p>
+                  {secrets.length.toLocaleString()} /{" "}
+                  {(
+                    billing?.subscription?.secretLimit ?? 1000
+                  ).toLocaleString()}{" "}
+                  secrets
+                </p>
+                {billing?.subscription?.active ? (
+                  <small>
+                    {billing.subscription.cancelAtPeriodEnd
+                      ? "Cancels"
+                      : "Access paid through"}{" "}
+                    {new Date(
+                      billing.subscription.paidUntil * 1000,
+                    ).toLocaleDateString()}
+                  </small>
+                ) : (
+                  <small>
+                    Subscribe to add and use secrets. Your encrypted backups
+                    remain available.
+                  </small>
+                )}
+              </div>
+              <div className="billing-actions">
+                {!billing?.subscription?.active && (
+                  <button
+                    disabled={!!busy || !billing}
+                    onClick={() =>
+                      work("Opening secure checkout…", async () => {
+                        const { url } = await client.api(
+                          "/api/billing/checkout",
+                          { method: "POST" },
+                        );
+                        window.location.assign(url);
+                      })
+                    }
+                  >
+                    Subscribe for $10/month
+                  </button>
+                )}
+                {billing?.canManageBilling && (
+                  <button
+                    className="secondary"
+                    disabled={!!busy}
+                    onClick={() =>
+                      work("Opening billing management…", async () => {
+                        const { url } = await client.api(
+                          "/api/billing/portal",
+                          { method: "POST" },
+                        );
+                        window.location.assign(url);
+                      })
+                    }
+                  >
+                    Manage billing
+                  </button>
+                )}
+                <button
+                  className="ghost"
+                  disabled={!!busy}
+                  onClick={() =>
+                    work("Refreshing subscription…", async () => {
+                      await client.api("/api/billing/refresh", {
+                        method: "POST",
+                      });
+                      await refresh();
+                    })
+                  }
+                >
+                  Refresh billing
+                </button>
+                <a
+                  href={`mailto:${encodeURIComponent(billing?.contactEmail || "support@litprotocol.com")}?subject=Keychain%20custom%20plan`}
+                >
+                  Contact us for more
+                </a>
+              </div>
+              <details>
+                <summary>Execution and account access</summary>
+                <p>
+                  Execution is included under fair use, with no automatic
+                  overage charges. Canceled subscriptions remain active through
+                  the paid period. Cancellation never deletes your secrets or
+                  encrypted backups.
+                </p>
+                <p>
+                  Agent configurations include a scoped execution key. Replacing
+                  it stops old configurations from connecting; agents still need
+                  your separate approval to access secrets.
+                </p>
+                <button
+                  className="secondary"
+                  disabled={!!busy}
+                  onClick={() =>
+                    work("Replacing execution key…", async () => {
+                      const { usageApiKey } = await client.api(
+                        "/api/execution-key/rotate",
+                        { method: "POST" },
+                      );
+                      client.lit.usageApiKey = usageApiKey;
+                      setNotice(
+                        "Execution key replaced. Download updated configurations for your agents.",
+                      );
+                    })
+                  }
+                >
+                  Replace execution key
+                </button>
+              </details>
+            </section>
             {tab === "secrets" && (
               <>
                 <div className="page-heading">
@@ -498,7 +649,11 @@ function App() {
                     </p>
                   </div>
                   <button
-                    disabled={!!busy}
+                    disabled={
+                      !!busy ||
+                      !billing?.subscription?.active ||
+                      secrets.length >= billing.subscription.secretLimit
+                    }
                     onClick={() => {
                       setCreating(true);
                       setSelected(undefined);

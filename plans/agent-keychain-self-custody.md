@@ -2,6 +2,24 @@
 
 Status: implemented, 2026-09-11. The prelaunch replacement, browser/SDK, owner-verifying Lit Actions, DB registry, recovery, strict Stripe integration and regression tests are in this PR. See [implementation](../lit-agent-keychain/README.md), [security contract](../lit-agent-keychain/SECURITY.md), and [adversarial review](../lit-agent-keychain/ADVERSARIAL_REVIEW.md). No production deployment or database reset performed.
 
+
+## Final launch decisions
+
+The accepted launch plan is $10/month per account for 1,000 retained secrets, rotations
+without extra slots, fair use execution and no automatic overage charges. Larger or
+high-volume accounts contact us. Stripe Checkout/customer portal manage payment and
+period-end cancellation; encrypted backups and owner revocation remain available.
+See [billing operations](../lit-agent-keychain/BILLING.md).
+
+All TEE operations use Chipotle's existing action execution API. A fixed public-key
+helper plus the secret action's `publicKey` operation replace the previously proposed
+public-key REST route. The API issues execution-only per-vault usage keys to browsers
+and agents, scoped to owner-approved immutable actions. These share a parent balance
+without a hard per-user spending cap; that limitation is accepted. Separate owner and
+secret groups make subscription changes independent of vault size. Billing-owner
+guards prevent child keys from controlling parent funding/card settings. No direct
+Phala access, on-chain policy registry, user funding or paymaster is required.
+
 This replaces the existing operator-signed grant / operator-managed vault design. The user confirms that there are no existing users, compatibility is unnecessary, and the implementation may replace the schema and wipe existing app data. Preserve the previous review as a reference; reassess its findings after the replacement rather than patching around the old architecture.
 
 ## Objective and trust boundary
@@ -16,7 +34,7 @@ The action's private encryption key is derived by Lit inside the trusted executi
 
 Open source enables inspection but does not establish that the served frontend matches audited source. Use reproducible versioned builds, pinned dependencies/action bundles, a locally runnable client, and authenticated release distribution. A compromised authorized agent can disclose plaintext it was permitted to receive.
 
-## Decisions proposed / still open
+## Design decisions
 
 | Topic | Working proposal | Status |
 |---|---|---|

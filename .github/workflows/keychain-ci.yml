@@ -48,6 +48,16 @@ jobs:
       - run: node scripts/test-local.mjs
         env:
           KEYCHAIN_TEST_DATABASE_URL: postgres://keychain_test:local-test-only@127.0.0.1:5432/keychain_test
+      - name: Real Stripe test-mode subscription contract
+        env:
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SANDBOX_SECRET_KEY }}
+          KEYCHAIN_TEST_DATABASE_URL: postgres://keychain_test:local-test-only@127.0.0.1:5432/keychain_test
+        run: |
+          if [ -z "$STRIPE_SECRET_KEY" ]; then
+            echo "Stripe test key unavailable; live contract test skipped."
+            exit 0
+          fi
+          cargo test --locked --test stripe_live -- --ignored
       - name: Actual Lit Deno runtime
         run: |
           sudo apt-get update -qq

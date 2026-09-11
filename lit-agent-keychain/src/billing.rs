@@ -5,7 +5,7 @@ use crate::{
     chipotle::Chipotle,
     config::Config,
     crypto,
-    models::{Authority, Manifest},
+    models::Authority,
 };
 use rocket::{
     http::Status,
@@ -45,7 +45,6 @@ pub async fn reserve(pool: &PgPool, bucket: &str, period: i64, limit: i64) -> Re
 #[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
 pub enum Execution {
     Authority { manifest: Authority, params: Value },
-    Secret { manifest: Manifest, params: Value },
 }
 #[post("/api/execute", format = "json", data = "<body>")]
 pub async fn execute(
@@ -66,17 +65,18 @@ pub async fn execute(
                 vault,
             )
         }
-        Execution::Secret { manifest, params } => {
-            manifest.validate(cfg).map_err(api::invalid)?;
-            (
-                actions::secret_source(&manifest).map_err(api::invalid)?,
-                params,
-                manifest.vault_id,
-            )
-        }
     };
-    // Every attempt consumes capacity, including invalid proofs and failures.
-    // The billing key stays server-side; clients cannot bypass these counters.
+    if params["document"]["kind"] != "login" || params["document"]["vaultId"] != vault {
+        return Err(api::err(Status::Forbidden, "login_bootstrap_only"));
+    }
+    let challenge = params["document"]["challenge"].as_str().unwrap_or("");
+    let pending:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM kc_challenges WHERE challenge=$1 AND vault_id=$2 AND expires_at>now())")
+        .bind(challenge).bind(&vault).fetch_one(pool.inner()).await.map_err(api::internal)?;
+    if !pending {
+        return Err(api::err(Status::Forbidden, "challenge_used_or_expired"));
+    }
+    // These counters bound the server-sponsored sign-in bootstrap only. User
+    // keys execute directly on Chipotle and are subject to its shared billing.
     reserve(pool, "execution-global", 86400, cfg.daily_execution_limit).await?;
     reserve(
         pool,

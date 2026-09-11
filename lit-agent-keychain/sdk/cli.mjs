@@ -17,7 +17,9 @@ try {
     const [identityFile, configFile, name] = args;
     const identity = JSON.parse(await readFile(identityFile, "utf8"));
     const config = JSON.parse(await readFile(configFile, "utf8"));
-    const client = new Keychain(identity.privateKey, config);
+    const client = new Keychain(identity.privateKey, config, {
+      usageApiKey: process.env.CHIPOTLE_USAGE_API_KEY,
+    });
     try {
       const result =
         command === "get"

@@ -75,7 +75,8 @@ The root only signs fixed receipt, key-binding and encrypted-response structures
 The browser verifies an action-signed binding of its challenge, manifest hash and
 X25519 public key against the root public key fetched directly from the trusted Lit
 TLS origin. Neither the backend nor a generic unattached enclave quote establishes
-that binding. The new public endpoint returns only the already-public secp256k1 identity.
+that binding. The fixed public-discovery Lit Action returns only the already-public secp256k1
+identity through the existing Chipotle execution API; it has no private-key operation.
 
 Import creates a random 256-bit DEK and a 96-bit AES-GCM IV. Metadata is authenticated
 as AAD; HPKE wraps the DEK with the same metadata in its domain-separated info context.
@@ -100,13 +101,39 @@ Owners must retain the original credential to reimport into a future action rele
 
 ## Budgets, audit and recovery
 
-Sponsorship counters are persisted and incremented atomically before execution.
-The execution key remains server-side, so clients cannot bypass these app counters
-with it. They limit attempts, not exact dollars. Global anonymous capacity is finite;
-an attacker may consume that capacity and deny service. No read-count/one-time-use
-guarantee exists against an operator who can roll back the database. Identical signed
-requests may execute repeatedly until expiry, so new integrations must account for
-external side effects; Stripe balance reads have no write side effects.
+The master management key and wildcard bootstrap execution key stay server-side.
+Per-vault execution-only usage keys are intentionally returned to authenticated owners
+and included in agent configs. They are encrypted in the DB with AES-256-GCM, a separate
+operator-held key, random nonces and vault-bound AAD. The operator can recover those
+billing keys, but they do not grant owner/agent authority or decrypt secrets by themselves.
+Protect exported configs as billing credentials. Rotation persists pending revocation
+before calling Chipotle and does not report success until removal is confirmed.
+
+Each usage key can execute a fixed recovery/discovery group and, while paid, the
+vault's secret group. Enrollment requires a valid owner-signed manifest and matching
+immutable source/CID. Incremental group grants avoid Chipotle's ten-CID bulk-update cap.
+Cancellation changes key permissions rather than deleting action grants or ciphertext.
+Billing-owner guards deny child usage keys access to parent funding/card management.
+
+**No hard per-user execution or dollar cap exists.** Users share the operator's parent
+balance. This explicitly accepted limit allows abuse of allowed actions to exhaust
+that balance; account funding and provider auto-recharge settings bound exposure.
+The $10/month subscription includes fair use with no automatic overage charges.
+Atomic app counters only limit server-sponsored login attempts. Anonymous capacity
+can be exhausted independently. The Stripe subscription is a storage/sponsorship
+entitlement, not a cryptographic access policy: an independently funded payer may
+still run the signed actions after subscription expiry.
+
+With an honest service, storage mutations stop at paid expiry. Sponsored secret
+execution stops after the background reconciler updates Chipotle permissions, subject
+to provider cache delay or outages. The worker runs every minute and refreshes Stripe
+state every five minutes; webhooks and explicit refresh also update the DB. This is
+not instantaneous revocation or a spending guarantee. Login, owner revocation and
+encrypted backups remain available. Data is never automatically deleted on cancellation.
+
+No read-count/one-time-use guarantee exists against an operator who can roll back the
+database. Identical signed requests may execute repeatedly until expiry; integrations
+must account for external side effects. Stripe balance reads have no write side effects.
 
 Management writes and their audit events share a transaction. The activity feed is
 not a complete execution ledger: an independent Lit payer can execute an action
@@ -127,7 +154,7 @@ cannot be replaced by an operator-issued reset token.
 Local tests use real WebCrypto, browser WebAuthn, the actual Deno worker and PostgreSQL,
 with synthetic Lit keys and Google issuance fixtures. They do not prove live Google
 OAuth configuration, production TEE measurements, or future Lit root-key continuity.
-Before launch, deploy the public-key/telemetry changes, configure Google and wallet
+Before launch, deploy the telemetry and billing-owner guards, configure Stripe, Google and wallet
 providers, and run live import/read/rotation/revocation/recovery and Stripe balance
 tests through the intended Chipotle API. Keychain uses Chipotle for all TEE execution
 and action public-key discovery; application validation requires no direct TEE

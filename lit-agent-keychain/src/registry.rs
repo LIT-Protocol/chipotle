@@ -136,7 +136,10 @@ async fn commit_policy(
         .bind(scope).bind(vault).bind(&hash).bind(epoch).execute(&mut **tx).await.map_err(api::internal)?;
     audit(tx, vault, "policy_updated", &hash).await
 }
-async fn lock_vault(tx: &mut Transaction<'_, Postgres>, vault: &str) -> Result<(), ApiError> {
+pub(crate) async fn lock_vault(
+    tx: &mut Transaction<'_, Postgres>,
+    vault: &str,
+) -> Result<(), ApiError> {
     sqlx::query("SELECT id FROM kc_vaults WHERE id=$1 FOR UPDATE")
         .bind(vault)
         .fetch_one(&mut **tx)
@@ -293,12 +296,13 @@ async fn write_secret(
             ));
         }
     }
+    let plan = crate::subscriptions::require_active(&mut tx, &session.vault_id).await?;
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM kc_secrets WHERE vault_id=$1")
         .bind(&session.vault_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(api::internal)?;
-    if count >= cfg.max_secrets {
+    if count >= plan.secret_limit {
         return Err(api::err(Status::Conflict, "secret_limit"));
     }
     let exists: bool = sqlx::query_scalar(
@@ -372,11 +376,22 @@ pub async fn restore(
 ) -> ApiResult<Value> {
     write_secret(&session, body.into_inner(), pool, lit, cfg, true).await
 }
-#[get("/api/secrets")]
-pub async fn list(session: Session, pool: &State<PgPool>) -> ApiResult<Value> {
-    let rows:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('secretId',s.id,'name',s.name,'actionCid',s.action_cid,'version',s.current_version,'release',s.manifest->'document'->'manifest'->'release','disabled',p.signed->'document'->'disabled','expiresAt',p.signed->'document'->'expiresAt','agentCount',jsonb_array_length(p.signed->'document'->'grants')) FROM kc_secrets s JOIN kc_registry r ON r.scope='secret:'||s.id JOIN kc_policies p ON p.hash=r.policy_hash WHERE s.vault_id=$1 ORDER BY s.created_at,s.id")
-        .bind(&session.vault_id).fetch_all(pool.inner()).await.map_err(api::internal)?;
-    Ok(Json(json!({"secrets":rows})))
+#[get("/api/secrets?<after>")]
+pub async fn list(session: Session, after: Option<&str>, pool: &State<PgPool>) -> ApiResult<Value> {
+    if after.is_some_and(|cursor| !valid_hex(cursor, 32)) {
+        return Err(api::err(Status::BadRequest, "invalid_cursor"));
+    }
+    let mut rows:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('secretId',s.id,'name',s.name,'actionCid',s.action_cid,'version',s.current_version,'release',s.manifest->'document'->'manifest'->'release','disabled',p.signed->'document'->'disabled','expiresAt',p.signed->'document'->'expiresAt','agentCount',jsonb_array_length(p.signed->'document'->'grants')) FROM kc_secrets s JOIN kc_registry r ON r.scope='secret:'||s.id JOIN kc_policies p ON p.hash=r.policy_hash WHERE s.vault_id=$1 AND s.id>$2 ORDER BY s.id LIMIT 201")
+        .bind(&session.vault_id).bind(after.unwrap_or("")).fetch_all(pool.inner()).await.map_err(api::internal)?;
+    let next = if rows.len() > 200 {
+        rows.pop();
+        rows.last()
+            .and_then(|r| r["secretId"].as_str())
+            .map(str::to_owned)
+    } else {
+        None
+    };
+    Ok(Json(json!({"secrets":rows,"nextCursor":next})))
 }
 #[get("/api/secrets/<secret>/bundle")]
 pub async fn bundle(secret: &str, pool: &State<PgPool>) -> ApiResult<Value> {
@@ -449,6 +464,7 @@ pub async fn rotate(
     .await
     .map_err(api::internal)?;
     let (version, cid) = old.ok_or_else(|| api::err(Status::NotFound, "not_found"))?;
+    crate::subscriptions::require_active(&mut tx, &session.vault_id).await?;
     if version >= 100 || checked.version != version + 1 || checked.cid != cid {
         return Err(api::err(Status::Conflict, "version_changed_or_limit"));
     }

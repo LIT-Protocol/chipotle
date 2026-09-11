@@ -27,7 +27,6 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         prepare_wallet,
         delete_wallet,
         lit_action,
-        lit_action_public_key,
         lit_binary_action,
         get_lit_action_ipfs_id,
         add_group,

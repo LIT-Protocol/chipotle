@@ -9,13 +9,13 @@ version: 2.0.0
 1. Generate an agent identity on the agent device with `keychain init identity.json`.
 2. Give only its public key to the owner. The owner signs in with a wallet, passkey,
    or Google account, encrypts a secret locally, and explicitly approves that key.
-3. Download the public **Agent config** and use `@lit-protocol/keychain` with the local
+3. Download the **Agent config** (public locators plus a scoped billing key) and use `@lit-protocol/keychain` with the local
    private identity. `get(name)` decrypts a recipient-encrypted result; `stripeBalance`
    invokes the strict Stripe integration without revealing its credential.
 
 Never request an owner's private key or Google token, and never ask the backend to
 mint a grant. There are no setup bearer tokens or managed per-tenant PKP vaults.
-Agent identity and Lit execution billing are separate. Keep identity files private
+Agent identity and Lit execution billing are separate. Keep identity and config files private
 and avoid logging credentials returned by `get` or the CLI.
 
 The operator can replay older still-valid owner permissions, including undoing a

@@ -18,12 +18,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libs
 COPY vendor/ipfs-hasher /build/vendor/ipfs-hasher
 COPY lit-agent-keychain/ ./
 COPY --from=client /build/lit-agent-keychain/generated ./generated
-RUN cargo build --locked --release --bin lit-agent-keychain
+RUN cargo build --locked --release --bins
 
 FROM debian:bookworm-slim
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 && rm -rf /var/lib/apt/lists/* && useradd --system --uid 10001 keychain
 COPY --from=server /build/lit-agent-keychain/target/release/lit-agent-keychain /app/lit-agent-keychain
+COPY --from=server /build/lit-agent-keychain/target/release/keychain-plan /app/keychain-plan
 COPY --from=client /build/lit-agent-keychain/web/dist /app/web/dist
 USER keychain
 ENV ROCKET_ADDRESS=0.0.0.0

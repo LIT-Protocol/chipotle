@@ -29,12 +29,18 @@ const env = {
   LIT_API_URL: lit,
   VITE_LIT_API_URL: lit,
   LIT_EXECUTION_KEY: "local-test-only",
+  CHIPOTLE_MASTER_API_KEY: "local-master-only",
+  USAGE_KEY_ENCRYPTION_KEY: "47".repeat(32),
+  STRIPE_SECRET_KEY: "sk_test_local",
+  STRIPE_WEBHOOK_SECRET: "whsec_local_test",
+  STRIPE_PRICE_ID: "price_test_standard",
+  STRIPE_PORTAL_CONFIGURATION_ID: "bpc_test_keychain",
+  KEYCHAIN_STRIPE_API_URL: "http://127.0.0.1:55442",
   GOOGLE_CLIENT_ID: "test.apps.googleusercontent.com",
   LIT_NETWORK: "test",
   ROCKET_PORT: "55441",
   ROCKET_ADDRESS: "127.0.0.1",
   WEB_DIR: "web/dist",
-  MAX_SECRETS_PER_VAULT: "3",
   HOURLY_IP_EXECUTION_LIMIT: "10000",
 };
 function start(command, args) {
@@ -51,7 +57,7 @@ async function run(command, args) {
     );
   });
 }
-for (const port of [55440, 55441]) {
+for (const port of [55440, 55441, 55442]) {
   await new Promise((resolve, reject) => {
     const probe = net.createServer();
     probe.once("error", reject);
@@ -62,12 +68,22 @@ await run("npm", ["run", "build"]);
 await run("cargo", ["+1.91", "build", "--locked"]);
 const children = [
   start(process.execPath, ["--import", "tsx", "tests/mock-lit.ts"]),
-  start(path.join(root, "target/debug/lit-agent-keychain"), []),
+  start(process.execPath, ["--import", "tsx", "tests/mock-stripe.ts"]),
 ];
 const stop = () => children.forEach((child) => child.kill("SIGTERM"));
 process.once("SIGINT", stop);
 process.once("SIGTERM", stop);
 try {
+  const stripeDeadline = Date.now() + 15000;
+  for (;;) {
+    try {
+      if ((await fetch(env.KEYCHAIN_STRIPE_API_URL + "/test/state")).ok) break;
+    } catch {}
+    if (Date.now() > stripeDeadline)
+      throw new Error("Stripe fixture did not start");
+    await delay(100);
+  }
+  children.push(start(path.join(root, "target/debug/lit-agent-keychain"), []));
   for (const url of [api + "/health", lit + "/test/google-token?nonce=ready"]) {
     const deadline = Date.now() + 30000;
     for (;;) {
@@ -86,6 +102,7 @@ try {
     "tsx",
     "--test",
     "tests/api.test.ts",
+    "tests/billing-api.test.ts",
   ]);
   await run("cargo", ["+1.91", "test", "--locked"]);
   await run("npm", ["run", "test:browser"]);

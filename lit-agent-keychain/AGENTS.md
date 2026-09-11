@@ -13,9 +13,13 @@ See README.md and SECURITY.md for the protocol and its explicit trust boundary.
 
 ## Invariants
 
-- No protected plaintext, owner/agent/session private keys, or Lit execution key
-  in the database, telemetry, API responses or action logs. Ciphertexts, signatures,
-  public keys and metadata are intentionally stored.
+- No protected plaintext or owner/agent/session private keys in the DB, telemetry,
+  API responses or action logs. Master/bootstrap keys never reach clients. Per-vault
+  execution-only usage keys are deliberately returned to owners/agents and stored
+  encrypted with a separate vault-bound AEAD key. They provide billing, not authority.
+- Standard is $10/month for 1,000 stored secrets. Rotations consume no extra slot.
+  Custom plans require explicit operator settings. No automatic overage charges.
+  Direct Chipotle usage has no hard per-user spending cap (accepted launch limit).
 - Owner verification is pinned in an immutable authorization action. Receipts bind
   exact canonical objects. Secret actions pin that authority CID and release mode.
 - The DB selects policy freshness. Operator rollback to old valid permissions is
@@ -31,7 +35,7 @@ See README.md and SECURITY.md for the protocol and its explicit trust boundary.
 - Owner sign-in proofs expire; owner credential membership is independent and can
   be indefinite. Agent access policies always have finite signed expiry.
 - Every successful mutation commits its audit entry in the same transaction.
-  Execution counters are atomic and enforced before sponsored calls.
+  Bootstrap execution counters are atomic and enforced before sponsored login calls.
 - Preserve deployed action releases byte for byte. Source/dependency changes alter
   CIDs/keys and require an explicit new release and owner-controlled transition.
 

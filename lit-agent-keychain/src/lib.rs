@@ -9,3 +9,6 @@ pub mod db;
 pub mod models;
 pub mod registry;
 pub mod server;
+pub mod sponsorship;
+pub mod stripe;
+pub mod subscriptions;

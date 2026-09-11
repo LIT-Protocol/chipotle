@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { subscribe } from "./billing-fixture.ts";
 import { privateKeyToAccount } from "viem/accounts";
 import {
   OwnerClient,
@@ -60,12 +62,19 @@ test(
         new LitConnection(lit),
       );
       await c.login();
+      await subscribe(c);
+      execFileSync(
+        "target/debug/keychain-plan",
+        [c.vaultId, "3", new Date(Date.now() + 86400000).toISOString()],
+        { env: process.env },
+      );
       assert.equal((await c.api("/api/me")).vaultId, c.vaultId);
       let bundle = await c.create("API_TEST", "local-only-secret-7f9ba");
       const keys = Keychain.generateKey();
       const agent = new Keychain(keys.privateKey, {
         v: 2,
         litApiUrl: lit,
+        usageApiKey: c.lit.usageApiKey,
         secrets: {
           API_TEST: {
             manifest: bundle.manifest.document.manifest,
@@ -198,6 +207,26 @@ test(
         notBefore: now,
         expiresAt: null,
       });
+      // Authorization now signs in first. Remove this test-only vault to model
+      // a lost database before exercising signed recovery initialization.
+      const database = new URL(process.env.KEYCHAIN_TEST_DATABASE_URL!);
+      assert.ok(["127.0.0.1", "localhost"].includes(database.hostname));
+      assert.match(database.pathname, /test|_ci$/);
+      execFileSync(
+        "psql",
+        [
+          database.toString(),
+          "-X",
+          "-v",
+          "ON_ERROR_STOP=1",
+          "-v",
+          `vault=${freshClient.vaultId}`,
+        ],
+        {
+          input:
+            "BEGIN; DELETE FROM kc_execution_accounts WHERE vault_id=:'vault'; DELETE FROM kc_subscriptions WHERE vault_id=:'vault'; DELETE FROM kc_audit WHERE vault_id=:'vault'; DELETE FROM kc_sessions WHERE vault_id=:'vault'; DELETE FROM kc_vaults WHERE id=:'vault'; COMMIT;",
+        },
+      );
       await OwnerClient.restoreCredentials(
         { authority: freshAuthority, credentials },
         new LitConnection(lit),

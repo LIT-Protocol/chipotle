@@ -1,9 +1,15 @@
 import { build } from "esbuild";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 await mkdir("generated", { recursive: true });
 const release = {};
 const templates = {};
+await writeFile(
+  "generated/discovery.ts",
+  "export default " +
+    JSON.stringify(await readFile("actions/public-key.js", "utf8")) +
+    ";\n",
+);
 for (const name of ["authority", "export", "stripe-balance"]) {
   const { outputFiles } = await build({
     entryPoints: [`actions/${name}.ts`],

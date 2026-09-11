@@ -1,4 +1,5 @@
 import { actionCid, actionSource } from "../../protocol/actions.ts";
+import discoverySource from "../../generated/discovery.ts";
 import {
   authoritySchema,
   manifestSchema,
@@ -75,6 +76,7 @@ export type SecretBundle = {
 export type AgentConfig = {
   v: 2;
   litApiUrl: string;
+  usageApiKey?: string;
   secrets: Record<string, { manifest: Manifest; actionCid: string }>;
 };
 const post = (body: unknown): RequestInit => ({
@@ -99,6 +101,7 @@ export class LitConnection {
   constructor(
     url = DEFAULT_LIT_API_URL,
     readonly timeoutMs = 30000,
+    public usageApiKey?: string,
   ) {
     this.url = origin(url);
   }
@@ -107,12 +110,7 @@ export class LitConnection {
     if (cached) return cached;
     // Deliberately direct to the caller-configured trusted Lit endpoint. Never
     // take a replacement endpoint/key from Keychain's API or a secret bundle.
-    const result = await jsonFetch(
-      `${this.url}/core/v1/lit_action_public_key/${cid}`,
-      {},
-      this.timeoutMs,
-      4096,
-    );
+    const result = await this.direct(discoverySource, { cid });
     requireThat(
       typeof result.public_key === "string" &&
         /^(0x)?(?:02|03)[0-9a-f]{64}$|^(0x)?04[0-9a-f]{128}$/.test(
@@ -124,7 +122,40 @@ export class LitConnection {
     this.keys.set(cid, result.public_key);
     return result.public_key;
   }
+  private async direct(code: string, params: unknown) {
+    requireThat(
+      typeof this.usageApiKey === "string" &&
+        this.usageApiKey.length > 0 &&
+        this.usageApiKey.length <= 512,
+      "A scoped Chipotle usage key is required",
+    );
+    const result = await jsonFetch(
+      `${this.url}/core/v1/lit_action`,
+      {
+        ...post({ code, js_params: params }),
+        headers: {
+          "Content-Type": "application/json",
+          "X-Api-Key": this.usageApiKey,
+          "X-Privacy-Mode": "true",
+        },
+      },
+      this.timeoutMs,
+    );
+    requireThat(result.has_error === false, "Lit execution failed");
+    requireThat(
+      result.response?.ok === true,
+      result.response?.error === "authorization_denied"
+        ? "Owner authorization denied"
+        : "Access denied",
+    );
+    return result.response;
+  }
   async execute(manifest: Authority | Manifest, params: unknown) {
+    if (this.usageApiKey) return this.direct(actionSource(manifest), params);
+    requireThat(
+      "owner" in manifest && (params as any)?.document?.kind === "login",
+      "Sign in before executing actions",
+    );
     const kind = "owner" in manifest ? "authority" : "secret";
     const expected = await actionCid(manifest);
     const result = await jsonFetch(
@@ -182,6 +213,16 @@ export class OwnerClient {
     );
   }
   async authorize<T extends Document>(document: T): Promise<Signed<T>> {
+    if (!this.lit.usageApiKey) await this.login();
+    const signed = await this.approve(document);
+    verifyReceipt(
+      signed,
+      await this.lit.publicKey(await actionCid(this.authority)),
+      this.vaultId,
+    );
+    return signed;
+  }
+  private async approve<T extends Document>(document: T): Promise<Signed<T>> {
     requireThat(document.vaultId === this.vaultId);
     const now = nowSeconds();
     const challenge: Challenge = {
@@ -199,22 +240,34 @@ export class OwnerClient {
       document,
       proof,
     });
-    const signed = { document, receipt: receiptSchema.parse(response.receipt) };
-    verifyReceipt(
-      signed,
-      await this.lit.publicKey(await actionCid(this.authority)),
-      this.vaultId,
-    );
-    return signed;
+    return { document, receipt: receiptSchema.parse(response.receipt) };
   }
   async login() {
     const document = await this.api("/auth/challenge", post(this.authority));
     requireThat(document.kind === "login" && document.vaultId === this.vaultId);
-    const authorization = await this.authorize(document);
-    return this.api(
+    const authorization = await this.approve(document);
+    const result = await this.api(
       "/auth/login",
       post({ authority: this.authority, authorization }),
     );
+    const { usageApiKey } = await this.api("/api/execution-key", {
+      method: "POST",
+    });
+    this.lit.usageApiKey = usageApiKey;
+    try {
+      // The bootstrap proxy establishes only an app session. Authenticate its
+      // receipt over a direct Chipotle connection before trusting it or importing.
+      verifyReceipt(
+        authorization,
+        await this.lit.publicKey(await actionCid(this.authority)),
+        this.vaultId,
+      );
+    } catch (error) {
+      this.lit.usageApiKey = undefined;
+      await this.api("/auth/logout", { method: "POST" }).catch(() => {});
+      throw error;
+    }
+    return result;
   }
   async create(
     name: string,
@@ -231,6 +284,15 @@ export class OwnerClient {
       release,
     };
     const cid = await actionCid(manifest);
+    const signedManifest = await this.authorize({
+      v: V,
+      domain: DOMAIN,
+      kind: "manifest",
+      vaultId: this.vaultId,
+      manifest,
+      actionCid: cid,
+    });
+    await this.api("/api/actions", post(signedManifest));
     const key = await this.lit.encryptionPublicKey(manifest);
     const envelope = await encryptEnvelope(
       {
@@ -246,14 +308,6 @@ export class OwnerClient {
       key,
       plaintext,
     );
-    const signedManifest = await this.authorize({
-      v: V,
-      domain: DOMAIN,
-      kind: "manifest",
-      vaultId: this.vaultId,
-      manifest,
-      actionCid: cid,
-    });
     const signedEnvelope = await this.authorize(envelope);
     const now = nowSeconds();
     const policy = await this.authorize({
@@ -403,7 +457,7 @@ export class OwnerClient {
     await this.api("/api/credentials", { ...post(signed), method: "PUT" });
   }
   async backup() {
-    const { secrets } = await this.api("/api/secrets");
+    const secrets = await this.listSecrets();
     const bundles = [];
     for (const secret of secrets)
       bundles.push(await this.bundle(secret.secretId));
@@ -414,6 +468,30 @@ export class OwnerClient {
       bundles,
     };
   }
+  async listSecrets() {
+    const secrets: any[] = [];
+    let after = "";
+    for (;;) {
+      const page = await this.api(
+        "/api/secrets" + (after ? `?after=${after}` : ""),
+      );
+      requireThat(
+        Array.isArray(page.secrets) &&
+          page.secrets.length <= 200 &&
+          secrets.length + page.secrets.length <= 100000,
+        "Invalid secret listing",
+      );
+      secrets.push(...page.secrets);
+      if (page.nextCursor === null) return secrets;
+      requireThat(
+        typeof page.nextCursor === "string" &&
+          /^[0-9a-f]{64}$/.test(page.nextCursor) &&
+          page.nextCursor > after,
+        "Invalid listing cursor",
+      );
+      after = page.nextCursor;
+    }
+  }
   static async restoreCredentials(
     backup: { authority: Authority; credentials?: Signed<Credentials> | null },
     lit = new LitConnection(),
@@ -423,11 +501,16 @@ export class OwnerClient {
     const credentials = signedSchema(credentialsSchema).parse(
       backup.credentials,
     );
-    verifyReceipt(
-      credentials,
-      await lit.publicKey(await actionCid(authority)),
-      digest(authority),
-    );
+    requireThat(credentials.document.vaultId === digest(authority));
+    // A fresh device may have no usage key before recovery/sign-in. Upload only
+    // the signed public backup; the API and immutable authority action verify it.
+    // Sign-in then bootstraps direct Chipotle verification before any secret use.
+    if (lit.usageApiKey)
+      verifyReceipt(
+        credentials,
+        await lit.publicKey(await actionCid(authority)),
+        digest(authority),
+      );
     await jsonFetch(
       authority.registry + "/auth/restore-credentials",
       post({ authority, credentials }),
@@ -443,7 +526,7 @@ export class OwnerClient {
       backup.v === V &&
         digest(backup.authority) === this.vaultId &&
         Array.isArray(backup.bundles) &&
-        backup.bundles.length <= 500,
+        backup.bundles.length <= 100000,
     );
     for (const bundle of backup.bundles) {
       await verifyBundle(bundle, this.lit, this.vaultId);
@@ -451,6 +534,7 @@ export class OwnerClient {
         bundle.manifest.document.manifest.authorityCid ===
           (await actionCid(this.authority)),
       );
+      await this.api("/api/actions", post(bundle.manifest));
       await this.api("/api/restore", post(bundle));
     }
   }
@@ -491,12 +575,16 @@ export class Keychain {
   constructor(
     privateKey: string,
     readonly config: AgentConfig,
-    options: { timeoutMs?: number } = {},
+    options: { timeoutMs?: number; usageApiKey?: string } = {},
   ) {
     this.key = unhex(privateKey);
     requireThat(this.key.length === 32 && config.v === V);
     this.publicKey = agentPublicKey(this.key);
-    this.lit = new LitConnection(config.litApiUrl, options.timeoutMs);
+    this.lit = new LitConnection(
+      config.litApiUrl,
+      options.timeoutMs,
+      options.usageApiKey ?? config.usageApiKey,
+    );
   }
   static generateKey() {
     const key = randomBytes();

@@ -38,6 +38,22 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
   await expect(
     page.getByRole("heading", { name: "Secrets", exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "+ Add secret" }),
+  ).toBeDisabled();
+  await page
+    .getByRole("button", { name: "Subscribe for $10/month", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Test Stripe Checkout" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Pay $10", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Use an existing passkey", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "+ Add secret" }),
+  ).toBeEnabled();
   await page.getByRole("button", { name: "+ Add secret" }).click();
   await page.getByLabel("Name", { exact: true }).fill("BROWSER_SECRET");
   await page
@@ -105,6 +121,16 @@ test("Google-only sign-in verifies a nonce-bound JWT without a wallet or passkey
   await expect(
     page.getByRole("heading", { name: "Secrets", exact: true }),
   ).toBeVisible();
+  const checkout = await page.request.post("/api/billing/checkout");
+  const { url } = await checkout.json();
+  expect(new URL(url).origin).toBe("http://127.0.0.1:55442");
+  expect((await page.request.post(url + "/complete")).ok()).toBeTruthy();
+  await page
+    .getByRole("button", { name: "Refresh billing", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "+ Add secret" }),
+  ).toBeEnabled();
   await page.getByRole("button", { name: "+ Add secret" }).click();
   await page.getByLabel("Name", { exact: true }).fill("GOOGLE_SECRET");
   await page

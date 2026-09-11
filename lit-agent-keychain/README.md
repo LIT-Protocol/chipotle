@@ -16,11 +16,12 @@ sequenceDiagram
     Owner->>Lit: Prove owner authorization for ciphertext / policy
     Lit-->>Owner: Signed receipt for each exact object
     Owner->>API: Ciphertext + signed receipts
-    Agent->>API: Signed request bound to an ephemeral recipient key
-    API->>Lit: Sponsor execution of the fixed action
+    API-->>Owner: Per-vault execution-only Chipotle usage key
+    Owner-->>Agent: Scoped execution key + public secret config
+    Agent->>Lit: Signed request + scoped usage key, directly through Chipotle
     Lit->>API: Fetch selected signed policy
     Lit->>Lit: Verify owner receipt, agent proof, scope, expiry, ciphertext
-    Lit-->>Agent: Action-signed, recipient-encrypted response (via API)
+    Lit-->>Agent: Action-signed, recipient-encrypted response
 ```
 
 The operator is trusted to serve the latest signed policy. It can replay old valid
@@ -42,7 +43,9 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 - Strict Stripe balance integration: fixed HTTPS request and bounded numeric projection;
   no credential-export, arbitrary URL, code, redirect, or migration path.
 - Encrypted backups of current versions and policies; restore never overwrites another secret.
-- Transactional mutation audit, paginated activity, persisted atomic sponsorship limits.
+- $10/month for 1,000 stored secrets; rotations use the same slot. Contact us for more.
+- Stripe Checkout and customer portal, period-end cancellation, retained encrypted backups.
+- Transactional mutation audit, paginated secrets/activity, scoped user execution keys.
 - Agent SDK and CLI; agent keys are generated locally. No management bearer tokens,
   operator grant signer, PKP vault provisioning, chain registry, relayer, or paymaster.
 
@@ -61,19 +64,26 @@ cargo +1.91 run
 ```
 
 The app does not automatically load `.env`. `DATABASE_URL`, `PUBLIC_BASE_URL`, and
-`LIT_EXECUTION_KEY` are required. Use a dedicated database. `PUBLIC_BASE_URL` must be
+the Chipotle and Stripe settings in `.env.example` are required. Use a dedicated database. `PUBLIC_BASE_URL` must be
 an origin, normally HTTPS; HTTP is supported only on loopback for development.
 Use `localhost` rather than a numeric loopback address for browser passkeys.
 The service serves `web/dist` and applies migrations on startup.
 
-`LIT_EXECUTION_KEY` is a server-held, funded **execution-only usage key** with wildcard
-execution (`executeInGroups=[0]`), without wallet-use or management permissions.
-It grants execution budget, not owner authorization. This service never issues it
-to browsers or agents. `DAILY_EXECUTION_LIMIT`, `HOURLY_IP_EXECUTION_LIMIT`, and
-`DAILY_VAULT_EXECUTION_LIMIT` cap sponsored attempts, including failures. These are
-request-count limits, not dollar guarantees. Configure the upstream account's funding
-accordingly. Peer throttles ignore untrusted forwarding headers; a reverse proxy can
-share one peer bucket, so set its limit for that deployment.
+`CHIPOTLE_MASTER_API_KEY` belongs to a dedicated managed Chipotle account. The API
+creates two groups per vault and an execution-only usage key. The browser/agent gets
+that key; it can execute only the immutable owner action, fixed public-key helper,
+and (while subscribed) the vault's enrolled secret actions. It cannot manage the
+account or authorize access to a secret without the corresponding owner/agent proof.
+The API encrypts usage keys at rest with `USAGE_KEY_ENCRYPTION_KEY` and vault-bound AAD.
+Owners can replace an execution key; distribute the replacement to their agents.
+
+`LIT_EXECUTION_KEY` is a separate server-only execution key with `executeInGroups=[0]`,
+used for login bootstrap and server receipt verification. The three execution-limit
+environment settings cap server-sponsored login attempts, including failures. User
+keys execute directly on Chipotle, share the parent balance, and have **no hard
+per-user dollar or execution cap**. This is the accepted launch limitation. Fair use
+is included in the subscription; there are no automatic user overage charges.
+See [BILLING.md](BILLING.md) for Stripe setup and the custom-plan operator command.
 
 Google-only sign-in requires `GOOGLE_CLIENT_ID` and the frontend origin registered
 on that Google OAuth client. Its callback uses Google Identity Services' nonce
@@ -83,8 +93,10 @@ wallets work without it. ERC-1271/6492 contract wallets are not supported in thi
 
 `VITE_LIT_API_URL` is the client trust anchor, compiled at build time. It defaults to
 `https://api.chipotle.litprotocol.com`. Do not obtain a replacement endpoint from an
-untrusted API response. The Lit server must include the new public identity endpoint
-`GET /core/v1/lit_action_public_key/<CID>`. Bootstrap trusts that Lit origin's TLS;
+untrusted API response. Public identity discovery runs the fixed `actions/public-key.js` helper through
+Chipotle's existing `POST /core/v1/lit_action`. The secret action's `publicKey` operation
+then signs its encryption-key binding. No new REST endpoint is needed. Bootstrap
+trusts that Lit origin's TLS;
 it does not claim quote-based public-key attestation.
 
 For hot reload, `npm run dev` starts Vite on port 5173 and proxies API calls to 8000.
@@ -107,10 +119,12 @@ is relative to the repository root.
 This is a prelaunch, incompatible replacement. Migration `20260911000001` drops the
 legacy Keychain tables and their contents. Stop the old service before applying it.
 It does not delete upstream PKPs/usage keys from the old Lit account; retire those
-separately if that account will remain in use. No deployment or production DB reset
-is part of this PR.
+separately if that account will remain in use. No production deployment or DB reset is part of this PR.
+Live compatibility validation uses temporary Chipotle groups/keys and removes them.
 
-Deploy the Lit public-key endpoint and private-key telemetry fix before enabling v2.
+Deploy the private-key telemetry fix and billing-owner guards in `lit-api-server`
+and `lit-payments` before distributing user execution keys. No direct Phala access
+is required for Keychain.
 Retain reproducible client/SDK artifacts, `generated/release.json`, and lockfiles for
 each deployed release. Changing action bytes changes encryption keys. Never silently
 rebuild a deployed v2 action against different dependencies; introduce a new action
@@ -143,10 +157,10 @@ npx playwright install chromium
 KEYCHAIN_TEST_DATABASE_URL=postgres://localhost/keychain_test node scripts/test-local.mjs
 ```
 
-This script builds the app, starts local services on ports 55440/55441, applies the
+This script builds the app, starts local services on ports 55440/55441/55442, applies the
 replacement migrations to that test database, runs SDK/API/browser/storage tests, and
 stops its services. The Keychain CI workflow runs the same suite. Its Lit adapter executes the bundled code while substituting only platform
-key derivation and external Google issuance. It never calls production services.
+key derivation, external Google issuance, and Stripe billing. It never calls production services.
 
 Agent examples: [sdk/README.md](sdk/README.md). Security/operational limits:
 [SECURITY.md](SECURITY.md). Review findings: [ADVERSARIAL_REVIEW.md](ADVERSARIAL_REVIEW.md).
