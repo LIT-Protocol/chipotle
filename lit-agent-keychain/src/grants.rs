@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::actions::ActionSet;
 use crate::agents::AgentKey;
 use crate::api::{err, err_detail, internal, ApiError, ApiResult};
-use crate::audit::{self, Event};
+use crate::audit::{self, Event, SecretRef};
 use crate::chipotle::ChipotleClient;
 use crate::config::Config;
 use crate::policy::{self, Denial, GrantContext};
@@ -106,8 +106,8 @@ async fn load_for_agent(
         audit::record(
             pool,
             tenant.id,
-            None,
-            Some(agent.id),
+            SecretRef { id: None, name },
+            agent,
             event,
             false,
             Some("secret_not_found"),
@@ -123,8 +123,11 @@ async fn load_for_agent(
         audit::record(
             pool,
             tenant.id,
-            Some(secret.id),
-            Some(agent.id),
+            SecretRef {
+                id: Some(secret.id),
+                name: &secret.name,
+            },
+            agent,
             event,
             false,
             Some("version_not_found"),
@@ -175,6 +178,32 @@ pub async fn issue_grant(
         .execute(&mut *tx)
         .await
         .map_err(|e| internal("quota_lock_failed", e))?;
+    // Re-read the secret under a share lock now that we hold the advisory
+    // lock: the row loaded above may have been deleted or its policy changed
+    // while we waited. Without this, access_log no longer having a FK to
+    // secrets would let a grant for a deleted secret slip through (codex
+    // finding, 2026-09-10). The share lock also blocks a concurrent DELETE
+    // until this transaction commits.
+    let Some(secret) = secrets::lock_secret_for_share(&mut *tx, secret.id)
+        .await
+        .map_err(|e| internal("secret_relock_failed", e))?
+    else {
+        drop(tx);
+        audit::record(
+            pool,
+            tenant.id,
+            SecretRef {
+                id: Some(secret.id),
+                name: &secret.name,
+            },
+            &agent,
+            Event::Grant,
+            false,
+            Some("secret_not_found"),
+        )
+        .await;
+        return Err(err(Status::NotFound, "not_found"));
+    };
     let reads = audit::grants_last_24h(&mut *tx, secret.id)
         .await
         .map_err(|e| internal("audit_count_failed", e))?;
@@ -190,8 +219,11 @@ pub async fn issue_grant(
         audit::record(
             pool,
             tenant.id,
-            Some(secret.id),
-            Some(agent.id),
+            SecretRef {
+                id: Some(secret.id),
+                name: &secret.name,
+            },
+            &agent,
             Event::Grant,
             false,
             Some(d.code()),
@@ -199,7 +231,7 @@ pub async fn issue_grant(
         .await;
         return Err(deny(d));
     }
-    audit::record_allow_tx(&mut tx, tenant.id, secret.id, agent.id, Event::Grant)
+    audit::record_allow_tx(&mut tx, tenant.id, &secret, &agent, Event::Grant)
         .await
         .map_err(|e| internal("audit_insert_failed", e))?;
     tx.commit()
@@ -268,8 +300,11 @@ pub async fn get_reference(
         audit::record(
             pool,
             tenant.id,
-            Some(secret.id),
-            Some(agent.id),
+            SecretRef {
+                id: Some(secret.id),
+                name: &secret.name,
+            },
+            &agent,
             Event::Reference,
             false,
             Some(d.code()),
@@ -280,8 +315,11 @@ pub async fn get_reference(
     audit::record(
         pool,
         tenant.id,
-        Some(secret.id),
-        Some(agent.id),
+        SecretRef {
+            id: Some(secret.id),
+            name: &secret.name,
+        },
+        &agent,
         Event::Reference,
         true,
         None,

@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use sqlx::PgPool;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 use super::token as auth_token;
@@ -45,10 +46,13 @@ pub async fn authorize_hash(
     label: Option<&str>,
 ) -> Result<()> {
     validate_agent_token_hash(token_hash)?;
-    let label = label
+    let label: String = label
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .unwrap_or("local-agent");
+        .unwrap_or("local-agent")
+        .chars()
+        .take(64)
+        .collect();
 
     // A token hash may only ever be (re-)bound by the user it already belongs
     // to. Without the WHERE guard, an attacker who obtains a victim's
@@ -100,15 +104,62 @@ pub async fn lookup(pool: &PgPool, raw_token: &str) -> Result<Option<Uuid>> {
     Ok(row.map(|(user_id,)| user_id))
 }
 
-#[allow(dead_code)]
-pub async fn revoke(pool: &PgPool, raw_token: &str, user_id: Uuid) -> Result<u64> {
-    validate_agent_token(raw_token)?;
+/// A setup-agent authorization as shown to its owner. `id` is the token hash
+/// (never the token), which is what `/agent/authorize?challenge=` carried.
+#[derive(Debug, serde::Serialize)]
+pub struct SetupToken {
+    pub id: String,
+    pub label: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub last_used_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub revoked_at: Option<OffsetDateTime>,
+}
+
+pub async fn list(pool: &PgPool, user_id: Uuid) -> Result<Vec<SetupToken>> {
+    let rows = sqlx::query_as::<
+        _,
+        (
+            String,
+            String,
+            OffsetDateTime,
+            Option<OffsetDateTime>,
+            Option<OffsetDateTime>,
+        ),
+    >(
+        "SELECT token_hash, label, created_at, last_used_at, revoked_at
+         FROM agent_access_tokens WHERE user_id = $1
+         ORDER BY created_at DESC",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(id, label, created_at, last_used_at, revoked_at)| SetupToken {
+                id,
+                label,
+                created_at,
+                last_used_at,
+                revoked_at,
+            },
+        )
+        .collect())
+}
+
+/// Revoke by token hash (the id shown in the dashboard). Returns rows affected:
+/// 0 if the hash is unknown, belongs to someone else, or is already revoked.
+pub async fn revoke_hash(pool: &PgPool, token_hash: &str, user_id: Uuid) -> Result<u64> {
+    validate_agent_token_hash(token_hash)?;
     let result = sqlx::query(
         "UPDATE agent_access_tokens
          SET revoked_at = now()
          WHERE token_hash = $1 AND user_id = $2 AND revoked_at IS NULL",
     )
-    .bind(auth_token::token_hash(raw_token))
+    .bind(token_hash)
     .bind(user_id)
     .execute(pool)
     .await?;

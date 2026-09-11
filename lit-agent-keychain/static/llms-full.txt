@@ -11,7 +11,7 @@
   - `in_tee_only`: no grants are ever issued. Only Lit Action programs the owner has explicitly attached (by IPFS CID) can decrypt, and only inside the TEE.
 - **Agent**: a runtime identity. Minting an agent returns a **usage API key** (shown once) that authenticates to this API *and* to the Chipotle TEE API. Revoking the agent removes the key at the TEE network too.
 - **Grant**: a short-lived (default 120s) EIP-191-signed JSON document `{v, tenant, name, version, pkpId, ciphertextHash, release, agent, iat, exp}` issued after policy evaluation. The pinned reader program in the TEE verifies the signature, expiry, vault and ciphertext hash before decrypting. Within its TTL a grant is bearer-redeemable by the tenant's agents, so treat it as sensitive and never cache it.
-- **Setup token (agent access token)**: a bearer token a *setup* agent uses to act as the human user (full management access). Authorized once by the logged-in user via /agent/authorize. Distinct from runtime usage keys — runtime agents should never hold one.
+- **Setup token (agent access token)**: a bearer token a *setup* agent uses to act as the human user (full management access). Authorized once by the logged-in user via /agent/authorize. Distinct from runtime usage keys — runtime agents should never hold one. Setup tokens have no expiry and are not affected by the user signing out of the dashboard; they are listed and revoked via `/api/setup-tokens` (or the dashboard's *Setup agents* section).
 
 ## Authentication
 
@@ -23,6 +23,8 @@ Two principals:
 ## Management API (User auth)
 
 - `GET /api/me` → `{id, email}` — verify auth.
+- `GET /api/setup-tokens` → list of setup-agent authorizations for this user: `{id, label, created_at, last_used_at, revoked_at}`. `id` is the url-safe sha256 hash of the token (the `challenge` used at authorization) — never the token itself.
+- `DELETE /api/setup-tokens/<id>` → revoke a setup token; its bearer requests return 401 immediately. Does not touch runtime agent keys.
 - `GET /api/tenant` → vault status: `{provisioned, tenant_id, pkp_id, group_id, reader_cid, encrypt_cid, grant_signer, chipotle_api_base_url, reader_cid_stale}`.
 - `POST /api/tenant/provision` → force tenant provisioning (otherwise automatic on first secret; takes ~30–60s, several on-chain transactions).
 - `POST /api/secrets` body `{name, value, kind?, environment?, release?, policy?}` → create + seal. `name` matches `[A-Za-z0-9][A-Za-z0-9_.-]{0,127}`; `value` ≤ 16 KB; `release` is `plaintext` | `in_tee_only`.
@@ -31,12 +33,12 @@ Two principals:
 - `PUT /api/secrets/<name>` body `{value}` → rotate: seals a new version and makes it current. Older versions stay readable by explicit version number.
 - `PATCH /api/secrets/<name>` body any of `{kind, environment, release, policy, disabled}` → partial update; omitted fields are untouched.
 - `DELETE /api/secrets/<name>` → hard-delete the secret and all versions.
-- `POST /api/agents` body `{name}` → mint runtime agent. Response includes `usage_api_key` exactly once. Store it securely; it cannot be re-fetched.
+- `POST /api/agents` body `{name}` → mint runtime agent. Response includes `usage_api_key` exactly once. Store it securely; it cannot be re-fetched. `name` must be unique among the tenant's *active* agents (`409 agent_name_exists`) so allowlists and audit rows are unambiguous.
 - `GET /api/agents` → list agents (`id, name, created_at, last_seen_at, revoked_at`).
-- `DELETE /api/agents/<id>` → revoke: removes the key on the TEE network and marks it revoked here. Effective at the network within ≤5 minutes across replicas.
+- `DELETE /api/agents/<id>` → revoke: marks the agent revoked here (this API rejects the key immediately, so no further grants are issued) and removes the key on the TEE network (effective at every replica within ≤5 minutes; a grant issued just before revocation stays redeemable until its ≤120s TTL ends).
 - `POST /api/actions` body `{cid, name?}` → attach a customer Lit Action (by IPFS CID) to the vault group so it can decrypt in-TEE (`in_tee_only` tier). Attach only audited code: any attached action can decrypt ANY ciphertext in this tenant's vault.
 - `GET /api/actions`, `DELETE /api/actions/<id>` → list / detach.
-- `GET /api/audit?limit=100` → access log: every grant/reference decision with `event`, `decision` (allow|deny), `reason`, secret and agent names, timestamp.
+- `GET /api/audit?limit=100` → access log: every grant/reference decision with `event`, `decision` (allow|deny), `reason`, `secret_id`, `secret_name`, `secret_deleted`, `agent_id`, `agent_name`, `created_at`. Names are snapshotted when the row is written, so entries stay attributable after the secret is deleted (`secret_deleted: true`; a recreated secret with the same name has a different `secret_id`). Denials for a nonexistent name carry `secret_id: null` with the requested `secret_name`.
 
 ## Agent API (usage-key auth)
 
@@ -53,31 +55,35 @@ Note on TEE errors: Chipotle reports action throws (e.g. "grant expired", "grant
 ```json
 {
   "allowed_agents": ["<agent uuid>", "..."],   // omit = all of the tenant's agents
-  "max_reads_per_day": 100,                     // rolling 24h cap on successful grants
+  "max_reads_per_day": 100,                     // cap on successful grants in the trailing 24h (rolling window, not calendar day)
   "not_after": "2026-12-31T00:00:00Z"          // hard expiry (RFC 3339); applies to grants and references
 }
 ```
 
-Unknown fields are rejected. Policy is evaluated at grant time and is editable for the life of the secret.
+Unknown fields are rejected. Policy is evaluated at grant time and is editable for the life of the secret (`PATCH /api/secrets/<name> {"policy": {...}}` replaces the whole policy object; omit a key to clear that limit). Agents are identified by immutable UUID, never by name.
 
 ## Limits and errors
 
 - 500 secrets per tenant (`secret_limit_reached`, HTTP 429), 100 active agents per tenant (`agent_limit_reached`, HTTP 429).
 - Secret values ≤ 16 KB (`value_too_large`). Names/labels validated (`invalid_name`, `invalid_label`, `invalid_policy`).
-- `409 secret_exists` on duplicate create; `404 not_found` / `version_not_found`.
+- `409 secret_exists` on duplicate create; `409 agent_name_exists` on duplicate active agent name; `404 not_found` / `version_not_found`.
+- Auth failures on `/api/*` are JSON too: `401 {"error":"unauthorized","detail":...}` (e.g. a runtime usage key calling a management endpoint).
 - `502` with detail = upstream Chipotle failure (safe to retry management calls); `503 reader_not_attached` = deployment's reader program not yet attached to this tenant (operator issue).
 
 ## SDK (JavaScript, zero dependencies)
 
+Node.js 18+ / Bun: `npm install @lit-protocol/keychain` (Node cannot import `https:` URLs). Deno and browsers may import `https://keychain.litprotocol.com/sdk/lit-agent-keychain.js` directly; or `curl -fsSL` that file to `lit-agent-keychain.mjs` and import it locally.
+
 ```js
-import { LitAgentKeychain } from 'https://keychain.litprotocol.com/sdk/lit-agent-keychain.js';
+import { LitAgentKeychain } from '@lit-protocol/keychain';
 const keychain = new LitAgentKeychain({
   usageApiKey: process.env.LIT_AGENT_KEYCHAIN_KEY,
   // baseUrl, fetch, timeoutMs (default 30000) are optional
 });
 const value = await keychain.get('OPENAI_API_KEY');          // grant + TEE redeem
-const g = await secrets.grant('OPENAI_API_KEY');            // grant only
-const ref = await secrets.reference('DB_PASSWORD');          // in_tee_only ciphertext
+const old = await keychain.get('OPENAI_API_KEY', { version: 1 }); // a previous version
+const g = await keychain.grant('OPENAI_API_KEY');            // grant only
+const ref = await keychain.reference('DB_PASSWORD');         // in_tee_only ciphertext
 // All methods accept { version, signal } (AbortSignal).
 // Errors: LitAgentKeychainError with .status, .code (policy denial code), .body.
 ```

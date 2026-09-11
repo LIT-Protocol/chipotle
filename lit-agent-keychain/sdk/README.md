@@ -1,7 +1,10 @@
 # @lit-protocol/keychain
 
 Zero-dependency JavaScript SDK for [Lit Keychain](https://keychain.litprotocol.com).
-ES modules for Node.js 18+, Deno, Bun, and browser bundlers.
+ES modules for Node.js 18+, Deno, Bun, and browser bundlers. Node cannot import
+`https:` module URLs, so install from npm (below) or download
+`https://keychain.litprotocol.com/sdk/lit-agent-keychain.js` and import it by
+relative path.
 
 ## Install
 

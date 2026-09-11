@@ -86,6 +86,23 @@ pub async fn find_secret(pool: &PgPool, tenant_id: Uuid, name: &str) -> Result<O
     row.map(row_to_secret).transpose()
 }
 
+/// Re-read a secret by id inside a transaction with a `FOR SHARE` row lock.
+/// Returns `None` if it has been deleted. Holding the share lock until commit
+/// blocks a concurrent `DELETE` (and `UPDATE`) of the row, so a grant can never
+/// be issued for a secret that no longer exists or against a stale policy.
+pub async fn lock_secret_for_share<'e, E: sqlx::PgExecutor<'e>>(
+    ex: E,
+    secret_id: Uuid,
+) -> Result<Option<SecretRow>> {
+    let row = sqlx::query(&format!(
+        "SELECT {SECRET_COLS} FROM secrets WHERE id = $1 FOR SHARE"
+    ))
+    .bind(secret_id)
+    .fetch_optional(ex)
+    .await?;
+    row.map(row_to_secret).transpose()
+}
+
 pub async fn find_version(
     pool: &PgPool,
     secret_id: Uuid,

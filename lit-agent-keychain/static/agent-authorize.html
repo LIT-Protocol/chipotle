@@ -18,8 +18,14 @@
         mint agent keys, edit policies, and read the audit log.
         It will not receive your Lit/Chipotle admin API key.
       </p>
+      <p>
+        This authorization <b>does not expire</b> and is not removed by signing out.
+        Revoke it any time under <b>Setup agents</b> on your dashboard.
+      </p>
     </section>
 
+    <label for="label">Name this agent (so you can recognize it later)</label>
+    <input id="label" name="label" type="text" value="local-agent" maxlength="64" autocomplete="off">
     <button id="authorize-btn" type="button">Authorize agent</button>
     <p id="status" class="status" role="status" aria-live="polite"></p>
     <p class="note"><a href="/SKILL.md">View the agent setup guide</a></p>
@@ -46,14 +52,14 @@
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ challenge, label: 'local-agent' }),
+          body: JSON.stringify({ challenge, label: document.getElementById('label').value.trim() || 'local-agent' }),
         });
         if (resp.status === 401) {
           window.location.href = `/login?next=${encodeURIComponent(`/agent/authorize?challenge=${encodeURIComponent(challenge)}`)}`;
           return;
         }
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        status.textContent = 'Agent authorized. You can return to your agent now.';
+        status.innerHTML = 'Agent authorized. You can return to your agent now. When it is done, revoke it from the <a href="/">dashboard</a> under Setup agents.';
         status.className = 'status ok';
       } catch (_err) {
         status.textContent = 'Could not authorize this agent. Ask it to generate a fresh authorization URL and try again.';

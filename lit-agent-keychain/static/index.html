@@ -6,105 +6,194 @@
   <title>Lit Agent Keychain</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
-<body>
+<body class="dashboard-page">
   <header class="topbar">
     <div class="brand">Lit Agent Keychain</div>
     <div class="topbar-right">
       <span id="me" class="muted"></span>
-      <button id="logout" class="ghost">Sign out</button>
+      <button id="logout" class="ghost compact">Sign out</button>
     </div>
   </header>
 
   <main class="container">
-    <section class="card" id="vault-card">
-      <div class="trigger-title">
-        <h2>Vault</h2>
-        <span id="vault-status" class="pill">loading…</span>
-      </div>
-      <p class="muted">
-        Secrets are sealed to a vault PKP inside the Chipotle TEE. This dashboard never sees plaintext after you submit it;
-        agents read <code>plaintext</code>-tier secrets straight from Chipotle via the reader action.
-      </p>
-      <dl class="kv" id="vault-kv"></dl>
-      <div id="vault-stale" class="error hidden">Reader action for this deployment is not attached to your vault group yet — grants will fail until an operator re-attaches it.</div>
+    <section class="card" id="getting-started">
+      <h2>Getting started</h2>
+      <ol class="steps">
+        <li><b>Add a secret.</b> The first save also provisions your vault inside the Chipotle TEE, which takes about 30–60 seconds. Later saves take a few seconds.</li>
+        <li><b>Mint an agent key.</b> One credential per runtime agent. It is shown once — copy it into the agent's environment.</li>
+        <li><b>Choose who may read what.</b> New secrets are readable by every agent you mint until you edit their policy.</li>
+        <li><b>Read it from your agent</b> with the snippet at the bottom of this page.</li>
+      </ol>
     </section>
 
     <section class="card">
-      <div class="trigger-title">
+      <div class="section-header">
         <h2>Secrets</h2>
-        <button id="new-secret-btn">+ Add secret</button>
+        <button id="new-secret-btn" class="compact">+ Add secret</button>
       </div>
-      <form id="secret-form" class="form hidden">
-        <label>Name <input name="name" required placeholder="OPENAI_API_KEY" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" /></label>
-        <label>Value <textarea name="value" required rows="3" placeholder="sk-…"></textarea></label>
+      <form id="secret-form" class="form hidden" novalidate>
+        <label>Name
+          <input name="name" type="text" required placeholder="OPENAI_API_KEY" autocomplete="off" spellcheck="false"
+                 pattern="[A-Za-z0-9][A-Za-z0-9_.\-]{0,127}" maxlength="128" />
+          <small class="hint">1–128 characters: letters, digits, <code>_</code> <code>.</code> <code>-</code>; must start with a letter or digit. No spaces.</small>
+        </label>
+        <label>Value
+          <textarea name="value" required rows="3" placeholder="sk-…" autocomplete="off" spellcheck="false" maxlength="16384"></textarea>
+          <small class="hint">Up to 16 KB. Sealed inside the TEE on save; this page never sees it again.</small>
+        </label>
         <div class="row">
-          <label>Kind <input name="kind" value="api_key" /></label>
-          <label>Environment <input name="environment" value="production" /></label>
+          <label>Kind <input name="kind" type="text" value="api_key" pattern="[A-Za-z0-9_.\-]{1,64}" /></label>
+          <label>Environment <input name="environment" type="text" value="production" pattern="[A-Za-z0-9_.\-]{1,64}" /></label>
           <label>Release
             <select name="release">
-              <option value="plaintext">plaintext — agents may read</option>
-              <option value="in_tee_only">in_tee_only — only permitted actions, in-TEE</option>
+              <option value="plaintext">plaintext — permitted agents receive the value</option>
+              <option value="in_tee_only">in-TEE-only — only your attached actions can decrypt, inside the TEE</option>
             </select>
           </label>
         </div>
         <div class="row">
-          <label>Max reads / day <input name="max_reads_per_day" type="number" min="1" placeholder="unlimited" /></label>
-          <label>Not after <input name="not_after" type="datetime-local" /></label>
+          <label>Max reads (rolling 24 h) <input name="max_reads_per_day" type="number" min="1" step="1" placeholder="unlimited" /></label>
+          <label>Not after (your local time) <input name="not_after" type="datetime-local" /></label>
         </div>
+        <p class="hint">Which agents may read this secret is set after saving, via <i>Edit policy</i>. Until then every agent you mint can read it.</p>
         <div class="row">
-          <button type="submit">Seal &amp; save</button>
-          <button type="button" class="ghost" id="secret-cancel">Cancel</button>
+          <button type="submit" class="compact">Seal &amp; save</button>
+          <button type="button" class="ghost compact" id="secret-cancel">Cancel &amp; discard</button>
+          <span id="secret-progress" class="muted"></span>
         </div>
-        <div class="error" id="secret-error"></div>
+        <div class="error" id="secret-error" role="alert"></div>
       </form>
-      <div id="secrets" class="trigger-list"></div>
+      <div id="secrets" class="trigger-list" data-section="secrets"></div>
     </section>
 
     <section class="card">
-      <div class="trigger-title">
-        <h2>Agents</h2>
+      <div class="section-header">
+        <h2>Agents (runtime keys)</h2>
         <form id="agent-form" class="inline-form">
-          <input name="name" required placeholder="agent name, e.g. payments-bot" />
-          <button type="submit">Mint key</button>
+          <label class="sr-only" for="agent-name">Agent name</label>
+          <input id="agent-name" name="name" type="text" required placeholder="agent name, e.g. payments-bot" maxlength="128" autocomplete="off" />
+          <button type="submit" class="compact">Mint key</button>
         </form>
       </div>
-      <p class="muted">Each agent is a scoped Chipotle usage key. It authenticates to this API and runs the reader action. Shown once.</p>
+      <p class="muted">Each agent is a scoped Chipotle usage key. It authenticates to this API and runs the reader action. It can only read secrets, never manage them. Names must be unique among active agents.</p>
       <div id="agent-new" class="notice hidden"></div>
-      <div id="agents" class="trigger-list"></div>
+      <div id="agents" class="trigger-list" data-section="agents"></div>
     </section>
 
     <section class="card">
-      <div class="trigger-title">
+      <div class="section-header">
+        <h2>Setup agents (full access)</h2>
+        <button id="setup-tokens-refresh" class="ghost compact">Refresh</button>
+      </div>
+      <p class="muted">Bearer tokens you approved on the <i>Authorize your agent</i> page. Each one can do everything this dashboard can. They do not expire and are <b>not</b> revoked by signing out — revoke them here when the agent is done.</p>
+      <div id="setup-tokens" class="trigger-list" data-section="setup-tokens"></div>
+    </section>
+
+    <section class="card">
+      <div class="section-header">
         <h2>Permitted actions (in-TEE-only tier)</h2>
         <form id="action-form" class="inline-form">
-          <input name="cid" required placeholder="IPFS CID of your Lit Action" />
-          <input name="name" placeholder="label" />
-          <button type="submit">Attach</button>
+          <label class="sr-only" for="action-cid">IPFS CID</label>
+          <input id="action-cid" name="cid" type="text" required placeholder="IPFS CID of your Lit Action" autocomplete="off" />
+          <label class="sr-only" for="action-label">Label</label>
+          <input id="action-label" name="name" type="text" placeholder="label" maxlength="64" />
+          <button type="submit" class="compact">Attach</button>
         </form>
       </div>
       <p class="muted">Actions attached here can <code>Lit.Actions.Decrypt</code> any ciphertext in your vault, inside the TEE. Attach only code you've audited.</p>
-      <div id="actions" class="trigger-list"></div>
+      <div id="actions" class="trigger-list" data-section="actions"></div>
     </section>
 
     <section class="card">
-      <div class="trigger-title">
+      <div class="section-header">
         <h2>Access log</h2>
-        <button id="audit-refresh" class="ghost">Refresh</button>
+        <button id="audit-refresh" class="ghost compact">Refresh</button>
       </div>
-      <table class="table" id="audit">
-        <thead><tr><th>When</th><th>Event</th><th>Secret</th><th>Agent</th><th>Decision</th><th>Reason</th></tr></thead>
-        <tbody></tbody>
-      </table>
+      <div class="table-wrap">
+        <table class="table" id="audit">
+          <thead><tr><th>When</th><th>Event</th><th>Secret</th><th>Agent</th><th>Decision</th><th>Reason</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="audit-state" data-section="audit"></div>
     </section>
 
     <section class="card">
       <h2>Use from an agent</h2>
-<pre><code>import { LitAgentKeychain } from '<span class="origin"></span>/sdk/lit-agent-keychain.js';
+      <p class="muted">Node.js 18+ (also Bun and Deno with npm specifiers). Install the SDK, put the minted key in the agent's environment, then read by name:</p>
+<pre><code>npm install @lit-protocol/keychain
+export LIT_AGENT_KEYCHAIN_KEY=…   # the key shown once when you minted the agent</code></pre>
+<pre><code>// agent.mjs
+import { LitAgentKeychain } from '@lit-protocol/keychain';
 const keychain = new LitAgentKeychain({ usageApiKey: process.env.LIT_AGENT_KEYCHAIN_KEY, baseUrl: '<span class="origin"></span>' });
-const key = await keychain.get('OPENAI_API_KEY');</code></pre>
-      <p class="muted">Agent playbook: <a href="/SKILL.md">/SKILL.md</a></p>
+const value = await keychain.get('<span class="example-secret">OPENAI_API_KEY</span>');</code></pre>
+      <details class="muted">
+        <summary>No npm? Download the single-file SDK instead</summary>
+<pre><code>curl -fsSL <span class="origin"></span>/sdk/lit-agent-keychain.js -o lit-agent-keychain.mjs
+# then: import { LitAgentKeychain } from './lit-agent-keychain.mjs';</code></pre>
+        <p>Deno and browsers can import the URL directly: <code>import { LitAgentKeychain } from '<span class="origin"></span>/sdk/lit-agent-keychain.js'</code>. Node's module loader does not load <code>https:</code> imports.</p>
+      </details>
+      <p class="muted">Agent playbook: <a href="/SKILL.md">/SKILL.md</a> · Full API reference: <a href="/llms-full.txt">/llms-full.txt</a></p>
+    </section>
+
+    <section class="card" id="vault-card">
+      <details>
+        <summary class="section-header">
+          <h2>Vault details</h2>
+          <span id="vault-status" class="pill">loading…</span>
+        </summary>
+        <p class="muted">
+          Secrets are sealed to a vault key (PKP) inside the Chipotle TEE. This dashboard never sees plaintext after you submit it;
+          agents read <code>plaintext</code>-tier secrets straight from Chipotle via the pinned reader action.
+        </p>
+        <dl class="kv" id="vault-kv"></dl>
+        <div id="vault-stale" class="error hidden">Reader action for this deployment is not attached to your vault group yet — grants will fail until an operator re-attaches it.</div>
+        <div id="vault-state" data-section="vault"></div>
+      </details>
     </section>
   </main>
+
+  <dialog id="policy-dialog" class="dialog">
+    <form method="dialog" id="policy-form" novalidate>
+      <h2>Edit policy — <code id="policy-secret-name"></code></h2>
+      <fieldset>
+        <legend>Agents allowed to read</legend>
+        <label class="checkbox-row"><input type="radio" name="scope" value="all" /> All agents (including ones minted later)</label>
+        <label class="checkbox-row"><input type="radio" name="scope" value="some" /> Only the agents checked below</label>
+        <div id="policy-agents" class="check-list"></div>
+      </fieldset>
+      <div class="row">
+        <label>Max reads (rolling 24 h window)
+          <input name="max_reads_per_day" type="number" min="1" step="1" placeholder="unlimited" />
+        </label>
+        <label>Not after (your local time)
+          <input name="not_after" type="datetime-local" />
+        </label>
+      </div>
+      <p class="hint">Leave a field empty to remove that limit. The read quota counts successful grants in the trailing 24 hours, not per calendar day.</p>
+      <div class="error" id="policy-error" role="alert"></div>
+      <div class="row">
+        <button type="submit" class="compact" value="save">Save policy</button>
+        <button type="button" class="ghost compact" value="cancel" data-close>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="rotate-dialog" class="dialog">
+    <form method="dialog" id="rotate-form">
+      <h2>Rotate — <code id="rotate-secret-name"></code></h2>
+      <label>New value
+        <textarea name="value" required rows="4" autocomplete="off" spellcheck="false" maxlength="16384"></textarea>
+        <small class="hint">Up to 16 KB. Becomes the new current version. Earlier versions stay readable by explicit version number until the secret is disabled or deleted.</small>
+      </label>
+      <div class="error" id="rotate-error" role="alert"></div>
+      <div class="row">
+        <button type="submit" class="compact" value="save">Seal new version</button>
+        <button type="button" class="ghost compact" data-close>Cancel &amp; discard</button>
+        <span id="rotate-progress" class="muted"></span>
+      </div>
+    </form>
+  </dialog>
 
   <script src="/static/app.js" type="module"></script>
 </body>
