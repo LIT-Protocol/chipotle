@@ -88,6 +88,7 @@ async fn stripe_test_mode_subscription_lifecycle() -> Result<()> {
             .post(
                 "/billing_portal/configurations",
                 &[
+                    ("metadata[keychain_contract_test]", nonce.clone()),
                     ("features[subscription_cancel][enabled]", "true".into()),
                     (
                         "features[subscription_cancel][mode]",
@@ -232,19 +233,32 @@ async fn stripe_test_mode_subscription_lifecycle() -> Result<()> {
         Ok(())
     }
     .await;
+    eprintln!("Stripe contract result: {result:?}");
     let mut cleanup_failed = false;
     if let Some(id) = checkout {
-        cleanup_failed |= stripe
+        let cleanup = stripe
             .post(
                 &format!("/checkout/sessions/{id}/expire"),
                 &[],
                 &format!("{nonce}-expire"),
             )
-            .await
-            .is_err();
+            .await;
+        if let Err(error) = cleanup {
+            eprintln!("Checkout cleanup {id}: {error}");
+            cleanup_failed = true;
+        }
     }
     if let Some(id) = customer {
-        cleanup_failed |= !matches!(http.delete(format!("https://api.stripe.com/v1/customers/{id}")).bearer_auth(&secret).header("Stripe-Version",VERSION).send().await,Ok(response) if response.status().is_success());
+        let response = http
+            .delete(format!("https://api.stripe.com/v1/customers/{id}"))
+            .bearer_auth(&secret)
+            .header("Stripe-Version", VERSION)
+            .send()
+            .await;
+        if !matches!(&response,Ok(r) if r.status().is_success()) {
+            eprintln!("Customer cleanup failed: {id}");
+            cleanup_failed = true;
+        }
     }
     for (kind, object) in [
         ("prices", price),
@@ -252,14 +266,17 @@ async fn stripe_test_mode_subscription_lifecycle() -> Result<()> {
         ("billing_portal/configurations", portal),
     ] {
         if let Some(id) = object {
-            cleanup_failed |= stripe
+            let cleanup = stripe
                 .post(
                     &format!("/{kind}/{id}"),
                     &[("active", "false".into())],
                     &format!("{nonce}-archive-{kind}"),
                 )
-                .await
-                .is_err();
+                .await;
+            if let Err(error) = cleanup {
+                eprintln!("Cleanup {kind} {id}: {error}");
+                cleanup_failed = true;
+            }
         }
     }
     tx.rollback().await?;

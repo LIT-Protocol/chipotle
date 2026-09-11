@@ -49,9 +49,7 @@ impl Stripe {
             request = request.header("Idempotency-Key", key);
         }
         let mut response = request.send().await?;
-        if !response.status().is_success() {
-            bail!("Stripe request failed ({})", response.status().as_u16());
-        }
+        let status = response.status();
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await? {
             if bytes.len() + chunk.len() > 2 * 1024 * 1024 {
@@ -59,7 +57,28 @@ impl Stripe {
             }
             bytes.extend_from_slice(&chunk);
         }
-        serde_json::from_slice(&bytes).context("invalid Stripe response")
+        let body: Value = serde_json::from_slice(&bytes).context("invalid Stripe response")?;
+        if !status.is_success() {
+            // Only fixed error classifications are useful for diagnostics. Never
+            // include provider messages, submitted values or full response bodies.
+            let class = |field: &str| {
+                body["error"][field]
+                    .as_str()
+                    .filter(|s| {
+                        s.len() <= 96
+                            && s.bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || b"_[]".contains(&b))
+                    })
+                    .unwrap_or("unknown")
+            };
+            bail!(
+                "Stripe {method} {path} failed ({}, code={}, param={})",
+                status.as_u16(),
+                class("code"),
+                class("param")
+            );
+        }
+        Ok(body)
     }
     pub async fn get(&self, path: &str, query: &[(&str, String)]) -> Result<Value> {
         self.request(reqwest::Method::GET, path, query, None).await
