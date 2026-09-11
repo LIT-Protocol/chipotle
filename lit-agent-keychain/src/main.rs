@@ -1,98 +1,13 @@
-use std::path::PathBuf;
-
-use anyhow::Result;
-use lit_agent_keychain::auth::routes as auth_routes;
 use lit_agent_keychain::{
-    actions, agents, audit, auth, chipotle, config, db, grants, mail, secrets, signer, tenants,
+    chipotle::Chipotle, config::Config, db, server, sponsorship, stripe::Stripe, subscriptions,
 };
-use rocket::fs::{FileServer, NamedFile};
-use rocket::http::Status;
-use rocket::response::Redirect;
-use rocket::serde::json::Json;
-use rocket::{catch, catchers, get, routes};
-
-#[rocket::launch]
-async fn rocket() -> _ {
-    init_tracing();
-    apply_platform_env();
-    let cfg = config::Config::from_env().expect("config");
-    let pool = db::connect(&cfg.database_url).await.expect("db connect");
-    db::run_migrations(&pool).await.expect("db migrate");
-
-    if let Err(e) = auth::session::purge_expired(&pool).await {
-        tracing::warn!("session purge on boot failed: {e}");
-    }
-
-    let mailer =
-        mail::Mailer::new(cfg.resend_api_key.clone(), cfg.mail_from.clone()).expect("mailer");
-    let rate_limit = auth::rate_limit::RateLimiter::new();
-    let chipotle =
-        chipotle::ChipotleClient::new(cfg.chipotle_api_base_url.clone()).expect("chipotle client");
-    let grant_signer =
-        signer::GrantSigner::from_hex(&cfg.grant_signing_key).expect("GRANT_SIGNING_KEY");
-    let action_set = actions::ActionSet::build(&grant_signer.address());
-    tracing::info!(
-        grant_signer = %action_set.grant_signer,
-        reader_cid = %action_set.reader_cid,
-        encrypt_cid = %action_set.encrypt_cid,
-        chipotle = %cfg.chipotle_api_base_url,
-        "lit-agent-keychain starting"
-    );
-
-    rocket::build()
-        .manage(pool)
-        .manage(cfg)
-        .manage(mailer)
-        .manage(rate_limit)
-        .manage(chipotle)
-        .manage(grant_signer)
-        .manage(action_set)
-        .manage(tenants::ProvisionLock::default())
-        .mount(
-            "/",
-            routes![
-                index,
-                login_page,
-                health,
-                skill_doc,
-                llms_txt,
-                llms_full_txt,
-                agent_authorize_page,
-                auth_routes::request_link,
-                auth_routes::verify_link,
-                auth_routes::logout,
-                auth_routes::authorize_agent,
-                auth_routes::me,
-                auth_routes::list_setup_tokens,
-                auth_routes::revoke_setup_token,
-                tenants::get_tenant,
-                tenants::provision_tenant,
-                tenants::add_tenant_action,
-                tenants::list_tenant_actions,
-                tenants::remove_tenant_action,
-                secrets::create_secret,
-                secrets::list_secrets,
-                secrets::get_secret,
-                secrets::rotate_secret,
-                secrets::update_secret,
-                secrets::delete_secret,
-                agents::create_agent,
-                agents::list_agents,
-                agents::revoke_agent,
-                grants::issue_grant,
-                grants::get_reference,
-                audit::list_audit,
-            ],
+#[rocket::main]
+async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
-        .register(
-            "/api",
-            catchers![api_unauthorized, api_not_found, api_default],
-        )
-        .mount("/static", FileServer::from("static"))
-        .mount("/sdk", FileServer::from("sdk"))
-}
-
-fn apply_platform_env() {
+        .init();
     if std::env::var("ROCKET_PORT").is_err() {
         if let Ok(port) = std::env::var("PORT") {
             std::env::set_var("ROCKET_PORT", port);
@@ -101,127 +16,67 @@ fn apply_platform_env() {
     if std::env::var("ROCKET_ADDRESS").is_err() {
         std::env::set_var("ROCKET_ADDRESS", "0.0.0.0");
     }
-}
-
-fn init_tracing() {
-    use tracing_subscriber::EnvFilter;
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .init();
-}
-
-#[get("/health")]
-fn health() -> &'static str {
-    "ok"
-}
-
-// Rocket's default catchers render HTML. Everything under /api is consumed by
-// programs, so guard failures (e.g. a runtime usage key hitting a management
-// endpoint) get the same `{error}` JSON shape as handler errors.
-#[catch(401)]
-fn api_unauthorized() -> Json<lit_agent_keychain::api::ErrorResponse> {
-    Json(lit_agent_keychain::api::ErrorResponse {
-        error: "unauthorized".into(),
-        detail: Some(
-            "management endpoints need a signed-in session or a setup bearer token; \
-             runtime usage keys may only call POST /api/grants and GET /api/reference/<name>"
-                .into(),
-        ),
-    })
-}
-
-#[catch(404)]
-fn api_not_found() -> Json<lit_agent_keychain::api::ErrorResponse> {
-    Json(lit_agent_keychain::api::ErrorResponse {
-        error: "not_found".into(),
-        detail: None,
-    })
-}
-
-#[catch(default)]
-fn api_default(
-    status: Status,
-    _req: &rocket::Request<'_>,
-) -> Json<lit_agent_keychain::api::ErrorResponse> {
-    Json(lit_agent_keychain::api::ErrorResponse {
-        error: status
-            .reason()
-            .unwrap_or("error")
-            .to_lowercase()
-            .replace(' ', "_"),
-        detail: None,
-    })
-}
-
-#[get("/SKILL.md")]
-async fn skill_doc() -> Result<NamedFile, Status> {
-    NamedFile::open("SKILL.md")
-        .await
-        .map_err(|_| Status::NotFound)
-}
-
-/// Machine-readable site index per the llms.txt convention (llmstxt.org).
-#[get("/llms.txt")]
-async fn llms_txt() -> Result<NamedFile, Status> {
-    NamedFile::open(static_path("llms.txt"))
-        .await
-        .map_err(|_| Status::NotFound)
-}
-
-/// Complete API + concepts reference for LLM consumption.
-#[get("/llms-full.txt")]
-async fn llms_full_txt() -> Result<NamedFile, Status> {
-    NamedFile::open(static_path("llms-full.txt"))
-        .await
-        .map_err(|_| Status::NotFound)
-}
-
-#[get("/agent/authorize?<challenge>")]
-async fn agent_authorize_page(
-    user: Option<auth::User>,
-    challenge: Option<&str>,
-) -> Result<NamedFile, Redirect> {
-    let Some(challenge) = challenge else {
-        return Err(Redirect::to("/login?error=invalid"));
-    };
-    if auth::agent::validate_agent_token_hash(challenge).is_err() {
-        return Err(Redirect::to("/login?error=invalid"));
-    }
-    match user {
-        Some(_) => NamedFile::open(static_path("agent-authorize.html"))
-            .await
-            .map_err(|_| Redirect::to("/login?error=missing_static")),
-        None => Err(Redirect::to(format!(
-            "/login?next=/agent/authorize%3Fchallenge%3D{challenge}"
-        ))),
-    }
-}
-
-#[get("/")]
-async fn index(user: Option<auth::User>) -> Result<NamedFile, Redirect> {
-    // Logged-in users land on the dashboard; everyone else gets the marketing
-    // landing page (sign-in lives at /login).
-    let page = if user.is_some() {
-        "index.html"
-    } else {
-        "home.html"
-    };
-    NamedFile::open(static_path(page))
-        .await
-        .map_err(|_| Redirect::to("/login?error=missing_static"))
-}
-
-#[get("/login")]
-async fn login_page() -> Result<NamedFile, Status> {
-    NamedFile::open(static_path("login.html"))
-        .await
-        .map_err(|_| Status::NotFound)
-}
-
-fn static_path(name: &str) -> PathBuf {
-    let mut p = PathBuf::from("static");
-    p.push(name);
-    p
+    let cfg = Config::from_env()?;
+    let pool = db::connect(&cfg.database_url).await?;
+    db::run_migrations(&pool).await?;
+    // Bound transient authentication and rate-limit state on long-lived servers.
+    // Budget windows are at most one day; retaining two days never resets a live window.
+    let cleanup_pool = pool.clone();
+    let cleanup = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(600));
+        loop {
+            interval.tick().await;
+            for query in [
+                "DELETE FROM kc_sessions WHERE expires_at<now()",
+                "DELETE FROM kc_challenges WHERE expires_at<now()",
+                "DELETE FROM kc_budgets WHERE expires_at<now()",
+            ] {
+                if sqlx::query(query).execute(&cleanup_pool).await.is_err() {
+                    tracing::warn!("transient state cleanup failed");
+                }
+            }
+        }
+    });
+    let lit = Chipotle::new(
+        cfg.lit_api_url.clone(),
+        cfg.lit_execution_key.clone(),
+        cfg.chipotle_master_key.clone(),
+    )?;
+    let stripe = Stripe::new(&cfg)?;
+    stripe.validate_configuration().await?;
+    let worker_pool = pool.clone();
+    let worker_stripe = stripe.clone();
+    let worker_lit = lit.clone();
+    let worker_cfg = cfg.clone();
+    let reconciler = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            let rows:Result<Vec<(String,bool)>,_>=sqlx::query_as("SELECT vault_id,customer_id IS NOT NULL AND reconcile_after<=now() FROM kc_subscriptions ORDER BY vault_id").fetch_all(&worker_pool).await;
+            let Ok(rows) = rows else {
+                tracing::warn!("billing reconciliation unavailable");
+                continue;
+            };
+            for (vault, due) in rows {
+                if due
+                    && subscriptions::refresh(&worker_pool, &worker_stripe, &vault)
+                        .await
+                        .is_err()
+                {
+                    tracing::warn!("subscription refresh failed");
+                }
+                if sponsorship::reconcile(&worker_pool, &worker_lit, &worker_cfg, &vault)
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!("execution scope reconciliation failed");
+                }
+            }
+        }
+    });
+    let result = server::build(cfg, pool, lit, stripe).launch().await;
+    reconciler.abort();
+    cleanup.abort();
+    result?;
+    Ok(())
 }

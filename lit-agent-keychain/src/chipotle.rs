@@ -1,400 +1,181 @@
-//! Chipotle (`lit-api-server`) HTTP client.
-//!
-//! Management calls use the app's master API key; action execution uses a
-//! per-tenant service usage key (encrypt) or is done by the agent itself with
-//! its own usage key (reader — never through this service).
-
-use anyhow::{Context, Result};
-use reqwest::StatusCode;
-use serde::Deserialize;
+use crate::models::valid_cid;
+use anyhow::{bail, Context, Result};
+use moka::future::Cache;
 use serde_json::{json, Value};
+use sha3::{Digest, Keccak256};
+use std::time::Duration;
 
 #[derive(Clone)]
-pub struct ChipotleClient {
+pub struct Chipotle {
     http: reqwest::Client,
-    base_url: String,
+    base: String,
+    execution_key: String,
+    master_key: String,
+    keys: Cache<String, String>,
 }
-
-#[derive(Debug)]
-pub struct ChipotleError {
-    pub message: String,
-    pub status: Option<StatusCode>,
-    pub body: Option<Value>,
-}
-
-impl std::fmt::Display for ChipotleError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for ChipotleError {}
-
-impl ChipotleError {
-    fn transport(e: reqwest::Error) -> Self {
-        // reqwest's Display hides the cause; walk the source chain so TLS/DNS/
-        // connect failures are diagnosable from the API error.
-        let mut message = format!("chipotle request failed: {e}");
-        let mut src = std::error::Error::source(&e);
-        while let Some(s) = src {
-            message.push_str(&format!(": {s}"));
-            src = s.source();
-        }
-        Self {
-            message,
-            status: None,
-            body: None,
-        }
-    }
-
-    /// True when Chipotle reports the entity already exists (e.g. re-registering
-    /// an action CID on the account). Callers that are idempotent by design may
-    /// treat this as success.
-    pub fn is_already_exists(&self) -> bool {
-        let text = self
-            .body
-            .as_ref()
-            .map(|b| b.to_string().to_lowercase())
-            .unwrap_or_default();
-        text.contains("already") || text.contains("exists")
-    }
-
-    /// True when Chipotle reports the entity doesn't exist (e.g. removing a
-    /// usage key that was already removed on a previous, half-failed attempt).
-    /// Lets revocation retries converge instead of wedging on the upstream
-    /// "does not exist" rejection.
-    pub fn is_not_found(&self) -> bool {
-        let text = self
-            .body
-            .as_ref()
-            .map(|b| b.to_string().to_lowercase())
-            .unwrap_or_default();
-        text.contains("not found")
-            || text.contains("does not exist")
-            || text.contains("doesnotexist")
-            || text.contains("unknown key")
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct LitActionResponse {
-    pub response: Value,
-    #[serde(default)]
-    pub logs: String,
-    #[serde(default)]
-    pub has_error: bool,
-}
-
-impl ChipotleClient {
-    pub fn new(base_url: String) -> Result<Self> {
-        let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(90))
-            .build()
-            .context("building Chipotle HTTP client")?;
+impl Chipotle {
+    pub fn new(base: String, execution_key: String, master_key: String) -> Result<Self> {
         Ok(Self {
-            http,
-            base_url: base_url.trim_end_matches('/').to_string(),
-        })
-    }
-
-    pub fn base_url(&self) -> &str {
-        &self.base_url
-    }
-
-    fn url(&self, path: &str) -> String {
-        format!("{}/core/v1/{}", self.base_url, path.trim_start_matches('/'))
-    }
-
-    async fn send(
-        &self,
-        req: reqwest::RequestBuilder,
-        api_key: &str,
-        path: &str,
-    ) -> Result<Value, ChipotleError> {
-        let response = req
-            .bearer_auth(api_key)
-            .header("X-Api-Key", api_key)
-            .send()
-            .await
-            .map_err(ChipotleError::transport)?;
-        let status = response.status();
-        let text = response.text().await.map_err(ChipotleError::transport)?;
-        let parsed = serde_json::from_str::<Value>(&text).ok();
-        if status.is_success() {
-            return Ok(parsed.unwrap_or_else(|| json!({ "raw": text })));
-        }
-        tracing::warn!(
-            target: "chipotle",
-            path,
-            status = %status,
-            body_preview = %text.chars().take(256).collect::<String>(),
-            "chipotle call failed"
-        );
-        Err(ChipotleError {
-            message: format!(
-                "chipotle {path} returned HTTP {status}: {}",
-                text.chars().take(200).collect::<String>()
-            ),
-            status: Some(status),
-            body: parsed.or_else(|| Some(json!({ "raw": text }))),
-        })
-    }
-
-    async fn post_json(
-        &self,
-        path: &str,
-        api_key: &str,
-        body: &Value,
-    ) -> Result<Value, ChipotleError> {
-        let req = self.http.post(self.url(path)).json(body);
-        self.send(req, api_key, path).await
-    }
-
-    /// Mint a vault PKP on the account. Returns its wallet address (the `pkpId`
-    /// used by `Lit.Actions.Encrypt/Decrypt`).
-    pub async fn create_wallet(&self, master_key: &str) -> Result<String, ChipotleError> {
-        let v = self
-            .post_json("create_wallet", master_key, &json!({}))
-            .await?;
-        string_field(&v, "wallet_address", "create_wallet")
-    }
-
-    /// Create a group permitting the given PKPs. Actions are attached separately
-    /// via [`add_action_to_group`] so the server does the CID hashing.
-    pub async fn add_group(
-        &self,
-        master_key: &str,
-        name: &str,
-        description: &str,
-        pkp_ids: &[String],
-    ) -> Result<u64, ChipotleError> {
-        let v = self
-            .post_json(
-                "add_group",
-                master_key,
-                &json!({
-                    "group_name": name,
-                    "group_description": description,
-                    "pkp_ids_permitted": pkp_ids,
-                    "cid_hashes_permitted": [],
-                }),
-            )
-            .await?;
-        let raw = string_field(&v, "group_id", "add_group")?;
-        parse_group_id(&raw).ok_or_else(|| ChipotleError {
-            message: format!("add_group returned unparseable group_id {raw:?}"),
-            status: None,
-            body: Some(v),
-        })
-    }
-
-    pub async fn add_action(
-        &self,
-        master_key: &str,
-        cid: &str,
-        name: &str,
-        description: &str,
-    ) -> Result<(), ChipotleError> {
-        self.post_json(
-            "add_action",
+            http: reqwest::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()?,
+            base,
+            execution_key,
             master_key,
-            &json!({ "action_ipfs_cid": cid, "name": name, "description": description }),
-        )
-        .await
-        .map(|_| ())
+            keys: Cache::builder()
+                .max_capacity(10000)
+                .time_to_live(Duration::from_secs(300))
+                .build(),
+        })
     }
-
-    pub async fn add_action_to_group(
-        &self,
-        master_key: &str,
-        group_id: u64,
-        cid: &str,
-    ) -> Result<(), ChipotleError> {
-        self.post_json(
+    async fn body(response: reqwest::Response) -> Result<Value> {
+        if !response.status().is_success() {
+            bail!("Lit request failed ({})", response.status().as_u16());
+        }
+        let mut response = response;
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await? {
+            if body.len() + chunk.len() > 1024 * 1024 {
+                bail!("Lit response too large");
+            }
+            body.extend_from_slice(&chunk);
+        }
+        serde_json::from_slice(&body).context("invalid Lit response")
+    }
+    pub async fn public_key(&self, cid: &str) -> Result<String> {
+        if !valid_cid(cid) {
+            bail!("invalid CID");
+        }
+        if let Some(key) = self.keys.get(cid).await {
+            return Ok(key);
+        }
+        let body = self
+            .execute(crate::actions::PUBLIC_KEY, &json!({"cid":cid}))
+            .await?;
+        let key = body
+            .get("public_key")
+            .and_then(Value::as_str)
+            .context("missing public key")?
+            .to_owned();
+        k256::PublicKey::from_sec1_bytes(&hex::decode(key.trim_start_matches("0x"))?)?;
+        self.keys.insert(cid.into(), key.clone()).await;
+        Ok(key)
+    }
+    async fn management(&self, path: &str, body: &Value) -> Result<Value> {
+        let result = Self::body(
+            self.http
+                .post(format!("{}/core/v1/{path}", self.base))
+                .header("X-Api-Key", &self.master_key)
+                .header("X-Privacy-Mode", "true")
+                .json(body)
+                .send()
+                .await?,
+        )
+        .await?;
+        if result.get("success").and_then(Value::as_bool) != Some(true) {
+            bail!("Chipotle management failed");
+        }
+        Ok(result)
+    }
+    pub async fn create_group(&self, vault: &str, cids: &[String]) -> Result<i64> {
+        let hashes: Vec<String> = cids
+            .iter()
+            .map(|cid| format!("0x{}", hex::encode(Keccak256::digest(cid.as_bytes()))))
+            .collect();
+        let result=self.management("add_group",&json!({"group_name":format!("Keychain {vault}"),"group_description":"Keychain execution only","pkp_ids_permitted":[],"cid_hashes_permitted":hashes})).await?;
+        let id = result["group_id"]
+            .as_str()
+            .context("missing group")?
+            .parse::<i64>()?;
+        if id <= 0 {
+            bail!("invalid group");
+        }
+        Ok(id)
+    }
+    pub async fn add_action(&self, group: i64, cid: &str) -> Result<()> {
+        self.management(
             "add_action_to_group",
-            master_key,
-            &json!({ "group_id": group_id, "action_ipfs_cid": cid }),
+            &json!({"group_id":group,"action_ipfs_cid":cid}),
         )
-        .await
-        .map(|_| ())
+        .await?;
+        Ok(())
     }
-
-    pub async fn remove_action_from_group(
-        &self,
-        master_key: &str,
-        group_id: u64,
-        hashed_cid: &str,
-    ) -> Result<(), ChipotleError> {
-        self.post_json(
-            "remove_action_from_group",
-            master_key,
-            &json!({ "group_id": group_id, "hashed_cid": hashed_cid }),
-        )
-        .await
-        .map(|_| ())
+    fn permissions(groups: &[i64]) -> Value {
+        json!({"name":"Keychain user execution","description":"Execution only; owner and agent proofs remain required","can_create_groups":false,"can_delete_groups":false,"can_create_pkps":false,"manage_ipfs_ids_in_groups":[],"add_pkp_to_groups":[],"remove_pkp_from_groups":[],"execute_in_groups":groups})
     }
-
-    /// Mint a usage API key that can only execute actions in `groups`.
-    pub async fn add_usage_api_key(
-        &self,
-        master_key: &str,
-        name: &str,
-        description: &str,
-        groups: &[u64],
-    ) -> Result<String, ChipotleError> {
-        let v = self
-            .post_json(
-                "add_usage_api_key",
-                master_key,
-                &json!({
-                    "name": name,
-                    "description": description,
-                    "can_create_groups": false,
-                    "can_delete_groups": false,
-                    "can_create_pkps": false,
-                    "manage_ipfs_ids_in_groups": [],
-                    "add_pkp_to_groups": [],
-                    "remove_pkp_from_groups": [],
-                    "execute_in_groups": groups,
-                }),
+    pub async fn update_usage_key(&self, key: &str, groups: &[i64]) -> Result<()> {
+        let mut body = Self::permissions(groups);
+        body["usage_api_key"] = json!(key);
+        self.management("update_usage_api_key", &body).await?;
+        Ok(())
+    }
+    pub async fn create_usage_key(&self, groups: &[i64]) -> Result<String> {
+        let result = self
+            .management("add_usage_api_key", &Self::permissions(groups))
+            .await?;
+        let key = result["usage_api_key"]
+            .as_str()
+            .context("missing usage key")?;
+        if key.is_empty() || key.len() > 512 {
+            bail!("invalid usage key");
+        }
+        Ok(key.into())
+    }
+    pub async fn remove_usage_key(&self, key: &str) -> Result<()> {
+        if self
+            .management("remove_usage_api_key", &json!({"usage_api_key":key}))
+            .await
+            .is_ok()
+        {
+            return Ok(());
+        }
+        // A removal may commit before its response is lost. Confirm absence via
+        // the master's key inventory, not account_exists (which also reports
+        // false for existing accounts in chain-secured mode).
+        let hash = format!("0x{}", hex::encode(Keccak256::digest(key.as_bytes())));
+        for page in 0..1000 {
+            let result = Self::body(
+                self.http
+                    .get(format!("{}/core/v1/list_api_keys", self.base))
+                    .header("X-Api-Key", &self.master_key)
+                    .header("X-Privacy-Mode", "true")
+                    .query(&[("page_number", page), ("page_size", 100)])
+                    .send()
+                    .await?,
             )
             .await?;
-        string_field(&v, "usage_api_key", "add_usage_api_key")
+            let keys = result.as_array().context("invalid key inventory")?;
+            for entry in keys {
+                let actual = entry["api_key_hash"]
+                    .as_str()
+                    .context("invalid key inventory")?;
+                if actual.eq_ignore_ascii_case(&hash) {
+                    bail!("usage key revocation unconfirmed");
+                }
+            }
+            if keys.len() < 100 {
+                return Ok(());
+            }
+        }
+        bail!("usage key revocation unconfirmed")
     }
-
-    pub async fn remove_usage_api_key(
-        &self,
-        master_key: &str,
-        usage_api_key: &str,
-    ) -> Result<(), ChipotleError> {
-        self.post_json(
-            "remove_usage_api_key",
-            master_key,
-            &json!({ "usage_api_key": usage_api_key }),
+    pub async fn execute(&self, code: &str, params: &Value) -> Result<Value> {
+        let body = Self::body(
+            self.http
+                .post(format!("{}/core/v1/lit_action", self.base))
+                .header("X-Api-Key", &self.execution_key)
+                .header("X-Privacy-Mode", "true")
+                .json(&json!({"code": code, "js_params": params}))
+                .send()
+                .await?,
         )
-        .await
-        .map(|_| ())
-    }
-
-    /// Execute inline action code. Errors thrown by the action surface as
-    /// `Err` with the action logs in the message.
-    pub async fn execute_lit_action(
-        &self,
-        usage_api_key: &str,
-        code: &str,
-        js_params: Value,
-    ) -> Result<LitActionResponse, ChipotleError> {
-        let v = self
-            .post_json(
-                "lit_action",
-                usage_api_key,
-                &json!({ "code": code, "js_params": js_params }),
-            )
-            .await?;
-        let parsed: LitActionResponse =
-            serde_json::from_value(v.clone()).map_err(|e| ChipotleError {
-                message: format!("lit_action returned an unexpected body: {e}"),
-                status: None,
-                body: Some(v.clone()),
-            })?;
-        if parsed.has_error {
-            return Err(ChipotleError {
-                message: format!(
-                    "lit action failed: {}",
-                    parsed.logs.chars().take(500).collect::<String>()
-                ),
-                status: None,
-                body: Some(v),
-            });
+        .await?;
+        if body.get("has_error").and_then(Value::as_bool) != Some(false) {
+            bail!("Lit execution failed");
         }
-        Ok(parsed)
-    }
-}
-
-fn string_field(v: &Value, field: &str, call: &str) -> Result<String, ChipotleError> {
-    v.get(field)
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| ChipotleError {
-            message: format!("{call} response missing `{field}`"),
-            status: None,
-            body: Some(v.clone()),
-        })
-}
-
-/// Chipotle returns group ids as strings, "decimal or hex".
-pub fn parse_group_id(raw: &str) -> Option<u64> {
-    let s = raw.trim();
-    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        u64::from_str_radix(hex, 16).ok()
-    } else {
-        s.parse::<u64>().ok()
-    }
-}
-
-/// Some action responses come back as a JSON string containing JSON. Normalize.
-pub fn unwrap_response(v: &Value) -> Value {
-    match v {
-        Value::String(s) => serde_json::from_str(s).unwrap_or_else(|_| v.clone()),
-        other => other.clone(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_group_ids() {
-        assert_eq!(parse_group_id("42"), Some(42));
-        assert_eq!(parse_group_id("0x2a"), Some(42));
-        assert_eq!(parse_group_id(" 7 "), Some(7));
-        assert_eq!(parse_group_id("nope"), None);
-    }
-
-    #[test]
-    fn unwraps_stringified_json() {
-        let v = Value::String("{\"ciphertext\":\"ab\"}".into());
-        assert_eq!(unwrap_response(&v)["ciphertext"], "ab");
-        let plain = json!({"a": 1});
-        assert_eq!(unwrap_response(&plain), plain);
-    }
-
-    #[test]
-    fn already_exists_detection() {
-        let e = ChipotleError {
-            message: String::new(),
-            status: None,
-            body: Some(json!({"error": "Action already exists"})),
-        };
-        assert!(e.is_already_exists());
-        let e2 = ChipotleError {
-            message: String::new(),
-            status: None,
-            body: Some(json!({"error": "insufficient balance"})),
-        };
-        assert!(!e2.is_already_exists());
-    }
-
-    #[test]
-    fn not_found_detection() {
-        for msg in [
-            "Usage key does not exist",
-            "key not found",
-            "UsageApiKeyDoesNotExist",
-        ] {
-            let e = ChipotleError {
-                message: String::new(),
-                status: None,
-                body: Some(json!({ "error": msg })),
-            };
-            assert!(e.is_not_found(), "{msg} should read as not-found");
-        }
-        let other = ChipotleError {
-            message: String::new(),
-            status: None,
-            body: Some(json!({"error": "insufficient balance"})),
-        };
-        assert!(!other.is_not_found());
+        let response = body.get("response").context("missing action response")?;
+        // The service never returns Lit execution logs.
+        Ok(response.clone())
     }
 }

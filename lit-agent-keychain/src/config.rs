@@ -1,94 +1,95 @@
-//! Environment configuration.
+use anyhow::{bail, Context, Result};
 
-use anyhow::{Context, Result};
-
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Config {
     pub database_url: String,
-    pub magic_link_signing_key: Vec<u8>,
-    pub resend_api_key: String,
-    pub mail_from: String,
     pub public_base_url: String,
-    /// AEAD key protecting Chipotle usage API keys (agent keys + per-tenant
-    /// service keys) at rest. These are *Chipotle credentials*, not secret
-    /// values — secret values are sealed inside the TEE and never stored here
-    /// in plaintext.
-    pub usage_key_encryption_key: Vec<u8>,
-    pub chipotle_api_base_url: String,
-    /// Master API key of the Chipotle account this deployment operates. Used
-    /// only for management calls (mint vault PKPs, groups, usage keys). Every
-    /// tenant lives on this one account.
-    pub chipotle_master_api_key: String,
-    /// secp256k1 private key (hex) that signs grants. Its address is baked into
-    /// the reader action source, so rotating it changes the reader CID.
-    pub grant_signing_key: String,
-    pub grant_ttl_secs: i64,
-    pub max_secret_bytes: usize,
+    pub lit_api_url: String,
+    pub lit_execution_key: String,
+    pub chipotle_master_key: String,
+    pub usage_key_encryption_key: [u8; 32],
+    pub stripe_secret_key: String,
+    pub stripe_webhook_secret: String,
+    pub stripe_price_id: String,
+    pub stripe_portal_configuration: String,
+    pub stripe_api_url: String,
+    pub contact_email: String,
+    pub network: String,
+    pub google_client_id: Option<String>,
+    pub daily_execution_limit: i64,
+    pub hourly_ip_execution_limit: i64,
+    pub daily_vault_execution_limit: i64,
+    pub secure_cookies: bool,
+    pub web_dir: String,
 }
-
 impl Config {
     pub fn from_env() -> Result<Self> {
+        let public_base_url = required("PUBLIC_BASE_URL")?;
+        validate_origin(&public_base_url)?;
+        let lit_api_url = optional("LIT_API_URL")
+            .unwrap_or_else(|| "https://api.chipotle.litprotocol.com".into());
+        validate_origin(&lit_api_url)?;
+        let secure_cookies = public_base_url.starts_with("https://");
+        let encryption_key = hex::decode(required("USAGE_KEY_ENCRYPTION_KEY")?)?;
+        let usage_key_encryption_key: [u8; 32] = encryption_key
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("USAGE_KEY_ENCRYPTION_KEY must be 32 bytes of hex"))?;
+        let stripe_api_url =
+            optional("KEYCHAIN_STRIPE_API_URL").unwrap_or_else(|| "https://api.stripe.com".into());
+        if stripe_api_url != "https://api.stripe.com" {
+            validate_origin(&stripe_api_url)?;
+            if secure_cookies || !stripe_api_url.starts_with("http://") {
+                bail!("Stripe API override is only allowed for loopback development");
+            }
+        }
         Ok(Self {
             database_url: required("DATABASE_URL")?,
-            magic_link_signing_key: parse_b64_key("MAGIC_LINK_SIGNING_KEY")?,
-            resend_api_key: required("RESEND_API_KEY")?,
-            mail_from: required("MAIL_FROM")?,
-            public_base_url: required("PUBLIC_BASE_URL")?
-                .trim_end_matches('/')
-                .to_string(),
-            usage_key_encryption_key: parse_b64_key("USAGE_KEY_ENCRYPTION_KEY")?,
-            chipotle_api_base_url: optional("CHIPOTLE_API_BASE_URL")
-                .unwrap_or_else(|| "https://api.chipotle.litprotocol.com".to_string())
-                .trim_end_matches('/')
-                .to_string(),
-            chipotle_master_api_key: required("CHIPOTLE_MASTER_API_KEY")?,
-            grant_signing_key: required("GRANT_SIGNING_KEY")?,
-            grant_ttl_secs: optional_parse_min("GRANT_TTL_SECS", 120, 10)?,
-            max_secret_bytes: optional_parse_min("MAX_SECRET_BYTES", 16 * 1024, 1)?,
+            public_base_url,
+            lit_api_url,
+            lit_execution_key: required("LIT_EXECUTION_KEY")?,
+            chipotle_master_key: required("CHIPOTLE_MASTER_API_KEY")?,
+            usage_key_encryption_key,
+            stripe_secret_key: required("STRIPE_SECRET_KEY")?,
+            stripe_webhook_secret: required("STRIPE_WEBHOOK_SECRET")?,
+            stripe_price_id: required("STRIPE_PRICE_ID")?,
+            stripe_portal_configuration: required("STRIPE_PORTAL_CONFIGURATION_ID")?,
+            stripe_api_url,
+            contact_email: optional("CONTACT_EMAIL")
+                .unwrap_or_else(|| "support@litprotocol.com".into()),
+            network: optional("LIT_NETWORK").unwrap_or_else(|| "chipotle-v1".into()),
+            google_client_id: optional("GOOGLE_CLIENT_ID"),
+            daily_execution_limit: positive("DAILY_EXECUTION_LIMIT", 10000)?,
+            hourly_ip_execution_limit: positive("HOURLY_IP_EXECUTION_LIMIT", 200)?,
+            daily_vault_execution_limit: positive("DAILY_VAULT_EXECUTION_LIMIT", 1000)?,
+            secure_cookies,
+            web_dir: optional("WEB_DIR").unwrap_or_else(|| "web/dist".into()),
         })
     }
 }
-
-fn required(name: &str) -> Result<String> {
-    let v = std::env::var(name).with_context(|| format!("missing env var: {name}"))?;
-    if v.trim().is_empty() {
-        anyhow::bail!("env var {name} is empty");
-    }
-    Ok(v)
+fn required(key: &str) -> Result<String> {
+    optional(key).with_context(|| format!("missing {key}"))
 }
-
-fn optional(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|v| !v.trim().is_empty())
+fn optional(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|s| !s.trim().is_empty())
 }
-
-fn optional_parse_min<T>(name: &str, default: T, min: T) -> Result<T>
-where
-    T: std::str::FromStr + PartialOrd + Copy + std::fmt::Display,
-    T::Err: std::fmt::Display,
-{
-    let value = match optional(name) {
-        Some(raw) => raw
-            .parse::<T>()
-            .map_err(|e| anyhow::anyhow!("env var {name} has invalid value: {e}"))?,
-        None => default,
-    };
-    if value < min {
-        anyhow::bail!("env var {name} must be >= {min}");
+fn positive(key: &str, default: i64) -> Result<i64> {
+    let value = optional(key)
+        .map(|s| s.parse::<i64>())
+        .transpose()?
+        .unwrap_or(default);
+    if !(1..=1_000_000).contains(&value) {
+        bail!("{key} must be 1..1000000");
     }
     Ok(value)
 }
-
-fn parse_b64_key(name: &str) -> Result<Vec<u8>> {
-    use base64::Engine;
-    let raw = required(name)?;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(raw.trim())
-        .with_context(|| format!("{name} must be valid base64"))?;
-    if bytes.len() < 32 {
-        anyhow::bail!(
-            "{name} decodes to {} bytes; need at least 32. Generate one with `openssl rand -base64 32`.",
-            bytes.len()
-        );
+pub fn validate_origin(value: &str) -> Result<()> {
+    let url = reqwest::Url::parse(value)?;
+    let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    if value.len() > 256
+        || url.origin().ascii_serialization() != value
+        || !(url.scheme() == "https" || (url.scheme() == "http" && loopback))
+    {
+        bail!("expected HTTPS origin (HTTP is allowed only on loopback)");
     }
-    Ok(bytes)
+    Ok(())
 }

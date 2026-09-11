@@ -1,69 +1,63 @@
-# @lit-protocol/keychain
+# @lit-protocol/keychain v2
 
-Zero-dependency JavaScript SDK for [Lit Keychain](https://keychain.litprotocol.com).
-ES modules for Node.js 18+, Deno, Bun, and browser bundlers. Node cannot import
-`https:` module URLs, so install from npm (below) or download
-`https://keychain.litprotocol.com/sdk/lit-agent-keychain.js` and import it by
-relative path.
-
-## Install
+The agent generates and holds an Ed25519 signing key. An owner authorizes its
+public key for exact secret versions. The SDK checks signed metadata, submits a
+recipient-bound signed request, and decrypts the action-signed HPKE response locally.
+Execution goes directly to Chipotle with a scoped, per-vault usage key funded by
+Keychain. That billing key does not authorize secret access by itself.
 
 ```sh
 npm install @lit-protocol/keychain
+npx keychain init ./agent-identity.json
 ```
 
-## Read a secret
-
-Create an agent usage API key in the Lit Keychain dashboard and supply it through
-your environment:
+Give the **public key** to the owner. In Keychain, approve it on a secret and download
+**Agent config**. Keep `agent-identity.json` private; it is created with mode 0600 and
+existing files are never overwritten. The config contains public locators and a
+**scoped billing key**. Keep both files private (mode 0600); do not commit them.
+The config contains no owner or agent signing private key.
 
 ```js
-import { LitAgentKeychain, LitAgentKeychainError } from '@lit-protocol/keychain';
-
-const keychain = new LitAgentKeychain({
-  usageApiKey: process.env.LIT_AGENT_KEYCHAIN_KEY,
-});
-
-const openaiKey = await keychain.get('OPENAI_API_KEY');
+import { readFile } from "node:fs/promises";
+import { Keychain } from "@lit-protocol/keychain";
+const identity = JSON.parse(await readFile("./agent-identity.json", "utf8"));
+const config = JSON.parse(
+  await readFile("./STRIPE_API_KEY.keychain.json", "utf8"),
+);
+const keychain = new Keychain(identity.privateKey, config);
+const secret = await keychain.get("STRIPE_API_KEY");
+// Use it without logging it. For strict Stripe-only secrets:
+// const balances = await keychain.stripeBalance('STRIPE_API_KEY');
+keychain.destroy();
 ```
 
-The SDK obtains a policy-approved grant, then redeems it directly with Chipotle.
-Plaintext travels from Chipotle to your agent.
-
-The constructor also accepts `baseUrl` (default
-`https://keychain.litprotocol.com`), `timeoutMs` (default `30000`), and a custom
-`fetch` implementation. Keep agent usage keys out of public client bundles.
-
-- `get(name, { version, signal } = {})`: retrieve a plaintext secret.
-- `grant(name, { version, signal } = {})`: obtain a grant without redeeming it.
-- `reference(name, { version, signal } = {})`: obtain ciphertext and vault metadata
-  for use inside a permitted Lit Action.
-
-`LitAgentKeychain` is also the default export. `LitAgentKeychainError` exposes
-`status`, `body`, and `code` (when the control plane supplies a denial code).
-
-## Build and publish
-
-From `lit-agent-keychain`, run:
+CLI reads write the requested result to stdout. Avoid sending credential output to logs:
 
 ```sh
-./publish.sh
+keychain get ./agent-identity.json ./API_KEY.keychain.json API_KEY
 ```
 
-This logs into npm, builds the SDK, and publishes `@lit-protocol/keychain` publicly.
-Use an npm account with publishing access to the `@lit-protocol` organization.
-Additional arguments are forwarded to `npm publish`, for example
-`./publish.sh --dry-run` (still logs in).
+Set `CHIPOTLE_USAGE_API_KEY` for a CLI billing-key override, or pass
+`{ usageApiKey }` as the SDK constructor's third argument. After the owner replaces
+the execution key, update every agent using the old key.
 
-No dependency installation is needed. The build checks JavaScript syntax and
-copies the ESM source into `dist/`. `npm pack` and `npm publish` also build
-automatically through `prepack`.
+The config pins each action manifest/CID and an independently trusted Lit endpoint.
+Never replace that endpoint using a URL supplied by the Keychain API. V2 clients
+must use the action templates from the same immutable release as the vault.
 
-For subsequent releases, update the version first:
+Owner management requests allow two minutes for initial Chipotle group/key
+provisioning and billing operations; direct action requests retain their separate
+execution timeout. `OwnerClient` accepts an optional fourth `managementTimeoutMs`
+constructor argument.
 
-```sh
-cd sdk
-npm version patch --no-git-tag-version
-cd ..
-./publish.sh
-```
+Owner/browser integrations can use `OwnerClient`, `LitConnection`, and
+`authorizationTypedData`; see `web/src/identities.ts` for wallet, passkey and Google
+signers. Owner approvals use short-lived proofs; stored ciphertext/policy receipts
+outlive a login session. No owner or agent private key is stored by Keychain.
+
+The operator is trusted for availability and the latest policy. It can replay old,
+still-valid permissions, but cannot forge owner authorization. Requests can repeat
+within their signed validity window; this SDK does not promise one-time execution.
+A compromised permitted agent can disclose any credential it receives.
+
+Build from this repository with `npm ci && npm run build` in `lit-agent-keychain/`.

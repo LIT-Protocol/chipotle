@@ -1,20 +1,28 @@
 {
   "name": "@lit-protocol/keychain",
-  "version": "0.1.0",
-  "description": "Zero-dependency agent SDK for Lit Keychain programmable credential access",
+  "version": "2.0.0",
+  "description": "Owner-authorized, locally encrypted credentials for agents",
   "type": "module",
-  "main": "./dist/lit-agent-keychain.js",
+  "main": "./dist/index.js",
   "exports": {
-    ".": "./dist/lit-agent-keychain.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "keychain": "./cli.mjs"
   },
   "files": [
-    "dist/lit-agent-keychain.js"
+    "dist",
+    "cli.mjs",
+    "README.md"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "scripts": {
-    "build": "node --check lit-agent-keychain.js && node build.mjs",
+    "build": "npm --prefix .. run build:actions && cd .. && node scripts/build-sdk.mjs",
     "prepack": "npm run build"
   },
   "publishConfig": {
@@ -26,5 +34,9 @@
     "url": "git+https://github.com/LIT-Protocol/chipotle.git",
     "directory": "lit-agent-keychain/sdk"
   },
-  "homepage": "https://keychain.litprotocol.com"
+  "license": "Apache-2.0",
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "zod": "4.3.6"
+  }
 }
