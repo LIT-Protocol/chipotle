@@ -1,177 +1,27 @@
 ---
 name: lit-agent-keychain
-description: "Use when an agent needs policy-gated access to secrets (API keys, tokens, credentials) stored in Lit Agent Keychain at keychain.litprotocol.com: help the user store secrets and mint an agent key, then read secrets at runtime with a single credential."
-version: 0.1.0
-author: Lit Protocol
-license: MIT
-metadata:
-  hermes:
-    tags: [lit-protocol, chipotle, secrets, credentials, agents]
+description: Use Lit Agent Keychain v2 for owner-approved agent access to encrypted credentials.
+version: 2.0.0
 ---
 
-# Lit Agent Keychain
+# Lit Agent Keychain v2
 
-Lit Agent Keychain is a password manager for machines. Secrets are sealed inside the
-Chipotle TEE; agents get **policy-gated** access with one credential. Two
-release tiers per secret:
+1. Generate an agent identity on the agent device with `keychain init identity.json`.
+2. Give only its public key to the owner. The owner signs in with a wallet, passkey,
+   or Google account, encrypts a secret locally, and explicitly approves that key.
+3. Download the public **Agent config** and use `@lit-protocol/keychain` with the local
+   private identity. `get(name)` decrypts a recipient-encrypted result; `stripeBalance`
+   invokes the strict Stripe integration without revealing its credential.
 
-- `plaintext` (default) — an authorized agent can read the value. The value is
-  decrypted inside the TEE by a pinned, auditable reader action and returned
-  straight to the agent. The Lit Agent Keychain control plane never sees it.
-- `in_tee_only` — only Lit Actions the user has explicitly permitted can decrypt
-  the value, and only inside the TEE. Nobody can read it out.
+Never request an owner's private key or Google token, and never ask the backend to
+mint a grant. There are no setup bearer tokens or managed per-tenant PKP vaults.
+Agent identity and Lit execution billing are separate. Keep identity files private
+and avoid logging credentials returned by `get` or the CLI.
 
-Base URL: `https://keychain.litprotocol.com`
+The operator can replay older still-valid owner permissions, including undoing a
+revocation. It cannot invent new owner permissions. The frontend/SDK, Lit runtime,
+selected sign-in provider, and policy freshness service are trusted as documented
+in SECURITY.md. Strict Stripe actions cannot export or arbitrarily migrate secrets;
+keep the original credential for reimporting into a future action release.
 
-## Two kinds of credential — don't mix them up
-
-| Credential | Who holds it | What it can do |
-|---|---|---|
-| **Agent access token** (bearer) | A setup agent acting *as the user* | Everything the dashboard can: create/rotate secrets, mint agent keys, edit policies, read audit log |
-| **Agent usage API key** | A runtime agent | `POST /api/grants`, `GET /api/reference/<name>`, and running the reader action on Chipotle. Nothing else. |
-
-Runtime agents should only ever hold a usage API key.
-
-## 1. Setup agent: authorize as the user
-
-Same flow as lit-triggers. Generate a local bearer token, hash it, open the
-authorize URL in the user's browser:
-
-```bash
-python3 - <<'PY'
-import base64, hashlib, pathlib, secrets, urllib.parse
-p = pathlib.Path.home() / '.lit-agent-keychain' / 'agent-token'
-p.parent.mkdir(exist_ok=True)
-if not p.exists():
-    p.write_text(secrets.token_urlsafe(48)); p.chmod(0o600)
-raw = p.read_text().strip()
-challenge = base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest()).rstrip(b'=').decode()
-print('https://keychain.litprotocol.com/agent/authorize?' + urllib.parse.urlencode({'challenge': challenge}))
-PY
-```
-
-Then verify: `curl -H "Authorization: Bearer $TOKEN" https://keychain.litprotocol.com/api/me` → 200.
-
-Lifecycle: setup tokens do **not** expire and are **not** revoked when the user
-signs out of the dashboard. The user sees every authorization under *Setup
-agents* on the dashboard and can revoke it there; programmatically:
-`GET /api/setup-tokens` lists them (`id` = the challenge hash, `label`,
-`created_at`, `last_used_at`, `revoked_at`) and `DELETE /api/setup-tokens/<id>`
-revokes one (subsequent requests → 401). Tell the user to revoke your token
-when setup is finished, or do it yourself with the hash you generated above.
-
-## 2. Store secrets (setup agent)
-
-```bash
-curl -X POST https://keychain.litprotocol.com/api/secrets \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"OPENAI_API_KEY","value":"sk-...","kind":"api_key","environment":"production"}'
-```
-
-The first call provisions the user's vault (a PKP + group on Chipotle; several
-on-chain transactions, expect **30–60 seconds** — use a generous HTTP timeout).
-Later creates/rotates take a few seconds. Fields: `name` `[A-Za-z0-9_.-]`, `value` ≤16 KB, optional `kind`,
-`environment`, `release` (`plaintext` | `in_tee_only`), `policy`:
-
-```json
-{ "allowed_agents": ["<agent uuid>"], "max_reads_per_day": 100, "not_after": "2026-12-31T00:00:00Z" }
-```
-
-Other calls: `GET /api/secrets`, `GET /api/secrets/<name>` (versions),
-`PUT /api/secrets/<name> {"value": ...}` (rotate → new version),
-`PATCH /api/secrets/<name>` (policy/release/disabled), `DELETE /api/secrets/<name>`.
-
-## 3. Mint a runtime agent key (setup agent)
-
-```bash
-curl -X POST https://keychain.litprotocol.com/api/agents \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"payments-bot"}'
-# -> { "id": "...", "usage_api_key": "…shown once…", "chipotle_api_base_url": "..." }
-```
-
-Agent names must be unique among active agents (`409 agent_name_exists`), so
-that policy allowlists and the audit log are unambiguous. Give `usage_api_key`
-to the runtime agent (env var). Revoke with `DELETE /api/agents/<id>` — this
-removes the key on Chipotle too. Keychain rejects the key immediately (no new
-grants); allow up to ~5 minutes for every Chipotle replica's authorization
-cache to stop accepting it for the reader action.
-
-## 4. Runtime agent: read a secret
-
-Easiest — the SDK (zero dependencies). **Node.js 18+ / Bun:** install from npm;
-Node's module loader does not load `https:` imports.
-
-```bash
-npm install @lit-protocol/keychain
-export LIT_AGENT_KEYCHAIN_KEY=<usage_api_key from step 3>
-```
-
-```js
-// read.mjs — run with: node read.mjs
-import { LitAgentKeychain } from '@lit-protocol/keychain';
-const keychain = new LitAgentKeychain({ usageApiKey: process.env.LIT_AGENT_KEYCHAIN_KEY });
-const key = await keychain.get('OPENAI_API_KEY');
-```
-
-No npm? Download the single file and import it locally:
-
-```bash
-curl -fsSL https://keychain.litprotocol.com/sdk/lit-agent-keychain.js -o lit-agent-keychain.mjs
-# import { LitAgentKeychain } from './lit-agent-keychain.mjs';
-```
-
-**Deno / browsers** can import the URL directly:
-`import { LitAgentKeychain } from 'https://keychain.litprotocol.com/sdk/lit-agent-keychain.js';`
-
-Older versions stay readable after rotation: `keychain.get(name, { version: 1 })`.
-
-Manually, it's two requests:
-
-```bash
-# (1) grant — policy is evaluated here; 403 with {"error": "<reason>"} if denied
-G=$(curl -s -X POST https://keychain.litprotocol.com/api/grants \
-  -H "Authorization: Bearer $LIT_AGENT_KEYCHAIN_KEY" -H 'Content-Type: application/json' \
-  -d '{"name":"OPENAI_API_KEY"}')
-# (2) run the reader action on Chipotle with the same key; plaintext comes back to you
-curl -s -X POST "$(echo "$G" | jq -r .chipotle_api_base_url)/core/v1/lit_action" \
-  -H "Authorization: Bearer $LIT_AGENT_KEYCHAIN_KEY" -H 'Content-Type: application/json' \
-  -d "$(echo "$G" | jq '{code: .action.code, js_params: .js_params}')" | jq -r '.response.value // .response'
-```
-
-Denial codes: `secret_disabled`, `release_not_plaintext`, `agent_not_allowed`,
-`policy_expired`, `rate_limited`. Grants expire after ~2 minutes; request a
-fresh one per read, don't cache them (a grant is bearer-redeemable within the
-tenant until it expires — treat the response as sensitive).
-
-## 5. In-TEE-only secrets
-
-For `release: "in_tee_only"`, the user attaches their own Lit Action CID via
-`POST /api/actions {"cid": "...", "name": "..."}` (setup agent). The runtime
-agent fetches `GET /api/reference/<name>` → `{ ciphertext, pkp_id }` and passes
-them as `js_params` to that action, which calls
-`Lit.Actions.Decrypt({ pkpId, ciphertext })` and uses the value in-TEE. Any
-action in the tenant's group can decrypt any of the tenant's ciphertexts, so
-only attach code you've audited.
-
-## Limits
-
-- 500 secrets and 100 active agents per tenant (`secret_limit_reached` /
-  `agent_limit_reached`, HTTP 429). Revoke unused agents rather than minting
-  fresh ones per run.
-- Secret values ≤ 16 KB. Names match `[A-Za-z0-9][A-Za-z0-9_.-]{0,127}`.
-
-## Machine-readable docs
-
-- `GET /llms.txt` — site index in the llms.txt convention.
-- `GET /llms-full.txt` — the complete API + concepts reference (every endpoint,
-  policy schema, grant format, error codes). Fetch it before improvising.
-
-## Notes
-
-- Never log or echo `usage_api_key` or secret values.
-- Chipotle executions are billed to the Lit Agent Keychain operator account; expect
-  ~0.5–2s per read.
-- `GET /api/audit` (setup agent) lists every grant/reference decision. Rows
-  keep the secret's name after it is deleted (`secret_deleted: true`).
-- All `/api/*` errors, including auth failures, are JSON `{error, detail?}`.
+See sdk/README.md for executable examples and README.md for deployment and recovery.

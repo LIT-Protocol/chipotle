@@ -70,3 +70,6 @@ lit-rust-crypto = { version = "0.6.0", features = [
 ] }
 
 hd-keys-curves-wasm = { version = "1.0.5", default-features = false }
+# Keep action CIDs consistent at exact UnixFS chunk boundaries.
+[patch.crates-io]
+ipfs-hasher = { path = "../vendor/ipfs-hasher" }

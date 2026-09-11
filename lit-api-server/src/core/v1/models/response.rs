@@ -55,6 +55,13 @@ pub struct LitActionResponse {
     pub has_error: bool,
 }
 
+/// Public secp256k1 identity of an exact immutable action CID. This endpoint
+/// discloses no private key and grants no execution or decryption permission.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct LitActionPublicKeyResponse {
+    pub public_key: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct EncryptResponse {
     pub ciphertext: String,

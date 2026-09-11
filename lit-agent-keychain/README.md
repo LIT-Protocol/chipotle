@@ -1,212 +1,152 @@
-# lit-agent-keychain
+# Lit Agent Keychain v2
 
-Programmable credential access on top of Chipotle — a Turnkey-Secrets-style
-"password manager for machines". Control plane only: it stores **ciphertexts**
-sealed to per-tenant vault PKPs inside the Chipotle TEE, evaluates policy, and
-signs short-lived grants. Plaintext only ever flows Chipotle → agent.
+A React client, Rust API and immutable Lit Actions for owner-authorized agent access
+to credentials. Secrets are encrypted locally; PostgreSQL stores ciphertext and
+owner-authorized policy records. Wallet, passkey and Google-only sign-in are alternatives.
+Google users need neither a wallet nor a passkey.
 
-See `plans/programmable-credential-access.md` at the repo root for the design.
-
-## How it works
-
-```
-                 ┌─────────────── lit-agent-keychain (this service, Railway) ───────────────┐
-  user ──login──▶│ secrets CRUD · agents (usage keys) · policy · grants · audit      │
-                 │ Postgres: ciphertext, policy, hashes   (no plaintext, ever)       │
-                 └────────────┬────────────────────────────────────┬─────────────────┘
-                              │ provision tenant / mint keys       │ POST /api/grants
-                              │ (master key, management API)      │ → signed grant + ciphertext
-                              ▼                                    ▼
-                 ┌──────────── Chipotle (TEE) ───────────┐     agent ── POST /lit_action ──▶ Chipotle
-                 │ vault PKP + group per tenant           │            (reader action, agent's usage key)
-                 │ encrypt action · reader action · CIDs  │     ◀── plaintext ─── Decrypt in TEE
-                 └────────────────────────────────────────┘
-```
-
-- **Tenant** = one user → vault PKP + Chipotle group on the operator's account,
-  plus a service usage key (runs the encrypt action).
-- **Secret** = name → versioned ciphertext (AES-GCM under a TEE-derived key
-  bound to the vault PKP). Release tier `plaintext` or `in_tee_only`.
-- **Agent** = scoped Chipotle usage key (`execute_in_groups: [tenant group]`).
-  Same key authenticates to this API. Revoke ⇒ removed on Chipotle.
-- **Grant** = EIP-191-signed JSON `{v, tenant, name, version, pkpId,
-  ciphertextHash, release, agent, iat, exp}`. The pinned reader action embeds
-  the signer address, verifies the grant, checks it matches the ciphertext and
-  vault, decrypts, returns the value to the caller.
-- **Policy** (per secret): `allowed_agents`, `max_reads_per_day`, `not_after`.
-  Evaluated before a grant is signed; every decision hits `access_log`, which
-  snapshots secret/agent names so rows survive deletion.
-- **Setup token** = full-access bearer authorized at `/agent/authorize`; listed
-  and revoked via `GET/DELETE /api/setup-tokens`. No expiry; not tied to the
-  browser session.
-
-## Environment
-
-| Var | Purpose |
-|---|---|
-| `DATABASE_URL` | Postgres |
-| `MAGIC_LINK_SIGNING_KEY` | base64, ≥32 bytes (`openssl rand -base64 32`) |
-| `USAGE_KEY_ENCRYPTION_KEY` | base64, ≥32 bytes — AES key for stored Chipotle usage keys |
-| `RESEND_API_KEY`, `MAIL_FROM` | magic-link email |
-| `PUBLIC_BASE_URL` | e.g. `https://keychain.litprotocol.com` |
-| `CHIPOTLE_API_BASE_URL` | default `https://api.chipotle.litprotocol.com` |
-| `CHIPOTLE_MASTER_API_KEY` | master key of the operator's Chipotle account (must be funded) |
-| `GRANT_SIGNING_KEY` | hex secp256k1 private key (`openssl rand -hex 32`) |
-| `GRANT_TTL_SECS` | default 120 |
-| `MAX_SECRET_BYTES` | default 16384 |
-
-**Rotating `GRANT_SIGNING_KEY` changes the reader CID.** Existing tenants keep
-the old CID in their group; `/api/tenant` reports `reader_cid_stale` and grants
-return `503 reader_not_attached` until the new reader is attached to each group
-(a re-attach job is a TODO — see plan).
-
-## Run locally
-
-```bash
-createdb lit_agent_keychain
-export DATABASE_URL=postgres://localhost/lit_agent_keychain
-export MAGIC_LINK_SIGNING_KEY=$(openssl rand -base64 32)
-export USAGE_KEY_ENCRYPTION_KEY=$(openssl rand -base64 32)
-export GRANT_SIGNING_KEY=$(openssl rand -hex 32)
-export RESEND_API_KEY=... MAIL_FROM=... PUBLIC_BASE_URL=http://localhost:8000
-export CHIPOTLE_MASTER_API_KEY=...
-cargo run
+```mermaid
+sequenceDiagram
+    participant Owner as Owner browser
+    participant API as Keychain API / DB
+    participant Lit as Immutable Lit Actions
+    participant Agent
+    Owner->>Lit: Discover public identity directly over trusted Lit TLS
+    Owner->>Owner: Encrypt secret locally to the action's bound HPKE key
+    Owner->>Lit: Prove owner authorization for ciphertext / policy
+    Lit-->>Owner: Signed receipt for each exact object
+    Owner->>API: Ciphertext + signed receipts
+    Agent->>API: Signed request bound to an ephemeral recipient key
+    API->>Lit: Sponsor execution of the fixed action
+    Lit->>API: Fetch selected signed policy
+    Lit->>Lit: Verify owner receipt, agent proof, scope, expiry, ciphertext
+    Lit-->>Agent: Action-signed, recipient-encrypted response (via API)
 ```
 
-Tests: `cargo test`. Lint: `cargo clippy --all-targets -- -D warnings && cargo fmt --check`.
+The operator is trusted to serve the latest signed policy. It can replay old valid
+permissions, including undoing a revocation, but cannot forge owner authorization.
+The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md).
 
-## API
+## Features
 
-Session / agent-access-token routes (`Authorization: Bearer <agent access token>` or cookie):
+- RainbowKit/wagmi EOA wallet connection, native WebAuthn P-256 passkeys, Google JWT
+  verification inside Lit with a nonce-bound, locally held session key.
+- One immutable encryption action per secret; an immutable owner authorization action
+  produces durable receipts without retaining Google tokens in the database.
+- X25519/HKDF-SHA256/AES-256-GCM HPKE key wrapping and response encryption; local
+  AES-256-GCM payload encryption. Action signatures authenticate results as well as keys.
+- Explicit agent public-key enrollment, exact ciphertext/version scopes, disable/revoke,
+  owner-approved renewal, atomic rotation, and credential replacement/recovery.
+- New secrets grant no agent access. Permissions default to 30 days, with a 90-day maximum.
+  Owner credential membership is independent and normally lasts until revoked.
+- Strict Stripe balance integration: fixed HTTPS request and bounded numeric projection;
+  no credential-export, arbitrary URL, code, redirect, or migration path.
+- Encrypted backups of current versions and policies; restore never overwrites another secret.
+- Transactional mutation audit, paginated activity, persisted atomic sponsorship limits.
+- Agent SDK and CLI; agent keys are generated locally. No management bearer tokens,
+  operator grant signer, PKP vault provisioning, chain registry, relayer, or paymaster.
 
-| Method | Path | |
-|---|---|---|
-| `GET` | `/api/tenant` · `POST /api/tenant/provision` | vault status / force provisioning |
-| `POST/GET` | `/api/secrets` | create (seals value) / list |
-| `GET/PUT/PATCH/DELETE` | `/api/secrets/<name>` | detail+versions / rotate / policy+release+disabled / delete |
-| `POST/GET` | `/api/agents` · `DELETE /api/agents/<id>` | mint (key shown once) / list / revoke |
-| `POST/GET` | `/api/actions` · `DELETE /api/actions/<id>` | attach/list/detach customer CIDs (in-TEE-only tier) |
-| `GET` | `/api/audit?limit=` | access log |
+## Local development
 
-Agent routes (`Authorization: Bearer <usage api key>`):
-
-| Method | Path | |
-|---|---|---|
-| `POST` | `/api/grants` `{name, version?}` | policy → signed grant + ciphertext + reader code + ready `js_params` |
-| `GET` | `/api/reference/<name>?version=` | ciphertext + `pkp_id` for in-TEE use |
-
-Client: `sdk/lit-agent-keychain.js` (served at `/sdk/lit-agent-keychain.js`). Agent playbook: `SKILL.md`.
-
-### npm SDK
+Use Rust 1.91, Node 22, npm and PostgreSQL 17. This directory has its own Cargo package
+and npm lockfile. It is not part of a root Cargo workspace.
 
 ```sh
-npm install @lit-protocol/keychain
+cd lit-agent-keychain
+npm ci
+npm run build
+cp .env.example .env
+# Set the values in .env, then export them in your shell.
+cargo +1.91 run
 ```
 
-```js
-import { LitAgentKeychain } from '@lit-protocol/keychain';
+The app does not automatically load `.env`. `DATABASE_URL`, `PUBLIC_BASE_URL`, and
+`LIT_EXECUTION_KEY` are required. Use a dedicated database. `PUBLIC_BASE_URL` must be
+an origin, normally HTTPS; HTTP is supported only on loopback for development.
+Use `localhost` rather than a numeric loopback address for browser passkeys.
+The service serves `web/dist` and applies migrations on startup.
 
-const keychain = new LitAgentKeychain({
-  usageApiKey: process.env.LIT_AGENT_KEYCHAIN_KEY,
-});
-const openaiKey = await keychain.get('OPENAI_API_KEY');
+`LIT_EXECUTION_KEY` is a server-held, funded **execution-only usage key** with wildcard
+execution (`executeInGroups=[0]`), without wallet-use or management permissions.
+It grants execution budget, not owner authorization. This service never issues it
+to browsers or agents. `DAILY_EXECUTION_LIMIT`, `HOURLY_IP_EXECUTION_LIMIT`, and
+`DAILY_VAULT_EXECUTION_LIMIT` cap sponsored attempts, including failures. These are
+request-count limits, not dollar guarantees. Configure the upstream account's funding
+accordingly. Peer throttles ignore untrusted forwarding headers; a reverse proxy can
+share one peer bucket, so set its limit for that deployment.
+
+Google-only sign-in requires `GOOGLE_CLIENT_ID` and the frontend origin registered
+on that Google OAuth client. Its callback uses Google Identity Services' nonce
+parameter. Google session keys and ID tokens remain in browser memory and expire.
+`VITE_WALLETCONNECT_PROJECT_ID` enables WalletConnect options at build time; injected
+wallets work without it. ERC-1271/6492 contract wallets are not supported in this release.
+
+`VITE_LIT_API_URL` is the client trust anchor, compiled at build time. It defaults to
+`https://api.chipotle.litprotocol.com`. Do not obtain a replacement endpoint from an
+untrusted API response. The Lit server must include the new public identity endpoint
+`GET /core/v1/lit_action_public_key/<CID>`. Bootstrap trusts that Lit origin's TLS;
+it does not claim quote-based public-key attestation.
+
+For hot reload, `npm run dev` starts Vite on port 5173 and proxies API calls to 8000.
+Set `PUBLIC_BASE_URL=http://localhost:5173` for that development deployment. The action's
+pinned registry origin must be reachable from the Lit runtime; use the test adapter
+for a fully local environment, or a public HTTPS development deployment for live Lit.
+
+## Build and deploy
+
+```sh
+# Repository root context includes the pinned Rust IPFS dependency fix.
+docker build -f lit-agent-keychain/Dockerfile -t lit-agent-keychain .
 ```
 
-To release the SDK, run `./publish.sh` from this directory. It logs into npm,
-builds, then publishes the public package. See [SDK documentation](sdk/README.md)
-for options and version bumps.
+Set build args `VITE_LIT_API_URL` and optionally `VITE_WALLETCONNECT_PROJECT_ID`.
+The image runs as an unprivileged user. For Railway, use repository root as the build
+context and `lit-agent-keychain/railway.json` as the config path; the Dockerfile path
+is relative to the repository root.
 
-## Deployment (Railway)
+This is a prelaunch, incompatible replacement. Migration `20260911000001` drops the
+legacy Keychain tables and their contents. Stop the old service before applying it.
+It does not delete upstream PKPs/usage keys from the old Lit account; retire those
+separately if that account will remain in use. No deployment or production DB reset
+is part of this PR.
 
-Project **Lit Secrets** (`5da0f592-403d-4acd-bf1e-7194139cd33c`), service `lit-secrets`,
-Postgres plugin, environment `production`. (Railway project/service/URL still carry the
-pre-rename `lit-secrets` name; renaming them is cosmetic and optional.) Source:
-`LIT-Protocol/chipotle`, root directory **`lit-agent-keychain`** (was `lit-secrets` before
-the rename — must be updated via the Railway API, the CLI has no flag for it, or deploys
-from `main` will fail), Dockerfile build, healthcheck `/health`, sleeping disabled.
-Canonical URL: `https://keychain.litprotocol.com` (custom domain, live; `PUBLIC_BASE_URL` set to
-match). Railway default URL `https://lit-secrets-production.up.railway.app` still resolves.
+Deploy the Lit public-key endpoint and private-key telemetry fix before enabling v2.
+Retain reproducible client/SDK artifacts, `generated/release.json`, and lockfiles for
+each deployed release. Changing action bytes changes encryption keys. Never silently
+rebuild a deployed v2 action against different dependencies; introduce a new action
+release and an explicit owner-approved transition. Strict Stripe-only secrets require
+reimporting the original credential. An encrypted DB backup alone cannot recover
+from loss of Lit's key derivation root or an incompatible network derivation change.
 
-Variables set: everything in the table above plus `ROCKET_SECRET_KEY`, `ROCKET_ADDRESS`,
-`RUST_LOG`; `DATABASE_URL` is the `${{Postgres.DATABASE_URL}}` reference. The
-`GRANT_SIGNING_KEY` is the production reader identity — never regenerate it casually.
+## Verification
 
-After the PR merges, switch the branch: `railway service source connect --repo
-LIT-Protocol/chipotle --branch main --service lit-secrets`.
+```sh
+npm run build
+npm test
+cargo +1.91 fmt --check
+cargo +1.91 clippy --all-targets -- -D warnings
+cargo +1.91 test
+npm run test:runtime
+```
 
-## Verified against prod Chipotle (2026-08-27 local, 2026-08-29 on Railway)
+`test:runtime` compiles Lit's actual Deno worker, executes the complete encryption
+release action with a local HTTP policy fixture and synthetic action keys, verifies
+the returned signature/HPKE plaintext, and scans tracing for key/plaintext leakage.
+It makes no live TEE attestation claim. The suite also includes RFC9180 vectors,
+JavaScript/Rust receipt and multichunk CID vectors, and adversarial proof tests.
 
-The identical suite was re-run against the deployed Railway service
-(`lit-secrets-production.up.railway.app`) after a real magic-link login +
-agent-authorize: provision (~50s), seal, grant + redeem (~2s via SDK from a
-laptop), rotate, `rate_limited` / `release_not_plaintext` denials, in-TEE-only
-via customer action, forged + expired grants rejected in-TEE, revoke (Chipotle
-rejected the revoked key immediately that run), audit log complete.
+Run full local API/browser tests with a dedicated local database (its name must
+contain `test` or end in `_ci`):
 
-## Original local run detail (2026-08-27)
+```sh
+npx playwright install chromium
+KEYCHAIN_TEST_DATABASE_URL=postgres://localhost/keychain_test node scripts/test-local.mjs
+```
 
-Full flow tested with a real account: provision (create_wallet → add_group →
-add_action ×2 → add_action_to_group ×2 → service key) ≈ 25s; seal ≈ 0.3s;
-grant + redeem ≈ 0.3–0.4s end to end; rotate → new version readable; policy
-denials (`rate_limited`, `release_not_plaintext`) logged; `in_tee_only` secret
-decrypted by a customer action attached via `/api/actions`; forged, tampered,
-and expired grants rejected inside the TEE by the reader.
+This script builds the app, starts local services on ports 55440/55441, applies the
+replacement migrations to that test database, runs SDK/API/browser/storage tests, and
+stops its services. The Keychain CI workflow runs the same suite. Its Lit adapter executes the bundled code while substituting only platform
+key derivation and external Google issuance. It never calls production services.
 
-Known Chipotle behaviors to be aware of:
-- **Revocation lag**: `remove_usage_api_key` invalidates the authz cache only on
-  the replica that served it; other replicas may accept the key for up to 300s
-  (chipotle issue filed). Treat revoke as "≤5 min", not instant.
-- Action throws (e.g. `grant expired`) come back as HTTP **500** with a JSON
-  string body, not 4xx. The SDK extracts the message.
-- Occasional transient transport errors on the first Chipotle call after boot;
-  management calls are safe to retry.
-
-## Trust model
-
-- Postgres compromise leaks ciphertexts (useless without the TEE + group
-  permission) and *encrypted* Chipotle usage keys (need `USAGE_KEY_ENCRYPTION_KEY`).
-- `GRANT_SIGNING_KEY` compromise lets an attacker forge grants — but only a
-  holder of a still-valid tenant usage key can redeem one, and only for that
-  tenant's vault. Rotate the key (new reader CID) to invalidate.
-- The operator's `CHIPOTLE_MASTER_API_KEY` is the root of trust for group
-  membership; treat like a cloud root credential.
-- `in_tee_only` secrets are never released by this service under any policy;
-  the only decryptors are CIDs the user attached themselves.
-
-## Known limitations (from adversarial review, 2026-09-10)
-
-An adversarial codex review (gpt-6-astra) found several issues. The exploitable
-ones are fixed (cross-user setup-token reassignment, PATCH lost-update race,
-concurrent-quota bypass, audit/quota atomicity, dashboard allowlist clearing on
-a typo, rotation version-allocation race, magic-link table growth, SDK deadline,
-idempotent revocation retry, per-tenant agent/secret caps). These remain by
-design or need upstream (Chipotle) support — track before GA:
-
-- **Grants are bearer tokens within a tenant.** The reader can't yet check
-  *which* agent is calling (Chipotle has no requester-identity op — issue #630),
-  so a leaked grant is redeemable by any of that tenant's agents until it
-  expires, and is replayable within its TTL. Mitigation today: short
-  `GRANT_TTL_SECS` (default 120). Full fix: bind the grant to
-  `requesterApiKeyHash()` in the reader once #630 lands.
-- **Import/rotation pass plaintext through the control plane.** Values are
-  sealed by calling the encrypt action, so a compromised control-plane process
-  could observe them at import time. Closing this needs client-side sealing /
-  sealed import (Phase 3 in the plan).
-- **`in_tee_only` use isn't policy-revocable.** Once an agent holds a
-  reference, Chipotle enforces group/action permission, not the secret's
-  current policy — disabling the secret or tightening its allowlist doesn't stop
-  in-TEE decryption by an already-permitted action. Revoke by detaching the
-  action or rotating the vault.
-- **Signer rotation is not self-healing.** Changing `GRANT_SIGNING_KEY` leaves
-  the old reader attached to every tenant group and doesn't update
-  `tenants.reader_cid`; a holder of the old key keeps working. The reader-CID
-  re-attach job (plan TODO) must also *remove* old readers and persist the new
-  CID per tenant.
-- **Setup (agent-access) tokens have no expiry or mounted revocation route.** A
-  stolen setup token keeps full control-plane access. Owner-facing listing +
-  revocation + expiry is a follow-up.
-- **Provisioning isn't durably checkpointed.** Upstream resources (wallet,
-  group, keys) are created before the tenant row is written and the mutex is
-  process-local, so a crash mid-provision can orphan resources and multiple
-  replicas could duplicate them. Needs per-user distributed locking +
-  reconciliation before multi-replica deploy.
+Agent examples: [sdk/README.md](sdk/README.md). Security/operational limits:
+[SECURITY.md](SECURITY.md). Review findings: [ADVERSARIAL_REVIEW.md](ADVERSARIAL_REVIEW.md).

@@ -1,70 +1,92 @@
-//! Authenticated encryption for scoped Chipotle usage API keys.
-
-use aes_gcm::aead::{Aead, KeyInit};
-use aes_gcm::{Aes256Gcm, Nonce};
-use anyhow::{Context, Result};
+use crate::models::Signed;
+use anyhow::{bail, Result};
+use k256::ecdsa::{signature::hazmat::PrehashVerifier, Signature, VerifyingKey};
 use rand::RngCore;
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 
-pub const NONCE_LEN: usize = 12;
-
-pub fn encrypt_usage_key(master_key: &[u8], usage_key: &str) -> Result<(Vec<u8>, Vec<u8>)> {
-    let cipher = cipher(master_key)?;
-    let mut nonce = [0u8; NONCE_LEN];
-    rand::thread_rng().fill_bytes(&mut nonce);
-    let ciphertext = cipher
-        .encrypt(Nonce::from_slice(&nonce), usage_key.as_bytes())
-        .map_err(|_| anyhow::anyhow!("usage key encryption failed"))?;
-    Ok((nonce.to_vec(), ciphertext))
+pub fn random_token() -> String {
+    let mut bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    hex::encode(bytes)
 }
-
-pub fn decrypt_usage_key(master_key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Result<String> {
-    if nonce.len() != NONCE_LEN {
-        anyhow::bail!("invalid usage key nonce length");
+pub fn hash_bytes(bytes: &[u8]) -> String {
+    hex::encode(Sha256::digest(bytes))
+}
+pub fn canonical(value: &Value) -> Result<String> {
+    fn validate(v: &Value, depth: usize) -> Result<()> {
+        if depth > 24 {
+            bail!("object too deep");
+        }
+        match v {
+            Value::Number(n)
+                if n.as_i64().is_none_or(|x| {
+                    !(-9_007_199_254_740_991..=9_007_199_254_740_991).contains(&x)
+                }) =>
+            {
+                bail!("unsafe number")
+            }
+            Value::Object(o) => {
+                for (key, v) in o {
+                    if !key.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+                        || !key.bytes().all(|c| c.is_ascii_alphanumeric())
+                    {
+                        bail!("invalid field name");
+                    }
+                    validate(v, depth + 1)?;
+                }
+            }
+            Value::Array(a) => {
+                for v in a {
+                    validate(v, depth + 1)?;
+                }
+            }
+            _ => (),
+        }
+        Ok(())
     }
-    let cipher = cipher(master_key)?;
-    let plaintext = cipher
-        .decrypt(Nonce::from_slice(nonce), ciphertext)
-        .map_err(|_| anyhow::anyhow!("usage key decryption failed"))?;
-    String::from_utf8(plaintext).context("usage key plaintext is not UTF-8")
+    validate(value, 0)?;
+    // serde_json's default map is a BTreeMap. Do not enable preserve_order.
+    Ok(serde_json::to_string(value)?)
 }
-
-fn cipher(master_key: &[u8]) -> Result<Aes256Gcm> {
-    if master_key.len() < 32 {
-        anyhow::bail!("USAGE_KEY_ENCRYPTION_KEY must decode to at least 32 bytes");
+pub fn digest(value: &Value) -> Result<String> {
+    Ok(hash_bytes(canonical(value)?.as_bytes()))
+}
+pub fn verify_signed(signed: &Signed, public_key: &str, vault: &str) -> Result<()> {
+    let p = &signed.receipt.payload;
+    if p.v != 2
+        || p.domain != "lit-keychain/receipt/v2"
+        || p.vault_id != vault
+        || p.object_hash != digest(&signed.document)?
+        || signed.document.get("vaultId").and_then(Value::as_str) != Some(vault)
+        || p.issued_at < 0
+        || p.issued_at > time::OffsetDateTime::now_utc().unix_timestamp() + 30
+    {
+        bail!("invalid receipt binding");
     }
-    Aes256Gcm::new_from_slice(&master_key[..32]).context("initializing usage key cipher")
+    let key = VerifyingKey::from_sec1_bytes(&hex::decode(public_key.trim_start_matches("0x"))?)?;
+    let signature = Signature::from_slice(&hex::decode(&signed.receipt.signature)?)?;
+    if signature.normalize_s().is_some() {
+        bail!("non-canonical signature");
+    }
+    key.verify_prehash(
+        &hex::decode(digest(&serde_json::to_value(p)?)?)?,
+        &signature,
+    )?;
+    Ok(())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const KEY: &[u8] = b"0123456789abcdef0123456789abcdef";
-    const WRONG: &[u8] = b"abcdef0123456789abcdef0123456789";
-
+    use serde_json::json;
     #[test]
-    fn roundtrip_usage_key() {
-        let (nonce, ciphertext) = encrypt_usage_key(KEY, "lit_usage_sk_secret").unwrap();
-        assert_ne!(ciphertext, b"lit_usage_sk_secret");
-        let plain = decrypt_usage_key(KEY, &nonce, &ciphertext).unwrap();
-        assert_eq!(plain, "lit_usage_sk_secret");
-    }
-
-    #[test]
-    fn rejects_wrong_key() {
-        let (nonce, ciphertext) = encrypt_usage_key(KEY, "lit_usage_sk_secret").unwrap();
-        assert!(decrypt_usage_key(WRONG, &nonce, &ciphertext).is_err());
-    }
-
-    #[test]
-    fn rejects_tampering() {
-        let (nonce, mut ciphertext) = encrypt_usage_key(KEY, "lit_usage_sk_secret").unwrap();
-        ciphertext[0] ^= 0x01;
-        assert!(decrypt_usage_key(KEY, &nonce, &ciphertext).is_err());
-    }
-
-    #[test]
-    fn rejects_short_key() {
-        assert!(encrypt_usage_key(b"short", "secret").is_err());
+    fn canonical_vectors() {
+        assert_eq!(
+            canonical(&json!({"z": [true, null, "é\n"], "a": 12})).unwrap(),
+            "{\"a\":12,\"z\":[true,null,\"é\\n\"]}"
+        );
+        assert!(canonical(&json!({"a": 1.5})).is_err());
+        assert!(canonical(&json!({"a": 9007199254740992u64})).is_err());
+        assert!(canonical(&json!({"__proto__": 1})).is_err());
     }
 }

@@ -3,3 +3,8 @@
 /sdk/dist/
 /sdk/node_modules/
 /sdk/*.tgz
+/node_modules/
+/web/dist/
+/generated/
+/test-results/
+/playwright-report/
