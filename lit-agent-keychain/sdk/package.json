@@ -18,6 +18,7 @@
     "cli.mjs",
     "mcp.mjs",
     "mcp.d.mts",
+    "tls.mjs",
     "README.md"
   ],
   "engines": {

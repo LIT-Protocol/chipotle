@@ -41,6 +41,39 @@ Set `CHIPOTLE_USAGE_API_KEY` for a CLI billing-key override, or pass
 `{ usageApiKey }` as the SDK constructor's third argument. After the owner replaces
 the execution key, update every agent using the old key.
 
+## Endpoint attestation
+
+Before the first request to a known Lit origin, the SDK proves the endpoint is a
+genuine Intel TDX machine running the governed Lit Chipotle release. It fails
+closed: any unmet check throws an `Attestation:` error and nothing is sent.
+
+1. Parses the TDX v4 quote from `GET /attestation` and verifies its ECDSA-P256
+   chain: quote, attestation key, QE report, PCK certificate, Intel PCK CA, and a
+   pinned Intel SGX Root CA public key.
+2. Replays the dstack event log and requires RTMR0-3 to match the quote.
+3. Requires the measured `app-id` to be the pinned DstackApp, the measured
+   `compose-hash` to equal SHA-256 of the served `app_compose`, and every
+   container image in it to be digest-pinned.
+4. Confirms on Base that the compose hash is whitelisted in DstackApp and the OS
+   image in DstackKms, both governed by the Lit Safe multisig.
+5. In Node (CLI and MCP), binds the live TLS certificate to the enclave through
+   the dstack-ingress evidence quote, so the connection terminates inside the TEE.
+
+```sh
+keychain attest                 # prints the full report for the default origin
+```
+
+The result is cached per connection for one hour. `new Keychain(key, config,
+{ attestation: false })` disables it; `{ attestation: policy }` pins a different
+`{ appId, kmsContract, rpcUrl }`. Unknown origins such as local test adapters are
+not attested. Set `KEYCHAIN_SKIP_ATTESTATION=1` for the CLI and MCP in development.
+
+Not covered: Intel TCB status and PCK revocation collateral (the dstack-verifier
+performs those), and quote freshness, because the public quote carries no caller
+nonce; step 5 supplies freshness by binding the certificate you connected with.
+Browsers run steps 1-4 only. See `protocol/attestation.ts` and
+https://developer.litprotocol.com/architecture/verification/attestation.
+
 ## MCP server
 
 The package ships a local Model Context Protocol server over stdio. Register it

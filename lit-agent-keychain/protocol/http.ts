@@ -4,6 +4,14 @@ export async function jsonFetch(
   timeoutMs = 15000,
   maxBytes = 1024 * 1024,
 ): Promise<any> {
+  return JSON.parse(await textFetch(url, init, timeoutMs, maxBytes));
+}
+export async function textFetch(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs = 15000,
+  maxBytes = 1024 * 1024,
+): Promise<string> {
   const controller = new AbortController();
   const abort = () => controller.abort(init.signal?.reason);
   if (init.signal?.aborted) abort();
@@ -40,7 +48,7 @@ export async function jsonFetch(
       bytes.set(chunk, offset);
       offset += chunk.length;
     }
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } finally {
     clearTimeout(timer);
     init.signal?.removeEventListener("abort", abort);

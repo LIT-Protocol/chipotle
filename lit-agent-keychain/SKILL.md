@@ -20,6 +20,12 @@ version: 2.0.0
    claude mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp ./agent-identity.json ./API_KEY.keychain.json
    ```
 
+Before its first request, the SDK attests the Lit endpoint: it verifies the Intel
+TDX quote to a pinned Intel root, replays the event log into the RTMRs, checks the
+measured app and compose hash against the on-chain whitelist on Base, and (in Node)
+binds the live TLS certificate to the enclave. Never set `attestation: false` or
+`KEYCHAIN_SKIP_ATTESTATION=1` outside local development.
+
 ## Know what you are holding
 
 There are exactly three artifacts. Two are JSON files and self-describing; only the

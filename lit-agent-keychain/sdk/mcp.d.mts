@@ -1,4 +1,4 @@
-import type { Keychain, AgentConfig } from "./dist/index.js";
+import type { Keychain, AgentConfig, AttestationPolicy } from "./dist/index.js";
 /** Structural view of a Keychain so src and dist builds interoperate. */
 export type KeychainLike = {
   readonly config: AgentConfig;
@@ -25,6 +25,8 @@ export function loadKeychain(
   options?: {
     readFile?: (file: string, encoding: "utf8") => Promise<string>;
     usageApiKey?: string;
+    attestation?: AttestationPolicy | false;
+    tlsCertificateSha256?: string;
   },
 ): Promise<Keychain>;
 export function callTool(

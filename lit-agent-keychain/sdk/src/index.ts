@@ -44,6 +44,23 @@ import {
   responseContext,
 } from "../../protocol/crypto.ts";
 import { jsonFetch } from "../../protocol/http.ts";
+import {
+  ATTESTED_ORIGINS,
+  verifyAttestation,
+  type AttestationPolicy,
+  type AttestationReport,
+} from "../../protocol/attestation.ts";
+export {
+  verifyAttestation,
+  verifyQuote,
+  replayEventLog,
+  CHIPOTLE_ATTESTATION_POLICY,
+  ATTESTED_ORIGINS,
+} from "../../protocol/attestation.ts";
+export type {
+  AttestationPolicy,
+  AttestationReport,
+} from "../../protocol/attestation.ts";
 export { authorizationTypedData } from "../../protocol/identity.ts";
 export {
   actionCid,
@@ -192,15 +209,59 @@ function origin(value: string) {
   );
   return value;
 }
+/**
+ * How a connection attests its Lit endpoint before sending anything.
+ * `false` disables the check; a policy pins the expected dstack app and
+ * governance contracts. Omitted: known Lit origins use their pinned policy and
+ * unknown origins (local development, test adapters) are not attested.
+ */
+export type AttestationOption = AttestationPolicy | false | undefined;
+export type AttestationHooks = {
+  /** SHA-256 of the DER TLS certificate observed for the endpoint (Node only). */
+  tlsCertificateSha256?: string;
+  /** Re-verify after this many milliseconds. Default one hour. */
+  maxAgeMs?: number;
+};
 export class LitConnection {
   readonly url: string;
   private readonly keys = new Map<string, string>();
+  readonly attestationPolicy: AttestationPolicy | undefined;
+  private attestationHooks: AttestationHooks = {};
+  private attested: Promise<AttestationReport> | undefined;
+  private attestedAt = 0;
   constructor(
     url = DEFAULT_LIT_API_URL,
     readonly timeoutMs = 30000,
     public usageApiKey?: string,
+    attestation: AttestationOption = undefined,
+    hooks: AttestationHooks = {},
   ) {
     this.url = origin(url);
+    this.attestationPolicy =
+      attestation === false
+        ? undefined
+        : (attestation ?? ATTESTED_ORIGINS[this.url]);
+    this.attestationHooks = hooks;
+  }
+  /**
+   * Proves the endpoint is a genuine, governed Lit TEE before any request. The
+   * result is cached per connection and refreshed after `maxAgeMs`. Throws (and
+   * leaves the connection unusable for that call) if any check fails.
+   */
+  async attest(): Promise<AttestationReport | undefined> {
+    if (!this.attestationPolicy) return undefined;
+    const maxAge = this.attestationHooks.maxAgeMs ?? 3600000;
+    if (!this.attested || Date.now() - this.attestedAt > maxAge) {
+      this.attestedAt = Date.now();
+      this.attested = verifyAttestation(this.url, this.attestationPolicy, {
+        timeoutMs: this.timeoutMs,
+        tlsCertificateSha256: this.attestationHooks.tlsCertificateSha256,
+      }).catch((error) => {
+        this.attested = undefined;
+        throw error;
+      });
+    }
+    return this.attested;
   }
   async publicKey(cid: string) {
     const cached = this.keys.get(cid);
@@ -226,6 +287,7 @@ export class LitConnection {
         this.usageApiKey.length <= 512,
       "A scoped Chipotle usage key is required",
     );
+    await this.attest();
     const result = await jsonFetch(
       `${this.url}/core/v1/lit_action`,
       {
@@ -673,7 +735,12 @@ export class Keychain {
   constructor(
     privateKey: string,
     readonly config: AgentConfig,
-    options: { timeoutMs?: number; usageApiKey?: string } = {},
+    options: {
+      timeoutMs?: number;
+      usageApiKey?: string;
+      attestation?: AttestationOption;
+      tlsCertificateSha256?: string;
+    } = {},
   ) {
     assertAgentIdentity({ privateKey });
     assertAgentConfig(config);
@@ -685,7 +752,13 @@ export class Keychain {
       config.litApiUrl,
       options.timeoutMs,
       options.usageApiKey ?? config.usageApiKey,
+      options.attestation,
+      { tlsCertificateSha256: options.tlsCertificateSha256 },
     );
+  }
+  /** Attests the Lit endpoint now instead of lazily on the first read. */
+  attest() {
+    return this.lit.attest();
   }
   /** Secret names with the single operation each release mode permits. */
   list(): { name: string; release: Manifest["release"]; operation: string }[] {

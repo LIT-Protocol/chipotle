@@ -49,6 +49,9 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 - Agent SDK, CLI and a local stdio MCP server (`npx @lit-protocol/keychain mcp`);
   agent keys are generated locally. No management bearer tokens, operator grant
   signer, PKP vault provisioning, chain registry, relayer, or paymaster.
+- Client-side remote attestation of the Lit endpoint before any request: TDX quote
+  chain to a pinned Intel root, event-log replay, measured app/compose identity,
+  on-chain governance whitelist, and (Node) TLS certificate binding.
 
 ## Local development
 

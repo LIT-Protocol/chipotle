@@ -14,6 +14,7 @@ import {
   assertAgentConfig,
   assertAgentIdentity,
 } from "./dist/index.js";
+import { peerCertificateSha256 } from "./tls.mjs";
 
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const SERVER_INFO = { name: "lit-agent-keychain", version: "2.0.0" };
@@ -87,7 +88,7 @@ const rpcError = (id, code, message) => ({
 export async function loadKeychain(
   identityFile,
   configFiles,
-  { readFile, usageApiKey } = {},
+  { readFile, usageApiKey, attestation, tlsCertificateSha256 } = {},
 ) {
   if (!identityFile || configFiles.length === 0)
     throw new Error(
@@ -137,7 +138,11 @@ export async function loadKeychain(
       merged.secrets[name] = locator;
     }
   }
-  return new Keychain(identity.privateKey, merged, { usageApiKey });
+  return new Keychain(identity.privateKey, merged, {
+    usageApiKey,
+    attestation,
+    tlsCertificateSha256,
+  });
 }
 
 export async function callTool(keychain, name, args = {}) {
@@ -254,10 +259,29 @@ export async function serve(keychain, { input, output }) {
 
 export async function main(argv, { readFile, stdin, stdout, stderr, env }) {
   const [identityFile, ...configFiles] = argv;
-  const keychain = await loadKeychain(identityFile, configFiles, {
+  const skipAttestation = env.KEYCHAIN_SKIP_ATTESTATION === "1";
+  let keychain = await loadKeychain(identityFile, configFiles, {
     readFile,
     usageApiKey: env.CHIPOTLE_USAGE_API_KEY,
+    attestation: skipAttestation ? false : undefined,
   });
+  if (!skipAttestation && keychain.lit.attestationPolicy) {
+    // Bind the endpoint's live TLS certificate into the attestation check, then
+    // attest eagerly so a misconfigured or impostor endpoint fails at startup.
+    const tlsCertificateSha256 = await peerCertificateSha256(
+      keychain.config.litApiUrl,
+    );
+    keychain.destroy();
+    keychain = await loadKeychain(identityFile, configFiles, {
+      readFile,
+      usageApiKey: env.CHIPOTLE_USAGE_API_KEY,
+      tlsCertificateSha256,
+    });
+    const report = await keychain.attest();
+    stderr.write(
+      `Lit Agent Keychain MCP: attested ${report.origin} (${report.checks.join(", ")})\n`,
+    );
+  }
   stderr.write(
     `Lit Agent Keychain MCP: ${keychain.list().length} secret(s), agent ${keychain.publicKey}\n`,
   );
