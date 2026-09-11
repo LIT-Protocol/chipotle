@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::actions::ActionSet;
 use crate::agents::AgentKey;
 use crate::api::{err, err_detail, internal, ApiError, ApiResult};
-use crate::audit::{self, Event};
+use crate::audit::{self, Event, SecretRef};
 use crate::chipotle::ChipotleClient;
 use crate::config::Config;
 use crate::policy::{self, Denial, GrantContext};
@@ -106,8 +106,8 @@ async fn load_for_agent(
         audit::record(
             pool,
             tenant.id,
-            None,
-            Some(agent.id),
+            SecretRef { id: None, name },
+            agent,
             event,
             false,
             Some("secret_not_found"),
@@ -123,8 +123,11 @@ async fn load_for_agent(
         audit::record(
             pool,
             tenant.id,
-            Some(secret.id),
-            Some(agent.id),
+            SecretRef {
+                id: Some(secret.id),
+                name: &secret.name,
+            },
+            agent,
             event,
             false,
             Some("version_not_found"),
@@ -190,8 +193,11 @@ pub async fn issue_grant(
         audit::record(
             pool,
             tenant.id,
-            Some(secret.id),
-            Some(agent.id),
+            SecretRef {
+                id: Some(secret.id),
+                name: &secret.name,
+            },
+            &agent,
             Event::Grant,
             false,
             Some(d.code()),
@@ -199,7 +205,7 @@ pub async fn issue_grant(
         .await;
         return Err(deny(d));
     }
-    audit::record_allow_tx(&mut tx, tenant.id, secret.id, agent.id, Event::Grant)
+    audit::record_allow_tx(&mut tx, tenant.id, &secret, &agent, Event::Grant)
         .await
         .map_err(|e| internal("audit_insert_failed", e))?;
     tx.commit()
@@ -268,8 +274,11 @@ pub async fn get_reference(
         audit::record(
             pool,
             tenant.id,
-            Some(secret.id),
-            Some(agent.id),
+            SecretRef {
+                id: Some(secret.id),
+                name: &secret.name,
+            },
+            &agent,
             Event::Reference,
             false,
             Some(d.code()),
@@ -280,8 +289,11 @@ pub async fn get_reference(
     audit::record(
         pool,
         tenant.id,
-        Some(secret.id),
-        Some(agent.id),
+        SecretRef {
+            id: Some(secret.id),
+            name: &secret.name,
+        },
+        &agent,
         Event::Reference,
         true,
         None,

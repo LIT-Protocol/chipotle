@@ -157,6 +157,24 @@ pub async fn create_agent(
             ),
         ));
     }
+    // Names are how humans pick agents in policy editors and read the audit
+    // log; two live agents with the same name make "restrict to X" ambiguous
+    // (KC-03). Revoked agents keep their name so history stays readable.
+    let (dup,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM agents WHERE tenant_id = $1 AND name = $2 AND revoked_at IS NULL",
+    )
+    .bind(tenant.id)
+    .bind(&name)
+    .fetch_one(pool.inner())
+    .await
+    .map_err(|e| internal("agents_count_failed", e))?;
+    if dup > 0 {
+        return Err(err_detail(
+            Status::Conflict,
+            "agent_name_exists",
+            format!("an active agent named {name:?} already exists; pick another name or revoke it first"),
+        ));
+    }
 
     let usage_key = chipotle
         .add_usage_api_key(

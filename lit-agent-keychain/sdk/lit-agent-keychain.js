@@ -4,7 +4,12 @@
 // dashboard). It authenticates to the lit-agent-keychain control plane *and* to
 // Chipotle. Plaintext travels Chipotle -> agent only.
 //
-//   import { LitAgentKeychain } from 'https://keychain.litprotocol.com/sdk/lit-agent-keychain.js';
+//   Node / Bun:   npm install @lit-protocol/keychain
+//                 import { LitAgentKeychain } from '@lit-protocol/keychain';
+//   Deno/browser: import { LitAgentKeychain } from 'https://keychain.litprotocol.com/sdk/lit-agent-keychain.js';
+//   (Node's ESM loader rejects https: imports — install from npm or download
+//    this file next to your code and import it with a relative path.)
+//
 //   const keychain = new LitAgentKeychain({ usageApiKey: process.env.LIT_AGENT_KEYCHAIN_KEY });
 //   const openaiKey = await keychain.get('OPENAI_API_KEY');
 

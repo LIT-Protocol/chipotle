@@ -34,7 +34,11 @@ See `plans/programmable-credential-access.md` at the repo root for the design.
   the signer address, verifies the grant, checks it matches the ciphertext and
   vault, decrypts, returns the value to the caller.
 - **Policy** (per secret): `allowed_agents`, `max_reads_per_day`, `not_after`.
-  Evaluated before a grant is signed; every decision hits `access_log`.
+  Evaluated before a grant is signed; every decision hits `access_log`, which
+  snapshots secret/agent names so rows survive deletion.
+- **Setup token** = full-access bearer authorized at `/agent/authorize`; listed
+  and revoked via `GET/DELETE /api/setup-tokens`. No expiry; not tied to the
+  browser session.
 
 ## Environment
 

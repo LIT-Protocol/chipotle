@@ -8,7 +8,8 @@ use lit_agent_keychain::{
 use rocket::fs::{FileServer, NamedFile};
 use rocket::http::Status;
 use rocket::response::Redirect;
-use rocket::{get, routes};
+use rocket::serde::json::Json;
+use rocket::{catch, catchers, get, routes};
 
 #[rocket::launch]
 async fn rocket() -> _ {
@@ -62,6 +63,8 @@ async fn rocket() -> _ {
                 auth_routes::logout,
                 auth_routes::authorize_agent,
                 auth_routes::me,
+                auth_routes::list_setup_tokens,
+                auth_routes::revoke_setup_token,
                 tenants::get_tenant,
                 tenants::provision_tenant,
                 tenants::add_tenant_action,
@@ -80,6 +83,10 @@ async fn rocket() -> _ {
                 grants::get_reference,
                 audit::list_audit,
             ],
+        )
+        .register(
+            "/api",
+            catchers![api_unauthorized, api_not_found, api_default],
         )
         .mount("/static", FileServer::from("static"))
         .mount("/sdk", FileServer::from("sdk"))
@@ -108,6 +115,44 @@ fn init_tracing() {
 #[get("/health")]
 fn health() -> &'static str {
     "ok"
+}
+
+// Rocket's default catchers render HTML. Everything under /api is consumed by
+// programs, so guard failures (e.g. a runtime usage key hitting a management
+// endpoint) get the same `{error}` JSON shape as handler errors.
+#[catch(401)]
+fn api_unauthorized() -> Json<lit_agent_keychain::api::ErrorResponse> {
+    Json(lit_agent_keychain::api::ErrorResponse {
+        error: "unauthorized".into(),
+        detail: Some(
+            "management endpoints need a signed-in session or a setup bearer token; \
+             runtime usage keys may only call POST /api/grants and GET /api/reference/<name>"
+                .into(),
+        ),
+    })
+}
+
+#[catch(404)]
+fn api_not_found() -> Json<lit_agent_keychain::api::ErrorResponse> {
+    Json(lit_agent_keychain::api::ErrorResponse {
+        error: "not_found".into(),
+        detail: None,
+    })
+}
+
+#[catch(default)]
+fn api_default(
+    status: Status,
+    _req: &rocket::Request<'_>,
+) -> Json<lit_agent_keychain::api::ErrorResponse> {
+    Json(lit_agent_keychain::api::ErrorResponse {
+        error: status
+            .reason()
+            .unwrap_or("error")
+            .to_lowercase()
+            .replace(' ', "_"),
+        detail: None,
+    })
 }
 
 #[get("/SKILL.md")]

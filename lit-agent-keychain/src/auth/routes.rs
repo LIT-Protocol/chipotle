@@ -6,13 +6,14 @@ use rocket::response::Redirect;
 use rocket::serde::json::Json;
 use rocket::serde::{Deserialize, Serialize};
 use rocket::State;
-use rocket::{get, post};
+use rocket::{delete, get, post};
 use sqlx::PgPool;
 use time::OffsetDateTime;
 
 use super::rate_limit::RateLimiter;
 use super::user::{self, User};
 use super::{agent, session, token, MAGIC_LINK_TTL_SECONDS, SESSION_COOKIE_NAME};
+use crate::api::{err, internal, ApiError, ApiResult};
 use crate::config::Config;
 use crate::mail::Mailer;
 
@@ -210,6 +211,47 @@ pub async fn authorize_agent(
 #[get("/api/me")]
 pub fn me(user: User) -> Json<User> {
     Json(user)
+}
+
+/// Setup-agent authorizations (full-access bearer tokens) for the current
+/// user, so they can be seen and revoked from the dashboard (KC-05). Signing
+/// out of the browser session does not revoke these.
+#[get("/api/setup-tokens")]
+pub async fn list_setup_tokens(
+    user: User,
+    pool: &State<PgPool>,
+) -> ApiResult<Vec<agent::SetupToken>> {
+    let list = agent::list(pool.inner(), user.id)
+        .await
+        .map_err(|e| internal("setup_tokens_list_failed", e))?;
+    Ok(Json(list))
+}
+
+#[delete("/api/setup-tokens/<id>")]
+pub async fn revoke_setup_token(
+    user: User,
+    pool: &State<PgPool>,
+    id: &str,
+) -> Result<Status, ApiError> {
+    if agent::validate_agent_token_hash(id).is_err() {
+        return Err(err(Status::BadRequest, "invalid_id"));
+    }
+    let n = agent::revoke_hash(pool.inner(), id, user.id)
+        .await
+        .map_err(|e| internal("setup_token_revoke_failed", e))?;
+    if n == 0 {
+        // Unknown, someone else's, or already revoked — idempotent 204 only
+        // when it's ours and already off; otherwise 404 to avoid leaking.
+        let owned = agent::list(pool.inner(), user.id)
+            .await
+            .map_err(|e| internal("setup_tokens_list_failed", e))?
+            .into_iter()
+            .any(|t| t.id == id);
+        if !owned {
+            return Err(err(Status::NotFound, "not_found"));
+        }
+    }
+    Ok(Status::NoContent)
 }
 
 async fn store_magic_link(
