@@ -188,7 +188,7 @@ pub async fn create_agent(
     let (nonce, ciphertext) = crypto::encrypt_usage_key(&cfg.usage_key_encryption_key, &usage_key)
         .map_err(|e| internal("agent_key_encrypt_failed", e))?;
 
-    let row = sqlx::query(
+    let inserted = sqlx::query(
         "INSERT INTO agents (id, tenant_id, name, usage_key_hash, usage_key_ciphertext, usage_key_nonce)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING id, name, created_at, last_seen_at, revoked_at",
@@ -200,8 +200,38 @@ pub async fn create_agent(
     .bind(ciphertext)
     .bind(nonce)
     .fetch_one(pool.inner())
-    .await
-    .map_err(|e| internal("agent_insert_failed", e))?;
+    .await;
+    let row = match inserted {
+        Ok(row) => row,
+        Err(e) => {
+            // The pre-check above is racy; the partial unique index
+            // (tenant_id, name) WHERE revoked_at IS NULL is authoritative. We
+            // already minted a Chipotle key for this loser, so remove it
+            // upstream (best effort) before reporting the conflict — otherwise
+            // it lingers as a live, unrecorded credential (codex finding).
+            if let Err(rm) = chipotle
+                .remove_usage_api_key(&cfg.chipotle_master_api_key, &usage_key)
+                .await
+            {
+                tracing::warn!(
+                    tenant_id = %tenant.id,
+                    "failed to remove usage key after agent insert failure: {rm}"
+                );
+            }
+            let is_unique_violation = e
+                .as_database_error()
+                .and_then(|d| d.code())
+                .is_some_and(|c| c == "23505");
+            if is_unique_violation {
+                return Err(err_detail(
+                    Status::Conflict,
+                    "agent_name_exists",
+                    format!("an active agent named {name:?} already exists; pick another name or revoke it first"),
+                ));
+            }
+            return Err(internal("agent_insert_failed", e));
+        }
+    };
 
     Ok(Json(CreatedAgentResponse {
         agent: row_to_agent(row),

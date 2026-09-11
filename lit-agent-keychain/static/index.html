@@ -52,7 +52,7 @@
           </label>
         </div>
         <div class="row">
-          <label>Max reads (rolling 24 h) <input name="max_reads_per_day" type="number" min="1" placeholder="unlimited" /></label>
+          <label>Max reads (rolling 24 h) <input name="max_reads_per_day" type="number" min="1" step="1" placeholder="unlimited" /></label>
           <label>Not after (your local time) <input name="not_after" type="datetime-local" /></label>
         </div>
         <p class="hint">Which agents may read this secret is set after saving, via <i>Edit policy</i>. Until then every agent you mint can read it.</p>
@@ -154,7 +154,7 @@ const value = await keychain.get('<span class="example-secret">OPENAI_API_KEY</s
   </main>
 
   <dialog id="policy-dialog" class="dialog">
-    <form method="dialog" id="policy-form">
+    <form method="dialog" id="policy-form" novalidate>
       <h2>Edit policy — <code id="policy-secret-name"></code></h2>
       <fieldset>
         <legend>Agents allowed to read</legend>
@@ -164,7 +164,7 @@ const value = await keychain.get('<span class="example-secret">OPENAI_API_KEY</s
       </fieldset>
       <div class="row">
         <label>Max reads (rolling 24 h window)
-          <input name="max_reads_per_day" type="number" min="1" placeholder="unlimited" />
+          <input name="max_reads_per_day" type="number" min="1" step="1" placeholder="unlimited" />
         </label>
         <label>Not after (your local time)
           <input name="not_after" type="datetime-local" />

@@ -198,11 +198,10 @@ $('#policy-form').addEventListener('submit', async (e) => {
     if (!ids.length) { $('#policy-error').textContent = 'Select at least one agent, or choose "All agents".'; return; }
     policy.allowed_agents = ids;
   }
+  const bad = policyFieldError(f);
+  if (bad) { $('#policy-error').textContent = bad.msg; bad.el.focus(); return; }
   const max = f.elements.max_reads_per_day.value;
-  if (max) {
-    if (!(Number(max) >= 1)) { $('#policy-error').textContent = 'Max reads must be a whole number of at least 1, or empty for unlimited.'; return; }
-    policy.max_reads_per_day = Number(max);
-  }
+  if (max) policy.max_reads_per_day = Number(max);
   if (f.elements.not_after.value) policy.not_after = new Date(f.elements.not_after.value).toISOString();
   try {
     await api('PATCH', `/api/secrets/${encodeURIComponent(name)}`, { policy });
@@ -281,6 +280,19 @@ $('#secrets').addEventListener('click', async (e) => {
   } catch (err) { alert(friendly(err, { name })); }
 });
 
+// A number/datetime control with a half-typed value ("1e", a date without a
+// time) serializes as "" while reporting validity.badInput. Treating that as
+// "no limit" would silently create an unlimited secret, so check explicitly.
+function policyFieldError(form) {
+  const max = form.elements.max_reads_per_day;
+  const until = form.elements.not_after;
+  if (max && !max.checkValidity()) return { el: max, msg: 'Max reads must be a whole number of at least 1, or left empty for unlimited.' };
+  if (max && max.value && !(Number.isInteger(Number(max.value)) && Number(max.value) >= 1)) return { el: max, msg: 'Max reads must be a whole number of at least 1, or left empty for unlimited.' };
+  if (until && !until.checkValidity()) return { el: until, msg: 'Enter a complete date and time for "Not after", or leave it empty for no expiry.' };
+  if (until && until.value && Number.isNaN(new Date(until.value).getTime())) return { el: until, msg: 'Enter a complete date and time for "Not after", or leave it empty for no expiry.' };
+  return null;
+}
+
 // --- add-secret form (KC-12, KC-13) ---
 const secretForm = $('#secret-form');
 function resetSecretForm() {
@@ -303,6 +315,8 @@ secretForm.addEventListener('submit', async (e) => {
   const nameInput = e.target.elements.name;
   if (!nameInput.checkValidity()) { errEl.textContent = ERROR_TEXT.invalid_name(); nameInput.focus(); return; }
   if (!f.get('value')) { errEl.textContent = ERROR_TEXT.invalid_value(); e.target.elements.value.focus(); return; }
+  const bad = policyFieldError(e.target);
+  if (bad) { errEl.textContent = bad.msg; bad.el.focus(); return; }
   const policy = {};
   if (f.get('max_reads_per_day')) policy.max_reads_per_day = Number(f.get('max_reads_per_day'));
   if (f.get('not_after')) policy.not_after = new Date(f.get('not_after')).toISOString();

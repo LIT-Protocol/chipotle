@@ -178,6 +178,32 @@ pub async fn issue_grant(
         .execute(&mut *tx)
         .await
         .map_err(|e| internal("quota_lock_failed", e))?;
+    // Re-read the secret under a share lock now that we hold the advisory
+    // lock: the row loaded above may have been deleted or its policy changed
+    // while we waited. Without this, access_log no longer having a FK to
+    // secrets would let a grant for a deleted secret slip through (codex
+    // finding, 2026-09-10). The share lock also blocks a concurrent DELETE
+    // until this transaction commits.
+    let Some(secret) = secrets::lock_secret_for_share(&mut *tx, secret.id)
+        .await
+        .map_err(|e| internal("secret_relock_failed", e))?
+    else {
+        drop(tx);
+        audit::record(
+            pool,
+            tenant.id,
+            SecretRef {
+                id: Some(secret.id),
+                name: &secret.name,
+            },
+            &agent,
+            Event::Grant,
+            false,
+            Some("secret_not_found"),
+        )
+        .await;
+        return Err(err(Status::NotFound, "not_found"));
+    };
     let reads = audit::grants_last_24h(&mut *tx, secret.id)
         .await
         .map_err(|e| internal("audit_count_failed", e))?;
