@@ -1,7 +1,28 @@
 #!/usr/bin/env node
 import { readFile, writeFile } from "node:fs/promises";
-import { Keychain } from "./dist/index.js";
+import {
+  Keychain,
+  assertAgentConfig,
+  assertAgentIdentity,
+} from "./dist/index.js";
 const [command, ...args] = process.argv.slice(2);
+const usage =
+  "Usage:\n" +
+  "  keychain init <identity-file>\n" +
+  "  keychain get <identity-file> <config-file> <secret-name>\n" +
+  "  keychain stripe-balance <identity-file> <config-file> <secret-name>\n" +
+  "  keychain mcp <identity-file> <config-file> [more-config-files]\n" +
+  "\n" +
+  "identity-file: JSON from `keychain init` ({ v, privateKey, publicKey }); keep private.\n" +
+  "config-file:   *.keychain.json downloaded from Keychain ({ v, litApiUrl, usageApiKey, secrets }).\n" +
+  "CHIPOTLE_USAGE_API_KEY overrides the config's scoped billing key.\n";
+const readJson = async (file) => {
+  try {
+    return JSON.parse(await readFile(file, "utf8"));
+  } catch (error) {
+    throw new Error(`Cannot read ${file}: ${error.message}`);
+  }
+};
 try {
   if (command === "init" && args.length === 1) {
     const identity = Keychain.generateKey();
@@ -15,8 +36,10 @@ try {
     );
   } else if (["get", "stripe-balance"].includes(command) && args.length === 3) {
     const [identityFile, configFile, name] = args;
-    const identity = JSON.parse(await readFile(identityFile, "utf8"));
-    const config = JSON.parse(await readFile(configFile, "utf8"));
+    const identity = await readJson(identityFile);
+    assertAgentIdentity(identity);
+    const config = await readJson(configFile);
+    assertAgentConfig(config);
     const client = new Keychain(identity.privateKey, config, {
       usageApiKey: process.env.CHIPOTLE_USAGE_API_KEY,
     });
@@ -31,10 +54,17 @@ try {
     } finally {
       client.destroy();
     }
+  } else if (command === "mcp" && args.length >= 2) {
+    const { main } = await import("./mcp.mjs");
+    await main(args, {
+      readFile,
+      stdin: process.stdin,
+      stdout: process.stdout,
+      stderr: process.stderr,
+      env: process.env,
+    });
   } else {
-    process.stderr.write(
-      "Usage:\n  keychain init <identity-file>\n  keychain get <identity-file> <config-file> <secret-name>\n  keychain stripe-balance <identity-file> <config-file> <secret-name>\n",
-    );
+    process.stderr.write(usage);
     process.exitCode = 2;
   }
 } catch (error) {

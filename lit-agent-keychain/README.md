@@ -46,8 +46,9 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 - $10/month for 1,000 stored secrets; rotations use the same slot. Contact us for more.
 - Stripe Checkout and customer portal, period-end cancellation, retained encrypted backups.
 - Transactional mutation audit, paginated secrets/activity, scoped user execution keys.
-- Agent SDK and CLI; agent keys are generated locally. No management bearer tokens,
-  operator grant signer, PKP vault provisioning, chain registry, relayer, or paymaster.
+- Agent SDK, CLI and a local stdio MCP server (`npx @lit-protocol/keychain mcp`);
+  agent keys are generated locally. No management bearer tokens, operator grant
+  signer, PKP vault provisioning, chain registry, relayer, or paymaster.
 
 ## Local development
 

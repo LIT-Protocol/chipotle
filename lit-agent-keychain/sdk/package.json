@@ -1,7 +1,7 @@
 {
   "name": "@lit-protocol/keychain",
   "version": "2.0.0",
-  "description": "Owner-authorized, locally encrypted credentials for agents",
+  "description": "Owner-authorized, locally encrypted credentials for agents, with a local MCP server",
   "type": "module",
   "main": "./dist/index.js",
   "exports": {
@@ -16,6 +16,8 @@
   "files": [
     "dist",
     "cli.mjs",
+    "mcp.mjs",
+    "mcp.d.mts",
     "README.md"
   ],
   "engines": {
@@ -38,5 +40,12 @@
   "types": "./dist/index.d.ts",
   "dependencies": {
     "zod": "4.3.6"
-  }
+  },
+  "keywords": [
+    "lit-protocol",
+    "mcp",
+    "model-context-protocol",
+    "secrets",
+    "agents"
+  ]
 }

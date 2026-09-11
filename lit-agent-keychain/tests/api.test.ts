@@ -12,6 +12,7 @@ import {
   type SecretBundle,
 } from "../sdk/src/index.ts";
 import { hex, randomBytes, digest, nowSeconds } from "../protocol/crypto.ts";
+import { handleMessage } from "../sdk/mcp.mjs";
 const api = process.env.KEYCHAIN_TEST_API;
 const lit = process.env.KEYCHAIN_TEST_LIT || "http://127.0.0.1:55440";
 test(
@@ -85,6 +86,29 @@ test(
       await assert.rejects(agent.get("API_TEST"), /denied/i);
       bundle = await c.delegate(bundle, keys.publicKey, "Integration agent");
       assert.equal(await agent.get("API_TEST"), "local-only-secret-7f9ba");
+      // Every API response must be strict JSON (RFC 8259): no raw control
+      // characters inside strings, so jq and other strict parsers accept it.
+      const rawBundle = await (
+        await fetch(
+          `${api}/api/secrets/${bundle.manifest.document.manifest.secretId}/bundle`,
+        )
+      ).text();
+      assert.doesNotMatch(rawBundle, /[\u0000-\u001f]/);
+      JSON.parse(rawBundle);
+      // The local MCP server reads through the same agent identity.
+      const mcpGet = await handleMessage(agent, {
+        jsonrpc: "2.0",
+        id: 7,
+        method: "tools/call",
+        params: { name: "get_secret", arguments: { name: "API_TEST" } },
+      });
+      assert.deepEqual(mcpGet, {
+        jsonrpc: "2.0",
+        id: 7,
+        result: {
+          content: [{ type: "text", text: "local-only-secret-7f9ba" }],
+        },
+      });
       assert.ok(
         uploads.every(
           (body) =>

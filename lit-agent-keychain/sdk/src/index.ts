@@ -79,6 +79,103 @@ export type AgentConfig = {
   usageApiKey?: string;
   secrets: Record<string, { manifest: Manifest; actionCid: string }>;
 };
+export type AgentIdentity = {
+  v?: number;
+  privateKey: string;
+  publicKey?: string;
+};
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+/**
+ * Classifies a value an agent may have been handed. Chipotle usage keys are
+ * opaque strings minted by Lit, so this recognizes the Keychain-controlled
+ * shapes exactly and treats everything else as an opaque value.
+ */
+export function describeCredential(
+  value: unknown,
+):
+  | "agent-identity"
+  | "agent-private-key"
+  | "agent-config"
+  | "usage-api-key"
+  | "unknown" {
+  if (isRecord(value)) {
+    if (typeof value.privateKey === "string") return "agent-identity";
+    if (value.v === V && isRecord(value.secrets) && "litApiUrl" in value)
+      return "agent-config";
+    return "unknown";
+  }
+  if (typeof value !== "string") return "unknown";
+  const s = value.trim();
+  if (/^(0x)?[0-9a-fA-F]{64}$/.test(s)) return "agent-private-key";
+  if (s.startsWith("{")) return "unknown";
+  // Chipotle usage keys are currently base64 of 32 random bytes (44 chars).
+  if (/^[A-Za-z0-9+/]{43}=$/.test(s)) return "usage-api-key";
+  return "unknown";
+}
+/** Validates the usage key override without pinning Chipotle's exact format. */
+export function assertUsageApiKey(value: unknown): asserts value is string {
+  requireThat(
+    typeof value === "string" && value.length > 0 && value.length <= 512,
+    "A scoped Chipotle usage key is required",
+  );
+  const shape = describeCredential(value);
+  requireThat(
+    shape !== "agent-private-key",
+    "The usage key looks like an agent private key. Pass the usageApiKey from the agent config, never the identity private key.",
+  );
+  requireThat(
+    !value.trim().startsWith("{"),
+    "The usage key looks like a JSON file. Pass only the usageApiKey string from the agent config.",
+  );
+}
+/** Validates the identity file written by `keychain init`. */
+export function assertAgentIdentity(
+  identity: unknown,
+): asserts identity is AgentIdentity {
+  requireThat(
+    isRecord(identity),
+    "Agent identity must be the JSON file created by `keychain init`",
+  );
+  requireThat(
+    describeCredential(identity) !== "agent-config",
+    "This is an agent config (*.keychain.json), not an agent identity. Check the argument order.",
+  );
+  requireThat(
+    typeof identity.privateKey === "string" &&
+      /^[0-9a-f]{64}$/.test(identity.privateKey),
+    "Agent identity privateKey must be 64 lowercase hex characters from `keychain init`",
+  );
+}
+/** Validates the agent config downloaded from Keychain (*.keychain.json). */
+export function assertAgentConfig(
+  config: unknown,
+): asserts config is AgentConfig {
+  requireThat(
+    isRecord(config),
+    "Agent config must be the *.keychain.json file downloaded from Keychain",
+  );
+  requireThat(
+    describeCredential(config) !== "agent-identity",
+    "This is an agent identity, not an agent config (*.keychain.json). Check the argument order.",
+  );
+  requireThat(config.v === V, "Unsupported agent config version");
+  requireThat(
+    typeof config.litApiUrl === "string",
+    "Agent config is missing litApiUrl",
+  );
+  requireThat(
+    isRecord(config.secrets) &&
+      Object.values(config.secrets).every(
+        (s) =>
+          isRecord(s) &&
+          isRecord(s.manifest) &&
+          typeof s.actionCid === "string",
+      ),
+    "Agent config secrets must map names to { manifest, actionCid }",
+  );
+  if (config.usageApiKey !== undefined) assertUsageApiKey(config.usageApiKey);
+}
 const post = (body: unknown): RequestInit => ({
   method: "POST",
   headers: { "Content-Type": "application/json" },
@@ -578,14 +675,26 @@ export class Keychain {
     readonly config: AgentConfig,
     options: { timeoutMs?: number; usageApiKey?: string } = {},
   ) {
+    assertAgentIdentity({ privateKey });
+    assertAgentConfig(config);
+    if (options.usageApiKey !== undefined)
+      assertUsageApiKey(options.usageApiKey);
     this.key = unhex(privateKey);
-    requireThat(this.key.length === 32 && config.v === V);
     this.publicKey = agentPublicKey(this.key);
     this.lit = new LitConnection(
       config.litApiUrl,
       options.timeoutMs,
       options.usageApiKey ?? config.usageApiKey,
     );
+  }
+  /** Secret names with the single operation each release mode permits. */
+  list(): { name: string; release: Manifest["release"]; operation: string }[] {
+    return Object.entries(this.config.secrets).map(([name, locator]) => ({
+      name,
+      release: locator.manifest.release,
+      operation:
+        locator.manifest.release === "export" ? "get" : "stripe.balance",
+    }));
   }
   static generateKey() {
     const key = randomBytes();
