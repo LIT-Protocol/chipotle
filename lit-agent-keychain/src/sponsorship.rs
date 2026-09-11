@@ -97,6 +97,9 @@ async fn reconcile_locked(
         row
     } else {
         if !issue {
+            if requested_cid.is_some() {
+                return Err(api::err(Status::Conflict, "execution_key_required"));
+            }
             return Ok(None);
         }
         let authority: String =
@@ -147,12 +150,12 @@ async fn reconcile_locked(
                 .map_err(api::internal)?;
         }
     }
-    if active {
+    if active && !issue {
         // Bulk group replacement is capped at 10 CIDs by Chipotle's contract.
         // Incremental addition has no such cap and is idempotent. A bounded batch
-        // resumes abandoned enrollments; prioritize the caller's action so a
-        // successful enrollment always means it can execute immediately.
-        let pending: Vec<String> = sqlx::query_scalar("SELECT action_cid FROM kc_execution_actions WHERE vault_id=$1 AND NOT applied ORDER BY (action_cid=$2) DESC NULLS LAST,created_at,action_cid LIMIT 10")
+        // resumes abandoned enrollments in the worker. Foreground enrollment
+        // applies only its requested CID; issuing a key never waits on backlog.
+        let pending: Vec<String> = sqlx::query_scalar("SELECT action_cid FROM kc_execution_actions WHERE vault_id=$1 AND NOT applied AND ($2::text IS NULL OR action_cid=$2) ORDER BY created_at,action_cid LIMIT 10")
             .bind(vault).bind(requested_cid).fetch_all(&mut **tx).await.map_err(api::internal)?;
         for cid in pending {
             lit.add_action(secret_group, &cid)

@@ -266,6 +266,33 @@ async fn stripe_test_mode_subscription_lifecycle() -> Result<()> {
         ("billing_portal/configurations", portal),
     ] {
         if let Some(id) = object {
+            // Stripe's first portal configuration can be the sandbox default.
+            // Preserve and label that shared fixture instead of removing it.
+            if kind == "billing_portal/configurations" {
+                match stripe.get(&format!("/{kind}/{id}"), &[]).await {
+                    Ok(value) if value["is_default"] == true => {
+                        if stripe
+                            .post(
+                                &format!("/{kind}/{id}"),
+                                &[("metadata[keychain_contract_test_default]", "true".into())],
+                                &format!("{nonce}-label-default"),
+                            )
+                            .await
+                            .is_err()
+                        {
+                            cleanup_failed = true;
+                        }
+                        eprintln!("Retained labelled default TEST portal configuration: {id}");
+                        continue;
+                    }
+                    Err(error) => {
+                        eprintln!("Portal lookup {id}: {error}");
+                        cleanup_failed = true;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
             let cleanup = stripe
                 .post(
                     &format!("/{kind}/{id}"),

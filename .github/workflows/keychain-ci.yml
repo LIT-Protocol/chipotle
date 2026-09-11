@@ -57,6 +57,7 @@ jobs:
             echo "Stripe test key unavailable; live contract test skipped."
             exit 0
           fi
+          node scripts/cleanup-stripe-tests.mjs
           cargo test --locked --test stripe_live -- --ignored
       - name: Actual Lit Deno runtime
         run: |

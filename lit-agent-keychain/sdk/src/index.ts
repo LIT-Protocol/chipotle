@@ -200,6 +200,7 @@ export class OwnerClient {
     authority: Authority,
     readonly signer: OwnerSigner,
     lit = new LitConnection(),
+    readonly managementTimeoutMs = 120000,
   ) {
     this.authority = authoritySchema.parse(authority);
     this.vaultId = digest(this.authority);
@@ -209,7 +210,7 @@ export class OwnerClient {
     return jsonFetch(
       this.authority.registry + path,
       { ...init, credentials: "include" },
-      this.lit.timeoutMs,
+      this.managementTimeoutMs,
     );
   }
   async authorize<T extends Document>(document: T): Promise<Signed<T>> {

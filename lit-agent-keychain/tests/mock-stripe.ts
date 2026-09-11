@@ -1,6 +1,6 @@
 // Loopback fixture only. No real cards, credentials, or Stripe network calls.
 import http from "node:http";
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 const port = Number(process.env.KEYCHAIN_MOCK_STRIPE_PORT || 55442);
 const base = `http://127.0.0.1:${port}`;
 const api = process.env.KEYCHAIN_TEST_API || "http://localhost:55441";
@@ -10,6 +10,7 @@ const customers = new Map<string, any>();
 const checkouts = new Map<string, any>();
 const subscriptions = new Map<string, any>();
 const idempotent = new Map<string, any>();
+const runId = randomBytes(8).toString("hex");
 let sequence = 0;
 const now = () => Math.floor(Date.now() / 1000);
 async function webhook(
@@ -18,7 +19,7 @@ async function webhook(
   id = `evt_test_${++sequence}`,
 ) {
   const body = JSON.stringify({
-    id,
+    id: `${id}_${runId}`,
     type,
     livemode: false,
     data: { object: { customer } },
@@ -54,7 +55,7 @@ const server = http.createServer(async (req, res) => {
       if (checkout.status === "open") {
         checkout.status = "complete";
         const subscription = {
-          id: `sub_test_${++sequence}`,
+          id: `sub_test_${runId}_${++sequence}`,
           customer: checkout.customer,
           created: now(),
           status: "active",
@@ -168,7 +169,7 @@ const server = http.createServer(async (req, res) => {
       };
     else if (url.pathname === "/v1/customers" && req.method === "POST") {
       result = {
-        id: `cus_test_${++sequence}`,
+        id: `cus_test_${runId}_${++sequence}`,
         metadata: {
           keychain_vault_id: form.get("metadata[keychain_vault_id]"),
           app: form.get("metadata[app]"),
@@ -192,7 +193,7 @@ const server = http.createServer(async (req, res) => {
         form.get("mode") !== "subscription"
       )
         throw new Error("Wrong checkout price");
-      const id = `cs_test_${++sequence}`;
+      const id = `cs_test_${runId}_${++sequence}`;
       result = {
         id,
         status: "open",

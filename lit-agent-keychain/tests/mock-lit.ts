@@ -17,7 +17,7 @@ const jwk = {
 const nativeFetch = globalThis.fetch;
 const groups = new Map<number, Set<string>>();
 const usageKeys = new Map<string, number[]>();
-let nextGroup = 1;
+let nextGroup = randomBytes(4).readUInt32BE() + 1;
 let failRemoval = false;
 const server = http.createServer(async (req, res) => {
   res.setHeader("Content-Type", "application/json");

@@ -45,6 +45,11 @@ The config pins each action manifest/CID and an independently trusted Lit endpoi
 Never replace that endpoint using a URL supplied by the Keychain API. V2 clients
 must use the action templates from the same immutable release as the vault.
 
+Owner management requests allow two minutes for initial Chipotle group/key
+provisioning and billing operations; direct action requests retain their separate
+execution timeout. `OwnerClient` accepts an optional fourth `managementTimeoutMs`
+constructor argument.
+
 Owner/browser integrations can use `OwnerClient`, `LitConnection`, and
 `authorizationTypedData`; see `web/src/identities.ts` for wallet, passkey and Google
 signers. Owner approvals use short-lived proofs; stored ciphertext/policy receipts

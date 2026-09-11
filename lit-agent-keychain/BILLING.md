@@ -99,6 +99,15 @@ reordered events, unpaid/wrong-price subscriptions, duplicate checkout, capacity
 rotation at capacity, more than ten action CIDs, scoped-key isolation, key replacement
 with a lost removal response, cancellation, renewal, and backup preservation.
 
+CI also uses the existing Stripe sandbox secret for a real contract test: price and
+portal validation, Checkout creation, a paid test subscription, period-end cancellation,
+and immediate cancellation through the actual Rust entitlement synchronizer. Synthetic
+customers/checkouts are removed and test prices/products are archived. If the first
+portal configuration becomes the sandbox default, it is retained and explicitly
+labelled as a test fixture; non-default configurations are deactivated. A bounded
+recovery script uses creation-event idempotency keys to find only older Keychain test
+objects left by interrupted CI. No live-mode credentials are accepted by these tests.
+
 Before launch, additionally complete a Stripe test-mode checkout/payment/portal cancel
 on the deployed origin and exercise live owner/agent flows through Chipotle. Local
 adapters do not establish live payment, OAuth or TEE deployment correctness.
