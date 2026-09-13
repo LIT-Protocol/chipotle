@@ -41,6 +41,92 @@ Set `CHIPOTLE_USAGE_API_KEY` for a CLI billing-key override, or pass
 `{ usageApiKey }` as the SDK constructor's third argument. After the owner replaces
 the execution key, update every agent using the old key.
 
+## Endpoint attestation
+
+Before the first request to a known Lit origin, the SDK proves the endpoint is a
+genuine Intel TDX machine running the governed Lit Chipotle release. It fails
+closed: any unmet check throws an `Attestation:` error and nothing is sent.
+
+1. Parses the TDX v4 quote from `GET /attestation` and verifies its ECDSA-P256
+   chain: quote, attestation key, QE report, PCK certificate, Intel PCK CA, and a
+   pinned Intel SGX Root CA public key.
+2. Replays the dstack event log and requires RTMR0-3 to match the quote.
+3. Requires the measured `app-id` to be the pinned DstackApp, the measured
+   `compose-hash` to equal SHA-256 of the served `app_compose`, and every
+   container image in it to be digest-pinned.
+4. Confirms on Base that the compose hash is whitelisted in DstackApp and the OS
+   image in DstackKms, both governed by the Lit Safe multisig.
+5. In Node (CLI and MCP), binds the live TLS certificate to the enclave through
+   the dstack-ingress evidence quote, so the connection terminates inside the TEE.
+
+```sh
+keychain attest                 # prints the full report for the default origin
+```
+
+The result is cached per connection for one hour. `new Keychain(key, config,
+{ attestation: false })` disables it; `{ attestation: policy }` pins a different
+`{ appId, kmsContract, rpcUrl }`. Unknown origins such as local test adapters are
+not attested. Set `KEYCHAIN_SKIP_ATTESTATION=1` for the CLI and MCP in development.
+
+Not covered: Intel TCB status and PCK revocation collateral (the dstack-verifier
+performs those), and quote freshness, because the public quote carries no caller
+nonce; step 5 supplies freshness by binding the certificate you connected with.
+Browsers run steps 1-4 only. See `protocol/attestation.ts` and
+https://developer.litprotocol.com/architecture/verification/attestation.
+
+## MCP server
+
+The package ships a local Model Context Protocol server over stdio. Register it
+with any MCP client in one line; pass one or more agent configs after the identity:
+
+```sh
+# Claude Code
+claude mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp ./agent-identity.json ./API_KEY.keychain.json
+# Codex CLI
+codex mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp ./agent-identity.json ./API_KEY.keychain.json
+```
+
+Cursor, Windsurf and similar clients take the same command in their JSON config:
+
+```json
+{
+  "mcpServers": {
+    "lit-keychain": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@lit-protocol/keychain",
+        "mcp",
+        "./agent-identity.json",
+        "./API_KEY.keychain.json"
+      ]
+    }
+  }
+}
+```
+
+Tools: `list_secrets` (names and permitted operation, no values), `get_secret`,
+`stripe_balance`, and `agent_public_key` (for the owner to approve). The server is
+intentionally local rather than hosted: decryption needs the agent's private
+identity, and a remote endpoint would hand that key and every plaintext to whoever
+runs it, which the Keychain trust boundary forbids. Nothing but JSON-RPC is written
+to stdout. Tool results enter the model context like any other tool output, so grant
+agents only the secrets they need.
+
+## Telling credentials apart
+
+| Artifact       | Shape                                                                            |
+| -------------- | -------------------------------------------------------------------------------- |
+| Agent identity | JSON from `keychain init`: `{ v: 2, privateKey: <64 hex>, publicKey: <64 hex> }` |
+| Agent config   | JSON `*.keychain.json`: `{ v: 2, litApiUrl, usageApiKey, secrets }`              |
+| Usage key      | Opaque Chipotle string (currently 44-character base64). Billing only.            |
+| Secret value   | Whatever `get` returns. Never log it.                                            |
+
+`describeCredential(value)` classifies a value; `assertAgentIdentity`,
+`assertAgentConfig` and `assertUsageApiKey` throw messages that name the mix-up.
+The constructor and CLI apply them, so swapping the identity and config arguments
+or pasting a private key as the usage key fails before any request is sent.
+
 The config pins each action manifest/CID and an independently trusted Lit endpoint.
 Never replace that endpoint using a URL supplied by the Keychain API. V2 clients
 must use the action templates from the same immutable release as the vault.

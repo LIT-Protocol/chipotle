@@ -15,6 +15,24 @@ a server served an audited build. A compromise that also changes delivered JavaS
 can steal new plaintext/owner approvals. Run a verified client release for a stronger
 separation from the hosting operator. Passkeys remain tied to their registered RP/origin.
 
+## Attested Lit endpoint
+
+The SDK, CLI and MCP server attest `VITE_LIT_API_URL`/`litApiUrl` before the first
+Chipotle request when a policy is pinned for that origin (`ATTESTED_ORIGINS`). The
+check verifies the TDX v4 quote's ECDSA chain to the pinned Intel SGX Root CA,
+replays the dstack event log into RTMR0-3, requires the measured app-id, compose
+hash (SHA-256 of the served `app_compose`, all images digest-pinned) and OS image,
+and confirms both hashes are whitelisted in the DstackApp and DstackKms contracts on
+Base. Node callers also bind the observed TLS certificate to the enclave through the
+dstack-ingress evidence quote. Any failure blocks the request.
+
+Limits: Intel TCB status, QE identity and PCK revocation collateral are not
+checked; the quote has no caller nonce, so freshness comes from the TLS binding,
+which browsers cannot perform; the Base RPC endpoint is trusted for the governance
+lookup (a lying RPC can only cause false rejections or accept a hash the Safe never
+whitelisted). The policy constants are compiled into the client, so the same
+"verified client release" caveat above applies.
+
 ## Accepted operator trust
 
 The database holds signed policy records and chooses the current record. The action
