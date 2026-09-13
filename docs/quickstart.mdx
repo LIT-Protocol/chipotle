@@ -5,6 +5,8 @@ description: "Go from zero to a running Lit Action in a few minutes using the Li
 
 This guide walks you through creating an account, funding it, and running your first Lit Action. You can do everything from the [**Dashboard**](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/) (web GUI) or directly against the [**REST API**](https://api.chipotle.litprotocol.com/).
 
+Once you're set up here, jump to the guide for your use case: [**Signing**](/guides/signing) (network-held wallets, verifiable signatures) or [**Encryption & decryption**](/guides/encryption) (secrets only your authorized code can read). If any terminology below is unfamiliar, [Core Concepts](/concepts) defines it all in one page.
+
 ## Zero to Lit Action
 
 1. [Create an account via the Dashboard](/management/dashboard#1-request-a-new-account-or-log-in), note down your API key. Account creation takes ~15 seconds — it registers your account on-chain (Base).
@@ -55,8 +57,16 @@ The Dashboard is just your human-friendly configuration tool. Once your account 
 
 ## Next steps
 
+**Build for your use case:**
+
+- [Signing guide](/guides/signing) — mint a wallet (PKP), sign from an action, verify the signature locally
+- [Encryption guide](/guides/encryption) — encrypt a secret, store the ciphertext anywhere, decrypt only from authorized code
+- [Core Concepts](/concepts) — accounts, API keys, PKPs, actions, and groups in one page
+
+**Go deeper:**
+
 - [Lit Actions Overview](/lit-actions/index) — what they are and how they run
-- [Examples](/lit-actions/examples) — signing, encryption, HTTP fetching, contract calls
+- [Examples](/lit-actions/examples) — 18 runnable patterns, from a signed message to bridges, oracles, and MPC co-signing
 - [Architecture](/architecture/index) — the TEE / on-chain / IPFS layers
 - [Chain Secured](/architecture/chain-secured) — why your keys' authority lives on-chain, and how an attested TEE enforces it
 - [OpenAPI Spec](https://api.chipotle.litprotocol.com/core/v1/openapi.json) / [Swagger UI](https://api.chipotle.litprotocol.com/core/v1/swagger-ui)

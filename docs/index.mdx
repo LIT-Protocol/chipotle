@@ -1,55 +1,79 @@
 ---
 title: "Lit Protocol"
-description: "One programmable runtime for everything between an event and a signed action. Read from any source, compute inside a chain-secured TEE, write to any chain or API — with no backend to trust."
+description: "Signing and encryption, programmable. Run JavaScript inside a chain-secured TEE that can sign on any chain and encrypt or decrypt data — with no backend to trust."
 ---
 
-Lit is a programmable runtime that reads data from any source, runs your JavaScript inside a chain-secured TEE, and signs on any chain or API. Keys never leave the enclave, and the code that's allowed to use them is governed on-chain. You get the speed and expressiveness of a single trusted runtime, with the auditability of a smart contract.
+Lit gives your app two cryptographic superpowers without a backend to trust: **signing** (wallets whose keys never leave a secure enclave, driven by code you control) and **encryption** (data only your authorized code can decrypt). Both are powered by [Lit Actions](/lit-actions/index) — immutable JavaScript programs that run inside a chain-secured TEE, with key permissions governed on-chain.
 
 <Card
-  title="Start here: Quick Start"
+  title="New here? Start with the Quick Start"
   icon="rocket"
   href="/quickstart"
   horizontal
 >
-  Create an account, fund it, and run your first Lit Action in a few minutes — via the Dashboard or the REST API.
+  Create an account, fund it, and run your first Lit Action in a few minutes — then follow the guide for your use case below.
 </Card>
 
-## Build
+## What do you want to build?
 
-The fastest paths to a running integration.
+Pick your use case. Each guide takes you from a fresh account to a working, verifiable result, and flags the administrative pieces (keys, funding, permissions) as you meet them.
+
+<CardGroup cols={2}>
+  <Card title="Signing" icon="signature" href="/guides/signing">
+    Create a wallet the network holds for you, sign messages and transactions from code, and verify every signature. Covers conditional signing, EVM and Solana, and non-custodial co-signing.
+  </Card>
+  <Card title="Encryption & decryption" icon="lock" href="/guides/encryption">
+    Encrypt secrets so only code you've authorized on-chain can decrypt them. Covers the encrypt/decrypt round trip, storing ciphertext anywhere, and using encrypted API keys inside actions.
+  </Card>
+</CardGroup>
+
+Not sure which nouns mean what? [Core Concepts](/concepts) explains the five things every Lit app is made of — accounts, API keys, wallets (PKPs), actions, and groups — in one page.
+
+## Use cases in the wild
+
+Patterns people build on these two primitives, with runnable code for each.
+
+<CardGroup cols={2}>
+  <Card title="Cross-chain actions" icon="arrows-left-right" href="/lit-actions/examples#11-cross-chain-burn-mint-bridge">
+    Read state on one chain, sign on another — bridges, mirrors, and replays without a multisig in the middle.
+  </Card>
+  <Card title="Custom oracles" icon="globe" href="/lit-actions/examples#9-median-price-oracle-across-three-exchanges">
+    Aggregate any HTTP or RPC feed inside the TEE, sign the result, deliver it anywhere a signature is trusted.
+  </Card>
+  <Card title="Conditional signing" icon="shield-check" href="/lit-actions/examples#8-gate-an-erc-20-transfer-on-on-chain-sanctions-data-cross-chain">
+    Sign only when on- or off-chain conditions hold — sanctions screens, price thresholds, KYC checks, dispute windows.
+  </Card>
+  <Card title="Encrypted secrets" icon="key" href="/lit-actions/examples#2-encrypt-a-secret">
+    Encrypt API keys, credentials, or user data — decryptable only by an action you've authorized on-chain.
+  </Card>
+</CardGroup>
+
+## Administer your account
+
+Everything you need to operate what you build — you'll meet each of these inside the guides, and they're all collected under **Administration** in the sidebar.
 
 <CardGroup cols={3}>
   <Card title="Dashboard" icon="browser" href="/management/dashboard">
     Web GUI for accounts, API keys, wallets (PKPs), IPFS actions, and groups.
   </Card>
+  <Card title="API Keys" icon="key" href="/management/api_keys">
+    Your master account key vs. scoped, rotatable usage keys — and how to manage both.
+  </Card>
+  <Card title="Pricing & Funding" icon="credit-card" href="/management/pricing">
+    Credit-based billing, what's metered vs. free, and paying by card, crypto, or LITKEY.
+  </Card>
+  <Card title="Account Modes" icon="users-gear" href="/management/account_modes">
+    API mode vs. ChainSecured mode — picking an ownership model and migrating between them.
+  </Card>
   <Card title="REST API" icon="code" href="/management/api_direct">
-    Drive the same workflows from cURL, the lightweight JS SDK, or your own client built from the OpenAPI spec.
+    Drive every management workflow from cURL, the lightweight JS SDK, or your own OpenAPI client.
   </Card>
-  <Card title="Lit Actions" icon="bolt" href="/lit-actions/index">
-    JavaScript that runs inside the network's TEE — read, decide, sign, in one file.
-  </Card>
-</CardGroup>
-
-## Use cases
-
-Patterns you can build on one programmable runtime.
-
-<CardGroup cols={2}>
-  <Card title="Cross-chain actions" icon="arrows-left-right" href="/lit-actions/examples">
-    Read state on one chain, sign on another — bridges, mirrors, and replays without a multisig in the middle.
-  </Card>
-  <Card title="Custom oracles" icon="globe" href="/lit-actions/examples">
-    Aggregate any HTTP or RPC feed inside the TEE, sign the result with a PKP, deliver it anywhere a signature is trusted.
-  </Card>
-  <Card title="Conditional signing" icon="shield-check" href="/lit-actions/examples">
-    Sign only when on- or off-chain conditions hold — sanctions screens, price thresholds, KYC checks, dispute windows.
-  </Card>
-  <Card title="Encrypted secrets" icon="lock" href="/lit-actions/examples#2-encrypt-a-secret">
-    Encrypt API keys, credentials, or user data under a PKP — decryptable only by an action you've authorized on-chain.
+  <Card title="Errors" icon="triangle-exclamation" href="/management/errors">
+    What `402 Payment Required` and friends mean, and how to fix them.
   </Card>
 </CardGroup>
 
-## Concepts
+## How it works
 
 How the runtime works and how trust is established.
 
@@ -63,30 +87,8 @@ How the runtime works and how trust is established.
   <Card title="Auth Model" icon="shield-check" href="/architecture/authModel">
     How API keys, scopes, and account ownership combine to authorize requests.
   </Card>
-  <Card title="Groups" icon="folder-tree" href="/architecture/groups">
-    Bind Programmable Key Pairs to permitted action CIDs and usage keys.
-  </Card>
   <Card title="Verification" icon="badge-check" href="/architecture/verification/index">
     Attest that the enclave is running the code it claims to be running.
-  </Card>
-</CardGroup>
-
-## Operate
-
-Account ownership, billing, and key management.
-
-<CardGroup cols={3}>
-  <Card title="Account Modes" icon="users-gear" href="/management/account_modes">
-    API mode vs. ChainSecured mode — picking an ownership model and migrating between them.
-  </Card>
-  <Card title="API Keys" icon="key" href="/management/api_keys">
-    Account keys vs. usage keys, and how to scope them.
-  </Card>
-  <Card title="Pricing" icon="credit-card" href="/management/pricing">
-    Credit-based billing, how requests are metered, and how to add funds.
-  </Card>
-  <Card title="Self-Hosting" icon="server" href="/architecture/self-hosting">
-    Open-source repos, deployment ownership, and the tradeoffs of operating your own Lit stack.
   </Card>
 </CardGroup>
 

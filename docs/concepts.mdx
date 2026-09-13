@@ -1,0 +1,92 @@
+---
+title: "Core Concepts"
+description: "The five things every Lit app is made of — accounts, API keys, wallets (PKPs), Lit Actions, and groups — and how they fit together."
+---
+
+Every Lit integration, whether it signs or encrypts, is assembled from the same five pieces. This page defines each one once, shows how they connect, and points to the administrative page where you manage it.
+
+```
+Account  (your identity; holds the credit balance)
+ ├── Account API key   (master credential — admin only, never ship it)
+ ├── Usage API keys    (scoped, rotatable — what your app actually uses)
+ └── Group             (the permission boundary)
+      ├── PKP (wallet)      — a key pair the network holds for you
+      └── Lit Action (CID)  — the code allowed to use those PKPs
+```
+
+When you call the `/core/v1/lit_action` endpoint, the server checks — before running anything — that your API key is allowed to execute that action code in a group, and that the PKP the action wants to use is permitted in the same group. That single rule is the whole security model from the developer's side.
+
+## Account
+
+Your account is your identity on Lit. Creating one registers it on-chain (on Base) and takes about 15 seconds; everything you create afterwards — keys, wallets, groups — hangs off it, and its credit balance pays for metered operations.
+
+Accounts come in two ownership flavors: **API mode** (the default — a server-generated API key is the credential) and **ChainSecured mode** (a wallet you control owns the account on-chain). Start in API mode; you can convert later, one-way.
+
+<Card title="Admin: Account Modes" icon="users-gear" href="/management/account_modes" horizontal>
+  Ownership models, converting API → ChainSecured, and transferring ownership.
+</Card>
+
+## API keys: account key vs. usage keys
+
+Lit has exactly two kinds of API key, and confusing them is the most common first-day mistake:
+
+| | Account key | Usage key |
+|---|---|---|
+| Created | Once, at account creation — **shown once, never again** | On demand, as many as you like |
+| Scope | Full admin access to the account | Only the groups it's been granted |
+| Rotatable | No — it *is* your account identity | Yes — create and delete freely |
+| Belongs in | A secrets manager, admin tooling | Your dApp, servers, cron jobs |
+
+Rule of thumb: the account key *configures*, usage keys *execute*. Anything that ships to production or to a user should hold a usage key scoped to one group.
+
+<Card title="Admin: API Keys" icon="key" href="/management/api_keys" horizontal>
+  Permission fields, key lifecycle, and managing keys via Dashboard or API.
+</Card>
+
+## PKPs (wallets)
+
+A Programmable Key Pair is a real wallet — an elliptic-curve key pair — whose private key lives inside the Lit network's TEE and never leaves it. Your account can mint many. A PKP does two jobs:
+
+- **Signing** — an authorized Lit Action retrieves the key with `Lit.Actions.getPrivateKey({ pkpId })` and signs messages or transactions with it (via ethers.js).
+- **Encryption** — `Lit.Actions.Encrypt` / `Lit.Actions.Decrypt` use an AES key derived from a PKP, so "who can decrypt" reduces to "which actions may use this PKP."
+
+Because a PKP is an ordinary EVM key pair, its address can hold funds, own NFTs, and be verified with `ecrecover` — the difference is that *code*, not a person with a seed phrase, decides when it signs.
+
+<Card title="Admin: create PKPs" icon="wallet" href="/management/dashboard#4-request-new-pkps-wallets" horizontal>
+  Mint wallets from the Dashboard, or via `POST /core/v1/create_wallet`.
+</Card>
+
+## Lit Actions
+
+A Lit Action is an immutable JavaScript program: you publish it to IPFS, and its content hash (CID) becomes both its address and a permanent commitment to its behavior — change one byte and you have a different action. Actions run inside the network's TEE with access to the [Lit Actions SDK](/lit-actions/chipotle): PKP signing, encryption/decryption, and plain `fetch` to any HTTP endpoint.
+
+For quick iteration you can also pass raw code to the run endpoint without publishing to IPFS — permission checks then apply to the hash of that code.
+
+<Card title="Lit Actions overview" icon="bolt" href="/lit-actions/index" horizontal>
+  The runtime, PKP access, proofs, and a minimal example.
+</Card>
+
+## Groups
+
+A group is the permission boundary that ties the other pieces together. It contains the PKPs that may be used, the action CIDs that may run, and it's what usage keys are scoped to. On-chain, this lives in the `AccountConfig` contract — the network enforces it on every call.
+
+Typical setup: one group per app (or per environment), holding that app's PKP(s) and permitted action(s), with one usage key granted `execute_in_groups` for it.
+
+<Card title="Groups in depth" icon="folder-tree" href="/architecture/groups" horizontal>
+  How on-chain group configuration binds PKPs, CIDs, and keys.
+</Card>
+
+## Funding and metering
+
+Running actions and *write* management calls (creating keys, PKPs, groups) consume credits from your account balance; all *read* calls are free. An unfunded metered call fails with `402 Payment Required`. You can fund with a credit card, [crypto](/management/crypto), or [LITKEY](/management/litkey).
+
+<Card title="Admin: Pricing" icon="credit-card" href="/management/pricing" horizontal>
+  Credit packages, per-call and per-second rates, and funding options.
+</Card>
+
+## Where to next
+
+- [Quick Start](/quickstart) — create an account and run your first action.
+- [Signing guide](/guides/signing) — from a fresh account to a verified signature.
+- [Encryption guide](/guides/encryption) — the encrypt/decrypt round trip.
+- [Architecture](/architecture/index) — how the TEE, the chain, and IPFS establish trust.
