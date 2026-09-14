@@ -20,7 +20,7 @@
 //!     (cross-tenant guard — codex gap #14).
 //!   - Disable transition clears `pending_action_pi_id` + `recovery_token`
 //!     (codex gap #15).
-//!   - API-key caller → 501.
+//!   - Master API-key caller reaches the normal flow.
 
 use std::sync::Arc;
 
@@ -157,7 +157,7 @@ async fn get_returns_null_when_no_row_exists() {
     let Some(key) = stripe_key() else { return };
     let Some(url) = db_url() else { return };
     let stripe = StripeClient::new(key.clone()).unwrap();
-    let cust =
+    let _cust =
         super::setup_intent_tests::ensure_unique_customer(&stripe, TEST_WALLET_CRUD_BASIC).await;
     let pool = PgPool::connect(&url).await.unwrap();
     reset_config_row_for_wallet(&pool, TEST_WALLET_CRUD_BASIC).await;
@@ -350,7 +350,7 @@ async fn put_with_pm_owned_by_different_customer_rejected() {
     let cust_owner =
         super::setup_intent_tests::ensure_unique_customer(&stripe, TEST_WALLET_CRUD_PM_OWNERSHIP)
             .await;
-    let other_cust =
+    let _other_cust =
         super::setup_intent_tests::ensure_unique_customer(&stripe, TEST_WALLET_CRUD_BASIC).await;
     // Attach the card to cust_owner.
     let pm_id = attach_test_card(&stripe, &cust_owner).await;
@@ -450,21 +450,23 @@ async fn put_disable_clears_pending_action_state() {
 #[tokio::test]
 #[serial_test::serial]
 async fn api_key_caller_proceeds_to_normal_flow() {
+    // Base64 of 32 bytes of 0x07, with its corresponding Ethereum wallet.
+    const MASTER_KEY: &str = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";
+    const MASTER_WALLET: &str = "0x4a62316623ad457f02cdc5d997ded67a383ec569";
     let Some(key) = stripe_key() else { return };
     let Some(url) = db_url() else { return };
     let stripe = StripeClient::new(key.clone()).unwrap();
     // Ensure the wallet has a Stripe customer so the GET path returns
     // 200 (Some / None depending on row presence), not 400. We use the
     // CRUD_BASIC wallet which `ensure_unique_customer` creates / finds.
-    let _ =
-        super::setup_intent_tests::ensure_unique_customer(&stripe, TEST_WALLET_CRUD_BASIC).await;
+    let _ = super::setup_intent_tests::ensure_unique_customer(&stripe, MASTER_WALLET).await;
     let pool = PgPool::connect(&url).await.unwrap();
-    reset_config_row_for_wallet(&pool, TEST_WALLET_CRUD_BASIC).await;
+    reset_config_row_for_wallet(&pool, MASTER_WALLET).await;
 
-    let client = build_client(key, url, TEST_WALLET_CRUD_BASIC).await;
+    let client = build_client(key, url, MASTER_WALLET).await;
     let resp = client
         .get("/billing/auto_topup_config")
-        .header(Header::new("X-Api-Key", "raw-api-key-abc"))
+        .header(Header::new("X-Api-Key", MASTER_KEY))
         .dispatch()
         .await;
     assert_eq!(resp.status(), Status::Ok);

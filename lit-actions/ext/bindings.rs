@@ -119,7 +119,7 @@ async fn op_aes_encrypt(
     )
 }
 
-#[instrument(skip_all, ret)]
+#[instrument(skip_all)]
 #[op2(reentrant)]
 #[string]
 async fn op_aes_decrypt(
@@ -137,7 +137,7 @@ async fn op_aes_decrypt(
     )
 }
 
-#[instrument(skip_all, ret)]
+#[instrument(skip_all)]
 #[op2(reentrant)]
 #[string]
 async fn op_get_private_key(
@@ -153,7 +153,7 @@ async fn op_get_private_key(
     )
 }
 
-#[instrument(skip_all, ret)]
+#[instrument(skip_all)]
 #[op2(reentrant)]
 #[string]
 async fn op_get_lit_action_private_key(state: Rc<RefCell<OpState>>) -> Result<String, JsErrorBox> {

@@ -5443,8 +5443,6 @@ dependencies = [
 [[package]]
 name = "ipfs-hasher"
 version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "802d005faacdd9ad472aa89649150e0057b06ecf1e5d723be74933772a2b9f48"
 dependencies = [
  "ipfs-unixfs",
 ]
@@ -6020,11 +6018,14 @@ dependencies = [
  "pretty_assertions",
  "pretty_env_logger",
  "rstest",
+ "serde_json",
  "sys_traits",
  "temp-file",
  "tokio",
  "tokio-stream",
  "tonic",
+ "tracing",
+ "tracing-subscriber",
  "wiremock",
 ]
 
