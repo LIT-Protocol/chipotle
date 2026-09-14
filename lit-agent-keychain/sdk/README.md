@@ -136,6 +136,11 @@ provisioning and billing operations; direct action requests retain their separat
 execution timeout. `OwnerClient` accepts an optional fourth `managementTimeoutMs`
 constructor argument.
 
+Set `client.progress = (message) => …` to receive short status messages during
+`login()`. The first sign-in for a vault provisions its Chipotle groups and
+execution key on-chain, which takes roughly 30 seconds; later sign-ins take a
+few seconds.
+
 Owner/browser integrations can use `OwnerClient`, `LitConnection`, and
 `authorizationTypedData`; see `web/src/identities.ts` for wallet, passkey and Google
 signers. Owner approvals use short-lived proofs; stored ciphertext/policy receipts
