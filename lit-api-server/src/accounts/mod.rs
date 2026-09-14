@@ -110,8 +110,32 @@ pub async fn wait_for_account_visible(api_key: &str) -> bool {
     const BASE_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
     const MAX_DELAY: std::time::Duration = std::time::Duration::from_millis(2000);
 
+    // Resolve the read-only contract and the simulated caller once. `api_payers` is
+    // stable deploy config, not per-account state, so re-fetching it on every poll
+    // iteration would only double the RPC reads on the hot path this is stabilizing.
+    let account_api_key_hash = api_key_hash(api_key);
+    let contract = match get_read_only_account_config_contract().await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("wait_for_account_visible: read-only contract unavailable: {e:#}");
+            return false;
+        }
+    };
+    let from = match get_api_payers().await.ok().and_then(|p| p.first().copied()) {
+        Some(from) => from,
+        None => {
+            tracing::warn!("wait_for_account_visible: no api_payers configured; cannot poll");
+            return false;
+        }
+    };
+
     for attempt in 1..=MAX_ATTEMPTS {
-        match account_exists(api_key).await {
+        match contract
+            .accountExistsAndIsMutable(account_api_key_hash)
+            .from(from)
+            .call()
+            .await
+        {
             Ok(true) => return true,
             Ok(false) => {}
             Err(e) => {
