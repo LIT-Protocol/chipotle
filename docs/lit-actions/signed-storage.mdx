@@ -1,0 +1,236 @@
+---
+title: "Signed Data in Untrusted Storage"
+description: "Let a Lit Action sign the records your app stores, then have other actions fetch and verify them at runtime. Your database becomes a dumb, replaceable cache: it can go down or be rolled back, but it can never forge a permission."
+---
+
+Lit Actions are stateless. Anything an action needs to remember between calls (who is allowed to do what, which version of a secret is current, whether a grant has been revoked) has to live somewhere else. The obvious home is your own database, and the obvious worry is that you now have to trust it.
+
+You don't. Have a Lit Action **sign every record before it is stored**, and have every consumer **verify the signature before acting on it**. The signer is an action's own CID-derived key, so a record can only exist if that exact audited code decided to issue it. Your database, API, and CDN become plumbing: they can withhold or serve stale data, but they cannot invent authority.
+
+```
+Owner ──proof──▶ Authority action ──signed receipt──▶ Your DB (plaintext JSON + signature)
+                                                          │
+Agent ──signed request──▶ Secret action ──fetch────────────┘
+                              │  verify receipt with getLitActionPublicKey(authorityCid)
+                              │  check bindings, windows, grants
+                              ▼
+                        use key, return signed + encrypted result
+```
+
+This is how the [Lit Agent Keychain](https://github.com/LIT-Protocol/chipotle/tree/main/lit-agent-keychain) stores ciphertext, access policies, and recovery credentials in ordinary PostgreSQL with no trusted operator. This page extracts the pattern so you can use it for your own records.
+
+## The three roles
+
+| Role | What it is | Trusts |
+|---|---|---|
+| **Issuer action** | A Lit Action that verifies some real-world authorization (a wallet signature, a passkey, an OAuth token) and, if valid, signs a *receipt* over the exact object being authorized. | Only its own code and the proof it verified. |
+| **Storage** | Any HTTPS-reachable store: your API over Postgres, S3, IPFS, an on-chain registry. Holds `{ document, receipt }` pairs. | Nothing. It is not a trust boundary. |
+| **Consumer action** | A Lit Action that fetches the signed document at runtime, verifies the receipt against the issuer's public key, checks that the document says what the request claims, and only then uses key material. | The issuer's CID and the Lit TLS origin. |
+
+The issuer and consumers are usually [derived actions](/lit-actions/derived-actions) built from shared templates, with the issuer's CID stamped into every consumer's manifest so the trust link is part of the consumer's own identity.
+
+## Step 1: Canonical documents
+
+Signatures cover bytes, so everyone must serialize the same object to the same bytes. Use a restricted canonical JSON:
+
+- Object keys sorted by ASCII code point.
+- Numbers must be safe integers. No floats, no `-0`.
+- No `undefined`, no prototype tricks, no unknown fields (validate with a strict schema before hashing).
+- Strings are exact Unicode text with no normalization.
+
+```javascript
+export function canonical(value) {
+  if (value === null || typeof value === "boolean" || typeof value === "string")
+    return JSON.stringify(value);
+  if (typeof value === "number" && Number.isSafeInteger(value) && !Object.is(value, -0))
+    return String(value);
+  if (Array.isArray(value)) return "[" + value.map(canonical).join(",") + "]";
+  if (value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+    const entries = Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return "{" + entries.map(([k, v]) => JSON.stringify(k) + ":" + canonical(v)).join(",") + "}";
+  }
+  throw new Error("Not a canonical protocol value");
+}
+export const digest = (v) => ethers.utils.sha256(ethers.utils.toUtf8Bytes(canonical(v))).slice(2);
+```
+
+Give every document a `domain` string (for example `"my-app/policy/v1"`) and a `v` version field. Domain separation means a signature over a policy can never be replayed as a signature over a receipt or a request, even if the two happen to hash the same fields.
+
+## Step 2: The issuer signs a receipt, not the document
+
+The receipt is a small payload that binds the document's hash to a scope and a timestamp. Signing a fixed-shape payload rather than arbitrary documents keeps the issuer's signing surface tiny and easy to audit.
+
+```javascript
+// Inside the issuer action. `document` and `proof` come from js_params.
+async function main({ document, proof }) {
+  let key;
+  try {
+    // 1. Validate shape. Reject unknown fields. Confirm it belongs to this scope.
+    const doc = policySchema.parse(document);
+    if (doc.vaultId !== MANIFEST.vaultId) throw new Error();
+
+    // 2. Verify the real-world authorization. In the Keychain this is an EIP-712
+    //    wallet signature, a WebAuthn assertion, or a Google ID token whose nonce
+    //    commits to a locally held session key. The proof must commit to
+    //    digest(document) so it cannot be reused for a different object.
+    await verifyOwnerProof(MANIFEST.owner, proof, digest(doc));
+
+    // 3. Enforce document-level rules the storage layer cannot be trusted to enforce.
+    const now = Math.floor(Date.now() / 1000);
+    if (doc.expiresAt - doc.notBefore > 90 * 86400) throw new Error();
+
+    // 4. Only now touch the key.
+    key = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+    const payload = {
+      v: 1,
+      domain: "my-app/receipt/v1",
+      vaultId: doc.vaultId,
+      objectHash: digest(doc),
+      issuedAt: now,
+    };
+    const signature = await key.signMessage(canonical(payload));
+    return { ok: true, receipt: { payload, signature } };
+  } catch {
+    return { ok: false, error: "authorization_denied" };
+  }
+}
+```
+
+Store the result as `{ document, receipt }`. The document stays plaintext JSON your app can query and index; the receipt travels with it.
+
+<Note>
+The example uses `signMessage` (EIP-191) because `ethers` is a runtime global and any EVM tool can verify it. The Keychain instead signs `sha256(canonical(payload))` directly with secp256k1 via `@noble/curves`, which yields a compact 64-byte signature verifiable in Rust with no Ethereum dependency. Either works; pick one and pin it in the `domain` string.
+</Note>
+
+## Step 3: Consumers fetch and verify at runtime
+
+A consumer action never trusts what it fetched until the receipt verifies under the **issuer's** public key, which it looks up by the issuer's CID. Because the issuer CID is stamped into the consumer's manifest, a consumer can only ever be satisfied by receipts from the one issuer it was built to trust.
+
+```javascript
+// Inside a consumer (secret) action.
+async function main(params) {
+  try {
+    const request = verifySignedRequest(params.signedRequest); // see step 4
+
+    // 1. Fetch the current signed policy. Fail closed on any transport error.
+    const res = await fetch(`${MANIFEST.registry}/api/registry/secrets/${MANIFEST.secretId}`, {
+      redirect: "error",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) throw new Error();
+    const { policy } = await res.json();
+    const { document: p, receipt } = signedPolicySchema.parse(policy);
+
+    // 2. Verify the receipt against the ISSUER's key, looked up by CID.
+    const issuerAddress = await Lit.Actions.getLitActionWalletAddress({ ipfsId: MANIFEST.authorityCid });
+    if (receipt.payload.domain !== "my-app/receipt/v1") throw new Error();
+    if (receipt.payload.vaultId !== MANIFEST.vaultId) throw new Error();
+    if (receipt.payload.objectHash !== digest(p)) throw new Error();
+    const recovered = ethers.utils.verifyMessage(canonical(receipt.payload), receipt.signature);
+    if (recovered.toLowerCase() !== issuerAddress.toLowerCase()) throw new Error();
+
+    // 3. Check the document says what the request claims. Every field the
+    //    requester relies on must be bound here, or storage could swap it.
+    const now = Math.floor(Date.now() / 1000);
+    if (p.secretId !== MANIFEST.secretId || p.actionCid !== request.actionCid) throw new Error();
+    if (digest(p) !== request.policyHash) throw new Error(); // requester saw THIS policy
+    if (p.disabled || p.notBefore > now || p.expiresAt <= now) throw new Error();
+    const grant = p.grants.find((g) => g.agentPublicKey === request.agentPublicKey);
+    if (!grant || !grant.operations.includes(request.operation)) throw new Error();
+    if (!grant.versions.some((v) => v.envelopeHash === request.envelopeHash)) throw new Error();
+
+    // 4. Only now request key material, then re-check the clock right before use.
+    const key = await Lit.Actions.getLitActionPrivateKey();
+    if (Math.floor(Date.now() / 1000) >= Math.min(p.expiresAt, request.expiresAt)) throw new Error();
+    // ... decrypt / sign / act
+  } catch {
+    return { ok: false, error: "access_denied" };
+  }
+}
+```
+
+Three things to notice:
+
+- **Every claim in the request is checked against the signed document.** The requester says "policy hash X, envelope hash Y, my key Z, operation W". The action confirms the signed policy has that hash, lists that key, permits that operation, and covers that envelope. Storage cannot substitute a different policy without the hash check failing.
+- **Fetch fails closed.** Timeouts, redirects, oversized bodies, non-2xx statuses, and schema failures all deny. The Keychain caps registry responses at 256 KB. Remember an action gets [fifty outbound requests](/lit-actions/limits) and ten key operations per execution.
+- **The key is requested last** and the expiry is re-checked immediately before use, because fetches take real time.
+
+## Step 4: Sign the request too
+
+If the consumer is acting for an agent or user, the request itself should be a signed canonical document so the consumer can verify *who* is asking and that the ask is fresh and specific.
+
+```javascript
+// Client side. Ed25519 keeps agent identities small and fast.
+const request = {
+  v: 1, domain: "my-app/request/v1",
+  vaultId, secretId, actionCid,
+  version, envelopeHash, policyHash,        // exactly what the agent saw and expects
+  agentPublicKey, operation: "get",
+  responsePublicKey: hex(x25519.getPublicKey(ephemeral)), // where to send the result
+  nonce: randomHex(32),
+  issuedAt: now, expiresAt: now + 90,
+};
+const signedRequest = { request, signature: ed25519.sign(sha256(canonical(request)), agentKey) };
+```
+
+Inside the action: parse strictly, verify the Ed25519 signature under `request.agentPublicKey`, and require a short window (the Keychain allows at most 120 seconds of lifetime and rejects requests whose issue time is more than 30 seconds in the future). The `nonce` and window bound replay; the hashes bind the request to one exact policy and one exact ciphertext.
+
+## Step 5: Sign and encrypt the response
+
+If the action's output is sensitive, or if it passes through a proxy you do not control (a relayer, your own API, an MCP server), protect it on the way out:
+
+1. **Encrypt to the requester.** HPKE-seal the result to `request.responsePublicKey`, with the request hash in the HPKE `info` so a sealed result cannot be replayed to a different request.
+2. **Sign the sealed result with the action key.** Payload: `{ domain: "my-app/response/v1", requestHash: digest(request), sealed }`. The client verifies against the consumer action's public key (looked up by the CID it computed itself).
+
+Now only the requester can read the result, and the requester can prove the result came from the exact code it intended to call. A malicious proxy can drop the response but cannot forge or alter it.
+
+## What storage can and cannot do
+
+Be precise about the residual trust, because it shapes your design.
+
+| Storage **cannot** | Storage **can** |
+|---|---|
+| Forge a receipt or policy | Withhold updates (deny service) |
+| Extend a signed expiry or lift a `disabled` flag | Serve an older *still-valid* record (roll back a revocation until the old record expires) |
+| Add a grant for a key the issuer never signed for | Delete records (make you rely on your own backups) |
+| Change which issuer a consumer trusts | Observe plaintext metadata (names, public keys, timing) |
+
+The rollback row is the one to design around. The Keychain accepts it explicitly, and bounds it with two rules:
+
+- **Finite windows on anything that grants access.** Agent policies expire in 30 days by default and 90 at most. A rolled-back grant is therefore a bounded exposure, not a permanent one.
+- **Epoch and previous-hash chaining.** Each new policy carries `epoch: n+1` and `previousHash: digest(previous)`. The API enforces the chain on write so concurrent editors get a clean conflict instead of clobbering each other. This is an honesty check on the operator's own writes, **not** rollback protection: a dishonest operator can still serve epoch 3 after epoch 4 exists.
+
+If you need real rollback protection, anchor the latest document hash somewhere the operator cannot rewind. Posting `digest(latestPolicy)` to a contract on Base and having the consumer read it over a [hostname-pinned RPC](/lit-actions/patterns#hostname-pinned-rpc-trust-anchors) is one call and turns "operator can roll back" into "operator can only stall".
+
+## When to use this instead of on-chain state
+
+| | Signed off-chain storage | On-chain registry |
+|---|---|---|
+| Write cost | Free | Gas per write |
+| Latency | One HTTPS fetch | One RPC call |
+| Privacy | Metadata visible only to the operator | Public |
+| Rollback protection | No (unless anchored) | Yes |
+| Availability | Your uptime | Chain uptime |
+| Payload size | Kilobytes fine (16 KB ciphertexts in the Keychain) | Expensive above a few hundred bytes |
+
+Most policy and ciphertext data belongs off-chain and signed. Anchor a hash on-chain only for the records where a rollback would be catastrophic.
+
+## Checklist
+
+- Canonical JSON with sorted keys and safe integers, shared by every party.
+- `domain` and `v` on every signed object. Different domains for receipts, requests, responses, and key bindings.
+- Receipts bind `objectHash` plus a scope such as `vaultId`.
+- Consumers look up the issuer's key by CID and never accept a key from the fetched payload.
+- Every field the requester relies on is bound in the signed document and checked.
+- Fetches use HTTPS, reject redirects, time out, cap size, and fail closed.
+- Key material is requested after all independent checks pass and expiry is re-checked before use.
+- Grants have finite expiry. Chains use epoch and previous hash. Anchor on-chain if rollback matters.
+- Responses are encrypted to the requester and signed by the action when they cross an untrusted hop.
+- One generic error for every denial.
+
+## See also
+
+- [Derived Actions](/lit-actions/derived-actions) — how the issuer CID gets stamped into each consumer so the trust link is part of the code.
+- [Action-Identity Signing](/lit-actions/patterns#action-identity-signing--immutable-proofs) — the primitive this builds on.
+- [Keychain security contract](https://github.com/LIT-Protocol/chipotle/blob/main/lit-agent-keychain/SECURITY.md) — the full statement of what the cryptography enforces and what the operator can still do.
+- [`actions/authority.ts`](https://github.com/LIT-Protocol/chipotle/blob/main/lit-agent-keychain/actions/authority.ts) and [`actions/secret-common.ts`](https://github.com/LIT-Protocol/chipotle/blob/main/lit-agent-keychain/actions/secret-common.ts) — production issuer and consumer actions.

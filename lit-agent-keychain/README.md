@@ -46,8 +46,12 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 - $10/month for 1,000 stored secrets; rotations use the same slot. Contact us for more.
 - Stripe Checkout and customer portal, period-end cancellation, retained encrypted backups.
 - Transactional mutation audit, paginated secrets/activity, scoped user execution keys.
-- Agent SDK and CLI; agent keys are generated locally. No management bearer tokens,
-  operator grant signer, PKP vault provisioning, chain registry, relayer, or paymaster.
+- Agent SDK, CLI and a local stdio MCP server (`npx @lit-protocol/keychain mcp`);
+  agent keys are generated locally. No management bearer tokens, operator grant
+  signer, PKP vault provisioning, chain registry, relayer, or paymaster.
+- Client-side remote attestation of the Lit endpoint before any request: TDX quote
+  chain to a pinned Intel root, event-log replay, measured app/compose identity,
+  on-chain governance whitelist, and (Node) TLS certificate binding.
 
 ## Local development
 
@@ -115,6 +119,13 @@ Set build args `VITE_LIT_API_URL` and optionally `VITE_WALLETCONNECT_PROJECT_ID`
 The image runs as an unprivileged user. For Railway, use repository root as the build
 context and `lit-agent-keychain/railway.json` as the config path; the Dockerfile path
 is relative to the repository root.
+
+Publish the agent SDK with `./publish.sh`. It builds, compares the packed contents
+with what npm serves for the current version, bumps the patch version only when
+they differ (`--bump minor|major` to choose), commits and tags
+`keychain-sdk-v<version>`, then publishes. `--dry-run` shows the decision without
+committing or publishing. A local `before=` cooldown in `~/.npmrc` does not affect
+it; the published tarball is fetched directly and integrity-checked.
 
 This is a prelaunch, incompatible replacement. Migration `20260911000001` drops the
 legacy Keychain tables and their contents. Stop the old service before applying it.

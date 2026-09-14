@@ -64,6 +64,8 @@ Immutable JS code pinned to IPFS, identified by its CID. Actions are **not owned
 
 This is intentional. Actions are meant to be reusable across companies and users. An ecosystem of audited, well-known action CIDs that people drop into their groups is more valuable than everyone registering private copies. Think of them like npm packages — you reference them, you don't own them.
 
+Every action also has an **identity key** that the TEE derives from its CID (`Lit.Actions.getLitActionPrivateKey()`). It needs no PKP and no group entry beyond the CID itself, and only that exact code can use it. Because the identity is a function of the bytes, stamping a small config constant into a template yields a new action with a new key per user or per secret. See [Derived Actions](/lit-actions/derived-actions). The group still decides *who may run* the action; the identity key decides *what can be proven about the result*.
+
 ### Group
 
 The core authorization primitive. A Group is a **permission policy** that binds together:

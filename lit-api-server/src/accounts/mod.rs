@@ -91,6 +91,68 @@ pub async fn account_exists(api_key: &str) -> Result<bool> {
     Ok(exists)
 }
 
+/// Poll until a freshly-created account becomes visible to the read RPC, absorbing
+/// read-after-write lag across load-balanced RPC backends.
+///
+/// `newAccount` may be mined and its receipt observed on one backend while a
+/// subsequent `eth_call` (e.g. the pre-send simulation for `registerWalletDerivation`)
+/// lands on a backend that has not yet imported that block. On the lagging backend
+/// `allApiKeyHashesToMaster[hash]` is still zero, so `accountExistsAndIsMutable`
+/// returns false and the access check reverts with `NoAccountAccess`. Blocking on
+/// this read until it returns true closes most of that window before the next write.
+///
+/// Best-effort and bounded: returns `true` once visible, `false` if it never became
+/// visible within the bound. Transient read errors are treated as "not yet visible"
+/// and retried rather than propagated.
+#[instrument(name = "accounts::wait_for_account_visible", level = "debug", skip_all)]
+pub async fn wait_for_account_visible(api_key: &str) -> bool {
+    const MAX_ATTEMPTS: u32 = 8;
+    const BASE_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
+    const MAX_DELAY: std::time::Duration = std::time::Duration::from_millis(2000);
+
+    // Resolve the read-only contract and the simulated caller once. `api_payers` is
+    // stable deploy config, not per-account state, so re-fetching it on every poll
+    // iteration would only double the RPC reads on the hot path this is stabilizing.
+    let account_api_key_hash = api_key_hash(api_key);
+    let contract = match get_read_only_account_config_contract().await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("wait_for_account_visible: read-only contract unavailable: {e:#}");
+            return false;
+        }
+    };
+    let from = match get_api_payers().await.ok().and_then(|p| p.first().copied()) {
+        Some(from) => from,
+        None => {
+            tracing::warn!("wait_for_account_visible: no api_payers configured; cannot poll");
+            return false;
+        }
+    };
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        match contract
+            .accountExistsAndIsMutable(account_api_key_hash)
+            .from(from)
+            .call()
+            .await
+        {
+            Ok(true) => return true,
+            Ok(false) => {}
+            Err(e) => {
+                tracing::warn!(
+                    attempt,
+                    "wait_for_account_visible: account visibility read failed: {e:#}"
+                );
+            }
+        }
+        if attempt < MAX_ATTEMPTS {
+            let delay = std::cmp::min(BASE_DELAY * attempt, MAX_DELAY);
+            tokio::time::sleep(delay).await;
+        }
+    }
+    false
+}
+
 /// Add a group to an account with name, description, permitted action CID hashes, wallet hashes, and permission flags.
 /// `permitted_actions` and `wallets` are keccak256 hashes (U256). Use `keccak256(action_ipfs_cid)` and `keccak256(pkp_public_key)` to produce them.
 /// `all_wallets_permitted` and `all_actions_permitted` match AccountConfig.sol Group fields.

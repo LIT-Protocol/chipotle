@@ -56,17 +56,24 @@ function getPrivateKey({ pkpId }) {
 }
 
 /**
- * Get the private key for the currently executing Lit Action
+ * Get the private key for the currently executing Lit Action. The key is a
+ * secp256k1 scalar deterministically derived by the TEE's KMS from this
+ * action's IPFS CID, so it is stable across executions and changes if any
+ * byte of the source changes. No PKP or group permission is required.
+ * Returned as 0x-prefixed hex.
  * @name Lit.Actions.getLitActionPrivateKey
  * @function getLitActionPrivateKey
- * @returns {Promise<string>} The private key secret
+ * @returns {Promise<string>} The private key secret, 0x-prefixed hex
  */
 function getLitActionPrivateKey() {
   return ops.op_get_lit_action_private_key();
 }
 
 /**
- * Get the public key for a Lit Action by IPFS ID
+ * Get the public key for a Lit Action by IPFS ID. Works for any CID with no
+ * group permission (the key is public). Use it to verify signatures or
+ * receipts produced by another action. Returned as 0x-prefixed SEC1 hex.
+ * Counts toward the per-execution key-operation limit.
  * @name Lit.Actions.getLitActionPublicKey
  * @function getLitActionPublicKey
  * @param {Object} params
@@ -78,7 +85,8 @@ function getLitActionPublicKey({ ipfsId }) {
 }
 
 /**
- * Get the wallet address for a Lit Action by IPFS ID
+ * Get the EVM wallet address for a Lit Action by IPFS ID. Works for any CID
+ * with no group permission. Counts toward the per-execution key-operation limit.
  * @name Lit.Actions.getLitActionWalletAddress
  * @function getLitActionWalletAddress
  * @param {Object} params
