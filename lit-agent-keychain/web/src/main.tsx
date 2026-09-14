@@ -193,7 +193,9 @@ function App() {
   const signIn = async (identity: Identity, authority?: Authority) =>
     work("Verifying owner authorization…", async () => {
       const c = ownerClient(identity, settings.network, authority || recovery);
+      c.progress = setBusy;
       await c.login();
+      setBusy("Loading your vault…");
       setClient(c);
       await c.api("/api/billing/refresh", { method: "POST" });
       await refresh(c);
@@ -305,7 +307,8 @@ function App() {
         </div>
       </header>
       {busy && (
-        <div className="progress" role="status">
+        <div className="progress" role="status" aria-live="polite">
+          <span className="spinner" aria-hidden="true" />
           {busy}
         </div>
       )}
@@ -424,7 +427,9 @@ function App() {
                 work("Creating a passkey…", async () => {
                   const identity = await createPasskey("My Keychain");
                   const c = ownerClient(identity, settings.network, recovery);
+                  c.progress = setBusy;
                   await c.login();
+                  setBusy("Loading your vault…");
                   setClient(c);
                   await c.api("/api/billing/refresh", { method: "POST" });
                   setRecoveryOwners([identity.owner]);
@@ -445,7 +450,9 @@ function App() {
                     settings.network,
                     found.authority || recovery,
                   );
+                  c.progress = setBusy;
                   await c.login();
+                  setBusy("Loading your vault…");
                   setClient(c);
                   await c.api("/api/billing/refresh", { method: "POST" });
                   await refresh(c);
