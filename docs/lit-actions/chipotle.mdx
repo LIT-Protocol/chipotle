@@ -63,7 +63,7 @@ Returns **[Promise](https://developer.mozilla.org/docs/Web/JavaScript/Reference/
 
 ## PKP Keys
 
-Key management functions for PKPs.  These functions are used to get keys for PKPs that can be used in javascript functions.
+Key management functions for PKPs and for action identity keys. `getPrivateKey` returns a PKP's key and is checked against group membership. The three `getLitAction*` functions deal with the key every action derives from its own CID; see [Two kinds of keys](/lit-actions/index#two-kinds-of-keys). All key-returning calls share one limit of ten per execution ([Limits](/lit-actions/limits)).
 
 ## Lit.Actions.getPrivateKey
 
@@ -79,13 +79,13 @@ Returns **[Promise](https://developer.mozilla.org/docs/Web/JavaScript/Reference/
 
 ## Lit.Actions.getLitActionPrivateKey
 
-Get the private key for the currently executing Lit Action
+Get the private key for the currently executing Lit Action. The key is a secp256k1 scalar deterministically derived by the TEE's KMS from this action's IPFS CID, so it is stable across executions and nodes, and changes if any byte of the action source changes. No PKP or group permission is required: every action can read its own key. Returned as 0x-prefixed hex; strip the prefix before feeding it to non-ethers libraries. See [Action-Identity Signing](/lit-actions/patterns#action-identity-signing--immutable-proofs) and [Derived Actions](/lit-actions/derived-actions).
 
-Returns **[Promise](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Promise)\<[string](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String)\>** The private key secret
+Returns **[Promise](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Promise)\<[string](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String)\>** The private key secret, 0x-prefixed hex
 
 ## Lit.Actions.getLitActionPublicKey
 
-Get the public key for a Lit Action by IPFS ID
+Get the public key for a Lit Action by IPFS ID. Works for any CID, including actions that are not in any of your groups and have never been executed: the key is public information. Use it to verify signatures or receipts produced by another action, for example an issuer action whose CID is stamped into this one. See [Signed Data in Untrusted Storage](/lit-actions/signed-storage). Returned as 0x-prefixed SEC1 hex. Counts toward the per-execution key-operation limit.
 
 ### Parameters
 
@@ -97,7 +97,7 @@ Returns **[Promise](https://developer.mozilla.org/docs/Web/JavaScript/Reference/
 
 ## Lit.Actions.getLitActionWalletAddress
 
-Get the wallet address for a Lit Action by IPFS ID
+Get the EVM wallet address for a Lit Action by IPFS ID. Works for any CID with no permission required. Convenient for comparing against `ethers.utils.verifyMessage` output when verifying another action's signature. Counts toward the per-execution key-operation limit.
 
 ### Parameters
 
