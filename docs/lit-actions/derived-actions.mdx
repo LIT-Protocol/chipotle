@@ -19,12 +19,26 @@ Nothing is uploaded to IPFS. Chipotle computes the CID from the source you submi
 
 | Need | Without derived actions | With derived actions |
 |---|---|---|
-| A wallet only one user can control | Mint a PKP, add it to a group, gate on the user's signature inside the action | Stamp the user's address into the template. The CID-derived key *is* their wallet. |
+| A signer only one user can control | Mint a PKP, add it to a group, gate on the user's signature inside the action | Stamp the user's address into the template. The CID-derived key signs only for them. |
 | A separate encryption key per secret | One vault PKP per secret, each added to the group | One derived action per secret. Its own key encrypts and decrypts only that secret. |
 | Auditing hundreds of near-identical actions | Read hundreds of files | Read one template. Every instance is `template + constant`; anyone can reproduce the CID and diff. |
 | Letting an untrusted party run the action | Worry about what their `js_params` can do | The constant is in the code, not in `js_params`. Callers cannot change it. |
 
 The last row is the important one. **Anything in the source is trusted; anything in `js_params` is not.** Moving configuration from parameters into the source turns it from caller-controlled input into part of the action's identity.
+
+## Signer, not treasury
+
+A derived key is a great **signer** and a poor **vault**. Its address is a function of the template bytes, so any change (a dependency bump, a bug fix, a new feature) gives every instance a new address. That is harmless when the address holds nothing but authority: a verifier pins a new signer, a smart-contract wallet rotates an owner, a policy names a new key. It is painful when the address holds funds, because every code change becomes a migration that the *old* code must already know how to perform.
+
+So keep balances somewhere that survives a code change and give the derived key the power to move them:
+
+- **Proofs and attestations.** The derived key signs; a contract or API verifies with `ecrecover`. Nothing is held.
+- **Smart-contract wallet signer.** Make the derived key an owner on a Safe, a validator on an ERC-4337 account, or the authorized caller of your own contract. The contract holds the funds. When you ship a new template, the contract's existing owners rotate in the new derived address and the balance never moves.
+- **Authorizer for a PKP.** The derived action verifies the user and signs an authorization; a PKP-backed action (or the same action using `getPrivateKey({ pkpId })`) executes it. Audited code decides, a durable address pays.
+
+If the Lit key itself must hold the funds, use a PKP. The full comparison is in [Which one should hold the funds?](/lit-actions/index#which-one-should-hold-the-funds)
+
+The [action-bound wallet example](/lit-actions/examples#14-a-unique-immutable-wallet-per-user-bound-to-the-action) deposits tokens directly at the derived address to keep the demo self-contained. Read it as a demonstration of the identity property, not as a recommendation to park real balances there.
 
 ## The pattern, step by step
 
@@ -228,6 +242,7 @@ The client checks the challenge matches the one it sent, the manifest hash match
 - **Request the private key last.** Do every independent check (signatures, windows, policy) *before* calling `getLitActionPrivateKey`. A rejected request should never have touched key material.
 - **Zero buffers in `finally`.** Call `.fill(0)` on key and plaintext `Uint8Array`s. JavaScript strings cannot be erased, so keep secrets in byte arrays where practical.
 - **Return one generic error.** The Keychain actions return `{ ok: false, error: "access_denied" }` for every failure so that callers cannot probe which check tripped.
+- **Do not park funds at a derived address.** Hold them in a PKP or a smart-contract wallet and let the derived key sign. See [Signer, not treasury](#signer-not-treasury).
 - **Rotate by re-encrypting, not by re-deriving.** To rotate a secret held by a derived action, encrypt the new value to the same action; the CID and key stay put. To *retire* an action, remove its CID from the group.
 - **Version the constant.** Include a protocol version in the manifest so a future template can recognize and migrate old instances.
 - **Keep the fetch budget in mind.** Actions may make up to fifty outbound requests, and responses are capped at 1 MB. See [Limits](/lit-actions/limits).

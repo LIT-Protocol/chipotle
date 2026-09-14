@@ -27,9 +27,27 @@ Every action can reach two different kinds of key. Knowing which to use is most 
 | Who can use it | Any action whose CID is in the same group as the PKP | Only this action |
 | Public key discovery | `list_wallets`, the Dashboard | `Lit.Actions.getLitActionPublicKey({ ipfsId })` from any action, for any CID |
 | Setup | Mint the PKP, add it and the action to a group | None. Enroll the CID in a group. |
-| Best for | Long-lived accounts whose code will evolve: treasuries, user wallets, vaults that several actions share | Anything that should be operable by exactly one piece of code: proofs, per-user wallets, per-secret encryption keys |
+| Survives a code change | Yes. Add the new CID to the group; the address does not move. | No. New bytes, new CID, new key, new address. |
+| Best for | **The Lit key holds funds or other on-chain state**: treasuries, user wallets, vaults several actions share | **The Lit key is a signer**: proofs and attestations, a signer on a smart-contract wallet, per-user or per-secret authority |
 
-A PKP outlives its code. When you ship a new version of an action, you add the new CID to the group and the PKP keeps its address. An identity key dies with its code. Ship a new version and you have a new key, which is exactly what you want when the key's whole meaning is "this code approved it".
+### Which one should hold the funds?
+
+The short rule: **if the Lit key itself will hold funds, use a PKP. If the Lit key only needs the authority to sign, use the action's identity key.**
+
+The reason is the "survives a code change" row. A PKP outlives its code. When you fix a bug or add a feature, you add the new CID to the group and the PKP keeps its address, so the balance never moves and nothing downstream has to be updated. An identity key dies with its code: ship a new version and you have a new address. If that address held funds you now have to sweep them, which means the old code has to include a migration path you wrote before you knew you'd need it. Group membership also gives you an on-chain, governable answer to "which code may spend from this address" that you can change later; with an identity key the answer is fixed forever at the bytes that derived it.
+
+None of that matters when the key holds nothing. A proof is verified once and the signer address is just a constant the verifier pins. A signer on a smart-contract wallet (a Safe owner, an ERC-4337 validator, a module) holds no balance; the contract does, and rotating the signer is a contract call rather than a fund migration. In those cases the identity key is strictly easier: no PKP to mint, no PKP to add to a group, and the key's whole meaning is "this exact code approved it", which is what you wanted anyway.
+
+| Situation | Use |
+|---|---|
+| Treasury, hot wallet, user balances held directly by Lit | PKP |
+| Oracle, price feed, attestation, cross-chain message signer | Identity key |
+| Signer or owner on a Safe / ERC-4337 account that holds the funds | Identity key (rotate at the contract when code changes) |
+| Per-user wallet where each user's balance sits at a Lit address | PKP per user, or a smart-contract wallet per user with an identity-key signer |
+| Per-user or per-secret encryption key | Identity key ([Derived Actions](/lit-actions/derived-actions)) |
+| Long-lived account whose controlling code will evolve | PKP |
+
+Mixing is normal. A common shape is an identity key that signs *authorizations* which a PKP-backed or contract-backed wallet then executes, so the audited code decides and the durable address pays.
 
 The identity key also unlocks a factory: stamp a small config constant into an audited template and each instance is a new immutable action with a new key. See [Derived Actions](/lit-actions/derived-actions).
 

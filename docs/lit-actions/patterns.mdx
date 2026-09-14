@@ -16,7 +16,7 @@ On this page:
 | [Multi-Source Consensus](#multi-source-consensus) | The action signs data from more than one external source |
 | [Gating Logic](#gating-logic--aka-access-control-conditions) | You want access-control conditions, written as plain JavaScript |
 | [Action-Identity Signing](#action-identity-signing--immutable-proofs) | The proof must be tied to the code, not to a wallet |
-| [A Wallet Bound to the Action](#a-wallet-bound-to-the-action--and-a-unique-one-per-user) | Each user needs a wallet only one piece of code can operate |
+| [A Wallet Bound to the Action](#a-wallet-bound-to-the-action--and-a-unique-one-per-user) | Each user needs a signer only one piece of code can operate |
 | [PKP Wallets as Data Vaults](#encrypt--decrypt--pkp-wallets-as-data-vaults) | Several actions share access to encrypted data |
 | [Securing RPC URLs](#securing-rpc-urls--hiding-api-keys-with-encryption) | An API key lives inside a URL |
 | [Multiple PKPs in a Single Action](#multiple-pkps-in-a-single-action--separating-app-secrets-from-user-signing) | One execution needs an app secret and a per-user signer |
@@ -302,7 +302,11 @@ This is the simplest **derived action**: one audited template plus a stamped-in 
 
 Because `OWNER_ADDRESS` is part of the hashed source, two users produce two CIDs, two keys, and two wallet addresses — there is no code path from one user's action to another's wallet. Authorize spending by recovering a signature and comparing it to the hardcoded owner (include a nonce/deadline in the signed `message` for replay protection, as in the [caller-signature check above](#what-if-someone-else-runs-my-action)). The Lit usage key that *runs* the action grants no spending power — it can only read the address or relay a withdrawal the real owner already signed.
 
-A full runnable version — deposit an ERC-20 into the wallet, withdraw by signing, and a wrong-user attack the action refuses — is in [`examples/action-bound-wallet/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/action-bound-wallet) (walkthrough in [Examples §13](./examples#13-a-unique-immutable-wallet-per-user-bound-to-the-action)).
+A full runnable version — deposit an ERC-20 into the wallet, withdraw by signing, and a wrong-user attack the action refuses — is in [`examples/action-bound-wallet/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/action-bound-wallet) (walkthrough in [Examples §14](./examples#14-a-unique-immutable-wallet-per-user-bound-to-the-action)).
+
+<Warning>
+**Use this as a signer, not as the place funds live.** The address is a function of the action bytes, so any change to the template gives every user a new address, and funds sitting at the old one have to be swept by the old code. The runnable example deposits tokens directly at the derived address to stay self-contained; for real balances, make the per-user derived key the owner or signer of a per-user smart-contract wallet, or use a PKP per user and let the action sign with `getPrivateKey({ pkpId })`. See [Which one should hold the funds?](/lit-actions/index#which-one-should-hold-the-funds)
+</Warning>
 
 ---
 
