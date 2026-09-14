@@ -200,7 +200,10 @@ pub async fn wait_for_usage_key_visible(usage_api_key: &str) -> bool {
             Ok(wallet) if wallet != Address::ZERO => return true,
             Ok(_) => {}
             Err(e) => {
-                tracing::warn!(
+                // Expected transient: the read RPC reverts (e.g. AccountDoesNotExist)
+                // until the just-mined setUsageApiKey block propagates. Log per-attempt
+                // at debug; add_usage_api_key emits a single warn if it never resolves.
+                tracing::debug!(
                     attempt,
                     "wait_for_usage_key_visible: billing wallet read failed: {e:#}"
                 );
@@ -254,7 +257,10 @@ pub async fn wait_for_group_visible(api_key: &str, group_id: U256) -> bool {
             Ok(group) if group.metadata.id == group_id => return true,
             Ok(_) => {}
             Err(e) => {
-                tracing::warn!(
+                // Expected transient: the read RPC reverts GroupDoesNotExist until the
+                // just-mined addGroup block propagates. Log per-attempt at debug;
+                // add_group emits a single warn if the group never resolves.
+                tracing::debug!(
                     attempt,
                     "wait_for_group_visible: group contents read failed: {e:#}"
                 );
