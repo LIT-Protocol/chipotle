@@ -1,0 +1,54 @@
+{
+  "name": "lit-agent-keychain-app",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "build:actions": "node scripts/build-actions.mjs",
+    "build": "npm run build:actions && node scripts/build-sdk.mjs && tsc --noEmit && vite build --config web/vite.config.ts",
+    "dev": "vite --config web/vite.config.ts",
+    "test": "npm run build:actions && node scripts/build-sdk.mjs && tsx --test tests/*.test.ts",
+    "test:browser": "playwright test --config tests/playwright.config.ts",
+    "check": "tsc --noEmit",
+    "test:runtime": "node scripts/test-runtime.mjs",
+    "format": "prettier --write protocol actions sdk web tests scripts *.json *.md",
+    "format:check": "prettier --check protocol actions sdk web tests scripts *.json *.md"
+  },
+  "dependencies": {
+    "@hpke/core": "1.9.0",
+    "@hpke/dhkem-x25519": "1.8.0",
+    "@noble/curves": "2.4.0",
+    "@noble/hashes": "2.0.1",
+    "@rainbow-me/rainbowkit": "2.2.11",
+    "@tanstack/react-query": "5.102.8",
+    "ipfs-unixfs-importer": "16.1.5",
+    "jose": "6.2.12",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "viem": "2.56.3",
+    "wagmi": "2.19.5",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2",
+    "@types/node": "22.19.15",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "5.1.4",
+    "esbuild": "0.28.2",
+    "prettier": "3.9.6",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.6"
+  },
+  "engines": {
+    "node": ">=22.16"
+  },
+  "overrides": {
+    "axios": "1.20.0",
+    "ws": "8.21.3",
+    "decode-uri-component": "0.5.0",
+    "uuid": "11.1.1",
+    "esbuild": "0.28.2"
+  }
+}

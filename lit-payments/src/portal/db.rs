@@ -1,7 +1,7 @@
 //! Postgres queries for the grants table.
 
 use anyhow::Result;
-use sqlx::PgPool;
+use sqlx::{PgExecutor, PgPool};
 use time::OffsetDateTime;
 
 use super::types::GrantRow;
@@ -21,7 +21,13 @@ pub struct NewGrant<'a> {
 /// Insert a grant. Returns the new row's id + created_at on success. If the
 /// idempotency key already exists, returns `Ok(None)` so the caller can fetch
 /// the prior row.
-pub async fn insert(pool: &PgPool, g: &NewGrant<'_>) -> Result<Option<(i64, OffsetDateTime)>> {
+///
+/// Takes any `PgExecutor` so the grant handler can run the insert inside the
+/// advisory-locked transaction that also runs the cap check (CPL-379 L5).
+pub async fn insert(
+    executor: impl PgExecutor<'_>,
+    g: &NewGrant<'_>,
+) -> Result<Option<(i64, OffsetDateTime)>> {
     let row: Option<(i64, OffsetDateTime)> = sqlx::query_as(
         "INSERT INTO grants (operator_id, stripe_customer_id, wallet_address, email, \
                              cents, note, stripe_balance_transaction_id, idempotency_key) \
@@ -37,15 +43,17 @@ pub async fn insert(pool: &PgPool, g: &NewGrant<'_>) -> Result<Option<(i64, Offs
     .bind(g.note)
     .bind(g.stripe_balance_transaction_id)
     .bind(g.idempotency_key)
-    .fetch_optional(pool)
+    .fetch_optional(executor)
     .await?;
     Ok(row)
 }
 
 /// Look up a grant by idempotency key. Used to detect retries when the prior
-/// attempt got far enough to write the row.
+/// attempt got far enough to write the row. Takes any `PgExecutor` so the
+/// lookup can run inside the grant handler's advisory-locked transaction
+/// (CPL-379 L5).
 pub async fn find_by_idempotency_key(
-    pool: &PgPool,
+    executor: impl PgExecutor<'_>,
     idempotency_key: &str,
 ) -> Result<Option<GrantRow>> {
     let row = sqlx::query_as::<
@@ -66,7 +74,7 @@ pub async fn find_by_idempotency_key(
          FROM grants WHERE idempotency_key = $1",
     )
     .bind(idempotency_key)
-    .fetch_optional(pool)
+    .fetch_optional(executor)
     .await?;
     Ok(row.map(map_grant_row))
 }

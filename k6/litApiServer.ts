@@ -669,8 +669,7 @@ export type ConvertToChainSecuredAccountHeaders = {
 };
 
 export type ConvertToChainSecuredAccountDefault =
-  | AccountOpResponse
-  | ErrMessage;
+  AccountOpResponse | ErrMessage;
 
 export type AccountExistsHeaders = {
   /**
@@ -700,8 +699,7 @@ export type CreateWalletPostHeaders = {
 export type CreateWalletPostDefault = CreateWalletResponse | ErrMessage;
 
 export type CreateWalletWithSignatureDefault =
-  | CreateWalletWithSignatureResponse
-  | ErrMessage;
+  CreateWalletWithSignatureResponse | ErrMessage;
 
 export type PrepareWalletDefault = PrepareWalletResponse | ErrMessage;
 
@@ -807,8 +805,7 @@ export type AddUsageApiKeyHeaders = {
 export type AddUsageApiKeyDefault = AddUsageApiKeyResponse | ErrMessage;
 
 export type AddUsageApiKeyWithSignatureDefault =
-  | AddUsageApiKeyWithSignatureResponse
-  | ErrMessage;
+  AddUsageApiKeyWithSignatureResponse | ErrMessage;
 
 export type UpdateUsageApiKeyHeaders = {
   /**
@@ -957,8 +954,7 @@ export type GetNodeChainConfigDefault = NodeChainConfigResponse | ErrMessage;
 export type GetChainConfigKeysDefault = ChainConfigKeysResponse | ErrMessage;
 
 export type GetLitActionClientConfigDefault =
-  | LitActionClientConfigResponse
-  | ErrMessage;
+  LitActionClientConfigResponse | ErrMessage;
 
 export type GetCacheMetadataHeaders = {
   /**
@@ -970,8 +966,7 @@ export type GetCacheMetadataHeaders = {
 export type GetCacheMetadataDefault = CacheMetadataResponse | ErrMessage;
 
 export type GetSupportedLanguagesDefault =
-  | SupportedLanguagesResponse
-  | ErrMessage;
+  SupportedLanguagesResponse | ErrMessage;
 
 export type GetApiPayersDefault = string[] | ErrMessage;
 
@@ -990,18 +985,17 @@ export type BillingBalanceDefault = BillingBalanceResponse | ErrMessage;
 
 export type BillingCreatePaymentIntentHeaders = {
   /**
-   * API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{typed_data, signature})>` where `typed_data` is EIP-712 with `primaryType: "BillingAuth"`. The signature proves wallet possession; the typed data must include the connected wallet address and an issuedAt timestamp within ±5 minutes.
+   * Billing owner only: account master API key or verified X-Wallet-Auth. Execution usage keys cannot manage funding or saved-card settings.
    */
   "X-Api-Key"?: string;
 };
 
 export type BillingCreatePaymentIntentDefault =
-  | CreatePaymentIntentResponse
-  | ErrMessage;
+  CreatePaymentIntentResponse | ErrMessage;
 
 export type BillingConfirmPaymentHeaders = {
   /**
-   * API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{typed_data, signature})>` where `typed_data` is EIP-712 with `primaryType: "BillingAuth"`. The signature proves wallet possession; the typed data must include the connected wallet address and an issuedAt timestamp within ±5 minutes.
+   * Billing owner only: account master API key or verified X-Wallet-Auth. Execution usage keys cannot manage funding or saved-card settings.
    */
   "X-Api-Key"?: string;
 };
@@ -1073,6 +1067,11 @@ export class LitApiServerClient {
     };
   }
 
+  /**
+ * Create a new managed account: derives a fresh wallet, registers it on-chain, and provisions a Stripe customer with starter credits. Returns the account's API key and wallet address.
+
+No authentication is required (this is how a caller obtains their first API key), but the endpoint is rate limited per client IP and may return 429 Too Many Requests when the node is under load or a single source creates accounts too quickly. Retry those with exponential backoff.
+ */
   newAccount(
     newAccountRequest: NewAccountRequest,
     requestParameters?: Params,
