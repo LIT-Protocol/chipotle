@@ -20,6 +20,9 @@ use serde_json::{json, Value};
 use sqlx::{PgPool, Postgres, Transaction};
 use time::OffsetDateTime;
 
+// Every vault starts on Free: a handful of secrets with sponsored execution so
+// the product can be tried without a card. Paying raises the storage limit.
+pub const FREE_LIMIT: i64 = 5;
 pub const STANDARD_LIMIT: i64 = 1000;
 pub const MAX_CUSTOM_LIMIT: i64 = 100000;
 #[derive(sqlx::FromRow)]
@@ -51,12 +54,20 @@ impl Subscription {
         let active =
             custom || (self.status == "active" && self.paid_until.is_some_and(|end| end > now));
         Plan {
-            plan: if custom { "custom" } else { "standard" },
+            plan: if custom {
+                "custom"
+            } else if active {
+                "standard"
+            } else {
+                "free"
+            },
             active,
             secret_limit: if custom {
                 self.custom_secret_limit.unwrap_or(STANDARD_LIMIT)
-            } else {
+            } else if active {
                 STANDARD_LIMIT
+            } else {
+                FREE_LIMIT
             },
             paid_until: if custom {
                 self.custom_until
@@ -85,13 +96,28 @@ pub async fn lock(
         .await
         .map_err(api::internal)
 }
-pub async fn require_active(
+// Storage writes must fit the current plan. Creating needs a free slot; other
+// writes (rotation, restore) only require the vault not to exceed its limit,
+// so a lapsed subscriber keeps working until they are over the Free limit.
+// Over the Free limit is a payment problem (402); at a paid limit it is
+// capacity (409). Callers hold the vault lock, so counts are race-free.
+pub async fn require_capacity(
     tx: &mut Transaction<'_, Postgres>,
     vault: &str,
+    creating: bool,
 ) -> Result<Plan, ApiError> {
     let plan = lock(tx, vault).await?.plan(OffsetDateTime::now_utc());
-    if !plan.active {
-        return Err(api::err(Status::PaymentRequired, "subscription_required"));
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM kc_secrets WHERE vault_id=$1")
+        .bind(vault)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(api::internal)?;
+    if count + i64::from(creating) > plan.secret_limit {
+        return Err(if plan.active {
+            api::err(Status::Conflict, "secret_limit")
+        } else {
+            api::err(Status::PaymentRequired, "subscription_required")
+        });
     }
     Ok(plan)
 }

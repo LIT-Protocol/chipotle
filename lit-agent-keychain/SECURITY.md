@@ -136,18 +136,19 @@ Billing-owner guards deny child usage keys access to parent funding/card managem
 **No hard per-user execution or dollar cap exists.** Users share the operator's parent
 balance. This explicitly accepted limit allows abuse of allowed actions to exhaust
 that balance; account funding and provider auto-recharge settings bound exposure.
-The $10/month subscription includes fair use with no automatic overage charges.
+Free (5 secrets) and the $10/month subscription both include fair use execution with
+no automatic overage charges.
 Atomic app counters only limit server-sponsored login attempts. Anonymous capacity
 can be exhausted independently. The Stripe subscription is a storage/sponsorship
 entitlement, not a cryptographic access policy: an independently funded payer may
 still run the signed actions after subscription expiry.
 
-With an honest service, storage mutations stop at paid expiry. Sponsored secret
-execution stops after the background reconciler updates Chipotle permissions, subject
-to provider cache delay or outages. The worker runs every minute and refreshes Stripe
-state every five minutes; webhooks and explicit refresh also update the DB. This is
-not instantaneous revocation or a spending guarantee. Login, owner revocation and
-encrypted backups remain available. Data is never automatically deleted on cancellation.
+With an honest service, storage mutations stop at paid expiry while the vault exceeds
+the Free limit. Sponsored execution of enrolled secret actions continues on Free;
+lapsing a subscription is not a revocation mechanism and never was a spending
+guarantee. The worker runs every minute and refreshes Stripe state every five minutes;
+webhooks and explicit refresh also update the DB. Login, owner revocation and encrypted
+backups remain available. Data is never automatically deleted on cancellation.
 
 No read-count/one-time-use guarantee exists against an operator who can roll back the
 database. Identical signed requests may execute repeatedly until expiry; integrations
