@@ -1,0 +1,17 @@
+**
+!lit-agent-keychain/
+!lit-agent-keychain/**
+!vendor/
+!vendor/ipfs-hasher/
+!vendor/ipfs-hasher/**
+**/target
+**/node_modules
+**/.env
+**/.env.*
+!**/.env.example
+lit-agent-keychain/generated
+lit-agent-keychain/sdk/dist
+lit-agent-keychain/web/dist
+lit-agent-keychain/test-results
+lit-agent-keychain/playwright-report
+**/*.tgz

@@ -209,7 +209,14 @@ pub async fn preview_customer(
 
 /// `POST /api/grant` — apply a credit to a customer's Stripe balance.
 ///
-/// Flow:
+/// Authorization: any authenticated `Operator` (either `Role::Mod` or
+/// `Role::Admin`) may grant. This is intentional and distinct from
+/// `override_rate`, which is Admin-only: grants are bounded by the per-grant
+/// and per-operator-per-day caps below, so delegating them to Mods is an
+/// accepted operational choice (CPL-379 L6 — intent confirmed).
+///
+/// Flow (steps 2, 3 and 6 run inside one per-operator advisory-locked
+/// transaction so the daily-cap check-then-insert is atomic — see CPL-379 L5):
 /// 1. Validate idempotency-key format + cents > 0.
 /// 2. Replay short-circuit: if a grant with this idempotency key already
 ///    exists, return it without re-hitting Stripe.
@@ -219,7 +226,7 @@ pub async fn preview_customer(
 /// 5. Write the Stripe balance_transaction with idempotency key so retries
 ///    after a network error don't duplicate the credit upstream.
 /// 6. Insert the grants row (ON CONFLICT DO NOTHING — race-safe).
-/// 7. Re-fetch the balance and return.
+/// 7. Commit (releases the lock), re-fetch the balance and return.
 #[post("/api/grant", format = "json", data = "<req>")]
 pub async fn grant_credit(
     operator: Operator,
@@ -243,11 +250,33 @@ pub async fn grant_credit(
     }
     let note = req.note.trim();
 
-    // Step 2: idempotent replay short-circuit.
-    if let Some(existing) = db::find_by_idempotency_key(pool, &req.idempotency_key)
+    // Serialize concurrent grants by the same operator (CPL-379 L5). The daily
+    // cap is enforced by reading the last-24h total and then inserting the grant
+    // as two separate statements; without serialization two requests can both
+    // read the pre-grant total, both pass the cap, and both insert — multiplying
+    // the cap by the concurrency. A transaction-scoped, per-operator advisory
+    // lock makes the second request block until the first commits its grants
+    // row, so its cap re-check (Step 3) sees the already-applied grant. The lock
+    // key is the operator id, so distinct operators never contend. The lock (and
+    // the pooled connection) is held across the Stripe calls in steps 4-5;
+    // grants come only from the low-volume admin portal (any operator role —
+    // see the handler docs), so that is an acceptable tradeoff for making the
+    // cap authoritative. `pg_advisory_xact_lock` auto-releases on commit or
+    // rollback.
+    let mut tx = pool.begin().await.map_err(server_err)?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(operator.id)
+        .execute(&mut *tx)
+        .await
+        .map_err(server_err)?;
+
+    // Step 2: idempotent replay short-circuit (inside the lock).
+    if let Some(existing) = db::find_by_idempotency_key(&mut *tx, &req.idempotency_key)
         .await
         .map_err(server_err)?
     {
+        // No write to perform; drop the lock/connection before the Stripe call.
+        let _ = tx.rollback().await;
         let balance_cents = balance::fetch(stripe, &existing.stripe_customer_id)
             .await
             .map_err(server_err)?;
@@ -262,8 +291,8 @@ pub async fn grant_credit(
         }));
     }
 
-    // Step 3: cap check.
-    let already_today = caps::cents_granted_last_24h(pool, operator.id)
+    // Step 3: cap check (inside the lock; sees all committed grants).
+    let already_today = caps::cents_granted_last_24h(&mut *tx, operator.id)
         .await
         .map_err(server_err)?;
     let check = caps::check(
@@ -275,6 +304,7 @@ pub async fn grant_credit(
     if let CapCheck::NonPositive | CapCheck::OverPerGrant { .. } | CapCheck::OverDaily { .. } =
         &check
     {
+        let _ = tx.rollback().await;
         let msg = check.message().unwrap_or_else(|| "cap violation".into());
         return Err(err(Status::BadRequest, msg));
     }
@@ -311,9 +341,9 @@ pub async fn grant_credit(
     .await
     .map_err(server_err)?;
 
-    // Step 6: persist the grants row. Race-safe via ON CONFLICT DO NOTHING;
-    // a concurrent retry that won the race produces None here, in which case
-    // we fetch the winning row.
+    // Step 6: persist the grants row (inside the advisory-locked transaction).
+    // Race-safe via ON CONFLICT DO NOTHING; a concurrent retry that won the race
+    // produces None here, in which case we fetch the winning row.
     let email_for_db = req
         .email
         .as_deref()
@@ -329,11 +359,11 @@ pub async fn grant_credit(
         stripe_balance_transaction_id: &stripe_balance_transaction_id,
         idempotency_key: &req.idempotency_key,
     };
-    let (grant_id, replay) = match db::insert(pool, &new).await.map_err(server_err)? {
+    let (grant_id, replay) = match db::insert(&mut *tx, &new).await.map_err(server_err)? {
         Some((id, _created_at)) => (id, false),
         None => {
             // Concurrent retry beat us; fetch the winning row.
-            let existing = db::find_by_idempotency_key(pool, &req.idempotency_key)
+            let existing = db::find_by_idempotency_key(&mut *tx, &req.idempotency_key)
                 .await
                 .map_err(server_err)?
                 .ok_or_else(|| {
@@ -342,6 +372,10 @@ pub async fn grant_credit(
             (existing.id, true)
         }
     };
+
+    // Commit: atomically persists the grant and releases the advisory lock, so a
+    // blocked concurrent grant now reads this grant in its cap check.
+    tx.commit().await.map_err(server_err)?;
 
     // Step 7: read the post-credit balance for the UI.
     let balance_cents = balance::fetch(stripe, &stripe_customer_id)
