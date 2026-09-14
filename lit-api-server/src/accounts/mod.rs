@@ -91,6 +91,189 @@ pub async fn account_exists(api_key: &str) -> Result<bool> {
     Ok(exists)
 }
 
+/// Poll until a freshly-created account becomes visible to the read RPC, absorbing
+/// read-after-write lag across load-balanced RPC backends.
+///
+/// `newAccount` may be mined and its receipt observed on one backend while a
+/// subsequent `eth_call` (e.g. the pre-send simulation for `registerWalletDerivation`)
+/// lands on a backend that has not yet imported that block. On the lagging backend
+/// `allApiKeyHashesToMaster[hash]` is still zero, so `accountExistsAndIsMutable`
+/// returns false and the access check reverts with `NoAccountAccess`. Blocking on
+/// this read until it returns true closes most of that window before the next write.
+///
+/// Best-effort and bounded: returns `true` once visible, `false` if it never became
+/// visible within the bound. Transient read errors are treated as "not yet visible"
+/// and retried rather than propagated.
+#[instrument(name = "accounts::wait_for_account_visible", level = "debug", skip_all)]
+pub async fn wait_for_account_visible(api_key: &str) -> bool {
+    const MAX_ATTEMPTS: u32 = 8;
+    const BASE_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
+    const MAX_DELAY: std::time::Duration = std::time::Duration::from_millis(2000);
+
+    // Resolve the read-only contract and the simulated caller once. `api_payers` is
+    // stable deploy config, not per-account state, so re-fetching it on every poll
+    // iteration would only double the RPC reads on the hot path this is stabilizing.
+    let account_api_key_hash = api_key_hash(api_key);
+    let contract = match get_read_only_account_config_contract().await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("wait_for_account_visible: read-only contract unavailable: {e:#}");
+            return false;
+        }
+    };
+    let from = match get_api_payers().await.ok().and_then(|p| p.first().copied()) {
+        Some(from) => from,
+        None => {
+            tracing::warn!("wait_for_account_visible: no api_payers configured; cannot poll");
+            return false;
+        }
+    };
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        match contract
+            .accountExistsAndIsMutable(account_api_key_hash)
+            .from(from)
+            .call()
+            .await
+        {
+            Ok(true) => return true,
+            Ok(false) => {}
+            Err(e) => {
+                tracing::warn!(
+                    attempt,
+                    "wait_for_account_visible: account visibility read failed: {e:#}"
+                );
+            }
+        }
+        if attempt < MAX_ATTEMPTS {
+            let delay = std::cmp::min(BASE_DELAY * attempt, MAX_DELAY);
+            tokio::time::sleep(delay).await;
+        }
+    }
+    false
+}
+
+/// Poll until a freshly-set usage API key resolves to its billing wallet on the
+/// read RPC, absorbing read-after-write lag across load-balanced RPC backends.
+///
+/// `setUsageApiKey` may be mined and its receipt observed on one backend while a
+/// subsequent `eth_call` — the billing guard's `getBillingWalletAddress` on the
+/// very next request (e.g. `POST /lit_action` authenticated with the new usage
+/// key) — lands on a backend that has not yet imported that block. On the lagging
+/// backend the `allApiKeyHashesToMaster` mapping is still zero, so the key
+/// "does not resolve to any account" and the guard answers 401. This mirrors the
+/// `wait_for_account_visible` window closed for `new_account` in #646, but on the
+/// billing-resolution read the usage-key path actually uses.
+///
+/// Best-effort and bounded: returns `true` once the key resolves to a non-zero
+/// wallet, `false` if it never became visible within the bound. Transient read
+/// errors and the not-yet-visible zero-address are both treated as "keep polling".
+///
+/// Polls with the raw usage key so the on-chain hash matches exactly what the
+/// billing guard computes via `get_billing_wallet_address` (`usage_api_key_to_hash`).
+#[instrument(
+    name = "accounts::wait_for_usage_key_visible",
+    level = "debug",
+    skip_all
+)]
+pub async fn wait_for_usage_key_visible(usage_api_key: &str) -> bool {
+    const MAX_ATTEMPTS: u32 = 8;
+    const BASE_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
+    const MAX_DELAY: std::time::Duration = std::time::Duration::from_millis(2000);
+
+    // Resolve the read-only contract once; the key hash is stable across the poll.
+    let usage_api_key_hash = usage_api_key_to_hash(usage_api_key);
+    let contract = match get_read_only_account_config_contract().await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("wait_for_usage_key_visible: read-only contract unavailable: {e:#}");
+            return false;
+        }
+    };
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        match contract
+            .getBillingWalletAddress(usage_api_key_hash)
+            .call()
+            .await
+        {
+            Ok(wallet) if wallet != Address::ZERO => return true,
+            Ok(_) => {}
+            Err(e) => {
+                // Expected transient: the read RPC reverts (e.g. AccountDoesNotExist)
+                // until the just-mined setUsageApiKey block propagates. Log per-attempt
+                // at debug; add_usage_api_key emits a single warn if it never resolves.
+                tracing::debug!(
+                    attempt,
+                    "wait_for_usage_key_visible: billing wallet read failed: {e:#}"
+                );
+            }
+        }
+        if attempt < MAX_ATTEMPTS {
+            let delay = std::cmp::min(BASE_DELAY * attempt, MAX_DELAY);
+            tokio::time::sleep(delay).await;
+        }
+    }
+    false
+}
+
+/// Poll until a freshly-created group becomes visible to the read RPC, absorbing
+/// read-after-write lag across load-balanced RPC backends.
+///
+/// `addGroup` may be mined and its receipt observed on one backend while a
+/// subsequent `eth_call` — the pre-send simulation for a follow-up `updateGroup`
+/// (or `addActionToGroup`/`addPkpToGroup`) — lands on a backend that has not yet
+/// imported that block. On the lagging backend the group storage is still empty,
+/// so the write reverts `GroupDoesNotExist` (surfaced as a 500). Blocking on the
+/// per-group `listGroupContents` read until it returns the group closes most of
+/// that window — the group analog of `wait_for_account_visible` (#646).
+///
+/// Best-effort and bounded: returns `true` once `listGroupContents` reports the
+/// matching `group_id`, `false` if it never became visible within the bound. A
+/// not-yet-visible group (revert, or a returned id that doesn't match) is treated
+/// as "keep polling".
+#[instrument(name = "accounts::wait_for_group_visible", level = "debug", skip_all)]
+pub async fn wait_for_group_visible(api_key: &str, group_id: U256) -> bool {
+    const MAX_ATTEMPTS: u32 = 8;
+    const BASE_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
+    const MAX_DELAY: std::time::Duration = std::time::Duration::from_millis(2000);
+
+    // Resolve the read-only contract once; the account hash is stable across the poll.
+    let account_api_key_hash = api_key_hash(api_key);
+    let contract = match get_read_only_account_config_contract().await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("wait_for_group_visible: read-only contract unavailable: {e:#}");
+            return false;
+        }
+    };
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        match contract
+            .listGroupContents(account_api_key_hash, group_id)
+            .call()
+            .await
+        {
+            Ok(group) if group.metadata.id == group_id => return true,
+            Ok(_) => {}
+            Err(e) => {
+                // Expected transient: the read RPC reverts GroupDoesNotExist until the
+                // just-mined addGroup block propagates. Log per-attempt at debug;
+                // add_group emits a single warn if the group never resolves.
+                tracing::debug!(
+                    attempt,
+                    "wait_for_group_visible: group contents read failed: {e:#}"
+                );
+            }
+        }
+        if attempt < MAX_ATTEMPTS {
+            let delay = std::cmp::min(BASE_DELAY * attempt, MAX_DELAY);
+            tokio::time::sleep(delay).await;
+        }
+    }
+    false
+}
+
 /// Add a group to an account with name, description, permitted action CID hashes, wallet hashes, and permission flags.
 /// `permitted_actions` and `wallets` are keccak256 hashes (U256). Use `keccak256(action_ipfs_cid)` and `keccak256(pkp_public_key)` to produce them.
 /// `all_wallets_permitted` and `all_actions_permitted` match AccountConfig.sol Group fields.
@@ -137,6 +320,18 @@ pub async fn add_group(
     );
     send_transaction(function_call, signer_pool, signer_lease, client).await?;
     blockchain_cache::invalidate_for_account(api_key).await;
+    // Block until the new group resolves on the read RPC before returning, so a
+    // client that immediately mutates it (e.g. update_group / add_action_to_group)
+    // does not race read-after-write lag into a spurious GroupDoesNotExist revert
+    // — the group analog of new_account's wait_for_account_visible (#646).
+    if !wait_for_group_visible(api_key, group_id).await {
+        tracing::warn!(
+            group_id = %group_id,
+            "add_group: group not yet visible to the read RPC after addGroup was mined; \
+             an immediate follow-up mutation may briefly revert GroupDoesNotExist until it \
+             propagates"
+        );
+    }
     Ok(group_id)
 }
 
@@ -364,6 +559,16 @@ pub async fn add_usage_api_key(
     );
     let result = send_transaction(function_call, signer_pool, signer_lease, client).await?;
     blockchain_cache::invalidate_for_keys(api_key, usage_api_key);
+    // Block until the new usage key resolves on the read RPC before returning, so a
+    // client that immediately authenticates with it (e.g. POST /lit_action) does not
+    // race read-after-write lag into a spurious 401 "does not resolve to any account"
+    // — the usage-key analog of new_account's wait_for_account_visible (#646).
+    if !wait_for_usage_key_visible(usage_api_key).await {
+        tracing::warn!(
+            "add_usage_api_key: usage key not yet visible to the read RPC after setUsageApiKey \
+             was mined; an immediate authenticated call may briefly 401 until it propagates"
+        );
+    }
     Ok(result)
 }
 
