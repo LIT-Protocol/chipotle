@@ -1,0 +1,52 @@
+{
+  "name": "@lit-protocol/keychain",
+  "version": "2.0.0",
+  "description": "Owner-authorized, locally encrypted credentials for agents, with a local MCP server",
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "keychain": "./cli.mjs"
+  },
+  "files": [
+    "dist",
+    "cli.mjs",
+    "mcp.mjs",
+    "mcp.d.mts",
+    "tls.mjs",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "npm --prefix .. run build:actions && cd .. && node scripts/build-sdk.mjs",
+    "prepack": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LIT-Protocol/chipotle.git",
+    "directory": "lit-agent-keychain/sdk"
+  },
+  "license": "Apache-2.0",
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "zod": "4.3.6"
+  },
+  "keywords": [
+    "lit-protocol",
+    "mcp",
+    "model-context-protocol",
+    "secrets",
+    "agents"
+  ]
+}

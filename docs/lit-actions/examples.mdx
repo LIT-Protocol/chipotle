@@ -1,6 +1,6 @@
 ---
 title: "Examples"
-description: "Common Lit Action patterns covering signing, encryption, decryption, HTTP fetching, contract calls, sending ETH, gating ERC-20 transfers on sanctions data, multi-source price oracles, AI-consensus prediction-market resolution, permissionless cross-chain token bridging, non-custodial threshold-ECDSA co-signing, and keyless Solana (ed25519) transaction signing."
+description: "Common Lit Action patterns covering signing, encryption, decryption, HTTP fetching, contract calls, sending ETH, gating ERC-20 transfers on sanctions data, multi-source price oracles, AI-consensus prediction-market resolution, permissionless cross-chain token bridging, non-custodial threshold-ECDSA co-signing, keyless Solana (ed25519) transaction signing, and a production agent secrets keychain built from derived actions and signed off-chain policy."
 ---
 
 Each example below is a self-contained Lit Action. Pass the code string to the `/core/v1/lit_action` endpoint with any required `js_params`. The `pkpId` parameter is the wallet address of the PKP you want to use, passed in via `js_params`.
@@ -842,4 +842,66 @@ async function signRound({ pkpId, encActionKeyshare, message, peerCommitments })
 
 <Info>
   The full runnable example — the stateless `mpcSigner` action, the user-side client + local share store, a `wasm/` wrapper that compiles `lit-frost` + `frost-dkg` to WebAssembly, and `setup` / `keygen` / `fund` / `sign` scripts covering the FROST DKG and both quorums (hot + Lit, and the no-Lit hot + cold recovery path) — lives at [`examples/mpc-signing-frost/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/mpc-signing-frost) in the repo. Verified end-to-end on Solana devnet (DKG + a hot + Lit transfer + a hot + cold recovery transfer); `npm run keygen -- --basic` does a simpler 2-of-2 (Lit + hot, no recovery).
+</Info>
+
+---
+
+## 19. Agent Secrets Keychain (Derived Actions + Signed Storage)
+
+Every example above is one action. This one shows what a whole product looks like when it is built from the two structural patterns: [Derived Actions](./derived-actions) and [Signed Data in Untrusted Storage](./signed-storage). The [Lit Agent Keychain](https://github.com/LIT-Protocol/chipotle/tree/main/lit-agent-keychain) lets a human give an AI agent scoped access to credentials (API keys, tokens) that the human can revoke, with no operator able to read or forge anything.
+
+There are **no PKPs** and **no trusted backend**. A vault is *N+1* immutable actions derived from three templates:
+
+- The **authority action** has the owner's identity (wallet address, passkey public key, or Google subject) stamped in. It verifies the owner's proof and signs a receipt over whatever object the owner approved: a ciphertext envelope, an access policy, a recovery-credential list.
+- One **secret action per stored secret** has the vault ID, secret ID, and the authority action's CID stamped in. Its CID-derived key, run through HKDF, is the X25519 key the owner encrypts to in the browser. It only ever decrypts after verifying an agent's signed request against a policy the authority action signed.
+- A fixed **public-key helper** lets browsers and SDKs look up any action's identity key directly from the trusted Lit origin.
+
+The Keychain's Postgres database stores plaintext policy JSON plus receipts. It can roll back or withhold, but cannot mint a grant, extend an expiry, or read a secret.
+
+```javascript
+// Abridged core of the per-secret action. Full source: lit-agent-keychain/actions/secret-common.ts
+async function main(params) {
+  try {
+    // 1. Agent's signed, short-lived request. Binds exact policy hash, envelope hash,
+    //    operation, and a fresh response encryption key.
+    const { request, signature } = params.signedRequest;
+    requireThat(request.secretId === MANIFEST.secretId && request.vaultId === MANIFEST.vaultId);
+    verifyWindow(request.issuedAt, request.expiresAt, now(), 120);
+    verifyAgent(request, signature, request.agentPublicKey);            // Ed25519
+
+    // 2. Fetch the current signed policy from the (untrusted) registry and verify the
+    //    receipt against the AUTHORITY action's key, looked up by the CID stamped in.
+    const { policy } = await jsonFetch(`${MANIFEST.registry}/api/registry/secrets/${MANIFEST.secretId}`, {}, 8000, 256 * 1024);
+    const authorityKey = await Lit.Actions.getLitActionPublicKey({ ipfsId: MANIFEST.authorityCid });
+    verifyReceipt(policy, authorityKey, MANIFEST.vaultId);
+    const p = policy.document;
+    requireThat(digest(p) === request.policyHash && !p.disabled && p.notBefore <= now() && now() < p.expiresAt);
+    requireThat(p.grants.some((g) => g.agentPublicKey === request.agentPublicKey
+      && g.operations.includes(request.operation)
+      && g.versions.some((v) => v.envelopeHash === request.envelopeHash)));
+
+    // 3. The ciphertext envelope is also owner-signed and bound to this exact action.
+    verifyReceipt(params.envelope, authorityKey, MANIFEST.vaultId);
+    requireThat(digest(params.envelope.document) === request.envelopeHash
+      && params.envelope.document.metadata.actionCid === request.actionCid);
+
+    // 4. Only now derive the decryption key from this action's identity key.
+    const actionKey = unhex((await Lit.Actions.getLitActionPrivateKey()).replace(/^0x/, ""));
+    const x25519Key = hkdf(sha256, actionKey, utf8("lit-keychain/v2"), utf8("secret-envelope-x25519"), 32);
+    const plaintext = await decryptEnvelope(params.envelope.document, x25519Key);      // HPKE unwrap + AES-GCM
+
+    // 5. Encrypt the result to the requester and sign it, so no proxy can read or forge it.
+    const payload = { domain: "lit-keychain/response/v2", requestHash: digest(request),
+      sealed: await seal(request.responsePublicKey, plaintext, { requestHash: digest(request) }) };
+    return { ok: true, result: { payload, signature: signAction(payload, actionKey) } };
+  } catch {
+    return { ok: false, error: "access_denied" };
+  }
+}
+```
+
+A second template, `stripe-balance`, uses the same manifest and the same verification but can only call one fixed Stripe endpoint and return bounded numbers. That credential has no export path, even for the owner, and the difference is auditable from the CID.
+
+<Info>
+  The full project, including the three action templates, the browser client that derives CIDs and encrypts locally, the Rust API that verifies receipts before storing them, the agent SDK/CLI/MCP server, client-side TEE attestation of the Lit endpoint, and the [security contract](https://github.com/LIT-Protocol/chipotle/blob/main/lit-agent-keychain/SECURITY.md) spelling out what the operator can and cannot do, lives at [`lit-agent-keychain/`](https://github.com/LIT-Protocol/chipotle/tree/main/lit-agent-keychain) in the repo. It runs against the production Chipotle API with execute-only usage keys.
 </Info>

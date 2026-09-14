@@ -22,14 +22,12 @@
 //!   - cap reached: pre-existing PIs already at/above cap →  second
 //!     top-up skipped  (gap #7, partial of gap #11)
 
-use std::sync::Arc;
-
 use hmac::{Hmac, Mac};
 use lit_billing_core::StripeClient;
 use rocket::http::{Header, Status};
 use rocket::local::asynchronous::Client;
 use rocket::{Rocket, routes};
-use serde_json::{Value, json};
+use serde_json::json;
 use sha2::Sha256;
 use sqlx::PgPool;
 

@@ -4328,8 +4328,6 @@ dependencies = [
 [[package]]
 name = "ipfs-hasher"
 version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "802d005faacdd9ad472aa89649150e0057b06ecf1e5d723be74933772a2b9f48"
 dependencies = [
  "ipfs-unixfs",
 ]
@@ -4742,8 +4740,10 @@ dependencies = [
  "alloy-primitives",
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "base64_light",
  "hex",
+ "k256",
  "reqwest 0.12.28",
  "rocket",
  "rocket_okapi",

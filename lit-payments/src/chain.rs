@@ -1120,8 +1120,8 @@ mod tests {
             ],
             data: encode_uint256(expected.amount_wei).into(),
             transaction_hash: Some(expected.tx_hash),
-            log_index: Some(expected.log_index.into()),
-            block_number: Some(expected.block_number.into()),
+            log_index: Some(expected.log_index),
+            block_number: Some(expected.block_number),
             ..Default::default()
         };
 
@@ -1150,8 +1150,8 @@ mod tests {
             ],
             data: encode_uint256(expected.amount_wei).into(),
             transaction_hash: Some(expected.tx_hash),
-            log_index: Some((expected.log_index - 1).into()),
-            block_number: Some(expected.block_number.into()),
+            log_index: Some(expected.log_index - 1),
+            block_number: Some(expected.block_number),
             ..Default::default()
         };
         let matching_payment = Log {
@@ -1163,8 +1163,8 @@ mod tests {
             ],
             data: encode_uint256(expected.amount_wei).into(),
             transaction_hash: Some(expected.tx_hash),
-            log_index: Some(expected.log_index.into()),
-            block_number: Some(expected.block_number.into()),
+            log_index: Some(expected.log_index),
+            block_number: Some(expected.block_number),
             ..Default::default()
         };
 
@@ -1197,8 +1197,8 @@ mod tests {
             .abi_encode()
             .into(),
             transaction_hash: Some(expected.tx_hash),
-            log_index: Some(expected.log_index.into()),
-            block_number: Some(expected.block_number.into()),
+            log_index: Some(expected.log_index),
+            block_number: Some(expected.block_number),
             ..Default::default()
         };
 
@@ -1232,8 +1232,8 @@ mod tests {
             ],
             data: encode_uint256(expected.amount_wei).into(),
             transaction_hash: Some(expected.tx_hash),
-            log_index: Some(expected.log_index.into()),
-            block_number: Some(expected.block_number.into()),
+            log_index: Some(expected.log_index),
+            block_number: Some(expected.block_number),
             ..Default::default()
         };
 

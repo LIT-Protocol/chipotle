@@ -2282,6 +2282,7 @@ dependencies = [
  "once_cell",
  "serdect",
  "sha2",
+ "signature",
 ]
 
 [[package]]
@@ -2359,8 +2360,10 @@ dependencies = [
  "alloy-signer-local",
  "anyhow",
  "async-trait",
+ "base64",
  "base64_light",
  "hex",
+ "k256",
  "reqwest",
  "rocket",
  "rocket_okapi",
