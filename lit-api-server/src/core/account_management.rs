@@ -100,6 +100,16 @@ async fn create_new_wallet() -> Result<(String, Address, [u8; 32], U256), ApiSta
     Ok((public_key_string, wallet_address, secret, derivation_u256))
 }
 
+/// True when a contract-write error is the transient read-after-write symptom of a
+/// just-created account not yet being visible to the RPC backend that served the
+/// pre-send simulation. The AccountConfig access check reverts with `NoAccountAccess`
+/// while `allApiKeyHashesToMaster[hash]` is still zero on that backend, so the error
+/// is safe to retry once the account has propagated. Any other revert is a genuine
+/// failure and must not be retried.
+fn is_account_not_yet_visible(err: &anyhow::Error) -> bool {
+    format!("{err:#}").contains("NoAccountAccess")
+}
+
 pub async fn new_account(
     signer_pool: Arc<SignerPool>,
     stripe_state: Option<Arc<StripeState>>,
@@ -124,16 +134,59 @@ pub async fn new_account(
         return Err(e.into());
     }
 
+    // The newAccount tx is now mined, but POST /new_account immediately issues a
+    // second on-chain write (registerWalletDerivation) whose pre-send simulation is
+    // an eth_call. On a load-balanced RPC endpoint that call can land on a backend
+    // that has not yet imported the newAccount block, so the account looks
+    // nonexistent and the AccountConfig access check reverts with NoAccountAccess
+    // (surfaced to the caller as a 500). Block until a read sees the account, then
+    // retry the write a few times to absorb any residual backend lag before failing.
+    // See the Deploy Staging k6 new-account correctness failures introduced by #634.
+    if !accounts::wait_for_account_visible(&api_key).await {
+        tracing::warn!(
+            "new_account: account not yet visible to read RPC after create; \
+             attempting wallet-derivation registration anyway"
+        );
+    }
+
     // technically this is NOT a derivaton path at all, but it's a stand-in for now
-    accounts::register_wallet_derivation(
-        signer_pool,
-        &api_key,
-        wallet_address,
-        derivation_path,
-        "AMW",
-        "Account Master Wallet",
-    )
-    .await?;
+    const REGISTER_MAX_ATTEMPTS: u32 = 3;
+    let mut register_err = None;
+    for attempt in 1..=REGISTER_MAX_ATTEMPTS {
+        match accounts::register_wallet_derivation(
+            signer_pool.clone(),
+            &api_key,
+            wallet_address,
+            derivation_path,
+            "AMW",
+            "Account Master Wallet",
+        )
+        .await
+        {
+            Ok(_) => {
+                register_err = None;
+                break;
+            }
+            Err(e) if attempt < REGISTER_MAX_ATTEMPTS && is_account_not_yet_visible(&e) => {
+                tracing::warn!(
+                    attempt,
+                    "new_account: registerWalletDerivation raced RPC read-after-write \
+                     lag (account not yet visible on the simulating backend); \
+                     retrying after backoff: {e:#}"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
+                let _ = accounts::wait_for_account_visible(&api_key).await;
+                register_err = Some(e);
+            }
+            Err(e) => {
+                register_err = Some(e);
+                break;
+            }
+        }
+    }
+    if let Some(e) = register_err {
+        return Err(e.into());
+    }
 
     // Best-effort: eagerly create the Stripe customer (with $0 balance), set the email
     // if provided, and grant starter credits when STARTER_CREDITS_CENTS is configured.
@@ -871,6 +924,34 @@ mod tests {
             assert!(
                 !crate::utils::parse_with_hash::is_precomputed_hash_shape(&encoded),
                 "encoded API key {encoded:?} unexpectedly matched precomputed-hash shape",
+            );
+        }
+    }
+
+    /// `NoAccountAccess` is the read-after-write symptom the create flow retries;
+    /// every other revert must be treated as terminal so we don't mask real
+    /// failures behind pointless retries. Pin both directions, including the
+    /// `Simulation failed:`-wrapped shape `registerWalletDerivation` actually
+    /// returns and a nested error chain.
+    #[test]
+    fn is_account_not_yet_visible_matches_only_no_account_access() {
+        let wrapped = anyhow::anyhow!(
+            "Simulation failed: Contract error: NoAccountAccess (0x7b0f9c07…6057a5eb)"
+        );
+        assert!(is_account_not_yet_visible(&wrapped));
+
+        let nested = anyhow::anyhow!("boom").context("NoAccountAccess while simulating");
+        assert!(is_account_not_yet_visible(&nested));
+
+        for other in [
+            "Simulation failed: Contract error: AccountAlreadyExists (0x…)",
+            "ChainSecured accounts must be unmanaged.",
+            "no receipt for transaction 0x… within 30s",
+            "nonce too low",
+        ] {
+            assert!(
+                !is_account_not_yet_visible(&anyhow::anyhow!("{other}")),
+                "unrelated error {other:?} must not be retried as a visibility race"
             );
         }
     }

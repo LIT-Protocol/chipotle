@@ -38,6 +38,15 @@ Release verification (image digests, attestation, governance) is covered in the
 - `CONTRIBUTING.md`, expanded `.env.example`, and per-component READMEs.
 
 ### Fixed
+- `POST /new_account` no longer intermittently fails with a `NoAccountAccess`
+  500. The endpoint issues two sequential on-chain writes (`newAccount` then
+  `registerWalletDerivation`); on a load-balanced RPC endpoint the second call's
+  pre-send simulation could land on a backend that had not yet imported the
+  freshly-mined `newAccount` block, so the account looked nonexistent and the
+  AccountConfig access check reverted. Account creation now waits for the new
+  account to become visible to the read RPC before the second write, and retries
+  that write a few times to absorb residual backend lag. This also unblocks the
+  k6 new-account correctness gate on staging deploys.
 - Write endpoints (`new_account`, `create_wallet`, …) can no longer hang
   indefinitely after an RPC outage. On-chain sends now pin nonces from a
   locally managed per-signer allocator that *reserves* the nonce at read time
