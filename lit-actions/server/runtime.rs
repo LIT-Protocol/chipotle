@@ -104,12 +104,7 @@ static BASE_PERMISSIONS: LazyLock<Permissions> = LazyLock::new(|| {
             // are handled by the egress-filtering DNS resolver wired in below.
             // See `egress` module (CPL-295).
             allow_net: Some(vec![]),
-            deny_net: Some(
-                crate::egress::DENY_NET
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect(),
-            ),
+            deny_net: Some(crate::egress::effective_deny_net()),
             ..Default::default()
         },
     )

@@ -19,14 +19,54 @@
 //! paths can never drift.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::sync::LazyLock;
+
+/// Env var: comma-separated list of literal IP addresses that are EXEMPT from
+/// egress filtering. Empty/unset (the production default) = full filtering.
+///
+/// This is an operator-only escape hatch for reaching a trusted internal
+/// endpoint (e.g. a co-located service) and is set by the Keychain runtime-
+/// fixture test harness (`lit-agent-keychain/scripts/test-runtime.mjs`) so its
+/// `127.0.0.1` fixture is reachable. Action code cannot set process env, so an
+/// untrusted action can never widen this. Only exact IP literals are honored —
+/// hostnames are intentionally unsupported (they'd reopen DNS-rebinding).
+pub const EGRESS_ALLOWLIST_ENV: &str = "LIT_ACTIONS_EGRESS_ALLOWLIST";
+
+/// Parsed, cached allowlist. Invalid entries are skipped.
+static EGRESS_ALLOWLIST: LazyLock<Vec<IpAddr>> = LazyLock::new(|| {
+    std::env::var(EGRESS_ALLOWLIST_ENV)
+        .ok()
+        .map(|raw| {
+            raw.split(',')
+                .filter_map(|s| s.trim().parse::<IpAddr>().ok())
+                .collect()
+        })
+        .unwrap_or_default()
+});
+
+/// True if `ip` has been explicitly allowlisted via [`EGRESS_ALLOWLIST_ENV`].
+pub fn is_egress_allowlisted(ip: IpAddr) -> bool {
+    EGRESS_ALLOWLIST.contains(&ip)
+}
+
+/// The parsed egress allowlist (empty in production). The server uses this to
+/// drop covering entries from Deno's static `deny_net`, since `deny_net` gates
+/// literal-IP `fetch()` URLs before the resolver's [`is_forbidden_ip`] runs.
+pub fn egress_allowlist() -> &'static [IpAddr] {
+    &EGRESS_ALLOWLIST
+}
 
 /// True if `ip` is in address space a Lit Action must not be able to reach.
 ///
 /// Runs on the actual resolved addresses (not the URL string), so it catches
 /// internal hosts named by hostname and DNS-rebinding answers alike. IPv4-in-
 /// IPv6 forms are unwrapped and re-checked as IPv4 so `::ffff:127.0.0.1` cannot
-/// smuggle loopback past us.
+/// smuggle loopback past us. An operator-configured allowlist
+/// ([`EGRESS_ALLOWLIST_ENV`]) exempts specific IPs.
 pub fn is_forbidden_ip(ip: IpAddr) -> bool {
+    if is_egress_allowlisted(ip) {
+        return false;
+    }
     match ip {
         IpAddr::V4(v4) => is_forbidden_ipv4(v4),
         IpAddr::V6(v6) => is_forbidden_ipv6(v6),

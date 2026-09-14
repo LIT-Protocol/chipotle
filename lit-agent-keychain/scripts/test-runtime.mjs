@@ -48,6 +48,11 @@ try {
     {
       ...process.env,
       KEYCHAIN_RUNTIME_VECTOR: path.join(root, "generated/runtime-vector.json"),
+      // The fixture server binds 127.0.0.1 and the action fetches it, but the
+      // Lit Actions egress filter (CPL-295) blocks loopback by default. Exempt
+      // the fixture host so this functional test can reach it; production never
+      // sets this var. See lit-actions/ext/egress.rs (EGRESS_ALLOWLIST_ENV).
+      LIT_ACTIONS_EGRESS_ALLOWLIST: "127.0.0.1",
     },
   );
   await run(process.execPath, [
