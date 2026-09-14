@@ -1324,3 +1324,62 @@ async fn secp256k1_precompute_warmed_in_snapshot(mut client: TestClient) {
     );
     assert!(client.received::<ExecutionResult>().success);
 }
+
+/// Runs the complete Keychain decryptor bundle in the actual Deno worker. The
+/// fixture's key derivation is synthetic; this is not a live TEE attestation test.
+/// Start lit-agent-keychain/scripts/runtime-vector.ts and set KEYCHAIN_RUNTIME_VECTOR.
+#[rstest]
+#[tokio::test]
+#[ignore = "requires the Keychain runtime fixture server"]
+async fn keychain_encrypted_release(mut client: TestClient) {
+    let path = std::env::var("KEYCHAIN_RUNTIME_VECTOR").unwrap();
+    let trace_path = format!("{path}.trace");
+    let trace_file = std::fs::File::create(&trace_path).unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer(std::sync::Mutex::new(trace_file))
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+    let vector: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let mut request: ExecutionRequest = vector["code"].as_str().unwrap().to_owned().into();
+    request.js_params = Some(serde_json::to_vec(&vector["params"]).unwrap());
+    client
+        .respond_with(IncrementFetchCountResponse { fetch_count: 1 })
+        .respond_with(GetLitActionPublicKeyResponse {
+            public_key: vector["authorityPublicKey"].as_str().unwrap().into(),
+        })
+        .respond_with(GetLitActionPrivateKeyResponse {
+            secret: vector["privateKey"].as_str().unwrap().into(),
+        })
+        .respond_with(SetResponseResponse {});
+    let result = client.execute_js(request).await.unwrap();
+    assert!(result.success);
+    let response = client.received::<SetResponseRequest>().response;
+    let parsed: serde_json::Value = serde_json::from_str(&response).unwrap();
+    assert_eq!(
+        parsed["ok"], true,
+        "runtime rejected Keychain bundle: {response}"
+    );
+    assert!(parsed["result"]["payload"]["sealed"]["ciphertext"].is_string());
+    assert!(!response.contains(vector["expected"].as_str().unwrap()));
+    std::fs::write(format!("{path}.response"), response).unwrap();
+    client.received::<IncrementFetchCountRequest>();
+    client.received::<GetLitActionPublicKeyRequest>();
+    client.received::<GetLitActionPrivateKeyRequest>();
+    client.received::<ExecutionResult>();
+    let trace = std::fs::read_to_string(trace_path).unwrap();
+    assert!(
+        !trace.contains(
+            vector["privateKey"]
+                .as_str()
+                .unwrap()
+                .trim_start_matches("0x")
+        ),
+        "private action key leaked to tracing"
+    );
+    assert!(
+        !trace.contains(vector["expected"].as_str().unwrap()),
+        "protected plaintext leaked to tracing"
+    );
+}

@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY lit-core ./lit-core/
+COPY vendor/ipfs-hasher ./vendor/ipfs-hasher/
 COPY lit-actions ./lit-actions/
 
 # Remove tests workspace member (excluded by .dockerignore; not needed for

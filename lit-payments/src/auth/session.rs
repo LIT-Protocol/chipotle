@@ -6,7 +6,7 @@ use base64::Engine;
 use rand::RngCore;
 use rocket::http::Status;
 use rocket::request::{FromRequest, Outcome, Request};
-use sqlx::PgPool;
+use sqlx::{PgExecutor, PgPool};
 use time::OffsetDateTime;
 
 use super::operator::{self, Operator};
@@ -20,13 +20,17 @@ pub fn generate_token() -> String {
 }
 
 /// Insert a new session row.
-pub async fn create(pool: &PgPool, token: &str, operator_id: i64) -> Result<()> {
+///
+/// Takes any `PgExecutor` so the caller can create the session inside the same
+/// transaction that records the magic-link token as consumed — so a failed
+/// insert rolls the consume back and leaves the link retryable (CPL-379 L8).
+pub async fn create(executor: impl PgExecutor<'_>, token: &str, operator_id: i64) -> Result<()> {
     let expires_at = OffsetDateTime::now_utc() + time::Duration::seconds(SESSION_TTL_SECONDS);
     sqlx::query("INSERT INTO sessions (token, operator_id, expires_at) VALUES ($1, $2, $3)")
         .bind(token)
         .bind(operator_id)
         .bind(expires_at)
-        .execute(pool)
+        .execute(executor)
         .await?;
     Ok(())
 }

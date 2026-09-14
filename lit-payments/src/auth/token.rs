@@ -11,7 +11,7 @@
 use anyhow::{Context, Result};
 use base64::Engine;
 use hmac::{Hmac, Mac};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 
 const B64: base64::engine::general_purpose::GeneralPurpose =
     base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -23,6 +23,12 @@ pub fn issue(signing_key: &[u8], email: &str, expires_unix: i64) -> String {
     let sig = hmac_sha256(signing_key, payload.as_bytes());
     let sig_b64 = B64.encode(sig);
     format!("{payload_b64}.{sig_b64}")
+}
+
+/// SHA-256 hex digest of a raw magic-link token. Used as the single-use dedup
+/// key in `used_magic_links` so the raw token is never persisted (CPL-379 L8).
+pub fn token_hash(token: &str) -> String {
+    hex::encode(Sha256::digest(token.as_bytes()))
 }
 
 /// Verified magic-link claims.
@@ -133,6 +139,20 @@ mod tests {
     fn rejects_malformed_token() {
         assert!(verify(KEY, "nopedotseparator", 1_000).is_err());
         assert!(verify(KEY, "!!!.!!!", 1_000).is_err());
+    }
+
+    #[test]
+    fn token_hash_is_deterministic_and_distinct() {
+        let token = issue(KEY, "chris@litprotocol.com", 1_800_000_000);
+        // Same token → same hash (so a replay maps to the same PK row).
+        assert_eq!(token_hash(&token), token_hash(&token));
+        // Different token → different hash.
+        let other = issue(KEY, "chris@litprotocol.com", 1_800_000_001);
+        assert_ne!(token_hash(&token), token_hash(&other));
+        // SHA-256 hex is 64 chars and never leaks the raw token.
+        let h = token_hash(&token);
+        assert_eq!(h.len(), 64);
+        assert!(!h.contains(&token));
     }
 
     #[test]
