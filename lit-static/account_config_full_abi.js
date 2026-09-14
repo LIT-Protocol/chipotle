@@ -366,7 +366,7 @@ export const ACCOUNT_CONFIG_FULL_ABI = [
  *   `cast keccak $(cast code <address> --rpc-url <rpc>)`.
  */
 export const ACCOUNT_CONFIG_DEPLOYMENTS = Object.freeze({
-  // Base mainnet — `next` (staging) deployment, NodeConfig.next.toml
+  // Base mainnet — `test` deployment, NodeConfig.test.toml
   '8453:0x98e501fab2d60a5119a185e1563f10cb54bc6068': {
     runtimeBytecodeKeccak: '0x3e21f437bf1c1f75d60cdcf90aafef49ef2869aa18e58e37e282152c5c702254',
   },

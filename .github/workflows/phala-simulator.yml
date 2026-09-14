@@ -195,11 +195,11 @@ jobs:
             exit 1
           }
 
-          # Copy branch-appropriate config (NodeConfig.toml is gitignored); main uses main.toml, others use next.toml.
+          # Copy branch-appropriate config (NodeConfig.toml is gitignored); main uses main.toml, others use test.toml.
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
             cp lit-api-server/NodeConfig.main.toml lit-api-server/NodeConfig.toml
           else
-            cp lit-api-server/NodeConfig.next.toml lit-api-server/NodeConfig.toml
+            cp lit-api-server/NodeConfig.test.toml lit-api-server/NodeConfig.toml
           fi
           # Pick a random free TCP port per run so concurrent jobs on the
           # same self-hosted host don't collide on the default Rocket port

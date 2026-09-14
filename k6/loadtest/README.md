@@ -107,7 +107,7 @@ threshold so per-endpoint p95 reflects the code path.
 ### How the gate decides pass/fail
 
 The gate compares the run's per-endpoint **p95** against a **committed baseline**
-(`k6/baselines/soak.next.json` — a saved run summary). For each endpoint it
+(`k6/baselines/soak.test.json` — a saved run summary). For each endpoint it
 fails if:
 
 ```
@@ -148,7 +148,7 @@ DURATION=10m k6/update-soak-baseline.sh     # longer run → steadier p95
 NETWORK=next BASE_URL=https://… k6/update-soak-baseline.sh
 
 # Then review the numbers and commit via PR:
-git add k6/baselines/soak.next.json
+git add k6/baselines/soak.test.json
 git commit -m "chore(k6): refresh soak baseline"
 ```
 

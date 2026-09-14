@@ -70,7 +70,7 @@ on:
         type: string
         default: ''
       baseline_file:
-        description: "Soak-only: path to a committed baseline summary, relative to k6/loadtest/ (e.g. ../baselines/soak.next.json). When set, the gate fails on a p95 regression vs that baseline (max(baseline*1.3, baseline+50ms)) instead of the absolute ceilings."
+        description: "Soak-only: path to a committed baseline summary, relative to k6/loadtest/ (e.g. ../baselines/soak.test.json). When set, the gate fails on a p95 regression vs that baseline (max(baseline*1.3, baseline+50ms)) instead of the absolute ceilings."
         required: false
         type: string
         default: ''
@@ -144,12 +144,12 @@ on:
           - ''
           - 'true'
       baseline_file:
-        description: "Soak-only: committed baseline summary path, relative to k6/loadtest/ (e.g. ../baselines/soak.next.json). Set to gate on a p95 regression vs that baseline."
+        description: "Soak-only: committed baseline summary path, relative to k6/loadtest/ (e.g. ../baselines/soak.test.json). Set to gate on a p95 regression vs that baseline."
         required: false
         type: string
-        default: '../baselines/soak.next.json'
+        default: '../baselines/soak.test.json'
       accounts_file:
-        description: "Optional accounts file override, relative to the k6/ dir (e.g. ./data/accounts.next.json)"
+        description: "Optional accounts file override, relative to the k6/ dir (e.g. ./data/accounts.test.json)"
         required: false
         type: string
 
@@ -157,9 +157,9 @@ jobs:
   loadtest:
     runs-on: self-hosted
     env:
-      # `main` is the deploy branch and targets chipotle-next (test.chipotle.litprotocol.com);
+      # `main` is the deploy branch and targets chipotle-test (test.chipotle.litprotocol.com);
       # the legacy `next` branch is retired. chipotle-dev is deprecated.
-      K6_ACCOUNTS_FILE: ${{ inputs.accounts_file || (github.ref_name == 'main' && './data/accounts.next.json' || './data/accounts.dev.json') }}
+      K6_ACCOUNTS_FILE: ${{ inputs.accounts_file || (github.ref_name == 'main' && './data/accounts.test.json' || './data/accounts.dev.json') }}
     steps:
       - uses: actions/checkout@v4
 

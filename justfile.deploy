@@ -82,7 +82,7 @@ deploy name=(app_name): docker-push _check_phala
 
 # First-time deploy to a new Phala app with OS image dstack-0.5.6.
 # Usage: just deploy-new [name]
-#   just deploy-new              # uses app name from branch (lit-api-server or chipotle-next)
+#   just deploy-new              # uses app name from branch (lit-api-server or chipotle-test)
 #   just deploy-new my-new-app   # creates app named my-new-app
 [group: 'deploy']
 deploy-new name=(app_name): docker-push _check_phala

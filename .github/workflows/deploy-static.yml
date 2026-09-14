@@ -75,4 +75,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy lit-static --project-name=lit-static-next --branch=main
+          command: pages deploy lit-static --project-name=lit-static-test --branch=main

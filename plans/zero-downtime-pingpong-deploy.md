@@ -37,7 +37,7 @@ Next deploy flips direction. Both nodes run the **same `app_id`** (shared KMS id
 
 | Thing | Today |
 |---|---|
-| `next` app | `chipotle-next` — instance `chipotle-next-rep-sa6xj` (prod2, `app_id 0x969a8c14…`) |
+| `next` app | `chipotle-test` — instance `chipotle-test-rep-sa6xj` (prod2, `app_id 0x969a8c14…`) |
 | `dev` app | `chipotle-dev` (prod5, `app_id f8fce543…`) |
 | prod app | `chipotle-prod` — instance `chipotle-prod-rep-r68r6`, Safe-owned `app_id` |
 | Staging domain | `test.chipotle.litprotocol.com` (prod domain = `vars.DOMAIN_PROD`) |

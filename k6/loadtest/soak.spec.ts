@@ -73,7 +73,7 @@ const SOAK_P95_FLOOR_MS = parseFloat(__ENV.SOAK_P95_FLOOR_MS || "50");
 // absolute ceilings — that would let a real regression pass green. When unset
 // (local / measurement runs) we use the absolute SOAK_P95_*_MS ceilings.
 // open() resolves relative to THIS spec's dir (k6/loadtest/), so the gate
-// passes e.g. "../baselines/soak.next.json".
+// passes e.g. "../baselines/soak.test.json".
 const SOAK_BASELINE_FILE = __ENV.SOAK_BASELINE_FILE || "";
 const baselineMode = SOAK_BASELINE_FILE !== "";
 // deno-lint-ignore no-explicit-any

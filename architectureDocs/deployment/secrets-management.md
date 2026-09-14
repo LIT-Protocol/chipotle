@@ -49,7 +49,7 @@ From `docker-compose.phala.yml` (all set as encrypted Phala CVM env vars):
   `GCP_SERVICE_ACCOUNT_JSON`) appear here. Capture the actual scopes in this doc.
 - **Dev vs prod separation.** Partially confirmed (2026-06-25) from the deploy
   workflows: staging (`deploy-staging.yml`) uses Stripe **sandbox** keys and GCP project
-  `chipotle-next`; prod (`deploy-prod-1-propose.yml`) uses **live** Stripe keys and GCP
+  `chipotle-test`; prod (`deploy-prod-1-propose.yml`) uses **live** Stripe keys and GCP
   project `chipotle-prod`, deploying to separate CVMs. **TODO/DECIDE (still open):** both
   workflows reference the *same* `PHALA_CLOUD_API_KEY` secret, so a separate Phala
   account/project per environment is **not** confirmed — verify whether staging and prod

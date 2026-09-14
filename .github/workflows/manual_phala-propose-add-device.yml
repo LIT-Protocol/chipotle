@@ -6,7 +6,7 @@
 # owner is a Safe multisig. This workflow proposes the addDevice call to the
 # Safe Transaction Service so signers can approve + execute it in the Safe UI.
 #
-# For single-key (EOA) DstackApp owners (chipotle-next / chipotle-dev), use
+# For single-key (EOA) DstackApp owners (chipotle-test / chipotle-dev), use
 # "Phala Add Device (manual)" instead — it signs the addDevice tx directly.
 #
 # After this workflow runs, open the printed Safe UI queue link, have signers

@@ -26,7 +26,7 @@ Company-run verification and published results. Automated verification uses the 
 - Choose location: e.g. `docs/verification/`, static site, API, or dedicated repo
 - Define format: pass/fail per step, attestation summary
 - Associate each CVM (app-id, custom domain, or deployment id) with its verification output
-- Ensure structure supports multiple CVMs (lit-api-server, lit-api-server-next, etc.)
+- Ensure structure supports multiple CVMs (lit-api-server, lit-api-server-test, etc.)
 
 ### Workflow B: Deploy Workflow Integration (FR-5.1, FR-5.4)
 

@@ -5,7 +5,7 @@
 # `next` branch was retired in CPL-272), so we always check out main and the
 # `target` input only selects which config to read:
 #   main → lit-api-server/NodeConfig.main.toml
-#   next → lit-api-server/NodeConfig.next.toml
+#   test → lit-api-server/NodeConfig.test.toml
 #
 # Required secrets:
 #   CONTRACT_DEPLOYER_SECRET_SEPOLIA - deployer wallet private key (Base Sepolia)
@@ -24,9 +24,9 @@ on:
         required: true
         type: choice
         options:
-          - next
+          - test
           - main
-        default: next
+        default: test
 
 concurrency:
   group: contract-upgrade-${{ inputs.target }}

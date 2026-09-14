@@ -48,8 +48,8 @@ COPY --from=builder /app/lit-actions/target/release/lit_actions /usr/local/bin/
 # Copy static assets (served by lit-api-server)
 COPY --from=builder /app/lit-api-server/static /app/lit-api-server/static/
 
-# Copy configuration file (main branch uses NodeConfig.main.toml; default: next)
-ARG NODE_CONFIG=NodeConfig.next.toml
+# Copy configuration file (main branch uses NodeConfig.main.toml; default: test)
+ARG NODE_CONFIG=NodeConfig.test.toml
 COPY lit-api-server/${NODE_CONFIG} /app/NodeConfig.toml
 
 # Copy and set entrypoint script (starts lit_actions in background, then lit-api-server)

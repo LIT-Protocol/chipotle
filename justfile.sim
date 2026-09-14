@@ -173,12 +173,12 @@ sim-verify: sim-build verifier-build api-server
         exit 1
     }
 
-    # Copy branch-appropriate config (NodeConfig.toml is gitignored); main uses main.toml, others use next.toml.
+    # Copy branch-appropriate config (NodeConfig.toml is gitignored); main uses main.toml, others use test.toml.
     BRANCH=$(git -C "$PROJECT_ROOT" branch --show-current)
     if [ "$BRANCH" = "main" ]; then
         cp "$PROJECT_ROOT/lit-api-server/NodeConfig.main.toml" "$PROJECT_ROOT/lit-api-server/NodeConfig.toml"
     else
-        cp "$PROJECT_ROOT/lit-api-server/NodeConfig.next.toml" "$PROJECT_ROOT/lit-api-server/NodeConfig.toml"
+        cp "$PROJECT_ROOT/lit-api-server/NodeConfig.test.toml" "$PROJECT_ROOT/lit-api-server/NodeConfig.toml"
     fi
     API_BIN="$PROJECT_ROOT/lit-api-server/target/debug/lit-api-server"
     echo "Starting lit-api-server (demo config)..."

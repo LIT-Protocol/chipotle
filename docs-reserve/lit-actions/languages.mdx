@@ -5,7 +5,7 @@ description: "Discover which languages, runtimes, and execution methods a node s
 
 ## Overview
 
-Lit Actions are written in JavaScript today, and support for additional languages (starting with Python, plus compiled languages like Rust) is rolling out. Because language availability varies by node and environment — the `next` environment enables languages before production does — clients should not hardcode assumptions about what a node runs. Instead, ask the node.
+Lit Actions are written in JavaScript today, and support for additional languages (starting with Python, plus compiled languages like Rust) is rolling out. Because language availability varies by node and environment — the `test` environment enables languages before production does — clients should not hardcode assumptions about what a node runs. Instead, ask the node.
 
 `GET /get_supported_languages` advertises the node's capability surface: every language it accepts, the runtime versions it can provision, and the execution methods each language supports. The endpoint requires no authentication — like `/get_lit_action_client_config`, it exists so you can discover capability before uploading anything.
 
@@ -69,7 +69,7 @@ A node that has not enabled multi-language support returns only the `javascript`
 | `id` | The value you pass as `runtime` when submitting an action, e.g. `"python3.13"`. |
 | `version` | Full version string, e.g. `"3.13.1"`. |
 | `is_default` | Used when you omit `runtime` from a request. |
-| `prewarmed` | Whether this runtime's install layers are already materialized on the node. Once execution lands, a cold runtime will still be accepted on `next` but pays a one-time provisioning cost, while production will only admit pre-warmed runtimes. Currently `false` for every runtime (see the note below). |
+| `prewarmed` | Whether this runtime's install layers are already materialized on the node. Once execution lands, a cold runtime will still be accepted on `test` but pays a one-time provisioning cost, while production will only admit pre-warmed runtimes. Currently `false` for every runtime (see the note below). |
 
 ### `methods[]`
 
@@ -83,7 +83,7 @@ A node that has not enabled multi-language support returns only the `javascript`
 
 Before submitting a non-JavaScript action, check that the `(language, method)` pair you intend to use is advertised — a node rejects requests outside its allowlist before any sandbox spins up. If you pick a `runtime`, use one of the advertised `id`s (or omit it to get the default).
 
-Language availability is deployment configuration, not a protocol constant: the same request can be accepted on `next` and rejected in production while a language is being rolled out. Query the environment you are targeting.
+Language availability is deployment configuration, not a protocol constant: the same request can be accepted on `test` and rejected in production while a language is being rolled out. Query the environment you are targeting.
 
 <Note>
 Multi-language execution is rolling out in phases. The discovery endpoint is live everywhere, but the non-JavaScript execution paths (`raw_script` for Python, code bundles, OCI bundles) become available as the corresponding phases land. A node only advertises what it can actually run.

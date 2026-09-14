@@ -5,7 +5,7 @@
 # releases keys to allowlisted devices. This workflow signs the addDevice
 # transaction with the GitHub-stored DstackApp owner key.
 #
-# Scope: single-key (EOA) DstackApp owners — i.e. chipotle-next / chipotle-dev.
+# Scope: single-key (EOA) DstackApp owners — i.e. chipotle-test / chipotle-dev.
 # chipotle-prod is owned by a Safe multisig and uses a different flow
 # (propose-add-device Hardhat task → Safe signers approve → execute).
 #

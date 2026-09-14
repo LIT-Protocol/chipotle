@@ -44,7 +44,7 @@ on:
         description: "GCP_PROJECT_ID for otel-collector"
         required: false
         type: string
-        default: "chipotle-next"
+        default: "chipotle-test"
       start:
         description: "Start the CVM after pushing envs"
         required: false
