@@ -125,7 +125,7 @@ yanked = "warn"
 #   =0.4.45, so GHSA-3pv8 (tar PAX desync) stays Dependabot-dismissed until deno
 #   bumps. No RUSTSEC id assigned, so no ignore entry needed here.
 # - 2026-08-19: two advisories published on 2026-08-18 turned every Rust CI job
-#   red at once (all six matrix workspaces). Neither is fixable in-house:
+#   red at once (all six matrix workspaces). Neither is fully fixable in-house:
 #   * RUSTSEC-2026-0258 (h2 unbounded empty DATA frames, low severity). Two h2
 #     lines were in the graph. The hyper-1.x line was bumped 0.4.12/0.4.13/
 #     0.4.14 -> 0.4.16 (the patched release) in lit-actions, lit-core,
