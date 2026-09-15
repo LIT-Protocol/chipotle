@@ -70,8 +70,25 @@ test(
     await b.login();
     const initial = await a.api("/api/billing");
     assert.equal(initial.subscription.active, false);
-    assert.equal(initial.subscription.secretLimit, 1000);
+    assert.equal(initial.subscription.plan, "free");
+    assert.equal(initial.subscription.secretLimit, 5);
+    // Free includes five secrets with sponsored execution; the sixth needs a card.
+    for (let i = 0; i < 5; i++) await a.create(`FREE_${i}`, `free-value-${i}`);
+    const freeBundle = await a.api(
+      `/api/secrets/${(await a.listSecrets()).find((s: any) => s.name === "FREE_0")!.secretId}/bundle`,
+    );
+    assert.equal(
+      (
+        await execute(
+          a.lit.usageApiKey!,
+          actionSource(freeBundle.manifest.document.manifest),
+          { operation: "publicKey", challenge: hex(randomBytes()) },
+        )
+      ).status,
+      200,
+    );
     await assert.rejects(a.create("UNPAID", "must-stay-local"), /402/);
+    assert.equal((await a.api("/api/billing")).secretCount, 5);
     assert.equal(
       (
         await execute(
@@ -138,6 +155,7 @@ test(
     const customer = await subscribe(a);
     const active = await a.api("/api/billing");
     assert.equal(active.subscription.active, true);
+    assert.equal(active.subscription.plan, "standard");
     assert.equal(active.subscription.secretLimit, 1000);
     await assert.rejects(
       a.api("/api/billing/checkout", { method: "POST" }),
@@ -153,7 +171,7 @@ test(
     fixtureSql(
       a.vaultId,
       `BEGIN;
-      CREATE TEMP TABLE quota_fixture AS SELECT md5(:'vault'||i::text)||md5(i::text||:'vault') AS id, i FROM generate_series(1,998) i;
+      CREATE TEMP TABLE quota_fixture AS SELECT md5(:'vault'||i::text)||md5(i::text||:'vault') AS id, i FROM generate_series(1,993) i;
       INSERT INTO kc_secrets(id,vault_id,name,manifest,action_cid,current_version) SELECT id,:'vault','QUOTA_FIXTURE_'||i,'{"document":{"manifest":{"release":"export"}}}', 'fixture',1 FROM quota_fixture;
       INSERT INTO kc_policies(hash,vault_id,scope,epoch,signed) SELECT 'fixture-'||id,:'vault','secret:'||id,1,'{"document":{"disabled":false,"expiresAt":2000000000,"grants":[]}}' FROM quota_fixture;
       INSERT INTO kc_registry(scope,vault_id,policy_hash,epoch) SELECT 'secret:'||id,:'vault','fixture-'||id,1 FROM quota_fixture;
@@ -203,7 +221,8 @@ test(
       usageApiKey: b.lit.usageApiKey,
     });
     await assert.rejects(otherPayer.get("BILLING_SECRET"), /403/);
-    await assert.rejects(b.api("/api/actions", post(bundle.manifest)), /402/);
+    // Another vault's manifest is rejected on Free and Standard alike.
+    await assert.rejects(b.api("/api/actions", post(bundle.manifest)), /403/);
     await subscribe(b);
     await assert.rejects(b.api("/api/actions", post(bundle.manifest)), /403/);
     const oldKey = a.lit.usageApiKey!;
@@ -243,6 +262,8 @@ test(
     assert.ok(!JSON.stringify(backup).includes("protected-test-credential"));
     await update({ expired: true });
     assert.equal((await a.api("/api/billing")).subscription.active, false);
+    assert.equal((await a.api("/api/billing")).subscription.secretLimit, 5);
+    // Over the Free limit after expiry: nothing is deleted, but writes need a subscription.
     await assert.rejects(a.create("AFTER_EXPIRY", "secret"), /402/);
     await assert.rejects(a.rotate(bundle, "new-secret"), /402|403/);
     assert.deepEqual(await a.backup(), backup);
@@ -251,8 +272,13 @@ test(
       ...config,
       usageApiKey: rotated.usageApiKey,
     });
-    await assert.rejects(currentAgent.get("BILLING_SECRET"), /403/);
+    // Lapsing is not revocation: enrolled secrets keep executing on Free.
+    assert.equal(
+      await currentAgent.get("BILLING_SECRET"),
+      "protected-test-credential",
+    );
     await a.setPolicy(bundle, { disabled: true }); // revocation remains available after cancellation
+    await assert.rejects(currentAgent.get("BILLING_SECRET"), /denied/i);
     await update({ expired: false, status: "active", paid: false });
     assert.equal((await a.api("/api/billing")).subscription.active, false);
     await update({ paid: true, price: "price_wrong" });
@@ -285,6 +311,6 @@ test(
     await update({ status: "canceled", eventId: "evt_test_old_delivery" });
     assert.equal((await a.api("/api/billing")).subscription.active, false);
     const saved = await a.api("/api/secrets");
-    assert.equal(saved.secrets.length, 14);
+    assert.equal(saved.secrets.length, 19);
   },
 );

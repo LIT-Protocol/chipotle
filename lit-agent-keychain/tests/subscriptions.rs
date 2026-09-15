@@ -2,7 +2,7 @@ use hmac::{Hmac, Mac};
 use lit_agent_keychain::{
     sponsorship::{decrypt_key, encrypt_key},
     stripe::verify_signature,
-    subscriptions::{Subscription, STANDARD_LIMIT},
+    subscriptions::{Subscription, FREE_LIMIT, STANDARD_LIMIT},
 };
 use sha2::Sha256;
 use time::{Duration, OffsetDateTime};
@@ -22,8 +22,10 @@ fn subscription_requires_paid_active_period_and_custom_access_expires() {
         custom_until: None,
     };
     assert!(sub.plan(now).active); // cancellation at period end preserves paid access
+    assert_eq!(sub.plan(now).plan, "standard");
     assert_eq!(sub.plan(now).secret_limit, 1000);
     assert_eq!(STANDARD_LIMIT, 1000);
+    assert_eq!(FREE_LIMIT, 5);
     for status in [
         "none",
         "incomplete",
@@ -36,16 +38,22 @@ fn subscription_requires_paid_active_period_and_custom_access_expires() {
     ] {
         sub.status = status.into();
         assert!(!sub.plan(now).active, "{status}");
+        // Unpaid vaults fall back to Free rather than losing storage entirely.
+        assert_eq!(sub.plan(now).plan, "free", "{status}");
+        assert_eq!(sub.plan(now).secret_limit, FREE_LIMIT, "{status}");
     }
     sub.status = "active".into();
     sub.paid_until = Some(now);
     assert!(!sub.plan(now).active);
+    assert_eq!(sub.plan(now).secret_limit, FREE_LIMIT);
     sub.custom_secret_limit = Some(2500);
     sub.custom_until = Some(now + Duration::days(1));
     assert!(sub.plan(now).active);
+    assert_eq!(sub.plan(now).plan, "custom");
     assert_eq!(sub.plan(now).secret_limit, 2500);
     sub.custom_until = Some(now);
     assert!(!sub.plan(now).active);
+    assert_eq!(sub.plan(now).secret_limit, FREE_LIMIT);
 }
 #[test]
 fn stripe_signature_binds_original_bytes_and_timestamp_and_accepts_rotating_signatures() {

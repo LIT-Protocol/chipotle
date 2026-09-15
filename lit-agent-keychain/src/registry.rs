@@ -296,15 +296,7 @@ async fn write_secret(
             ));
         }
     }
-    let plan = crate::subscriptions::require_active(&mut tx, &session.vault_id).await?;
-    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM kc_secrets WHERE vault_id=$1")
-        .bind(&session.vault_id)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(api::internal)?;
-    if count >= plan.secret_limit {
-        return Err(api::err(Status::Conflict, "secret_limit"));
-    }
+    crate::subscriptions::require_capacity(&mut tx, &session.vault_id, true).await?;
     let exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM kc_secrets WHERE id=$1 OR (vault_id=$2 AND name=$3))",
     )
@@ -464,7 +456,7 @@ pub async fn rotate(
     .await
     .map_err(api::internal)?;
     let (version, cid) = old.ok_or_else(|| api::err(Status::NotFound, "not_found"))?;
-    crate::subscriptions::require_active(&mut tx, &session.vault_id).await?;
+    crate::subscriptions::require_capacity(&mut tx, &session.vault_id, false).await?;
     if version >= 100 || checked.version != version + 1 || checked.cid != cid {
         return Err(api::err(Status::Conflict, "version_changed_or_limit"));
     }
