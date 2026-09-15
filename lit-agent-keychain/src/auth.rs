@@ -1,5 +1,4 @@
 use crate::{
-    actions,
     api::{self, ApiError, ApiResult},
     billing,
     chipotle::Chipotle,
@@ -99,8 +98,14 @@ pub async fn challenge(
         .execute(pool.inner())
         .await
         .map_err(api::internal)?;
+    let current: Option<String> =
+        sqlx::query_scalar("SELECT authority_cid FROM kc_vaults WHERE id=$1")
+            .bind(&vault_id)
+            .fetch_optional(pool.inner())
+            .await
+            .map_err(api::internal)?;
     Ok(Json(
-        json!({"v":2,"domain":"lit-keychain/v2","kind":"login","vaultId":vault_id,"challenge":nonce,"expiresAt":expires.unix_timestamp()}),
+        json!({"v":2,"domain":"lit-keychain/v2","kind":"login","vaultId":vault_id,"challenge":nonce,"expiresAt":expires.unix_timestamp(),"authorityCid":current}),
     ))
 }
 #[post("/auth/login", format = "json", data = "<body>")]
@@ -114,13 +119,10 @@ pub async fn login(
 ) -> ApiResult<Value> {
     body.authority.validate(cfg).map_err(api::invalid)?;
     let vault_id = body.authority.vault_id().map_err(api::invalid)?;
-    let code = actions::authority_source(&body.authority).map_err(api::invalid)?;
-    let cid = actions::cid(&code);
-    let key = lit
-        .public_key(&cid)
-        .await
-        .map_err(|_| api::err(Status::BadGateway, "lit_unavailable"))?;
-    crypto::verify_signed(&body.authorization, &key, &vault_id).map_err(api::denied)?;
+    // Any released authority version may sign a login; the one that verifies is
+    // recorded for the vault and granted to its execution group on first use.
+    let (cid, _key) =
+        crate::authority::verify_with(lit, &body.authority, &vault_id, &body.authorization).await?;
     let doc = &body.authorization.document;
     if field(doc, "kind").map_err(api::invalid)? != "login"
         || number(doc, "expiresAt").map_err(api::invalid)?
@@ -141,7 +143,8 @@ pub async fn login(
         return Err(api::err(Status::Forbidden, "challenge_used_or_expired"));
     }
     sqlx::query("INSERT INTO kc_vaults(id,authority,authority_cid) VALUES($1,$2,$3) ON CONFLICT(id) DO NOTHING")
-        .bind(&vault_id).bind(serde_json::to_value(&body.authority).map_err(api::invalid)?).bind(cid).execute(&mut *tx).await.map_err(api::internal)?;
+        .bind(&vault_id).bind(serde_json::to_value(&body.authority).map_err(api::invalid)?).bind(&cid).execute(&mut *tx).await.map_err(api::internal)?;
+    crate::authority::ensure_granted(&mut tx, lit, &vault_id, &cid).await?;
     let token = crypto::random_token();
     sqlx::query("INSERT INTO kc_sessions(token_hash,vault_id,expires_at) VALUES($1,$2,now()+interval '12 hours')")
         .bind(crypto::hash_bytes(token.as_bytes())).bind(&vault_id).execute(&mut *tx).await.map_err(api::internal)?;
@@ -168,8 +171,15 @@ pub async fn me(session: Session, pool: &State<PgPool>) -> ApiResult<Value> {
         .fetch_one(pool.inner())
         .await
         .map_err(api::internal)?;
+    let authorities: Vec<String> = sqlx::query_scalar(
+        "SELECT authority_cid FROM kc_vault_authorities WHERE vault_id=$1 ORDER BY created_at",
+    )
+    .bind(&session.vault_id)
+    .fetch_all(pool.inner())
+    .await
+    .map_err(api::internal)?;
     Ok(Json(
-        json!({"vaultId":session.vault_id,"authority":authority}),
+        json!({"vaultId":session.vault_id,"authority":authority,"authorities":authorities}),
     ))
 }
 #[post("/auth/logout")]

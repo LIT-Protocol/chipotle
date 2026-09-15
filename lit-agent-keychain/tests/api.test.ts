@@ -289,3 +289,161 @@ test(
     }
   },
 );
+test(
+  "authority release transition: old vaults keep working, sign-in moves them forward, old secrets stay manageable",
+  { skip: !api },
+  async () => {
+    const { default: archiveIndex } =
+      await import("../generated/archive-index.ts");
+    const { actionCid, templateStore } = await import("../protocol/actions.ts");
+    const [newest, previous] = archiveIndex.authority;
+    assert.ok(previous, "the archive must hold an earlier authority release");
+    const original = globalThis.fetch;
+    const jars = new Map<string, string>();
+    let active = "old";
+    globalThis.fetch = async (input, init) => {
+      if (String(input).startsWith(api!)) {
+        const headers = new Headers(init?.headers);
+        const cookie = jars.get(active);
+        if (cookie) headers.set("Cookie", cookie);
+        const res = await original(input, { ...init, headers });
+        const set = res.headers.get("set-cookie");
+        if (set) jars.set(active, set.split(";")[0]);
+        return res;
+      }
+      return original(input, init);
+    };
+    try {
+      const account = privateKeyToAccount(`0x${hex(randomBytes())}`);
+      const owner = {
+        kind: "wallet" as const,
+        address: account.address.toLowerCase(),
+      };
+      const authority: Authority = {
+        v: 2,
+        network: "test",
+        registry: api!,
+        owner,
+      };
+      const signer = async (challenge: any) => ({
+        kind: "wallet" as const,
+        owner,
+        challenge,
+        signature: await account.signTypedData(
+          authorizationTypedData(challenge),
+        ),
+      });
+      // A vault created by a client that shipped the previous authority release.
+      const oldClient = new OwnerClient(
+        authority,
+        signer,
+        new LitConnection(lit),
+        120000,
+        { authorityRelease: previous },
+      );
+      await oldClient.login();
+      await subscribe(oldClient);
+      const oldCid = await oldClient.currentAuthorityCid();
+      const oldTemplate = await templateStore.byHash(
+        "authority",
+        previous,
+        api!,
+      );
+      assert.equal(oldCid, await actionCid(authority, oldTemplate.code));
+      assert.notEqual(oldCid, await actionCid(authority));
+      assert.deepEqual((await oldClient.api("/api/me")).authorities, [oldCid]);
+      let s1 = await oldClient.create("LEGACY", "created-under-old-release");
+      assert.equal(s1.manifest.document.manifest.authorityCid, oldCid);
+      const agentKeys = Keychain.generateKey();
+      const agentFor = (bundle: SecretBundle, usageApiKey?: string) =>
+        new Keychain(agentKeys.privateKey, {
+          v: 2,
+          litApiUrl: lit,
+          usageApiKey,
+          secrets: {
+            [bundle.envelope.document.metadata.name]: {
+              manifest: bundle.manifest.document.manifest,
+              actionCid: bundle.manifest.document.actionCid,
+            },
+          },
+        });
+      s1 = await oldClient.delegate(s1, agentKeys.publicKey, "agent");
+      assert.equal(
+        await agentFor(s1, oldClient.lit.usageApiKey).get("LEGACY"),
+        "created-under-old-release",
+      );
+
+      // The owner upgrades their client: sign-in runs the newest release and the
+      // vault records it; the old release stays granted.
+      active = "new";
+      const newClient = new OwnerClient(
+        authority,
+        signer,
+        new LitConnection(lit),
+      );
+      await newClient.login();
+      const newCid = await newClient.currentAuthorityCid();
+      assert.equal(newCid, await actionCid(authority));
+      const me = await newClient.api("/api/me");
+      assert.deepEqual(me.authorities, [oldCid, newCid]);
+      const audit = await newClient.api("/api/audit");
+      assert.ok(
+        audit.events.some(
+          (e: any) =>
+            e.event === "authority_upgraded" && e.objectHash === newCid,
+        ),
+      );
+      // The old secret is still manageable: approvals run the release it pins,
+      // fetched by hash from the registry and verified locally.
+      const fresh = await newClient.bundle(
+        s1.manifest.document.manifest.secretId,
+      );
+      assert.equal(fresh.manifest.document.manifest.authorityCid, oldCid);
+      const disabled = await newClient.setPolicy(fresh, { disabled: true });
+      assert.equal(disabled.policy.document.disabled, true);
+      await assert.rejects(
+        agentFor(disabled, newClient.lit.usageApiKey).get("LEGACY"),
+        /denied/i,
+      );
+      const enabled = await newClient.setPolicy(disabled, { disabled: false });
+      assert.equal(
+        await agentFor(enabled, newClient.lit.usageApiKey).get("LEGACY"),
+        "created-under-old-release",
+      );
+      const rotated = await newClient.rotate(enabled, "rotated-by-new-client");
+      assert.equal(
+        await agentFor(rotated, newClient.lit.usageApiKey).get("LEGACY"),
+        "rotated-by-new-client",
+      );
+      // New secrets pin the newest release.
+      const s2 = await newClient.create("MODERN", "created-under-new-release");
+      assert.equal(s2.manifest.document.manifest.authorityCid, newCid);
+      // Backups spanning both releases restore.
+      const backup = await newClient.backup();
+      assert.equal(backup.bundles.length, 2);
+      await newClient.restore(backup);
+      // A client still on the previous release can sign in; the vault is not
+      // moved backwards.
+      active = "old";
+      await oldClient.login();
+      assert.deepEqual((await oldClient.api("/api/me")).authorities, [
+        oldCid,
+        newCid,
+      ]);
+      // Templates are content-addressed and public.
+      const index = await (await fetch(`${api}/api/templates`)).json();
+      assert.deepEqual(index.templates.authority, archiveIndex.authority);
+      const served = await (
+        await fetch(`${api}/api/templates/${previous}`)
+      ).text();
+      assert.equal(served, oldTemplate.code);
+      assert.equal(
+        (await fetch(`${api}/api/templates/${"0".repeat(64)}`)).status,
+        404,
+      );
+      void newest;
+    } finally {
+      globalThis.fetch = original;
+    }
+  },
+);

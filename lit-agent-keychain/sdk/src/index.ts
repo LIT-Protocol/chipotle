@@ -1,4 +1,10 @@
-import { actionCid, actionSource } from "../../protocol/actions.ts";
+import {
+  actionCid,
+  actionSource,
+  cidForCode,
+  templateStore,
+  type Template,
+} from "../../protocol/actions.ts";
 import discoverySource from "../../generated/discovery.ts";
 import catalog from "../../generated/catalog.ts";
 import {
@@ -74,6 +80,7 @@ export { authorizationTypedData } from "../../protocol/identity.ts";
 export {
   actionCid,
   actionSource,
+  templateStore,
   digest,
   agentPublicKey,
   randomBytes,
@@ -335,17 +342,31 @@ export class LitConnection {
     );
     return result.response;
   }
-  async execute(manifest: Authority | Manifest, params: unknown) {
-    if (this.usageApiKey) return this.direct(actionSource(manifest), params);
+  /**
+   * Runs the action for `manifest`. `template` selects an earlier release of its
+   * template (exact bytes, verified by hash); by default the current release runs.
+   */
+  async execute(
+    manifest: Authority | Manifest,
+    params: unknown,
+    template?: Template,
+  ) {
+    const code = actionSource(manifest, template?.code);
+    if (this.usageApiKey) return this.direct(code, params);
     requireThat(
       "owner" in manifest && (params as any)?.document?.kind === "login",
       "Sign in before executing actions",
     );
     const kind = "owner" in manifest ? "authority" : "secret";
-    const expected = await actionCid(manifest);
+    const expected = await cidForCode(code);
     const result = await jsonFetch(
       `${manifest.registry}/api/execute`,
-      post({ kind, manifest, params }),
+      post({
+        kind,
+        manifest,
+        params,
+        ...(template ? { template: template.hash } : {}),
+      }),
       this.timeoutMs,
     );
     requireThat(result.actionCid === expected, "Action identity mismatch");
@@ -393,11 +414,19 @@ export class OwnerClient {
     readonly signer: OwnerSigner,
     lit = new LitConnection(),
     readonly managementTimeoutMs = 120000,
+    options: { authorityRelease?: string } = {},
   ) {
     this.authority = authoritySchema.parse(authority);
     this.vaultId = digest(this.authority);
     this.lit = lit;
+    this.authorityRelease = options.authorityRelease;
   }
+  /**
+   * Template hash of the authority release to sign in and approve new objects
+   * with. Defaults to the newest release bundled in this client. Recovery tooling
+   * and tests can pin an earlier archived release here.
+   */
+  readonly authorityRelease: string | undefined;
   async api(path: string, init: RequestInit = {}) {
     return jsonFetch(
       this.authority.registry + path,
@@ -405,17 +434,51 @@ export class OwnerClient {
       this.managementTimeoutMs,
     );
   }
-  async authorize<T extends Document>(document: T): Promise<Signed<T>> {
+  /**
+   * Authority releases are versioned. Secrets pin the release that approved them,
+   * so approvals for an existing secret run that exact release; everything else
+   * (sign-in, new secrets, credentials) uses the newest release this client knows.
+   */
+  private async authorityTemplate(authorityCid?: string): Promise<Template> {
+    if (authorityCid !== undefined)
+      return templateStore.resolve(this.authority, authorityCid);
+    return this.authorityRelease === undefined
+      ? templateStore.current(this.authority)
+      : templateStore.byHash(
+          "authority",
+          this.authorityRelease,
+          this.authority.registry,
+        );
+  }
+  /** CID of the authority release this client signs in and approves new objects with. */
+  async currentAuthorityCid() {
+    return actionCid(this.authority, (await this.authorityTemplate()).code);
+  }
+  /** Whether `cid` is a legitimate authority release for this vault. */
+  async isAuthorityVersion(cid: string) {
+    return templateStore.resolve(this.authority, cid).then(
+      () => true,
+      () => false,
+    );
+  }
+  async authorize<T extends Document>(
+    document: T,
+    authorityCid?: string,
+  ): Promise<Signed<T>> {
     if (!this.lit.usageApiKey) await this.login();
-    const signed = await this.approve(document);
+    const template = await this.authorityTemplate(authorityCid);
+    const signed = await this.approve(document, template);
     verifyReceipt(
       signed,
-      await this.lit.publicKey(await actionCid(this.authority)),
+      await this.lit.publicKey(await actionCid(this.authority, template.code)),
       this.vaultId,
     );
     return signed;
   }
-  private async approve<T extends Document>(document: T): Promise<Signed<T>> {
+  private async approve<T extends Document>(
+    document: T,
+    template: Template,
+  ): Promise<Signed<T>> {
     requireThat(document.vaultId === this.vaultId);
     const now = nowSeconds();
     const challenge: Challenge = {
@@ -429,18 +492,38 @@ export class OwnerClient {
       expiresAt: now + 120,
     };
     const proof = await this.signer(challenge);
-    const response = await this.lit.execute(this.authority, {
-      document,
-      proof,
-    });
+    const response = await this.lit.execute(
+      this.authority,
+      { document, proof },
+      template,
+    );
     return { document, receipt: receiptSchema.parse(response.receipt) };
   }
   async login() {
     this.progress?.("Requesting a sign-in challenge…");
-    const document = await this.api("/auth/challenge", post(this.authority));
+    const { authorityCid: recorded, ...document } = await this.api(
+      "/auth/challenge",
+      post(this.authority),
+    );
     requireThat(document.kind === "login" && document.vaultId === this.vaultId);
     this.progress?.("Verifying owner authorization…");
-    const authorization = await this.approve(document);
+    // Sign in with the newest release, which moves the vault forward. If that
+    // release cannot verify this owner (its owner set was approved under the
+    // release the vault currently uses), fall back to that release.
+    let template = await this.authorityTemplate();
+    let authorization: Signed<Document>;
+    try {
+      authorization = await this.approve(document, template);
+    } catch (error) {
+      if (
+        typeof recorded !== "string" ||
+        recorded === (await actionCid(this.authority, template.code))
+      )
+        throw error;
+      template = await templateStore.resolve(this.authority, recorded);
+      this.progress?.("Retrying with the vault's current authority release…");
+      authorization = await this.approve(document, template);
+    }
     const result = await this.api(
       "/auth/login",
       post({ authority: this.authority, authorization }),
@@ -459,7 +542,9 @@ export class OwnerClient {
       this.progress?.("Verifying the Lit endpoint and sign-in receipt…");
       verifyReceipt(
         authorization,
-        await this.lit.publicKey(await actionCid(this.authority)),
+        await this.lit.publicKey(
+          await actionCid(this.authority, template.code),
+        ),
         this.vaultId,
       );
     } catch (error) {
@@ -486,7 +571,7 @@ export class OwnerClient {
       network: this.authority.network,
       registry: this.authority.registry,
       vaultId: this.vaultId,
-      authorityCid: await actionCid(this.authority),
+      authorityCid: await this.currentAuthorityCid(),
       secretId: randomId(),
       release,
     };
@@ -545,8 +630,10 @@ export class OwnerClient {
     await verifyBundle(bundle, this.lit, this.vaultId);
     requireThat(bundle.manifest.document.manifest.secretId === secretId);
     requireThat(
-      bundle.manifest.document.manifest.authorityCid ===
-        (await actionCid(this.authority)),
+      await this.isAuthorityVersion(
+        bundle.manifest.document.manifest.authorityCid,
+      ),
+      "Secret was approved by an authority release this client does not know",
     );
     return bundle;
   }
@@ -567,7 +654,10 @@ export class OwnerClient {
       grants: changes.grants ?? old.grants,
       disabled: changes.disabled ?? old.disabled,
     });
-    const signed = await this.authorize(policy);
+    const signed = await this.authorize(
+      policy,
+      bundle.manifest.document.manifest.authorityCid,
+    );
     await this.api(`/api/secrets/${old.secretId}/policy`, {
       ...post(signed),
       method: "PUT",
@@ -607,24 +697,30 @@ export class OwnerClient {
       await this.lit.encryptionPublicKey(manifest),
       plaintext,
     );
-    const signedEnvelope = await this.authorize(envelope);
+    const signedEnvelope = await this.authorize(
+      envelope,
+      manifest.authorityCid,
+    );
     const now = nowSeconds();
-    const policy = await this.authorize({
-      ...bundle.policy.document,
-      epoch: bundle.policy.document.epoch + 1,
-      previousHash: digest(bundle.policy.document),
-      notBefore: now,
-      expiresAt: now + 30 * 86400,
-      grants: bundle.policy.document.grants.map((g) => ({
-        ...g,
-        versions: [
-          {
-            version: envelope.metadata.version,
-            envelopeHash: digest(envelope),
-          },
-        ],
-      })),
-    });
+    const policy = await this.authorize(
+      {
+        ...bundle.policy.document,
+        epoch: bundle.policy.document.epoch + 1,
+        previousHash: digest(bundle.policy.document),
+        notBefore: now,
+        expiresAt: now + 30 * 86400,
+        grants: bundle.policy.document.grants.map((g) => ({
+          ...g,
+          versions: [
+            {
+              version: envelope.metadata.version,
+              envelopeHash: digest(envelope),
+            },
+          ],
+        })),
+      },
+      manifest.authorityCid,
+    );
     const updated = {
       manifest: bundle.manifest,
       envelope: signedEnvelope,
@@ -638,12 +734,27 @@ export class OwnerClient {
     requireThat(Object.hasOwn(state, "policy"));
     if (state.policy === null) return null;
     const signed = signedSchema(credentialsSchema).parse(state.policy);
-    verifyReceipt(
-      signed,
-      await this.lit.publicKey(await actionCid(this.authority)),
-      this.vaultId,
-    );
+    await this.verifyByAnyAuthority(signed);
     return signed;
+  }
+  /** Verifies a receipt against every authority release this client knows for the vault. */
+  private async verifyByAnyAuthority(signed: Signed<unknown>) {
+    for (const hash of templateStore.hashes("authority")) {
+      try {
+        const { code } = await templateStore.byHash(
+          "authority",
+          hash,
+          this.authority.registry,
+        );
+        verifyReceipt(
+          signed,
+          await this.lit.publicKey(await actionCid(this.authority, code)),
+          this.vaultId,
+        );
+        return;
+      } catch {}
+    }
+    throw new Error("Receipt was not issued by a known authority release");
   }
   async updateCredentials(owners: Authority["owner"][]) {
     const previous = (await this.getCredentials())?.document;
@@ -710,12 +821,26 @@ export class OwnerClient {
     // A fresh device may have no usage key before recovery/sign-in. Upload only
     // the signed public backup; the API and immutable authority action verify it.
     // Sign-in then bootstraps direct Chipotle verification before any secret use.
-    if (lit.usageApiKey)
-      verifyReceipt(
-        credentials,
-        await lit.publicKey(await actionCid(authority)),
-        digest(authority),
-      );
+    if (lit.usageApiKey) {
+      let verified = false;
+      for (const hash of templateStore.hashes("authority")) {
+        try {
+          const { code } = await templateStore.byHash(
+            "authority",
+            hash,
+            authority.registry,
+          );
+          verifyReceipt(
+            credentials,
+            await lit.publicKey(await actionCid(authority, code)),
+            digest(authority),
+          );
+          verified = true;
+          break;
+        } catch {}
+      }
+      requireThat(verified, "Credentials receipt is from an unknown release");
+    }
     await jsonFetch(
       authority.registry + "/auth/restore-credentials",
       post({ authority, credentials }),
@@ -736,8 +861,10 @@ export class OwnerClient {
     for (const bundle of backup.bundles) {
       await verifyBundle(bundle, this.lit, this.vaultId);
       requireThat(
-        bundle.manifest.document.manifest.authorityCid ===
-          (await actionCid(this.authority)),
+        await this.isAuthorityVersion(
+          bundle.manifest.document.manifest.authorityCid,
+        ),
+        "Backup was approved by an authority release this client does not know",
       );
       await this.api("/api/actions", post(bundle.manifest));
       await this.api("/api/restore", post(bundle));
@@ -755,8 +882,9 @@ export async function verifyBundle(
   const m = signedManifest.document.manifest;
   requireThat(signedManifest.document.vaultId === m.vaultId);
   requireThat(!vaultId || m.vaultId === vaultId);
-  const cid = await actionCid(m);
-  requireThat(bundle.manifest.document.actionCid === cid);
+  const cid = bundle.manifest.document.actionCid;
+  // Throws unless some known release of this action binds to exactly this CID.
+  await templateStore.resolve(m, cid);
   const key = await lit.publicKey(m.authorityCid);
   const env = signedSchema(envelopeSchema).parse(bundle.envelope);
   const policy = signedSchema(policySchema).parse(bundle.policy);
@@ -873,10 +1001,9 @@ export class Keychain {
     const locator = this.config.secrets[name];
     requireThat(locator, "Unknown secret");
     const manifest = manifestSchema.parse(locator.manifest);
-    requireThat(
-      (await actionCid(manifest)) === locator.actionCid,
-      "Pinned action CID mismatch",
-    );
+    // The exact release this secret was created under; fetched by hash if older
+    // than this client's bundled template.
+    const template = await templateStore.resolve(manifest, locator.actionCid);
     requireThat(
       actionDefinition(manifest.release).operation === operation,
       "Unsupported release operation",
@@ -911,11 +1038,15 @@ export class Keychain {
       expiresAt: now + 90,
     });
     try {
-      const result = await this.lit.execute(manifest, {
-        operation,
-        signedRequest: { request, signature: signAgent(request, this.key) },
-        envelope: bundle.envelope,
-      });
+      const result = await this.lit.execute(
+        manifest,
+        {
+          operation,
+          signedRequest: { request, signature: signAgent(request, this.key) },
+          envelope: bundle.envelope,
+        },
+        template,
+      );
       const protectedResult = result.result as ProtectedResponse;
       requireThat(
         protectedResult?.payload?.v === V &&

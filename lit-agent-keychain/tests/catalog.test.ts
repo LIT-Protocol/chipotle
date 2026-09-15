@@ -368,3 +368,33 @@ test("Slack post action treats ok:false as denial and returns only channel and t
     error: "access_denied",
   });
 });
+test("the template archive is append-only, content-addressed and newest-first", async () => {
+  const archiveDir = "actions/archive";
+  const index = (await import("../generated/archive-index.ts")).default;
+  const lock = JSON.parse(await readFile("actions/catalog.lock.json", "utf8"));
+  for (const name of (await readdir(archiveDir, { withFileTypes: true }))
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name)) {
+    const files = (await readdir(path.join(archiveDir, name))).sort();
+    for (const file of files) {
+      const code = await readFile(path.join(archiveDir, name, file), "utf8");
+      assert.equal(
+        file,
+        createHash("sha256").update(code).digest("hex") + ".js",
+        `${name}/${file} must hash to its name`,
+      );
+    }
+    assert.deepEqual(
+      [...index[name]].sort(),
+      files.map((f) => f.slice(0, 64)),
+    );
+    // The current release is first and matches the lock and bundled template.
+    assert.equal(index[name][0], lock.templates[name]);
+    assert.equal(
+      createHash("sha256").update(templates[name]).digest("hex"),
+      index[name][0],
+    );
+  }
+  // The authority has been released more than once; both versions are retained.
+  assert.ok(index.authority.length >= 2);
+});

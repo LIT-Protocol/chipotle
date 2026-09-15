@@ -257,3 +257,55 @@ test("Stripe redirects, upstream errors and reflected strings never expose a cre
     });
   }
 });
+test("authority treats a credentials receipt from another release like the original credential", async () => {
+  // A vault whose owner set was approved under a different authority release:
+  // this release cannot verify that receipt, so it sees only the root owner.
+  const f = await fixture();
+  const otherOwner = {
+    kind: "wallet" as const,
+    address: "0x" + "2".repeat(40),
+  };
+  const credentials = {
+    v: 2 as const,
+    domain: "lit-keychain/v2" as const,
+    kind: "credentials" as const,
+    vaultId: f.manifest.vaultId,
+    epoch: 1,
+    previousHash: null,
+    owners: [otherOwner],
+    notBefore: f.now - 10,
+    expiresAt: null,
+  };
+  const foreignKey = keyFor("Qm" + "z".repeat(44));
+  f.h.registry.set(
+    `${f.authority.registry}/api/registry/credentials/${f.manifest.vaultId}`,
+    {
+      document: credentials,
+      receipt: makeReceipt(credentials, foreignKey, f.now),
+    },
+  );
+  // Root owner still authorizes (equivalent to the operator serving null)…
+  const proof = await f.ownerProof(f.policy);
+  const out = await f.h.run(f.authority, { document: f.policy, proof });
+  assert.equal(out.ok, true);
+  // …but the unverifiable owner set grants nothing: a forged owner is denied.
+  const forged = structuredClone(proof);
+  forged.owner = otherOwner;
+  assert.equal(
+    (await f.h.run(f.authority, { document: f.policy, proof: forged })).ok,
+    false,
+  );
+  // A receipt from this release with the root owner removed is honoured (fail closed for root).
+  const replaced = { ...credentials, owners: [otherOwner] };
+  f.h.registry.set(
+    `${f.authority.registry}/api/registry/credentials/${f.manifest.vaultId}`,
+    {
+      document: replaced,
+      receipt: makeReceipt(replaced, keyFor(f.authorityCid), f.now),
+    },
+  );
+  assert.equal(
+    (await f.h.run(f.authority, { document: f.policy, proof })).ok,
+    false,
+  );
+});
