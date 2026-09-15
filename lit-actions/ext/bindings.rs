@@ -431,7 +431,12 @@ fn proxied_fetch_client(proxy: Option<&str>) -> Result<reqwest::Client, JsErrorB
         // downgrade — replaying the caller's method, body, and API-key/HMAC headers
         // to a destination the action never authorized. The action sees the 3xx
         // status and decides for itself.
-        .redirect(reqwest::redirect::Policy::none());
+        .redirect(reqwest::redirect::Policy::none())
+        // Egress filter (CPL-295): drop DNS answers pointing at internal address
+        // space so a hostname destination/proxy can't SSRF into the TEE pod.
+        // Literal-IP connect targets bypass DNS and are rejected up front in
+        // op_lit_proxied_fetch via egress::connect_target_forbidden_ip.
+        .dns_resolver(crate::egress::egress_filtered_reqwest_resolver());
     if !key.is_empty() {
         // Pull any `user:pass@` out of the URL and apply it explicitly:
         // reqwest::Proxy does not reliably forward URL userinfo as the
@@ -490,6 +495,20 @@ async fn op_lit_proxied_fetch(
 ) -> Result<ProxiedFetchResponse, JsErrorBox> {
     ensure_not_blank!(req.url, "url");
 
+    let proxy = resolve_proxy(req.proxy.as_deref())?;
+
+    // Egress filter (CPL-295): reject a request that would connect directly to
+    // an internal literal IP. When proxied, the connect target is the proxy
+    // host; otherwise it is the destination URL host. Hostname targets are
+    // caught later by the client's egress DNS resolver. Checked before taking a
+    // limiter permit so a blocked request fails fast without holding one.
+    if crate::egress::connect_target_forbidden_ip(req.url.trim(), proxy) {
+        return Err(JsErrorBox::generic(
+            "op_lit_proxied_fetch: destination blocked: connecting to internal \
+             address space (loopback / RFC1918 / link-local) is not permitted",
+        ));
+    }
+
     // Bound concurrent native response buffering per execution (CPL-373). The
     // server installs a `ProxiedFetchLimiter` sized to the isolate's memory
     // budget; if one is somehow absent (a direct op call outside that path), we
@@ -509,7 +528,7 @@ async fn op_lit_proxied_fetch(
     // native read buffer below. Released on drop so a waiting fetch can proceed.
     let _permit = limiter.acquire().await?;
 
-    let client = proxied_fetch_client(resolve_proxy(req.proxy.as_deref())?)?;
+    let client = proxied_fetch_client(proxy)?;
 
     let method = reqwest::Method::from_bytes(req.method.trim().to_ascii_uppercase().as_bytes())
         .map_err(|e| JsErrorBox::generic(format!("op_lit_proxied_fetch: invalid method: {e}")))?;

@@ -518,9 +518,19 @@ async fn set_response(mut client: TestClient) {
     assert!(client.received::<ExecutionResult>().success);
 }
 
+/// A malicious action must not reach an internal service by *literal IP* — the
+/// classic SSRF vector (`http://127.0.0.1:5001` → the co-located kubo IPFS
+/// daemon). Deno's `deny_net` rejects it at the permission layer before any
+/// socket opens (CPL-295). `op_increment_fetch_count` still fires first (the
+/// JS wrapper increments before the real fetch), and the mock — bound to
+/// loopback — must observe zero requests.
+///
+/// NB: this replaces the old happy-path `fetch` test, which fetched the
+/// loopback-bound mock directly; that path is now (correctly) blocked. Real
+/// outbound `fetch` success is covered by `proxied_fetch` (ignored, real net).
 #[rstest]
 #[tokio::test]
-async fn fetch(mut client: TestClient) {
+async fn fetch_blocks_loopback_literal_ip(mut client: TestClient) {
     use wiremock::matchers::method;
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -530,9 +540,15 @@ async fn fetch(mut client: TestClient) {
         .mount(&mock_server)
         .await;
 
+    // mock_server.uri() is http://127.0.0.1:<port> — a literal loopback IP.
     let code = formatdoc! {r#"
         async function main() {{
-            await fetch("{uri}")
+            try {{
+                await fetch("{uri}");
+                Lit.Actions.setResponse({{ response: "REACHED" }});
+            }} catch (e) {{
+                Lit.Actions.setResponse({{ response: "BLOCKED:" + e }});
+            }}
         }}
         "#,
         uri = &mock_server.uri()
@@ -540,14 +556,138 @@ async fn fetch(mut client: TestClient) {
 
     client
         .respond_with(IncrementFetchCountResponse { fetch_count: 1 })
+        .respond_with(SetResponseResponse {})
         .execute_js(code)
         .await
         .unwrap();
 
-    assert_eq!(
-        client.received::<IncrementFetchCountRequest>(),
-        IncrementFetchCountRequest {}
+    let response = client.received::<SetResponseRequest>().response;
+    assert!(
+        response.starts_with("BLOCKED:"),
+        "loopback literal-IP fetch must be blocked, got: {response}"
     );
+
+    let hits = mock_server.received_requests().await.unwrap_or_default();
+    assert!(
+        hits.is_empty(),
+        "no request may reach the internal service, got {} hit(s)",
+        hits.len()
+    );
+
+    let _ = client.received::<IncrementFetchCountRequest>();
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+/// The same block must hold when the internal address is reached by *hostname*
+/// rather than literal IP. `deny_net` only inspects the URL host string, so
+/// `http://localhost:<port>` slips past it — but the egress DNS resolver
+/// resolves `localhost` to loopback, drops every disallowed address, and the
+/// connection never happens. This is the DNS-rebinding / internal-hostname
+/// layer (CPL-295).
+#[rstest]
+#[tokio::test]
+async fn fetch_blocks_hostname_resolving_to_loopback(mut client: TestClient) {
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&mock_server)
+        .await;
+
+    // Same loopback-bound mock, reached via the "localhost" hostname on its
+    // port — so only DNS resolution (not the literal-IP deny rule) can catch it.
+    let port = mock_server.address().port();
+    let code = formatdoc! {r#"
+        async function main() {{
+            try {{
+                await fetch("http://localhost:{port}/");
+                Lit.Actions.setResponse({{ response: "REACHED" }});
+            }} catch (e) {{
+                Lit.Actions.setResponse({{ response: "BLOCKED:" + e }});
+            }}
+        }}
+        "#,
+        port = port
+    };
+
+    client
+        .respond_with(IncrementFetchCountResponse { fetch_count: 1 })
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    let response = client.received::<SetResponseRequest>().response;
+    assert!(
+        response.starts_with("BLOCKED:"),
+        "localhost fetch must be blocked by the egress resolver, got: {response}"
+    );
+
+    let hits = mock_server.received_requests().await.unwrap_or_default();
+    assert!(
+        hits.is_empty(),
+        "no request may reach the internal service via hostname, got {} hit(s)",
+        hits.len()
+    );
+
+    let _ = client.received::<IncrementFetchCountRequest>();
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+/// `Lit.Actions.proxiedFetch` is a separate egress surface (a raw `reqwest`
+/// op that never touches Deno's permission engine), so it must be filtered
+/// independently (CPL-295). A *direct* (proxy-less) proxiedFetch to a loopback
+/// literal IP must be rejected before any socket opens, and the loopback-bound
+/// mock must observe zero requests.
+#[rstest]
+#[tokio::test]
+async fn proxied_fetch_blocks_loopback_literal_ip(mut client: TestClient) {
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&mock_server)
+        .await;
+
+    // No proxy → the destination URL host (127.0.0.1) is the connect target.
+    let code = formatdoc! {r#"
+        async function main() {{
+            try {{
+                await Lit.Actions.proxiedFetch({{ url: "{uri}" }});
+                Lit.Actions.setResponse({{ response: "REACHED" }});
+            }} catch (e) {{
+                Lit.Actions.setResponse({{ response: "BLOCKED:" + e }});
+            }}
+        }}
+        "#,
+        uri = &mock_server.uri()
+    };
+
+    client
+        .respond_with(IncrementFetchCountResponse { fetch_count: 1 })
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    let response = client.received::<SetResponseRequest>().response;
+    assert!(
+        response.starts_with("BLOCKED:"),
+        "loopback proxiedFetch must be blocked, got: {response}"
+    );
+
+    let hits = mock_server.received_requests().await.unwrap_or_default();
+    assert!(
+        hits.is_empty(),
+        "no request may reach the internal service via proxiedFetch, got {} hit(s)",
+        hits.len()
+    );
+
+    let _ = client.received::<IncrementFetchCountRequest>();
     assert!(client.received::<ExecutionResult>().success);
 }
 
