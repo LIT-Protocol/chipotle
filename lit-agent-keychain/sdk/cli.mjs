@@ -2,6 +2,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import {
   Keychain,
+  ACTIONS,
   assertAgentConfig,
   assertAgentIdentity,
 } from "./dist/index.js";
@@ -11,12 +12,14 @@ const usage =
   "Usage:\n" +
   "  keychain init <identity-file>\n" +
   "  keychain get <identity-file> <config-file> <secret-name>\n" +
-  "  keychain stripe-balance <identity-file> <config-file> <secret-name>\n" +
+  "  keychain use <identity-file> <config-file> <secret-name> [json-input]\n" +
+  "  keychain actions\n" +
   "  keychain mcp <identity-file> <config-file> [more-config-files]\n" +
   "  keychain attest [lit-api-url]\n" +
   "\n" +
   "identity-file: JSON from `keychain init` ({ v, privateKey, publicKey }); keep private.\n" +
   "config-file:   *.keychain.json downloaded from Keychain ({ v, litApiUrl, usageApiKey, secrets }).\n" +
+  "use runs the secret's catalog action inside Lit (never revealing the value); actions lists the catalog.\n" +
   "CHIPOTLE_USAGE_API_KEY overrides the config's scoped billing key.\n" +
   "KEYCHAIN_SKIP_ATTESTATION=1 disables the TEE attestation check (development only).\n";
 const attestationOptions = async (litApiUrl) =>
@@ -41,8 +44,34 @@ try {
     process.stdout.write(
       `Agent public key: ${identity.publicKey}\nPrivate identity saved to ${args[0]}\n`,
     );
-  } else if (["get", "stripe-balance"].includes(command) && args.length === 3) {
-    const [identityFile, configFile, name] = args;
+  } else if (command === "actions" && args.length === 0) {
+    for (const action of Object.values(ACTIONS)) {
+      if (action.deprecated) continue;
+      process.stdout.write(
+        `${action.id}\n  ${action.name} (${action.kind === "use" ? action.operation : "get"}${action.tier === "community" ? ", community" : ""})\n  ${action.description}\n` +
+          (action.kind === "use" && action.input
+            ? `  input: ${Object.entries(action.input.properties)
+                .map(
+                  ([k, v]) =>
+                    `${k}${(action.input.required ?? []).includes(k) ? "" : "?"}: ${v.type}`,
+                )
+                .join(", ")}\n`
+            : ""),
+      );
+    }
+  } else if (
+    (["get", "stripe-balance"].includes(command) && args.length === 3) ||
+    (command === "use" && (args.length === 3 || args.length === 4))
+  ) {
+    const [identityFile, configFile, name, rawInput] = args;
+    let input;
+    if (rawInput !== undefined) {
+      try {
+        input = JSON.parse(rawInput);
+      } catch (error) {
+        throw new Error(`json-input must be a JSON object: ${error.message}`);
+      }
+    }
     const identity = await readJson(identityFile);
     assertAgentIdentity(identity);
     const config = await readJson(configFile);
@@ -55,7 +84,7 @@ try {
       const result =
         command === "get"
           ? await client.get(name)
-          : await client.stripeBalance(name);
+          : await client.use(name, input);
       process.stdout.write(
         (typeof result === "string" ? result : JSON.stringify(result)) + "\n",
       );

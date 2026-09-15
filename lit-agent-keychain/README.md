@@ -40,8 +40,14 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
   owner-approved renewal, atomic rotation, and credential replacement/recovery.
 - New secrets grant no agent access. Permissions default to 30 days, with a 90-day maximum.
   Owner credential membership is independent and normally lasts until revoked.
-- Strict Stripe balance integration: fixed HTTPS request and bounded numeric projection;
-  no credential-export, arbitrary URL, code, redirect, or migration path.
+- "Use inside Lit" action catalog from the public
+  [agent-keychain-library](https://github.com/LIT-Protocol/agent-keychain-library)
+  repo, pinned to a commit in `package.json`: Stripe balance, OpenAI chat, GitHub
+  file reads, Slack messages. Each action's manifest pins the hosts it may reach,
+  the credential shape, agent input and result shapes; the harness in
+  `actions/secret-common.ts` enforces them in the enclave. No credential-export,
+  arbitrary URL, code, redirect, or migration path. Contributors add actions by PR
+  to that repo; Keychain picks them up with `npm run library:pin <sha>`.
 - Encrypted backups of current versions and policies; restore never overwrites another secret.
 - Free for 5 stored secrets, $10/month for 1,000; rotations use the same slot. Contact us for more.
 - Stripe Checkout and customer portal, period-end cancellation, retained encrypted backups.
@@ -137,10 +143,13 @@ Deploy the private-key telemetry fix and billing-owner guards in `lit-api-server
 and `lit-payments` before distributing user execution keys. No direct Phala access
 is required for Keychain.
 Retain reproducible client/SDK artifacts, `generated/release.json`, and lockfiles for
-each deployed release. Changing action bytes changes encryption keys. Never silently
-rebuild a deployed v2 action against different dependencies; introduce a new action
-release and an explicit owner-approved transition. Strict Stripe-only secrets require
-reimporting the original credential. An encrypted DB backup alone cannot recover
+each deployed release. Changing action bytes changes encryption keys.
+`actions/catalog.lock.json` pins the SHA-256 of every built template (authority and
+each catalog action); `npm run build:actions` fails on drift, so a rebuild against
+different sources or dependencies is an explicit `--update-lock` release, never a
+silent change. Introduce a new action id and an explicit owner-approved transition
+instead of changing a deployed one. "Use inside Lit" secrets require reimporting the
+original credential. An encrypted DB backup alone cannot recover
 from loss of Lit's key derivation root or an incompatible network derivation change.
 
 ## Verification

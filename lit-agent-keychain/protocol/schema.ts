@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  releaseIdSchema,
+  operationSchema,
+  MAX_INPUT_BYTES,
+} from "@lit-protocol/agent-keychain-library/shape";
 
 export const V = 2 as const;
 export const DOMAIN = "lit-keychain/v2" as const;
@@ -71,7 +76,7 @@ export const manifestSchema = z.strictObject({
   vaultId: hashSchema,
   authorityCid: cidSchema,
   secretId: hashSchema,
-  release: z.enum(["export", "stripe_balance"]),
+  release: releaseIdSchema,
 });
 export type Manifest = z.infer<typeof manifestSchema>;
 const objectBase = {
@@ -84,7 +89,7 @@ export const metadataSchema = z.strictObject({
   secretId: hashSchema,
   actionCid: cidSchema,
   version: integer.min(1),
-  release: z.enum(["export", "stripe_balance"]),
+  release: releaseIdSchema,
   name: z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/),
 });
 const b64 = z.string().regex(/^[A-Za-z0-9_-]+$/);
@@ -109,10 +114,7 @@ const versionSchema = z.strictObject({
 export const grantSchema = z.strictObject({
   agentPublicKey: hex(32),
   label: text,
-  operations: z
-    .array(z.enum(["get", "stripe.balance"]))
-    .min(1)
-    .max(2),
+  operations: z.array(operationSchema).min(1).max(4),
   versions: z.array(versionSchema).min(1).max(100),
 });
 export type Grant = z.infer<typeof grantSchema>;
@@ -229,7 +231,15 @@ export const requestSchema = z.strictObject({
   envelopeHash: hashSchema,
   policyHash: hashSchema,
   agentPublicKey: hex(32),
-  operation: z.enum(["get", "stripe.balance"]),
+  operation: operationSchema,
+  /** Action-specific input, validated in the action against its catalog shape. Canonical JSON, bounded. */
+  input: z
+    .record(z.string(), z.unknown())
+    .refine(
+      (value) => JSON.stringify(value).length <= MAX_INPUT_BYTES,
+      "input too large",
+    )
+    .optional(),
   responsePublicKey: hex(32),
   nonce: hashSchema,
   issuedAt: integer,

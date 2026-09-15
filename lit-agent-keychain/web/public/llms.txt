@@ -7,9 +7,9 @@ Key facts for agents:
 - Install: `npm install @lit-protocol/keychain` (Node 22+). CLI binary: `keychain`.
 - Generate an identity locally: `npx @lit-protocol/keychain init ./agent-identity.json`. Share ONLY `publicKey` with the owner.
 - The owner approves that public key in the web app and downloads an agent config (`*.keychain.json`) containing public locators plus a scoped Chipotle execution key. The execution key pays for Lit execution; it cannot read a secret by itself.
-- Read at runtime: `new Keychain(identity.privateKey, config).get("NAME")`, or `keychain get ./agent-identity.json ./NAME.keychain.json NAME`.
-- MCP (local stdio, never hosted): `claude mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp ./agent-identity.json ./NAME.keychain.json`. Tools: `list_secrets`, `get_secret`, `stripe_balance`, `agent_public_key`.
-- Release modes: `export` (plaintext delivered encrypted to the agent) and `stripe_balance` (credential used only inside the enclave for a fixed Stripe balance call; value never revealed).
+- Read at runtime: `new Keychain(identity.privateKey, config).get("NAME")`, or `keychain get ./agent-identity.json ./NAME.keychain.json NAME`. For "use inside Lit" secrets: `.use("NAME", input)` or `keychain use ./agent-identity.json ./NAME.keychain.json NAME '{...}'`.
+- MCP (local stdio, never hosted): `claude mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp ./agent-identity.json ./NAME.keychain.json`. Tools: `list_secrets`, `get_secret`, one tool per catalog action (`stripe_balance`, `openai_chat`, `github_read_file`, `slack_post_message`), `list_actions`, `agent_public_key`.
+- Actions: `export` delivers the plaintext encrypted to the agent. Every other action uses the credential only inside the enclave for one fixed upstream call and returns a bounded result (Stripe balance, OpenAI chat completion, GitHub file read, Slack post message); the value is never revealed and the action can reach only the hosts its manifest declares. The catalog is open to contributions: https://github.com/LIT-Protocol/chipotle/tree/main/lit-agent-keychain/actions/catalog
 - The SDK attests the Lit endpoint (TDX quote, RTMR replay, on-chain whitelist on Base, TLS binding in Node) before the first request and fails closed. Never disable attestation outside local development.
 - There are no setup tokens, management bearer tokens, or server-minted grants. Never ask the owner for a private key or Google token.
 

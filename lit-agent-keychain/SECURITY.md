@@ -107,15 +107,29 @@ collection and provider/browser internals do not offer guaranteed memory erasure
 No secrets, owner private keys or agent private keys are persisted by the API.
 Names, public identities, permissions and traffic metadata are not encrypted.
 
-## Strict Stripe mode
+## "Use inside Lit" actions
 
-The separate Stripe action cannot export, rewrap, sign arbitrary data, call arbitrary
-URLs, accept custom headers/body, follow redirects, or execute caller code. It only
-GETs `https://api.stripe.com/v1/balance`, then returns bounded numeric amounts,
-three-letter currency codes and a boolean, encrypted to the agent. Raw upstream
-responses, errors and headers are never returned or logged. Stripe necessarily
-receives its credential over TLS and remains a trusted service for that operation.
-Owners must retain the original credential to reimport into a future action release.
+Every non-export action comes from the reviewed public catalog
+[agent-keychain-library](https://github.com/LIT-Protocol/agent-keychain-library),
+pinned to an exact commit and integrity hash in `package.json`/`package-lock.json`. An
+action cannot export, rewrap, sign arbitrary data, follow redirects, or execute caller
+code. Its manifest declares, and the shared harness enforces inside the enclave: a
+credential pattern the plaintext must match before the action runs; an exact HTTPS
+hostname allowlist and request budget for the only HTTP client the action can reach;
+a shape for the agent's signed input, validated before any key derivation; a shape and
+16 KiB cap for the result; and timeouts and response-size limits. The build rejects
+action code that imports anything but the contributor library or references `fetch`,
+`eval`, dynamic `import`, timers, `crypto` or the Lit runtime. Raw upstream responses,
+errors and headers are never returned or logged; agents see only `access_denied`.
+
+For example, the Stripe action only GETs `https://api.stripe.com/v1/balance` and
+returns bounded numeric amounts, three-letter currency codes and a boolean. Upstream
+providers necessarily receive the credential over TLS and remain trusted for their
+operation. Actions whose purpose is to return upstream text (an OpenAI reply, a GitHub
+file) can carry whatever that provider returns; review, not the shape, is what keeps a
+projection from echoing the credential. Owners must retain the original credential to
+reimport into a future action release. Catalog ids are permanent and their template
+bytes are pinned in `actions/catalog.lock.json`; deprecated actions stay restorable.
 
 ## Budgets, audit and recovery
 

@@ -28,8 +28,17 @@ See README.md and SECURITY.md for the protocol and its explicit trust boundary.
   Never trust a Keychain-supplied replacement public key or Lit endpoint.
 - Keep all executable action dependencies in the bundle. Never fetch/import mutable
   executable code. Never expose an arbitrary signing, key-export or decryption op.
-- The Stripe-only action has no export path, even for the owner. Its destination,
-  method and projected response are fixed. Never reflect upstream strings/errors.
+- "Use inside Lit" actions come from the pinned `@lit-protocol/agent-keychain-library`
+  package (public repo LIT-Protocol/agent-keychain-library; `actions/<id>/` manifest +
+  code) and have no export path, even for the owner. The harness in
+  `actions/secret-common.ts` enforces the manifest: credential pattern, HTTPS host
+  allowlist, input/output shapes, request budget and size caps. Action code may import
+  only the library's `lib.ts`. Never reflect upstream strings/errors. Bump the pin with
+  `npm run library:pin <sha>` (tarball URL + integrity in the lockfile; CI needs no git
+  or npm credentials), then `--update-lock` and review that only new hashes appear.
+- `actions/catalog.lock.json` pins every template's SHA-256 (authority included).
+  `npm run build:actions` fails on drift; pass `--update-lock` only for an intended,
+  reviewed release. Never delete a catalog id; set `deprecated: true` instead.
 - No operator grants, setup bearer authority, managed PKP vaults, or permissive
   default agents. New secrets start with an empty allowlist.
 - Owner sign-in proofs expire; owner credential membership is independent and can

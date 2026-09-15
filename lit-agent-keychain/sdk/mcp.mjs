@@ -11,6 +11,8 @@
 import { createInterface } from "node:readline";
 import {
   Keychain,
+  ACTIONS,
+  shapeToJsonSchema,
   assertAgentConfig,
   assertAgentIdentity,
 } from "./dist/index.js";
@@ -20,11 +22,18 @@ export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const SERVER_INFO = { name: "lit-agent-keychain", version: "2.0.0" };
 const MAX_FRAME_BYTES = 64 * 1024;
 
+const nameProperty = {
+  name: { type: "string", description: "Secret name from list_secrets" },
+};
+/** One MCP tool per "use inside Lit" catalog action, so a model sees each action's input schema directly. */
+const USE_ACTIONS = Object.values(ACTIONS).filter(
+  (action) => action.kind === "use" && !action.deprecated,
+);
 const TOOLS = [
   {
     name: "list_secrets",
     description:
-      "List the secret names this agent may request, with the single operation the owner's release mode permits (get or stripe_balance). Returns no secret values.",
+      "List the secret names this agent may request, with the single operation the owner's chosen action permits (get for export releases, otherwise the catalog action's operation). Returns no secret values.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -37,23 +46,36 @@ const TOOLS = [
       "Decrypt one owner-approved credential (export release only) and return its value. Use the value directly; do not repeat or log it.",
     inputSchema: {
       type: "object",
-      properties: {
-        name: { type: "string", description: "Secret name from list_secrets" },
-      },
+      properties: nameProperty,
       required: ["name"],
       additionalProperties: false,
     },
   },
-  {
-    name: "stripe_balance",
-    description:
-      "Run the strict Stripe balance action for a stripe_balance-release secret. Returns only the bounded numeric balance projection, never the Stripe key.",
+  ...USE_ACTIONS.map((action) => ({
+    name: action.id,
+    description: `${action.description} Runs inside Lit for a secret created with the "${action.name}" action; the credential is never returned. Result fields: ${Object.keys(action.output.properties ?? {}).join(", ")}.`,
     inputSchema: {
       type: "object",
       properties: {
-        name: { type: "string", description: "Secret name from list_secrets" },
+        ...nameProperty,
+        ...(action.input ? { input: shapeToJsonSchema(action.input) } : {}),
       },
-      required: ["name"],
+      required: [
+        "name",
+        ...(action.input && (action.input.required ?? []).length
+          ? ["input"]
+          : []),
+      ],
+      additionalProperties: false,
+    },
+  })),
+  {
+    name: "list_actions",
+    description:
+      "Describe every catalog action this client knows: id, operation, whether the agent receives the value (export) or the value is only used inside Lit, and the input shape. Contains nothing sensitive.",
+    inputSchema: {
+      type: "object",
+      properties: {},
       additionalProperties: false,
     },
   },
@@ -167,10 +189,37 @@ export async function callTool(keychain, name, args = {}) {
       return text({ publicKey: keychain.publicKey });
     case "get_secret":
       return text(await keychain.get(secretName()));
-    case "stripe_balance":
-      return text(await keychain.stripeBalance(secretName()));
-    default:
-      return null;
+    case "list_actions":
+      return text({
+        actions: Object.values(ACTIONS)
+          .filter((action) => !action.deprecated)
+          .map((action) => ({
+            id: action.id,
+            name: action.name,
+            kind: action.kind,
+            operation: action.operation,
+            description: action.description,
+            ...(action.kind === "use" ? { input: action.input } : {}),
+          })),
+      });
+    default: {
+      const action = USE_ACTIONS.find((candidate) => candidate.id === name);
+      if (!action) return null;
+      const secret = secretName();
+      const release = keychain.config.secrets[secret].manifest.release;
+      if (release !== action.id)
+        throw new Error(
+          `Secret "${secret}" was created with the ${release} action, not ${action.id}`,
+        );
+      if (
+        args.input !== undefined &&
+        (typeof args.input !== "object" ||
+          args.input === null ||
+          Array.isArray(args.input))
+      )
+        throw new Error("input must be an object");
+      return text(await keychain.use(secret, args.input));
+    }
   }
 }
 

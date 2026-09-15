@@ -120,7 +120,7 @@ impl Manifest {
             || !valid_hex(&self.vault_id, 32)
             || !valid_hex(&self.secret_id, 32)
             || !valid_cid(&self.authority_cid)
-            || !matches!(self.release.as_str(), "export" | "stripe_balance")
+            || crate::actions::release(&self.release).is_none()
         {
             bail!("invalid manifest");
         }

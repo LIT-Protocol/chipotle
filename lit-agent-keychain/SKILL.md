@@ -10,11 +10,14 @@ version: 2.0.0
 2. Give only its public key to the owner. The owner signs in with a wallet, passkey,
    or Google account, encrypts a secret locally, and explicitly approves that key.
 3. Download the **Agent config** (public locators plus a scoped billing key) and use `@lit-protocol/keychain` with the local
-   private identity. `get(name)` decrypts a recipient-encrypted result; `stripeBalance`
-   invokes the strict Stripe integration without revealing its credential.
+   private identity. `get(name)` decrypts a recipient-encrypted result;
+   `use(name, input)` runs the secret's catalog action (Stripe balance, OpenAI chat,
+   GitHub file read, Slack message, …) inside Lit without revealing its credential.
+   `list()` tells you which applies to each secret and the input shape it takes.
 4. Or expose it to an MCP client in one line. The server runs locally, next to the
-   identity file, and offers `list_secrets`, `get_secret`, `stripe_balance` and
-   `agent_public_key`:
+   identity file, and offers `list_secrets`, `get_secret`, one tool per catalog
+   action (`stripe_balance`, `openai_chat`, `github_read_file`, `slack_post_message`),
+   `list_actions` and `agent_public_key`:
 
    ```sh
    claude mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp ./agent-identity.json ./API_KEY.keychain.json
@@ -53,7 +56,7 @@ and avoid logging credentials returned by `get` or the CLI.
 The operator can replay older still-valid owner permissions, including undoing a
 revocation. It cannot invent new owner permissions. The frontend/SDK, Lit runtime,
 selected sign-in provider, and policy freshness service are trusted as documented
-in SECURITY.md. Strict Stripe actions cannot export or arbitrarily migrate secrets;
+in SECURITY.md. "Use inside Lit" actions cannot export or arbitrarily migrate secrets;
 keep the original credential for reimporting into a future action release.
 
 See sdk/README.md for executable examples and README.md for deployment and recovery.

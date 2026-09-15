@@ -199,12 +199,26 @@ test("stdio MCP server speaks JSON-RPC, exposes tools, and never prints the priv
     assert.deepEqual(replies[0].result.capabilities, { tools: {} });
     assert.deepEqual(
       replies[1].result.tools.map((t: any) => t.name),
-      ["list_secrets", "get_secret", "stripe_balance", "agent_public_key"],
+      [
+        "list_secrets",
+        "get_secret",
+        "github_read_file",
+        "openai_chat",
+        "slack_post_message",
+        "stripe_balance",
+        "list_actions",
+        "agent_public_key",
+      ],
     );
     assert.deepEqual(JSON.parse(replies[2].result.content[0].text), {
       secrets: [
         { name: "A", release: "export", operation: "get" },
-        { name: "B", release: "stripe_balance", operation: "stripe.balance" },
+        {
+          name: "B",
+          release: "stripe_balance",
+          operation: "stripe.balance",
+          input: null,
+        },
       ],
     });
     assert.deepEqual(JSON.parse(replies[3].result.content[0].text), {

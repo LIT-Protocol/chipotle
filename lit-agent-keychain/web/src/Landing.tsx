@@ -159,10 +159,12 @@ ${MCP_COMMAND}`}
           <p>
             <strong>Use in Lit only</strong> never reveals the value to anyone.
             The action uses the credential inside the enclave to make one fixed
-            API call and returns only a bounded result. Today that covers
-            reading a Stripe balance; the action cannot call any other URL,
-            export the key, or run caller-supplied code. More strict
-            integrations will follow.
+            API call and returns only a bounded result. Each integration is a
+            reviewed action from the open catalog (Stripe balance, OpenAI chat,
+            GitHub file reads, Slack messages, and growing); its manifest pins
+            the hosts it may reach and the shape of what it returns, and the
+            action cannot call any other URL, export the key, or run
+            caller-supplied code.
           </p>
         </Faq>
         <Faq q="What does the agent actually hold?">

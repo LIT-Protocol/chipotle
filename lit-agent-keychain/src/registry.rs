@@ -272,6 +272,13 @@ async fn write_secret(
     if !restoring && checked.version != 1 {
         return Err(api::err(Status::BadRequest, "initial_version_must_be_one"));
     }
+    // Deprecated catalog releases stay valid for restores of existing secrets but
+    // cannot be chosen for new ones.
+    if !restoring
+        && actions::release(&checked.manifest.release).is_none_or(|release| release.deprecated)
+    {
+        return Err(api::err(Status::BadRequest, "release_deprecated"));
+    }
     let mut tx = pool.begin().await.map_err(api::internal)?;
     lock_vault(&mut tx, &session.vault_id).await?;
     let authority_cid: String =
