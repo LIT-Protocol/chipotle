@@ -355,6 +355,13 @@ export class OwnerClient {
   readonly authority: Authority;
   readonly vaultId: string;
   readonly lit: LitConnection;
+  /**
+   * Optional progress reporter for long-running owner flows. `login()` calls it
+   * with a short human-readable status before each step. First sign-in provisions
+   * the vault's Chipotle groups and execution key, which are on-chain writes and
+   * take roughly 30 seconds.
+   */
+  progress?: (message: string) => void;
   constructor(
     authority: Authority,
     readonly signer: OwnerSigner,
@@ -403,12 +410,18 @@ export class OwnerClient {
     return { document, receipt: receiptSchema.parse(response.receipt) };
   }
   async login() {
+    this.progress?.("Requesting a sign-in challenge…");
     const document = await this.api("/auth/challenge", post(this.authority));
     requireThat(document.kind === "login" && document.vaultId === this.vaultId);
+    this.progress?.("Verifying owner authorization…");
     const authorization = await this.approve(document);
     const result = await this.api(
       "/auth/login",
       post({ authority: this.authority, authorization }),
+    );
+    this.progress?.(
+      "Preparing your vault's execution key on the Lit network… " +
+        "The first sign-in takes about 30 seconds.",
     );
     const { usageApiKey } = await this.api("/api/execution-key", {
       method: "POST",
@@ -417,6 +430,7 @@ export class OwnerClient {
     try {
       // The bootstrap proxy establishes only an app session. Authenticate its
       // receipt over a direct Chipotle connection before trusting it or importing.
+      this.progress?.("Verifying the Lit endpoint and sign-in receipt…");
       verifyReceipt(
         authorization,
         await this.lit.publicKey(await actionCid(this.authority)),

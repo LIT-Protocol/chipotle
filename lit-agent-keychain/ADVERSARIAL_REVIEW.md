@@ -49,8 +49,9 @@ old signed policy records. The latter explicitly models accepted revocation roll
   ciphertext backups and owner revocation. Renewal restores scoped execution.
 
 Shared parent-account spending with no per-user execution/dollar cap is explicitly
-accepted. Stripe subscriptions enforce storage and sponsorship entitlement, not secret
-access authorization. Fair use has no automatic overage charges. See BILLING.md for
+accepted. Stripe subscriptions enforce the storage limit (Free 5, Standard 1,000), not
+secret access authorization; execution is sponsored on every plan. Fair use has no
+automatic overage charges. See BILLING.md for
 scope-reconciliation delay and required platform deployment order.
 
 ## Attacks exercised

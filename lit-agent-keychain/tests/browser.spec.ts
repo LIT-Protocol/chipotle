@@ -38,9 +38,11 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
   await expect(
     page.getByRole("heading", { name: "Secrets", exact: true }),
   ).toBeVisible();
+  // Free plan: secrets can be added before any payment.
+  await expect(page.getByText("Free includes 5 secrets")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "+ Add secret" }),
-  ).toBeDisabled();
+  ).toBeEnabled();
   await page
     .getByRole("button", { name: "Subscribe for $10/month", exact: true })
     .click();
@@ -51,6 +53,7 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
   await page
     .getByRole("button", { name: "Use an existing passkey", exact: true })
     .click();
+  await expect(page.getByText("Access paid through")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "+ Add secret" }),
   ).toBeEnabled();
