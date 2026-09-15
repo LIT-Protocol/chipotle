@@ -58,7 +58,7 @@ import {
   decode,
   responseContext,
 } from "../../protocol/crypto.ts";
-import { jsonFetch } from "../../protocol/http.ts";
+import { jsonFetch, HttpError } from "../../protocol/client-http.ts";
 import {
   ATTESTED_ORIGINS,
   verifyAttestation,
@@ -77,6 +77,7 @@ export type {
   AttestationReport,
 } from "../../protocol/attestation.ts";
 export { authorizationTypedData } from "../../protocol/identity.ts";
+export { HttpError } from "../../protocol/client-http.ts";
 export {
   actionCid,
   actionSource,
@@ -255,6 +256,15 @@ export type AttestationHooks = {
   /** Re-verify after this many milliseconds. Default one hour. */
   maxAgeMs?: number;
 };
+/** Retry policy for the first request made with a freshly minted usage key. */
+export type FreshKeySettle = {
+  /** Give up after this many milliseconds. Default 45000. */
+  ms?: number;
+  /** Base backoff step in milliseconds; doubles per round, capped at 5 steps. */
+  stepMs?: number;
+  /** Called before each wait with the 1-based retry count. */
+  onWait?: (retry: number) => void;
+};
 export class LitConnection {
   readonly url: string;
   private readonly keys = new Map<string, string>();
@@ -296,12 +306,15 @@ export class LitConnection {
     }
     return this.attested;
   }
-  async publicKey(cid: string) {
+  async publicKey(cid: string, settle?: FreshKeySettle) {
     const cached = this.keys.get(cid);
     if (cached) return cached;
     // Deliberately direct to the caller-configured trusted Lit endpoint. Never
     // take a replacement endpoint/key from Keychain's API or a secret bundle.
-    const result = await this.direct(discoverySource, { cid });
+    const result = await this.settled(
+      () => this.direct(discoverySource, { cid }),
+      settle,
+    );
     requireThat(
       typeof result.public_key === "string" &&
         /^(0x)?(?:02|03)[0-9a-f]{64}$|^(0x)?04[0-9a-f]{128}$/.test(
@@ -312,6 +325,34 @@ export class LitConnection {
       this.keys.delete(this.keys.keys().next().value!);
     this.keys.set(cid, result.public_key);
     return result.public_key;
+  }
+  /**
+   * Runs `attempt`, retrying while Chipotle answers 401/403. A usage key that was
+   * minted moments ago is an on-chain write; Chipotle's authorization reads go
+   * through load-balanced RPC backends and one may not have imported that block
+   * yet, and a denial is cached there for ~30 seconds. Bounded by `settle.ms`
+   * (default 45 seconds) so a genuinely unauthorized key still fails.
+   */
+  private async settled<T>(
+    attempt: () => Promise<T>,
+    settle: FreshKeySettle | undefined,
+  ): Promise<T> {
+    if (!settle) return attempt();
+    const deadline = Date.now() + (settle.ms ?? 45000);
+    const step = settle.stepMs ?? 1000;
+    for (let round = 0; ; round++) {
+      try {
+        return await attempt();
+      } catch (error) {
+        const denied =
+          error instanceof HttpError &&
+          (error.status === 401 || error.status === 403);
+        const wait = Math.min(step * 2 ** round, 5 * step);
+        if (!denied || Date.now() + wait > deadline) throw error;
+        settle.onWait?.(round + 1);
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    }
   }
   private async direct(code: string, params: unknown) {
     requireThat(
@@ -544,6 +585,12 @@ export class OwnerClient {
         authorization,
         await this.lit.publicKey(
           await actionCid(this.authority, template.code),
+          {
+            onWait: () =>
+              this.progress?.(
+                "Waiting for the Lit network to recognize your new execution key…",
+              ),
+          },
         ),
         this.vaultId,
       );

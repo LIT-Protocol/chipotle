@@ -18,7 +18,7 @@ import {
   signAgent,
   nowSeconds,
 } from "../../protocol/crypto.ts";
-import { jsonFetch } from "../../protocol/http.ts";
+import { jsonFetch } from "../../protocol/client-http.ts";
 export type Identity = { owner: Owner; signer: OwnerSigner };
 export const LIT_URL =
   import.meta.env.VITE_LIT_API_URL || "https://api.chipotle.litprotocol.com";
