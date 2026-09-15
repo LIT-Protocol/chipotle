@@ -1,0 +1,45 @@
+{
+  "publicKey": "034f355bdcb7cc0af728ef3cceb9615d90684bb5b2ca5f859ab0f0b704075871aa",
+  "signed": {
+    "document": {
+      "v": 2,
+      "domain": "lit-keychain/v2",
+      "vaultId": "2222222222222222222222222222222222222222222222222222222222222222",
+      "kind": "login",
+      "challenge": "3333333333333333333333333333333333333333333333333333333333333333",
+      "expiresAt": 2000000000
+    },
+    "receipt": {
+      "payload": {
+        "v": 2,
+        "domain": "lit-keychain/receipt/v2",
+        "vaultId": "2222222222222222222222222222222222222222222222222222222222222222",
+        "objectHash": "4a66e2df749ed3c829a2f7b5a37a12c39dc64e2ebe1b9ee1326617e2980768d0",
+        "issuedAt": 1
+      },
+      "signature": "04fe93c7d0c507fab7f4191b2f94c6ff04acc7ffa92910907adcf3dd7cfd12862b7a8e96a65adb4e2dc06ec8d0e9c34c23431e96b70172759dc94c74a82ae927"
+    }
+  },
+  "cids": [
+    {
+      "pattern": "abc",
+      "repeat": 1,
+      "cid": "QmQpeUrxtQE5N2SVog1ZCxd7c7RN4fBNQu5aLwkk5RY9ER"
+    },
+    {
+      "pattern": "é☃",
+      "repeat": 100000,
+      "cid": "Qma2C9M45P7FoHXLEvU262psxsz1XqozLCDxp6SikgMBRM"
+    },
+    {
+      "pattern": "x",
+      "repeat": 262144,
+      "cid": "QmbcaCtvxnoA1iPnGSvABvZTddnhoMJv2gNbpHfVmkxPuW"
+    },
+    {
+      "pattern": "x",
+      "repeat": 262145,
+      "cid": "QmTSZuGYUpVrhMmC4duxRJbPtKXTUZyx73oebV8oRMiDTs"
+    }
+  ]
+}

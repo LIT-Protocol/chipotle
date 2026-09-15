@@ -29,8 +29,47 @@ doesn't describe endpoints the released server lacks.
   enabled (the gVisor runner image build opts in), and `POST /lit_binary_action`
   stays mounted but returns `503` ("feature disabled") unless the api-server is
   started with `LIT_GVISOR_ENABLED=true`.
+- The gVisor runner's run-time gate now has **three axes**, all fail-closed
+  (CPL-361). `LIT_GVISOR_ENABLED` is rendered per-deploy — testing/manual/staging
+  deploys default it **on**, the production deploy defaults it **off** — and a
+  new on-chain `GVISOR_RUNNER_ENABLED` node-configuration value in the
+  AccountConfig contract must *also* be truthy before `POST /lit_binary_action`
+  runs, giving operators a network-wide runner kill-switch that needs no redeploy.
 - `max_get_keys_count` is now enforced in the key handlers; oversized
   `get_keys` requests are rejected.
+
+### Fixed
+- `POST /new_account` no longer intermittently fails with a `NoAccountAccess`
+  500. The endpoint issues two sequential on-chain writes (`newAccount` then
+  `registerWalletDerivation`); on a load-balanced RPC endpoint the second call's
+  pre-send simulation could land on a backend that had not yet imported the
+  freshly-mined `newAccount` block, so the account looked nonexistent and the
+  AccountConfig access check reverted. Account creation now waits for the new
+  account to become visible to the read RPC before the second write, and retries
+  that write a few times to absorb residual backend lag. This also unblocks the
+  k6 new-account correctness gate on staging deploys.
+- Write endpoints (`new_account`, `create_wallet`, …) can no longer hang
+  indefinitely after an RPC outage. On-chain sends now pin nonces from a
+  locally managed per-signer allocator that *reserves* the nonce at read time
+  (concurrent borrowers of one signer get distinct nonces instead of
+  colliding) and is invalidated on any send failure or receipt timeout
+  (alloy's optimistic nonce cache is never rolled back after a dropped
+  broadcast, so a poisoned signer could never recover). Every RPC step in the
+  send pipeline — simulation, nonce fetch, broadcast, receipt wait — now has a
+  hard deadline, including an outer bound on `get_receipt` (alloy's own
+  watcher timeout does not cover its receipt-fetch RPC awaits). Signer leases
+  carry an id, so a slow borrower whose lease was force-freed can no longer
+  free the next borrower's lease; the stale threshold now exceeds the
+  worst-case bounded send so cleanup is purely leak recovery; and the pool's
+  rebalancer pins nonces from the same allocator, runs off the dispatcher
+  task, and no longer aborts remaining wallets after one failure.
+  Root-caused from the 2026-09-03 prod incident where two wedged payer
+  wallets absorbed nearly all signer leases and `POST /new_account` timed out
+  for days; hardened further after an adversarial cross-model review.
+- On-chain writes confirm ~2-5s sooner: the RPC receipt poller now ticks every
+  2s (matching block time on the configured chains) instead of alloy's 7s
+  default for HTTP transports, which also shortens how long each signer lease
+  is held.
 
 ### Security
 - `registerWalletDerivation` now enforces a global first-owner binding

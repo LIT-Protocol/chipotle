@@ -42,6 +42,24 @@ export function renderPermissionSummary(item) {
   return parts.length > 0 ? parts.join('; ') : 'none';
 }
 
+// Record a freshly-created usage key into the in-memory store + UI. Extracted
+// so both the success path and the "broadcast but unconfirmed" recovery path
+// (sovereign mode) surface the once-only cleartext key identically.
+function recordCreatedUsageKey(usageKey, name, description) {
+  if (!usageKey) return;
+  getUsageKeysStore().push({
+    id: usageKey.slice(0, 12),
+    api_key: usageKey,
+    usage_api_key: usageKey,
+    name: name || '',
+    description: description || '',
+    expiration: '',
+  });
+  setStat('usageKeys', getUsageKeysStore().length);
+  renderUsageKeysTable();
+  updateStatCards();
+}
+
 // ----- Table rendering -----
 
 export function renderUsageKeysTable() {
@@ -272,23 +290,25 @@ function openUsageKeyModal(item = null) {
           executeInGroups,
         });
         const usageKey = res && res.usage_api_key ? res.usage_api_key : '';
-        if (usageKey) {
-          getUsageKeysStore().push({
-            id: usageKey.slice(0, 12),
-            api_key: usageKey,
-            usage_api_key: usageKey,
-            name: name || '',
-            description: description || '',
-            expiration: '',
-          });
-          setStat('usageKeys', getUsageKeysStore().length);
-          renderUsageKeysTable();
-          updateStatCards();
-        }
+        recordCreatedUsageKey(usageKey, name, description);
         showStatus('overview-status-usage-keys', 'Usage API key added. Copy and store your key now (shown once): ' + usageKey, 'success');
       } catch (e) {
         logError('addUsageKey', e);
-        showStatus('overview-status-usage-keys', 'Error: ' + formatError(e), 'error');
+        // Sovereign mode mints the cleartext key locally before broadcasting the
+        // on-chain write. If the broadcast succeeded but its receipt couldn't be
+        // confirmed, the SDK attaches the key to the error (e.usage_api_key) so
+        // it isn't lost forever — the write may still land on-chain. Surface it
+        // with a warning instead of masking it behind the generic error.
+        if (e && e.usage_api_key) {
+          recordCreatedUsageKey(e.usage_api_key, name, description);
+          showStatus(
+            'overview-status-usage-keys',
+            'Usage API key created, but the transaction could not be confirmed — it may still be processing on-chain. Copy and store your key NOW (shown once, cannot be recovered): ' + e.usage_api_key + ' — then use "Load" shortly to verify it registered.',
+            'warning',
+          );
+        } else {
+          showStatus('overview-status-usage-keys', 'Error: ' + formatError(e), 'error');
+        }
       } finally {
         closeActionProgress();
       }

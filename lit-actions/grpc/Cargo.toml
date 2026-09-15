@@ -15,6 +15,7 @@ anyhow = { workspace = true }
 concat-idents = "1"
 http = "1"
 hyper-util = "0.1"
+libc = "0.2"
 lit-observability = { workspace = true }
 prost = "0.13"
 tokio = { workspace = true }
@@ -22,6 +23,7 @@ tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tonic-reflection = { workspace = true }
 tower = "0.4"
+tracing = { workspace = true }
 
 [build-dependencies]
 tonic-build = { workspace = true }

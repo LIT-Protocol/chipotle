@@ -13,10 +13,17 @@
 //! keep the Stripe secret key off the public HTTP surface.
 //!
 //! Usage:
-//!   stripe_report                             # last 30 days → ./stripe-report.{csv,html}
+//!   stripe_report                             # last 14 days → ./stripe-report.{csv,html}
 //!   stripe_report --days 7                    # last 7 days
 //!   stripe_report --out /tmp/april            # writes /tmp/april.csv and /tmp/april.html
 //!   stripe_report --csv-only                  # skip the HTML file
+//!   stripe_report --email a@b.com             # only customer(s) with this email
+//!   stripe_report --wallet 0xABC…             # only customer(s) with this wallet
+//!
+//! `--email` / `--wallet` are matched case-insensitively against each customer's
+//! Stripe `email` / `metadata.wallet_address`. Passing both narrows to customers
+//! matching *both* (logical AND). Filtering happens right after the customer list
+//! is fetched, so the per-customer balance-transaction calls only run for matches.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -34,12 +41,16 @@ struct Args {
     days: u32,
     out: String,
     csv_only: bool,
+    email: Option<String>,
+    wallet: Option<String>,
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut days = DEFAULT_DAYS;
     let mut out = DEFAULT_OUT.to_string();
     let mut csv_only = false;
+    let mut email: Option<String> = None;
+    let mut wallet: Option<String> = None;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -59,6 +70,26 @@ fn parse_args() -> Result<Args, String> {
                     .next()
                     .ok_or_else(|| "--out requires a value".to_string())?;
             }
+            "--email" => {
+                let v = it
+                    .next()
+                    .ok_or_else(|| "--email requires a value".to_string())?;
+                let v = v.trim().to_string();
+                if v.is_empty() {
+                    return Err("--email must not be empty".to_string());
+                }
+                email = Some(v);
+            }
+            "--wallet" => {
+                let v = it
+                    .next()
+                    .ok_or_else(|| "--wallet requires a value".to_string())?;
+                let v = v.trim().to_string();
+                if v.is_empty() {
+                    return Err("--wallet must not be empty".to_string());
+                }
+                wallet = Some(v);
+            }
             "--csv-only" => csv_only = true,
             "-h" | "--help" => {
                 print_help();
@@ -71,7 +102,44 @@ fn parse_args() -> Result<Args, String> {
         days,
         out,
         csv_only,
+        email,
+        wallet,
     })
+}
+
+/// Keep only customers matching the provided `--email` / `--wallet` filters.
+///
+/// Both filters are matched case-insensitively (emails are ASCII-insensitive;
+/// wallet addresses differ only by EIP-55 checksum casing). When both are set a
+/// customer must match *both*. With neither set the list is returned unchanged.
+fn filter_customers(
+    customers: Vec<ReportCustomer>,
+    email: Option<&str>,
+    wallet: Option<&str>,
+) -> Vec<ReportCustomer> {
+    if email.is_none() && wallet.is_none() {
+        return customers;
+    }
+    customers
+        .into_iter()
+        .filter(|c| {
+            let email_ok = match email {
+                Some(want) => c
+                    .email
+                    .as_deref()
+                    .is_some_and(|e| e.trim().eq_ignore_ascii_case(want)),
+                None => true,
+            };
+            let wallet_ok = match wallet {
+                Some(want) => c
+                    .wallet_address
+                    .as_deref()
+                    .is_some_and(|w| w.trim().eq_ignore_ascii_case(want)),
+                None => true,
+            };
+            email_ok && wallet_ok
+        })
+        .collect()
 }
 
 fn print_help() {
@@ -85,6 +153,9 @@ OPTIONS:
     --days <N>       Window size in days (default: {DEFAULT_DAYS}).
     --out <PATH>     Output path prefix (default: {DEFAULT_OUT}).
                      Writes <PATH>.csv and <PATH>.html.
+    --email <ADDR>   Only include customer(s) with this email (case-insensitive).
+    --wallet <ADDR>  Only include customer(s) with this wallet_address
+                     (case-insensitive). Combined with --email, both must match.
     --csv-only       Skip the HTML file.
     -h, --help       Show this message.
 
@@ -143,6 +214,27 @@ async fn main() -> ExitCode {
         }
     };
     eprintln!("  {} customers", customers.len());
+
+    // Narrow to the requested account(s) before the expensive per-customer
+    // balance-transaction fetch below.
+    let customers = filter_customers(customers, args.email.as_deref(), args.wallet.as_deref());
+    if args.email.is_some() || args.wallet.is_some() {
+        let mut parts = Vec::new();
+        if let Some(e) = &args.email {
+            parts.push(format!("email={e}"));
+        }
+        if let Some(w) = &args.wallet {
+            parts.push(format!("wallet={w}"));
+        }
+        eprintln!(
+            "  filtered to {} customer(s) matching {}",
+            customers.len(),
+            parts.join(" & ")
+        );
+        if customers.is_empty() {
+            eprintln!("  warning: no customers matched the filter; report will be empty");
+        }
+    }
 
     let mut transactions: Vec<ReportBalanceTx> = Vec::new();
     for (i, c) in customers.iter().enumerate() {
@@ -543,6 +635,67 @@ td.total, th.total { font-weight: 600; background: #fafafa; }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mkcust(id: &str, wallet: Option<&str>, email: Option<&str>) -> ReportCustomer {
+        ReportCustomer {
+            id: id.to_string(),
+            wallet_address: wallet.map(|s| s.to_string()),
+            email: email.map(|s| s.to_string()),
+        }
+    }
+
+    #[test]
+    fn filter_customers_none_returns_all() {
+        let custs = vec![
+            mkcust("cus_a", Some("0xA"), Some("a@x.com")),
+            mkcust("cus_b", None, None),
+        ];
+        let out = filter_customers(custs.clone(), None, None);
+        assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn filter_customers_by_email_case_insensitive() {
+        let custs = vec![
+            mkcust("cus_a", Some("0xA"), Some("Alice@Example.com")),
+            mkcust("cus_b", Some("0xB"), Some("bob@example.com")),
+            mkcust("cus_c", Some("0xC"), None),
+        ];
+        let out = filter_customers(custs, Some("alice@example.com"), None);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].id, "cus_a");
+    }
+
+    #[test]
+    fn filter_customers_by_wallet_case_insensitive() {
+        // EIP-55 checksum casing must not cause a miss.
+        let custs = vec![
+            mkcust("cus_a", Some("0xAbCdEf"), Some("a@x.com")),
+            mkcust("cus_b", Some("0x000000"), Some("b@x.com")),
+        ];
+        let out = filter_customers(custs, None, Some("0xabcdef"));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].id, "cus_a");
+    }
+
+    #[test]
+    fn filter_customers_both_flags_require_and() {
+        let custs = vec![
+            mkcust("cus_a", Some("0xA"), Some("a@x.com")),
+            mkcust("cus_b", Some("0xA"), Some("b@x.com")),
+            mkcust("cus_c", Some("0xB"), Some("a@x.com")),
+        ];
+        // Only cus_a has BOTH the wallet 0xA and the email a@x.com.
+        let out = filter_customers(custs, Some("a@x.com"), Some("0xa"));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].id, "cus_a");
+    }
+
+    #[test]
+    fn filter_customers_no_match_is_empty() {
+        let custs = vec![mkcust("cus_a", Some("0xA"), Some("a@x.com"))];
+        assert!(filter_customers(custs, Some("nobody@x.com"), None).is_empty());
+    }
 
     fn mkrow(date: &str, customer_id: &str, charges_cents: i64) -> ReportRow {
         ReportRow {

@@ -37,6 +37,11 @@ smoke:
 smoke-local:
     K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} K6_ACCOUNTS_FILE={{ACCOUNTS_FILE}} K6_ENV={{_env}} k6 run smoke.spec.ts
 
+# gVisor deploy smoke: Python hello-world bundle via /lit_binary_action.
+# Needs gVisor enabled on the target (staging/next); prod has it off by default.
+gvisor-smoke-local:
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} K6_ACCOUNTS_FILE={{ACCOUNTS_FILE}} K6_ENV={{_env}} k6 run gvisor-smoke.spec.ts
+
 soak:
     # K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} k6 cloud run --local-execution loadtest/soak.spec.ts
     K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} K6_ACCOUNTS_FILE={{ACCOUNTS_FILE}} K6_ENV={{_env}} k6 run --out cloud loadtest/soak.spec.ts

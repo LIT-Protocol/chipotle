@@ -1,7 +1,9 @@
 # Upgrade existing Diamond contract facets.
 #
-# Network and contract address are always read from the NodeConfig file
-# for the selected branch:
+# Network and contract address are read from the NodeConfig file for the
+# selected deploy target. All NodeConfig.*.toml files live on main (the
+# `next` branch was retired in CPL-272), so we always check out main and the
+# `target` input only selects which config to read:
 #   main → lit-api-server/NodeConfig.main.toml
 #   next → lit-api-server/NodeConfig.next.toml
 #
@@ -17,8 +19,8 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
-      branch:
-        description: "Branch whose NodeConfig to use"
+      target:
+        description: "Deploy target whose NodeConfig to use"
         required: true
         type: choice
         options:
@@ -27,7 +29,7 @@ on:
         default: next
 
 concurrency:
-  group: contract-upgrade-${{ inputs.branch }}
+  group: contract-upgrade-${{ inputs.target }}
   cancel-in-progress: false
 
 jobs:
@@ -36,12 +38,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch }}
+          ref: main
 
       - name: Read config from NodeConfig
         id: config
         run: |
-          CONFIG="lit-api-server/NodeConfig.${{ inputs.branch }}.toml"
+          CONFIG="lit-api-server/NodeConfig.${{ inputs.target }}.toml"
 
           if [ ! -f "$CONFIG" ]; then
             echo "::error::$CONFIG not found."

@@ -20,13 +20,15 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
 # Copy full source (lit-api-server, lit-actions, lit-core)
 COPY . .
 
-# Build release binaries (no workspace root, so build each crate by manifest path)
-# RUN cargo build --release --manifest-path lit-api-server/Cargo.toml --bin lit-api-server
-# RUN cargo build --release --manifest-path lit-actions/Cargo.toml --bin lit_actions
+# Build RELEASE binaries (no workspace root, so build each crate by manifest path).
+# Release builds disable `debug_assertions`, which compiles out the
+# cfg(debug_assertions)-gated dev auth bypass (LIT_DEV_WALLET_BYPASS) in
+# lit-billing-core — a debug build reaching production would re-enable it. Never
+# ship a debug build (CPL-379 L11).
 WORKDIR /app/lit-actions
-RUN cargo build --bin lit_actions
+RUN cargo build --release --bin lit_actions
 WORKDIR /app/lit-api-server
-RUN cargo build --bin lit-api-server
+RUN cargo build --release --bin lit-api-server
 
 # Runtime stage: minimal image with binaries and entrypoint
 FROM ubuntu:24.04 AS runtime
@@ -39,8 +41,8 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy built binaries into PATH
-COPY --from=builder /app/lit-api-server/target/debug/lit-api-server /usr/local/bin/
-COPY --from=builder /app/lit-actions/target/debug/lit_actions /usr/local/bin/
+COPY --from=builder /app/lit-api-server/target/release/lit-api-server /usr/local/bin/
+COPY --from=builder /app/lit-actions/target/release/lit_actions /usr/local/bin/
 
 
 # Copy static assets (served by lit-api-server)
@@ -53,5 +55,13 @@ COPY lit-api-server/${NODE_CONFIG} /app/NodeConfig.toml
 # Copy and set entrypoint script (starts lit_actions in background, then lit-api-server)
 COPY DockerEntryPoint.sh /usr/local/bin/DockerEntryPoint.sh
 RUN chmod +x /usr/local/bin/DockerEntryPoint.sh
+
+# Run as a non-root system user (defense in depth; CPL-379 L11). The binaries in
+# /usr/local/bin stay root-owned but world-executable; /app is chowned so the app
+# can read its config/static assets and write any runtime state under it.
+RUN groupadd --system lit \
+    && useradd --system --gid lit --home-dir /app --no-create-home --shell /usr/sbin/nologin lit \
+    && chown -R lit:lit /app
+USER lit
 
 ENTRYPOINT ["/usr/local/bin/DockerEntryPoint.sh"]

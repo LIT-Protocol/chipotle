@@ -101,10 +101,28 @@ pub enum BillingReason {
 }
 
 impl BillingReason {
+    /// Machine-readable code. Used as the `reason` label on billing metrics, the
+    /// `billing_reason` field on per-payment events, and the `metadata[reason]`
+    /// key on the Stripe balance transaction (so Stripe-side reporting can slice
+    /// spend by charge type).
     pub fn as_str(self) -> &'static str {
         match self {
             BillingReason::Management => "management",
             BillingReason::LitAction => "lit_action",
+        }
+    }
+
+    /// Human-readable description sent as the Stripe balance transaction
+    /// `description` (the "Reason" field in the Stripe dashboard), so the charge
+    /// type is legible there.
+    ///
+    /// This is the fallback label. Lit Action charges override it with the
+    /// action's IPFS CID (`Lit Action {cid}`) when one is available — see
+    /// [`charge`].
+    pub fn description(self) -> &'static str {
+        match self {
+            BillingReason::Management => "Configuration change",
+            BillingReason::LitAction => "Lit Action execution",
         }
     }
 }
@@ -809,10 +827,54 @@ pub async fn check_credit(
 /// network error cannot produce duplicate balance transactions.
 ///
 /// Returns `Err` only if the *cached* balance would go positive (insufficient credits).
+///
+/// The Stripe "Reason" (`description`) and CID metadata for a charge, along with
+/// the normalized CID. Only Lit Action charges carry a CID: an empty CID, or one
+/// passed with any other `reason`, is dropped so a stray argument can never
+/// mislabel a charge as a Lit Action. Pure so it can be unit-tested.
+fn charge_label(reason: BillingReason, ipfs_id: Option<&str>) -> (String, Option<&str>) {
+    let cid = match reason {
+        BillingReason::LitAction => ipfs_id.filter(|s| !s.is_empty()),
+        _ => None,
+    };
+    let description = match cid {
+        Some(id) => format!("Lit Action {id}"),
+        None => reason.description().to_string(),
+    };
+    (description, cid)
+}
+
+/// Build the Stripe balance-transaction form parameters. `ipfs_id` and
+/// `request_id` are attached as metadata only when present. Pure so the exact
+/// param set (and the conditional metadata) can be unit-tested.
+fn charge_params<'a>(
+    cost_str: &'a str,
+    description: &'a str,
+    reason: BillingReason,
+    ipfs_id: Option<&'a str>,
+    request_id: Option<&'a str>,
+) -> Vec<(&'a str, &'a str)> {
+    let mut params = vec![
+        ("amount", cost_str),
+        ("currency", "usd"),
+        ("description", description),
+        ("metadata[reason]", reason.as_str()),
+    ];
+    if let Some(id) = ipfs_id {
+        params.push(("metadata[ipfs_id]", id));
+    }
+    if let Some(rid) = request_id {
+        params.push(("metadata[request_id]", rid));
+    }
+    params
+}
+
 async fn charge(
     api_key: &str,
     cost_cents: i64,
     reason: BillingReason,
+    ipfs_id: Option<&str>,
+    request_id: Option<&str>,
     state: &StripeState,
 ) -> std::result::Result<(), BillingError> {
     tracing::debug!(cost_cents, "stripe::charge: starting");
@@ -879,6 +941,13 @@ async fn charge(
     let cid = customer_id.clone();
     let wallet_for_metric = wallet.clone();
     let idempotency_key = uuid::Uuid::new_v4().to_string();
+    // The dashboard "Reason" and normalized CID metadata (Lit Action charges
+    // only — see `charge_label`), owned so they can move into the fire-and-forget
+    // task below. `request_id` groups the several balance transactions one
+    // request emits: a Lit Action's per-second flushes share a request-id.
+    let (description, ipfs_id) = charge_label(reason, ipfs_id);
+    let ipfs_id = ipfs_id.map(str::to_owned);
+    let request_id = request_id.map(str::to_owned);
     tokio::spawn(async move {
         let cost_str = cost_cents.to_string();
         let delays = [
@@ -893,15 +962,18 @@ async fn charge(
             if !delay.is_zero() {
                 tokio::time::sleep(delay).await;
             }
+            let params = charge_params(
+                cost_str.as_str(),
+                description.as_str(),
+                reason,
+                ipfs_id.as_deref(),
+                request_id.as_deref(),
+            );
             match state
                 .client
                 .post_with_idempotency(
                     &format!("customers/{cid}/balance_transactions"),
-                    &[
-                        ("amount", cost_str.as_str()),
-                        ("currency", "usd"),
-                        ("description", "API call charge"),
-                    ],
+                    &params,
                     &idempotency_key,
                 )
                 .await
@@ -936,15 +1008,21 @@ async fn charge(
     Ok(())
 }
 
-/// Charge $0.01 for a management API call.
+/// Charge $0.01 for a management (configuration-change) API call.
+///
+/// `request_id` is the request's `X-Request-Id`, recorded as
+/// `metadata[request_id]` on the Stripe transaction for later correlation.
 pub async fn charge_management(
     api_key: &str,
+    request_id: Option<&str>,
     state: &StripeState,
 ) -> std::result::Result<(), BillingError> {
     charge(
         api_key,
         COST_MANAGEMENT_CENTS,
         BillingReason::Management,
+        None,
+        request_id,
         state,
     )
     .await
@@ -952,9 +1030,17 @@ pub async fn charge_management(
 
 /// Charge for `seconds` of Lit Action execution time.
 /// Returns `Ok(())` if the charge succeeds, `Err` if insufficient credits.
+///
+/// `ipfs_id` is the executing action's IPFS CID; it becomes the Stripe
+/// transaction `description` (`Lit Action {cid}` — the "Reason" field) and
+/// `metadata[ipfs_id]`. `request_id` is the request's `X-Request-Id`, recorded
+/// as `metadata[request_id]` so the several per-second flushes of one execution
+/// can be grouped after the fact.
 pub async fn charge_lit_action_time(
     api_key: &str,
     seconds: u64,
+    ipfs_id: Option<&str>,
+    request_id: Option<&str>,
     state: &StripeState,
 ) -> Result<()> {
     tracing::debug!(seconds, "stripe::charge_lit_action_time: starting");
@@ -966,9 +1052,16 @@ pub async fn charge_lit_action_time(
     if cost == 0 {
         return Ok(());
     }
-    charge(api_key, cost, BillingReason::LitAction, state)
-        .await
-        .map_err(anyhow::Error::new)
+    charge(
+        api_key,
+        cost,
+        BillingReason::LitAction,
+        ipfs_id,
+        request_id,
+        state,
+    )
+    .await
+    .map_err(anyhow::Error::new)
 }
 
 /// Grant the configured starter credits to a newly created customer.
@@ -1048,6 +1141,17 @@ pub async fn create_payment_intent(
     Ok((client_secret, pi_id))
 }
 
+/// Stripe idempotency key for the top-up balance transaction of a PaymentIntent.
+///
+/// The key is a pure function of the PaymentIntent ID: every caller that races to
+/// credit the same intent computes the identical key, and Stripe collapses those
+/// requests into a single balance transaction (dedup window: 24h). Kept as a
+/// standalone, deterministic helper so the format is unit-testable and cannot drift
+/// silently — a regression here would re-open the double-credit window (CPL-370).
+fn topup_credit_idempotency_key(payment_intent_id: &str) -> String {
+    format!("topup-credit-{payment_intent_id}")
+}
+
 /// Verify a PaymentIntent succeeded and credit the customer's account.
 ///
 /// Replay protection:
@@ -1057,6 +1161,12 @@ pub async fn create_payment_intent(
 /// 3. Marks the PaymentIntent as credited (`metadata[credited]=true`) **before** creating
 ///    the balance transaction, so a crash or retry after this point is safe (the second call
 ///    will be rejected by check 1).
+/// 4. Posts the balance transaction with a stable idempotency key
+///    (`topup-credit-{payment_intent_id}`, see [`topup_credit_idempotency_key`]). The
+///    check-then-set in step 3 spans two Stripe round-trips and is not atomic, so N
+///    concurrent callers can all pass check 1 before any writes the metadata; the shared
+///    idempotency key ensures Stripe still records the credit exactly once, closing that
+///    TOCTOU double-credit window.
 pub async fn confirm_payment_and_credit(
     payment_intent_id: &str,
     wallet_address: &str,
@@ -1119,15 +1229,21 @@ pub async fn confirm_payment_and_credit(
         .await?;
 
     let credit = (-amount).to_string(); // negative = credit to customer
+    // Stable idempotency key derived from the PaymentIntent so that N concurrent
+    // confirm_payment calls racing past the metadata.credited check-then-set above
+    // still produce exactly one balance transaction (Stripe deduplicates keys for
+    // 24h). This closes the TOCTOU window between the check and the credit POST.
+    let idempotency_key = topup_credit_idempotency_key(payment_intent_id);
     state
         .client
-        .post(
+        .post_with_idempotency(
             &format!("customers/{customer_id}/balance_transactions"),
             &[
                 ("amount", credit.as_str()),
                 ("currency", "usd"),
                 ("description", &format!("Top-up via {payment_intent_id}")),
             ],
+            &idempotency_key,
         )
         .await?;
 
@@ -1185,10 +1301,102 @@ mod tests {
 
     #[test]
     fn billing_reason_labels_are_stable() {
-        // These strings are emitted as metric labels (CPL-329); dashboards and
-        // alerts key off them, so the mapping must not drift.
+        // These strings are emitted as metric labels (CPL-329) and as the Stripe
+        // `metadata[reason]` code; dashboards, alerts, and Stripe-side reporting
+        // key off them, so the mapping must not drift.
         assert_eq!(BillingReason::Management.as_str(), "management");
         assert_eq!(BillingReason::LitAction.as_str(), "lit_action");
+    }
+
+    #[test]
+    fn billing_reason_descriptions_distinguish_charge_type() {
+        // Fallback `description` (the "Reason" field in the Stripe dashboard).
+        // Lit Action charges override it with `Lit Action {cid}` when a CID is
+        // available; this is the label used when none is.
+        assert_eq!(
+            BillingReason::Management.description(),
+            "Configuration change"
+        );
+        assert_eq!(
+            BillingReason::LitAction.description(),
+            "Lit Action execution"
+        );
+        assert_ne!(
+            BillingReason::Management.description(),
+            BillingReason::LitAction.description()
+        );
+    }
+
+    #[test]
+    fn charge_label_uses_cid_only_for_lit_action() {
+        // Lit Action + real CID → CID becomes the Reason and the metadata.
+        let (desc, cid) = charge_label(BillingReason::LitAction, Some("QmABC123"));
+        assert_eq!(desc, "Lit Action QmABC123");
+        assert_eq!(cid, Some("QmABC123"));
+
+        // Empty CID is dropped: fall back to the static Lit Action label, no meta.
+        let (desc, cid) = charge_label(BillingReason::LitAction, Some(""));
+        assert_eq!(desc, "Lit Action execution");
+        assert_eq!(cid, None);
+
+        // Missing CID on a Lit Action charge → static label, no metadata.
+        let (desc, cid) = charge_label(BillingReason::LitAction, None);
+        assert_eq!(desc, "Lit Action execution");
+        assert_eq!(cid, None);
+
+        // A CID passed with a non–Lit-Action reason must NOT mislabel the charge
+        // or leak into metadata — it is dropped entirely.
+        let (desc, cid) = charge_label(BillingReason::Management, Some("QmABC123"));
+        assert_eq!(desc, "Configuration change");
+        assert_eq!(cid, None);
+
+        let (desc, cid) = charge_label(BillingReason::Management, None);
+        assert_eq!(desc, "Configuration change");
+        assert_eq!(cid, None);
+    }
+
+    #[test]
+    fn charge_params_include_metadata_only_when_present() {
+        // Base params are always present, in order; reason code is always set.
+        let params = charge_params(
+            "10",
+            "Configuration change",
+            BillingReason::Management,
+            None,
+            None,
+        );
+        assert_eq!(
+            params,
+            vec![
+                ("amount", "10"),
+                ("currency", "usd"),
+                ("description", "Configuration change"),
+                ("metadata[reason]", "management"),
+            ]
+        );
+
+        // request_id is included when provided (grouping key for a request's
+        // several charges); ipfs_id is included when provided.
+        let params = charge_params(
+            "5",
+            "Lit Action QmABC123",
+            BillingReason::LitAction,
+            Some("QmABC123"),
+            Some("req-42"),
+        );
+        assert!(params.contains(&("metadata[ipfs_id]", "QmABC123")));
+        assert!(params.contains(&("metadata[request_id]", "req-42")));
+
+        // request_id without a CID is still attached.
+        let params = charge_params(
+            "5",
+            "Lit Action execution",
+            BillingReason::LitAction,
+            None,
+            Some("req-7"),
+        );
+        assert!(params.contains(&("metadata[request_id]", "req-7")));
+        assert!(!params.iter().any(|(k, _)| *k == "metadata[ipfs_id]"));
     }
 
     #[test]
@@ -1212,6 +1420,38 @@ mod tests {
         let raw = "test-api-key";
         let hash_hex = format!("0x{:064x}", api_key_hash(raw));
         assert_eq!(cache_key(raw), cache_key(&hash_hex));
+    }
+
+    // ── Top-up credit idempotency key (CPL-370) ──────────────────────────────
+
+    #[test]
+    fn topup_key_has_expected_format() {
+        // The format is the load-bearing contract with Stripe: it must stay
+        // `topup-credit-<pi_id>` verbatim or the dedup guarantee silently breaks.
+        assert_eq!(
+            topup_credit_idempotency_key("pi_3AbCdEf12345"),
+            "topup-credit-pi_3AbCdEf12345"
+        );
+    }
+
+    #[test]
+    fn topup_key_is_deterministic_per_intent() {
+        // Same intent → same key, so concurrent confirm_payment callers collapse
+        // to a single Stripe balance transaction.
+        assert_eq!(
+            topup_credit_idempotency_key("pi_same"),
+            topup_credit_idempotency_key("pi_same")
+        );
+    }
+
+    #[test]
+    fn topup_key_differs_across_intents() {
+        // Distinct intents must never share a key, or a legitimate second top-up
+        // would be silently deduped away.
+        assert_ne!(
+            topup_credit_idempotency_key("pi_one"),
+            topup_credit_idempotency_key("pi_two")
+        );
     }
 
     // ── Balance cache merge logic ────────────────────────────────────────────

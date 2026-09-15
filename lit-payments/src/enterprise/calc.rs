@@ -28,6 +28,17 @@ pub fn overage_cents(overage_units: i64, rate_hundredths_cent_per_unit: i64) -> 
     (overage_units.saturating_mul(rate_hundredths_cent_per_unit) + 50) / 100
 }
 
+/// Whether an `auto_send` cycle must be held as a draft for human review
+/// because the consumed reading is untrustworthy:
+///   - 0 units: an external credit masked usage, or usage genuinely stopped.
+///   - at/above the full buffer target: since `consumed = target + balance`,
+///     a reading ≥ target means the payer's balance hit zero or positive during
+///     the cycle (buffer exhausted, or an external debit hit the payer) and the
+///     identity no longer measures this cycle's usage.
+pub fn hold_for_review(consumed_units: i64, target_credit_cents: i64) -> bool {
+    consumed_units <= 0 || consumed_units >= target_credit_cents
+}
+
 /// Signed balance-transaction amount that restores the buffer to target.
 /// Negative == credit. Returns 0 when the account already holds ≥ target credit
 /// (we never claw credit back).
@@ -83,6 +94,20 @@ mod tests {
     #[test]
     fn regrant_noop_when_above_target() {
         assert_eq!(regrant_amount_cents(50_000_000, -60_000_000), 0);
+    }
+
+    #[test]
+    fn hold_for_review_bounds() {
+        let target = 50_000_000;
+        // 0 units — external credit or usage stopped.
+        assert!(hold_for_review(0, target));
+        // Healthy readings in between are not held.
+        assert!(!hold_for_review(1, target));
+        assert!(!hold_for_review(3_000_000, target));
+        assert!(!hold_for_review(target - 1, target));
+        // At/above target — balance went zero/positive during the cycle.
+        assert!(hold_for_review(target, target));
+        assert!(hold_for_review(target + 940_000, target));
     }
 
     // Consumed and the (negated) regrant magnitude agree.

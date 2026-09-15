@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 use super::caps::{self, CapCheck};
 use super::db;
+use super::rate_limit::PreviewRateLimit;
 use super::types::{
     CustomerMatch, CustomerPreviewResponse, ErrorResponse, GrantRequest, GrantResponse, GrantRow,
     GrantsResponse, LookupResponse,
@@ -126,13 +127,62 @@ pub async fn lookup_customer(
     }
 }
 
+/// Mask an email for the public preview endpoint (CPL-376).
+///
+/// `GET /api/customer/preview` is unauthenticated, so returning raw emails lets
+/// anyone enumerate on-chain wallets and harvest a wallet↔email de-anonymization
+/// dataset. Masking preserves enough shape for the legitimate payer — who
+/// already knows the account email — to recognize it on the pay page, while
+/// destroying the value of a scraped dataset:
+///
+/// - `brendon@litprotocol.com` → `b***n@l***l.com`
+/// - `a@b.co`                  → `a***@b***.co`
+///
+/// Anything without a usable `local@domain` shape is fully masked to `***`
+/// rather than risk echoing a raw string.
+pub fn mask_email(email: &str) -> String {
+    let email = email.trim();
+    match email.rsplit_once('@') {
+        Some((local, domain)) if !local.is_empty() && !domain.is_empty() => {
+            format!("{}@{}", mask_segment(local), mask_domain(domain))
+        }
+        _ => "***".to_string(),
+    }
+}
+
+/// Reveal the first (and, when long enough, last) character of a segment and
+/// replace the interior with a fixed `***` so the exact length isn't leaked.
+fn mask_segment(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    match chars.len() {
+        0 => "***".to_string(),
+        // 1–2 chars: revealing both ends would expose the whole segment.
+        1 | 2 => format!("{}***", chars[0]),
+        _ => format!("{}***{}", chars[0], chars[chars.len() - 1]),
+    }
+}
+
+/// Mask a domain, keeping the (low-value, public) TLD intact and masking the
+/// registrable label. `litprotocol.com` → `l***l.com`.
+fn mask_domain(domain: &str) -> String {
+    match domain.rsplit_once('.') {
+        Some((name, tld)) if !name.is_empty() && !tld.is_empty() => {
+            format!("{}.{}", mask_segment(name), tld)
+        }
+        _ => mask_segment(domain),
+    }
+}
+
 /// `GET /api/customer/preview?wallet=…`
 ///
 /// Public wallet-only customer preview for the pay-with-LITKEY page. Exposes
 /// only the account identity the user is about to credit; never exposes Stripe
-/// customer ids or balances.
+/// customer ids or balances. The email is **masked** (CPL-376) so the endpoint
+/// can't be scraped into a wallet↔email dataset, and it's throttled per client
+/// IP by the [`PreviewRateLimit`] guard, which runs before the Stripe lookup.
 #[get("/api/customer/preview?<wallet>")]
 pub async fn preview_customer(
+    _rate_limit: PreviewRateLimit,
     wallet: Option<&str>,
     stripe: &State<StripeClient>,
 ) -> ApiResult<CustomerPreviewResponse> {
@@ -146,7 +196,7 @@ pub async fn preview_customer(
     Ok(Json(match summary {
         Some(summary) => CustomerPreviewResponse {
             found: true,
-            email: summary.email,
+            email: summary.email.as_deref().map(mask_email),
             wallet_address: summary.wallet_address.or(Some(wallet)),
         },
         None => CustomerPreviewResponse {
@@ -159,7 +209,14 @@ pub async fn preview_customer(
 
 /// `POST /api/grant` — apply a credit to a customer's Stripe balance.
 ///
-/// Flow:
+/// Authorization: any authenticated `Operator` (either `Role::Mod` or
+/// `Role::Admin`) may grant. This is intentional and distinct from
+/// `override_rate`, which is Admin-only: grants are bounded by the per-grant
+/// and per-operator-per-day caps below, so delegating them to Mods is an
+/// accepted operational choice (CPL-379 L6 — intent confirmed).
+///
+/// Flow (steps 2, 3 and 6 run inside one per-operator advisory-locked
+/// transaction so the daily-cap check-then-insert is atomic — see CPL-379 L5):
 /// 1. Validate idempotency-key format + cents > 0.
 /// 2. Replay short-circuit: if a grant with this idempotency key already
 ///    exists, return it without re-hitting Stripe.
@@ -169,7 +226,7 @@ pub async fn preview_customer(
 /// 5. Write the Stripe balance_transaction with idempotency key so retries
 ///    after a network error don't duplicate the credit upstream.
 /// 6. Insert the grants row (ON CONFLICT DO NOTHING — race-safe).
-/// 7. Re-fetch the balance and return.
+/// 7. Commit (releases the lock), re-fetch the balance and return.
 #[post("/api/grant", format = "json", data = "<req>")]
 pub async fn grant_credit(
     operator: Operator,
@@ -193,11 +250,33 @@ pub async fn grant_credit(
     }
     let note = req.note.trim();
 
-    // Step 2: idempotent replay short-circuit.
-    if let Some(existing) = db::find_by_idempotency_key(pool, &req.idempotency_key)
+    // Serialize concurrent grants by the same operator (CPL-379 L5). The daily
+    // cap is enforced by reading the last-24h total and then inserting the grant
+    // as two separate statements; without serialization two requests can both
+    // read the pre-grant total, both pass the cap, and both insert — multiplying
+    // the cap by the concurrency. A transaction-scoped, per-operator advisory
+    // lock makes the second request block until the first commits its grants
+    // row, so its cap re-check (Step 3) sees the already-applied grant. The lock
+    // key is the operator id, so distinct operators never contend. The lock (and
+    // the pooled connection) is held across the Stripe calls in steps 4-5;
+    // grants come only from the low-volume admin portal (any operator role —
+    // see the handler docs), so that is an acceptable tradeoff for making the
+    // cap authoritative. `pg_advisory_xact_lock` auto-releases on commit or
+    // rollback.
+    let mut tx = pool.begin().await.map_err(server_err)?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1)")
+        .bind(operator.id)
+        .execute(&mut *tx)
+        .await
+        .map_err(server_err)?;
+
+    // Step 2: idempotent replay short-circuit (inside the lock).
+    if let Some(existing) = db::find_by_idempotency_key(&mut *tx, &req.idempotency_key)
         .await
         .map_err(server_err)?
     {
+        // No write to perform; drop the lock/connection before the Stripe call.
+        let _ = tx.rollback().await;
         let balance_cents = balance::fetch(stripe, &existing.stripe_customer_id)
             .await
             .map_err(server_err)?;
@@ -212,8 +291,8 @@ pub async fn grant_credit(
         }));
     }
 
-    // Step 3: cap check.
-    let already_today = caps::cents_granted_last_24h(pool, operator.id)
+    // Step 3: cap check (inside the lock; sees all committed grants).
+    let already_today = caps::cents_granted_last_24h(&mut *tx, operator.id)
         .await
         .map_err(server_err)?;
     let check = caps::check(
@@ -225,6 +304,7 @@ pub async fn grant_credit(
     if let CapCheck::NonPositive | CapCheck::OverPerGrant { .. } | CapCheck::OverDaily { .. } =
         &check
     {
+        let _ = tx.rollback().await;
         let msg = check.message().unwrap_or_else(|| "cap violation".into());
         return Err(err(Status::BadRequest, msg));
     }
@@ -261,9 +341,9 @@ pub async fn grant_credit(
     .await
     .map_err(server_err)?;
 
-    // Step 6: persist the grants row. Race-safe via ON CONFLICT DO NOTHING;
-    // a concurrent retry that won the race produces None here, in which case
-    // we fetch the winning row.
+    // Step 6: persist the grants row (inside the advisory-locked transaction).
+    // Race-safe via ON CONFLICT DO NOTHING; a concurrent retry that won the race
+    // produces None here, in which case we fetch the winning row.
     let email_for_db = req
         .email
         .as_deref()
@@ -279,11 +359,11 @@ pub async fn grant_credit(
         stripe_balance_transaction_id: &stripe_balance_transaction_id,
         idempotency_key: &req.idempotency_key,
     };
-    let (grant_id, replay) = match db::insert(pool, &new).await.map_err(server_err)? {
+    let (grant_id, replay) = match db::insert(&mut *tx, &new).await.map_err(server_err)? {
         Some((id, _created_at)) => (id, false),
         None => {
             // Concurrent retry beat us; fetch the winning row.
-            let existing = db::find_by_idempotency_key(pool, &req.idempotency_key)
+            let existing = db::find_by_idempotency_key(&mut *tx, &req.idempotency_key)
                 .await
                 .map_err(server_err)?
                 .ok_or_else(|| {
@@ -292,6 +372,10 @@ pub async fn grant_credit(
             (existing.id, true)
         }
     };
+
+    // Commit: atomically persists the grant and releases the advisory lock, so a
+    // blocked concurrent grant now reads this grant in its cap check.
+    tx.commit().await.map_err(server_err)?;
 
     // Step 7: read the post-credit balance for the UI.
     let balance_cents = balance::fetch(stripe, &stripe_customer_id)
@@ -342,5 +426,31 @@ mod tests {
     fn canonical_wallet_param_rejects_non_addresses() {
         assert!(canonical_wallet_param("not-a-wallet").is_err());
         assert!(canonical_wallet_param("0x1234").is_err());
+    }
+
+    #[test]
+    fn mask_email_masks_local_and_domain_but_keeps_tld() {
+        assert_eq!(mask_email("brendon@litprotocol.com"), "b***n@l***l.com");
+        assert_eq!(mask_email("a@b.co"), "a***@b***.co");
+    }
+
+    #[test]
+    fn mask_email_never_reveals_short_segments_whole() {
+        // 1–2 char local/label must not be echoed in full.
+        assert_eq!(mask_email("jo@hi.io"), "j***@h***.io");
+        assert!(!mask_email("jo@example.com").contains("jo@"));
+    }
+
+    #[test]
+    fn mask_email_fully_masks_malformed_input() {
+        assert_eq!(mask_email("no-at-sign"), "***");
+        assert_eq!(mask_email("@nolocal.com"), "***");
+        assert_eq!(mask_email("nodomain@"), "***");
+        assert_eq!(mask_email(""), "***");
+    }
+
+    #[test]
+    fn mask_email_trims_before_masking() {
+        assert_eq!(mask_email("  brendon@litprotocol.com  "), "b***n@l***l.com");
     }
 }

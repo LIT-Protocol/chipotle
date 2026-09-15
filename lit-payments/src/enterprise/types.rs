@@ -17,7 +17,9 @@ pub struct EnterpriseAccount {
     pub target_credit_cents: i64,
     pub billing_anchor_day: i32,
     pub notify_email: String,
-    /// v1 = false: draft + email for manual send.
+    /// false: draft + review email for manual send. true: finalize + send
+    /// automatically (anomalous readings — see `calc::hold_for_review` — are
+    /// still held as drafts for review).
     pub auto_send: bool,
     pub term_start: Option<Date>,
     pub term_end: Option<Date>,
@@ -46,6 +48,9 @@ pub struct EnterpriseInvoice {
     pub total_cents: i64,
     pub stripe_invoice_id: Option<String>,
     pub regrant_balance_txn_id: Option<String>,
+    /// Set once Stripe has confirmed finalize + send (auto_send accounts only).
+    /// Written before the FYI email so a resume never replays the Stripe calls.
+    pub finalized_at: Option<OffsetDateTime>,
     pub status: String,
     pub created_at: OffsetDateTime,
 }

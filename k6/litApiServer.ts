@@ -92,6 +92,17 @@ export interface CreateWalletWithSignatureRequest {
 }
 
 /**
+ * Returned by `POST /prepare_wallet`. Same shape as `CreateWalletWithSignatureResponse` but obtained with no owner signature and no API key. The client MUST follow up with an on-chain `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)` call — until that lands the PKP exists in MPC but is registered to no account, which makes an un-registered response equivalent to a discarded keypair.
+
+NOT IDEMPOTENT: every call returns a brand-new wallet (a fresh random derivation path). Retrying does not return the previous address; concurrent callers each get a different wallet with no server-side dedup. See `docs/management/api_direct.mdx` for the full concurrency semantics.
+ */
+export interface PrepareWalletResponse {
+  wallet_address: string;
+  /** 0x-prefixed lowercase hex (uint256). Pass through verbatim to `registerWalletDerivation`'s `derivationPath` arg. */
+  derivation_path: string;
+}
+
+/**
  * Request for delete_wallet (AccountConfig.removeWalletDerivation). Master (account) API key via header — usage API keys are rejected on-chain (`NotMasterAccount`).
 
 HARD DELETE: permanently and irreversibly removes the wallet (PKP) and wipes its on-chain derivation path. Anything secured by the wallet becomes unrecoverable.
@@ -658,8 +669,7 @@ export type ConvertToChainSecuredAccountHeaders = {
 };
 
 export type ConvertToChainSecuredAccountDefault =
-  | AccountOpResponse
-  | ErrMessage;
+  AccountOpResponse | ErrMessage;
 
 export type AccountExistsHeaders = {
   /**
@@ -689,8 +699,9 @@ export type CreateWalletPostHeaders = {
 export type CreateWalletPostDefault = CreateWalletResponse | ErrMessage;
 
 export type CreateWalletWithSignatureDefault =
-  | CreateWalletWithSignatureResponse
-  | ErrMessage;
+  CreateWalletWithSignatureResponse | ErrMessage;
+
+export type PrepareWalletDefault = PrepareWalletResponse | ErrMessage;
 
 export type DeleteWalletHeaders = {
   /**
@@ -794,8 +805,7 @@ export type AddUsageApiKeyHeaders = {
 export type AddUsageApiKeyDefault = AddUsageApiKeyResponse | ErrMessage;
 
 export type AddUsageApiKeyWithSignatureDefault =
-  | AddUsageApiKeyWithSignatureResponse
-  | ErrMessage;
+  AddUsageApiKeyWithSignatureResponse | ErrMessage;
 
 export type UpdateUsageApiKeyHeaders = {
   /**
@@ -944,8 +954,7 @@ export type GetNodeChainConfigDefault = NodeChainConfigResponse | ErrMessage;
 export type GetChainConfigKeysDefault = ChainConfigKeysResponse | ErrMessage;
 
 export type GetLitActionClientConfigDefault =
-  | LitActionClientConfigResponse
-  | ErrMessage;
+  LitActionClientConfigResponse | ErrMessage;
 
 export type GetCacheMetadataHeaders = {
   /**
@@ -957,8 +966,7 @@ export type GetCacheMetadataHeaders = {
 export type GetCacheMetadataDefault = CacheMetadataResponse | ErrMessage;
 
 export type GetSupportedLanguagesDefault =
-  | SupportedLanguagesResponse
-  | ErrMessage;
+  SupportedLanguagesResponse | ErrMessage;
 
 export type GetApiPayersDefault = string[] | ErrMessage;
 
@@ -977,18 +985,17 @@ export type BillingBalanceDefault = BillingBalanceResponse | ErrMessage;
 
 export type BillingCreatePaymentIntentHeaders = {
   /**
-   * API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{typed_data, signature})>` where `typed_data` is EIP-712 with `primaryType: "BillingAuth"`. The signature proves wallet possession; the typed data must include the connected wallet address and an issuedAt timestamp within ±5 minutes.
+   * Billing owner only: account master API key or verified X-Wallet-Auth. Execution usage keys cannot manage funding or saved-card settings.
    */
   "X-Api-Key"?: string;
 };
 
 export type BillingCreatePaymentIntentDefault =
-  | CreatePaymentIntentResponse
-  | ErrMessage;
+  CreatePaymentIntentResponse | ErrMessage;
 
 export type BillingConfirmPaymentHeaders = {
   /**
-   * API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{typed_data, signature})>` where `typed_data` is EIP-712 with `primaryType: "BillingAuth"`. The signature proves wallet possession; the typed data must include the connected wallet address and an issuedAt timestamp within ±5 minutes.
+   * Billing owner only: account master API key or verified X-Wallet-Auth. Execution usage keys cannot manage funding or saved-card settings.
    */
   "X-Api-Key"?: string;
 };
@@ -1060,6 +1067,11 @@ export class LitApiServerClient {
     };
   }
 
+  /**
+ * Create a new managed account: derives a fresh wallet, registers it on-chain, and provisions a Stripe customer with starter credits. Returns the account's API key and wallet address.
+
+No authentication is required (this is how a caller obtains their first API key), but the endpoint is rate limited per client IP and may return 429 Too Many Requests when the node is under load or a single source creates accounts too quickly. Retry those with exponential backoff.
+ */
   newAccount(
     newAccountRequest: NewAccountRequest,
     requestParameters?: Params,
@@ -1313,6 +1325,45 @@ Deprecated: minting is a metered write, so it should not live on a GET — link 
       response,
       data,
       operationId: "create_wallet_with_signature",
+    };
+  }
+
+  /**
+ * Return a fresh derived wallet address + derivation path — no signature, no API key.
+
+The no-signature equivalent of `create_wallet_with_signature`: it collapses the ChainSecured owner ceremony into a single signed bind UserOp. Fetch the address here, then register it on-chain yourself with `registerWalletDerivation`.
+
+Unauthenticated, so it carries the same `CpuAvailable` load-shedding guard as `lit_action`: each request drives a dstack KDF call, and unlike the `_with_signature` siblings there is no EIP-712 verification in front of it, so the guard bounds how hard an anonymous caller can hammer the KDF path when the box is already saturated.
+
+NOT IDEMPOTENT: every call returns a brand-new wallet (a fresh random derivation path). Retrying returns a different address, and concurrent callers each get a separate wallet with no server-side dedup. See `docs/management/api_direct.mdx`.
+ */
+  prepareWallet(requestParameters?: Params): {
+    response: Response;
+    data: PrepareWalletDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/prepare_wallet`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "POST",
+      k6url.toString(),
+      undefined,
+      mergedRequestParameters,
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "prepare_wallet",
     };
   }
 

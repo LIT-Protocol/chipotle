@@ -133,7 +133,8 @@ library SecurityLib {
         if (
             !s.api_payers.contains(caller) &&
             caller != LibDiamond.contractOwner() &&
-            caller != s.adminApiPayerAccount
+            caller != s.adminApiPayerAccount &&
+            caller != s.configOperator
         ) {
             revert AppStorage.OnlyApiPayerOrOwner(caller);
         }
@@ -158,20 +159,22 @@ library SecurityLib {
         if (
             !s.api_payers.contains(caller) &&
             caller != LibDiamond.contractOwner() &&
-            caller != s.adminApiPayerAccount
+            caller != s.adminApiPayerAccount &&
+            caller != s.configOperator
         ) {
             revert AppStorage.OnlyApiPayerOrOwner(caller);
         }
     }
 
     /// @notice Non-reverting predicate: true if caller is an api payer, the
-    ///         diamond owner, or the admin api payer account.
+    ///         diamond owner, the admin api payer account, or the config operator.
     function isApiPayerOrOwner(address caller) internal view returns (bool) {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         return
             s.api_payers.contains(caller) ||
             caller == LibDiamond.contractOwner() ||
-            caller == s.adminApiPayerAccount;
+            caller == s.adminApiPayerAccount ||
+            caller == s.configOperator;
     }
 
     /// @notice Resolve any API key hash (master or usage) to the master account hash.
