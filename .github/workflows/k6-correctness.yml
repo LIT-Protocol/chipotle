@@ -37,7 +37,9 @@ jobs:
   correctness:
     runs-on: self-hosted
     env:
-      K6_ACCOUNTS_FILE: ${{ inputs.accounts_file || (github.ref_name == 'next' && './data/accounts.next.json' || './data/accounts.dev.json') }}
+      # `main` is the deploy branch and targets chipotle-next (test.chipotle.litprotocol.com);
+      # the legacy `next` branch is retired. chipotle-dev is deprecated.
+      K6_ACCOUNTS_FILE: ${{ inputs.accounts_file || (github.ref_name == 'main' && './data/accounts.next.json' || './data/accounts.dev.json') }}
     steps:
       - uses: actions/checkout@v4
 

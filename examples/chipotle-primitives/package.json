@@ -1,0 +1,11 @@
+{
+  "name": "chipotle-primitives",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Reusable Lit Action primitives (gating, signing, RPC safety, oracles, secrets) built on audited libraries from Paul Miller -- micro-eth-signer and @noble/hashes. Import into any Lit Action.",
+  "dependencies": {
+    "micro-eth-signer": "0.19.0",
+    "@noble/hashes": "1.4.0"
+  }
+}

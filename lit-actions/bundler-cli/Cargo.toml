@@ -1,0 +1,38 @@
+# Standalone workspace: this is a local developer tool, intentionally
+# decoupled from the lit-actions workspace build. Its binary is named
+# `lit-bundle` (not `lit`) so it never collides with gvisor-server's guest
+# `lit` binary or the local-cli `lit` binary in a shared target dir.
+[workspace]
+
+[package]
+name = "lit-actions-bundler-cli"
+description = "Local developer CLI to bundle, deploy, and run any-language Lit Actions against a Lit Chipotle network node"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "lit-bundle"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive", "env"] }
+flate2 = "1"
+# Match lit-api-server's checksum derivation byte-for-byte so a locally
+# computed CID equals the one the server derives from the same bundle bytes.
+ipfs-hasher = "0.13.0"
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "json",
+    "rustls-tls",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tar = "0.4"
+
+[dev-dependencies]
+flate2 = "1"
+tar = "0.4"
+tempfile = "3"

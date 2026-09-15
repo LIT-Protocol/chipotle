@@ -483,6 +483,11 @@ body.has-api-key .dashboard-wrap {
   transition: color 0.15s, background 0.15s;
 }
 
+/* `.sidebar-link`'s display:flex beats the UA [hidden] rule, so enforce it. */
+.sidebar-link[hidden] {
+  display: none;
+}
+
 .sidebar-link:hover {
   color: var(--sidebar-text-hover);
   background: var(--sidebar-link-hover-bg);
@@ -1574,6 +1579,64 @@ textarea.input.textarea-sm {
   background: rgba(255, 255, 255, 0.04);
 }
 
+/* ----- gVisor Runner bundle controls (CPL-360) ----- */
+.section-desc code,
+.form-hint code,
+.dashboard-section label code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--border);
+}
+
+[data-theme="dark"] .section-desc code,
+[data-theme="dark"] .form-hint code,
+[data-theme="dark"] .dashboard-section label code {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.gvisor-bundle-source {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.radio-label input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+}
+
+.gvisor-bundle-file-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.gvisor-bundle-file-row input[type="file"] {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+#gvisor-runner-bundle {
+  margin-top: 0.75rem;
+  width: 100%;
+}
+
 .input-sm {
   padding: 0.375rem 0.5rem;
   font-size: 0.8125rem;
@@ -1695,6 +1758,16 @@ textarea.input.textarea-sm {
   background: rgba(22, 163, 74, 0.1);
   color: var(--success);
   border: 1px solid rgba(22, 163, 74, 0.25);
+}
+
+.status.warning {
+  background: rgba(217, 119, 6, 0.1);
+  color: #b45309;
+  border: 1px solid rgba(217, 119, 6, 0.3);
+}
+
+[data-theme="dark"] .status.warning {
+  color: #fbbf24;
 }
 
 /* ----- Data tables ----- */
@@ -2319,3 +2392,46 @@ textarea.input.textarea-sm {
 #add-card-modal-status.info { color: var(--primary, #3c50e0); }
 #add-card-modal-status.error { color: var(--danger, #dc2626); }
 #add-card-modal-status.success { color: var(--success, #16a34a); }
+
+/* ----- Wallets: actions column + permanent-delete danger modal ----- */
+.data-table th.col-actions,
+.data-table td.col-actions {
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
+}
+
+.danger-panel {
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  padding: 16px;
+}
+
+.danger-panel .danger-lead {
+  margin: 0 0 10px;
+  color: var(--danger);
+}
+
+.danger-panel .danger-list {
+  margin: 0 0 12px;
+  padding-left: 20px;
+}
+
+.danger-panel .danger-list li {
+  margin-bottom: 6px;
+  line-height: 1.45;
+}
+
+.danger-panel .danger-target {
+  margin: 4px 0 14px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
+  word-break: break-all;
+}
+
+.danger-panel .danger-confirm-target {
+  margin: 4px 0 6px;
+  font-weight: 600;
+  word-break: break-all;
+}

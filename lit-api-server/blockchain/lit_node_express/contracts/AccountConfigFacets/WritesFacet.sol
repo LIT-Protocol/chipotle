@@ -69,6 +69,14 @@ contract WritesFacet {
         address indexed pkpId,
         uint256 derivationPath
     );
+    event WalletDerivationRemoved(
+        uint256 indexed apiKeyHash,
+        address indexed pkpId
+    );
+    event PkpOwnerBackfilled(
+        address indexed pkpId,
+        uint256 indexed masterHash
+    );
     event UsageApiKeyRemoved(
         uint256 indexed accountApiKeyHash,
         uint256 indexed usageApiKeyHash
@@ -264,6 +272,13 @@ contract WritesFacet {
         uint256[] memory removePkpFromGroups,
         uint256[] memory executeInGroups
     ) public {
+        // Zero is the "does not exist" sentinel for allApiKeyHashesToMaster and
+        // for usageApiKeys[h].apiKeyHash. Allowing a zero usage hash would let an
+        // account claim allApiKeyHashesToMaster[0] and corrupt every existence
+        // check that treats 0 as "unset".
+        if (usageApiKeyHash == 0) {
+            revert AppStorage.InvalidRequest("usageApiKeyHash must be non-zero");
+        }
         if (manageIPFSIdsInGroups.length > 50) {
             revert AppStorage.InvalidRequest(
                 "manageIPFSIdsInGroups must be 50 items or fewer"
@@ -289,6 +304,31 @@ contract WritesFacet {
         uint256 masterAccountApiKeyHash = s.allApiKeyHashesToMaster[
             accountApiKeyHash
         ];
+        // Guard the account-resolution entry. Without this an attacker holding
+        // any account could call setUsageApiKey(theirHash, victimMasterHash, ...)
+        // and overwrite allApiKeyHashesToMaster[victimMasterHash], hijacking
+        // every later resolution of the victim's hash.
+        uint256 existingUsageMaster = s.allApiKeyHashesToMaster[usageApiKeyHash];
+        if (existingUsageMaster != 0) {
+            // The hash already resolves to an account. Only let it through when
+            // it is already a usage key OF THIS account (a legitimate update).
+            // Everything else is rejected:
+            //   - a master hash (resolves to itself),
+            //   - a hash registered to a different account (cross-account hijack),
+            //   - this account's own wallet/resolver alias created by
+            //     convertToChainSecuredAccount / transferChainSecuredAccountOwnership
+            //     that is not a usage key — promoting it would let a later
+            //     removeUsageApiKey delete the alias and orphan the wallet.
+            bool isExistingUsageKeyForThisAccount = existingUsageMaster ==
+                masterAccountApiKeyHash &&
+                s
+                .accounts[masterAccountApiKeyHash]
+                .usageApiKeys[usageApiKeyHash].apiKeyHash ==
+                usageApiKeyHash;
+            if (!isExistingUsageKeyForThisAccount) {
+                revert AppStorage.AccountAlreadyExists(usageApiKeyHash);
+            }
+        }
         AppStorage.UsageApiKey storage apiKeyStorage = s
             .accounts[masterAccountApiKeyHash]
             .usageApiKeys[usageApiKeyHash];
@@ -672,6 +712,19 @@ contract WritesFacet {
         if (account.pkpData[pkpId].id != 0) {
             revert AppStorage.InvalidRequest("PKP already registered");
         }
+        // Global first-owner binding. Derivation paths are public on-chain and
+        // the key is a stateless function of the path, so without this check a
+        // different account could register an already-registered pkpId under
+        // its own account and drive the node to sign with the victim's key.
+        // The first master account to register a pkpId owns it forever; the
+        // binding survives removeWalletDerivation, so only the original owner
+        // may ever re-register a deleted address (recovery flow stays intact).
+        uint256 existingOwner = s.pkpIdToOwnerMaster[pkpId];
+        if (existingOwner == 0) {
+            s.pkpIdToOwnerMaster[pkpId] = masterHash;
+        } else if (existingOwner != masterHash) {
+            revert AppStorage.InvalidRequest("PKP owned by another account");
+        }
         account.pkpData[pkpId].id = derivationPath;
         account.pkpData[pkpId].name = name;
         account.pkpData[pkpId].description = description;
@@ -680,6 +733,89 @@ contract WritesFacet {
         s.pkpCount++;
         s.allPkpIds[s.pkpCount] = pkpId;
         emit WalletDerivationRegistered(masterHash, pkpId, derivationPath);
+    }
+
+    /// @notice Permanently and irreversibly remove a registered wallet (PKP) from an account.
+    /// @dev HARD DELETE. This wipes the on-chain metadata for the wallet, including its
+    ///      `derivationPath`. Keys are stateless derivations from that path and are never
+    ///      stored anywhere else, so once the path is deleted the private key can never be
+    ///      re-derived. Anything encrypted or otherwise secured by this wallet becomes
+    ///      permanently unrecoverable. There is no undo. The wallet is also removed from
+    ///      every group it belongs to. Only the master account may call this.
+    ///
+    ///      The global `allPkpIds` "ever generated" ledger is intentionally left untouched;
+    ///      it records only the address (never the path) and serves as an append-only history.
+    ///
+    ///      The global `pkpIdToOwnerMaster` binding is also intentionally kept: even after a
+    ///      hard delete, only the original master account may ever re-register this address.
+    ///      This closes the delete/re-register race that would otherwise let another account
+    ///      claim the address (and thus the key, which is a stateless function of the path).
+    function removeWalletDerivation(uint256 apiKeyHash, address pkpId) public {
+        SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
+        SecurityLib.revertIfNotMasterAccount(apiKeyHash);
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        AppStorage.Account storage account = s.accounts[apiKeyHash];
+        // pkpData[pkpId].id is the derivationPath, which registerWalletDerivation
+        // guarantees is non-zero for a registered wallet. Zero => not registered.
+        if (account.pkpData[pkpId].id == 0) {
+            revert AppStorage.InvalidRequest("PKP not registered");
+        }
+
+        // Swap-and-pop within the counter-indexed pkpIds mapping so that listPkps
+        // (which iterates indices 0..pkpCount) stays gap-free after removal.
+        uint256 count = account.pkpCount;
+        for (uint256 i = 0; i < count; i++) {
+            if (account.pkpIds[i] == pkpId) {
+                if (i != count - 1) {
+                    account.pkpIds[i] = account.pkpIds[count - 1];
+                }
+                delete account.pkpIds[count - 1];
+                account.pkpCount = count - 1;
+                break;
+            }
+        }
+
+        // Wipe the wallet metadata. Deleting derivationPath here is what makes the
+        // key permanently unrecoverable.
+        delete account.pkpData[pkpId];
+
+        // Remove the wallet from every group that references it to avoid stale entries.
+        uint256 groupCount = account.groupList.length();
+        for (uint256 i = 0; i < groupCount; i++) {
+            uint256 groupId = account.groupList.at(i);
+            account.groups[groupId].pkpId.remove(pkpId);
+        }
+
+        emit WalletDerivationRemoved(apiKeyHash, pkpId);
+    }
+
+    /// @notice One-time migration helper: bind wallets registered before the global
+    ///         owner binding existed to their original master account.
+    /// @dev Pairs should be derived off-chain from the EARLIEST
+    ///      `WalletDerivationRegistered(masterHash, pkpId, ...)` event per pkpId
+    ///      (first registration wins, matching the rule `registerWalletDerivation`
+    ///      now enforces). Already-bound pkpIds are skipped, never re-assigned, so
+    ///      the call is idempotent and safe to run in batches / re-run. Restricted
+    ///      to the diamond owner or config operator.
+    function backfillPkpOwners(
+        address[] calldata pkpIds,
+        uint256[] calldata masterHashes
+    ) public {
+        SecurityLib.revertIfNotConfigOperatorOrOwner(msg.sender);
+        if (pkpIds.length != masterHashes.length) {
+            revert AppStorage.InvalidRequest("array length mismatch");
+        }
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        for (uint256 i = 0; i < pkpIds.length; i++) {
+            if (masterHashes[i] == 0) {
+                revert AppStorage.InvalidRequest("masterHash must be non-zero");
+            }
+            if (s.pkpIdToOwnerMaster[pkpIds[i]] != 0) {
+                continue; // already bound — never re-assign ownership
+            }
+            s.pkpIdToOwnerMaster[pkpIds[i]] = masterHashes[i];
+            emit PkpOwnerBackfilled(pkpIds[i], masterHashes[i]);
+        }
     }
 
     function setNodeConfiguration(

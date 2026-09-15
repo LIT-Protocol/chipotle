@@ -42,10 +42,14 @@ install:
 	pnpm install
 	pnpm exec playwright install --with-deps chromium
 
+# LIT_DISABLE_BILLING: the E2E suite runs without a Stripe account (api-client.ts
+# treats a missing billing endpoint as "Payment Not Required"). CPL-330 makes a
+# local lit-api-server refuse to start unless TEST Stripe keys are configured, so
+# this automation path must explicitly opt out or `up` would hang on wait-on.
 .PHONY: up
 up:
 	@pkill -f "local_test.sh" 2>/dev/null || true
-	@(cd .. && ./local_test.sh &>/tmp/lit-local-stack.log & echo $$! > /tmp/lit-local-stack.pid)
+	@(cd .. && LIT_DISABLE_BILLING=true ./local_test.sh &>/tmp/lit-local-stack.log & echo $$! > /tmp/lit-local-stack.pid)
 	@npx -y wait-on $(API_BASE_URL) -t 180000
 	@npx -y wait-on $(DASHBOARD_URL) -t 60000
 	@echo "stack up — dashboard=$(DASHBOARD_URL) api=$(API_BASE_URL)"
@@ -53,7 +57,7 @@ up:
 .PHONY: up-no-code
 up-no-code:
 	@pkill -f "local_test.sh" 2>/dev/null || true
-	@(cd .. && ./local_test.sh --no_code &>/tmp/lit-local-stack.log & echo $$! > /tmp/lit-local-stack.pid)
+	@(cd .. && LIT_DISABLE_BILLING=true ./local_test.sh --no_code &>/tmp/lit-local-stack.log & echo $$! > /tmp/lit-local-stack.pid)
 	@echo "anvil + dstack-simulator + jaeger started; start lit-api-server/lit-actions/static-web-server in your own terminals."
 
 .PHONY: down

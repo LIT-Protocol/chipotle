@@ -68,6 +68,18 @@ pub struct RemovePkpFromGroupRequest {
     pub pkp_id: String,
 }
 
+/// Request for delete_wallet (AccountConfig.removeWalletDerivation). Master (account) API
+/// key via header — usage API keys are rejected on-chain (`NotMasterAccount`).
+///
+/// HARD DELETE: permanently and irreversibly removes the wallet (PKP) and wipes its
+/// on-chain derivation path. Anything secured by the wallet becomes unrecoverable.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteWalletRequest {
+    /// Wallet (PKP) address to permanently delete: 20-byte hex, with an optional
+    /// `0x`/`0X` prefix.
+    pub wallet_address: String,
+}
+
 /// Request for update_group (AccountConfig.updateGroup). API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateGroupRequest {
@@ -173,6 +185,39 @@ pub struct LitActionRequest {
     /// IPFS CID of a previously-submitted action. Looked up in the in-memory cache.
     #[serde(default)]
     pub ipfs_id: Option<String>,
+    pub js_params: Option<serde_json::Value>,
+}
+
+/// POST /lit_binary_action
+///
+/// Executes an any-language action **bundle** in the gVisor runner. Provide
+/// either `bundle` (a base64-encoded tar/tar.gz of payload files) or
+/// `checksum` (the content id of a bundle the runner already cached). When
+/// `bundle` is supplied the server derives the checksum from the decoded tar
+/// bytes and authorizes on that derived value — a client-supplied `checksum`
+/// is only a hint and is ignored if it disagrees.
+///
+/// The sandbox only ever executes `bash startup.sh` (CPL-355): the
+/// `startup_script` sent here, or the `startup.sh` at the bundle root.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct LitBinaryActionRequest {
+    /// Base64-encoded tar or tar.gz bundle. Optional when `checksum` refers to
+    /// a previously-submitted bundle the runner still has cached.
+    #[serde(default)]
+    pub bundle: Option<String>,
+    /// Content id (IPFS CID) of the bundle. Required when `bundle` is omitted;
+    /// when `bundle` is present it is only a hint, validated against the value
+    /// derived from the bundle bytes.
+    #[serde(default)]
+    pub checksum: Option<String>,
+    /// Bash script executed as the sandbox entrypoint (`bash startup.sh`).
+    /// Sent separately from `bundle` so different scripts reuse the same
+    /// cached bundle. Optional when the bundle ships a `startup.sh` at its
+    /// root; the request-supplied script wins when both exist.
+    #[serde(default)]
+    pub startup_script: Option<String>,
+    /// Parameters passed to the action: exposed to guest code via `lit params`,
+    /// and top-level values are injected into the sandbox environment.
     pub js_params: Option<serde_json::Value>,
 }
 

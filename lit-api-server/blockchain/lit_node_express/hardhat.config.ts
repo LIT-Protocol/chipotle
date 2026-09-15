@@ -11,6 +11,8 @@ import "./tasks/propose-add-device";
 import "./tasks/transfer-ownership";
 import "./tasks/verify-compose-hash";
 import "./tasks/verify-diamond-facets";
+import "./tasks/verify-basescan";
+import "./tasks/backfill-pkp-owners";
 
 const config: HardhatUserConfig = {
   solidity: {

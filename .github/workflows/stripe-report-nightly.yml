@@ -1,0 +1,91 @@
+# Nightly Stripe usage digest → Slack.
+#
+# Runs the `stripe_report` CLI against the LIVE Stripe account, then posts a
+# top-spenders summary (per-customer charges over the window) to the Slack
+# incoming webhook in $SLACK_WEBHOOK_URL.
+#
+# Schedule: 08:00 UTC daily = midnight PST (01:00 during PDT — GitHub cron is
+# UTC and does not follow daylight saving). Also runnable on demand via
+# "Run workflow" with a custom window.
+#
+# Required repo secrets:
+#   STRIPE_SECRET_KEY      - Stripe live secret key
+#   STRIPE_PUBLISHABLE_KEY - Stripe live publishable key
+#   SLACK_WEBHOOK_URL      - Slack incoming webhook URL
+
+name: Stripe usage report (nightly → Slack)
+
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Window size in days"
+        required: false
+        default: "7"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stripe-report-nightly
+  cancel-in-progress: false
+
+jobs:
+  report:
+    name: Generate + post Stripe usage
+    runs-on: self-hosted
+    env:
+      DAYS: ${{ github.event.inputs.days || '7' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Self-hosted runners persist state between runs; ensure a clean tree.
+      - name: Reset workspace to HEAD
+        run: git checkout HEAD -- .
+
+      # lit-api-server pulls in lit-actions (libsqlite3 + bindgen/libclang) and
+      # lit-actions-grpc (protobuf build script). Retry on apt lock contention.
+      - name: Install system dependencies
+        run: |
+          for i in 1 2 3 4 5; do
+            sudo apt-get update -qq && \
+            sudo apt-get install -y libsqlite3-dev libclang-dev protobuf-compiler && break
+            echo "apt lock held, waiting 10s (attempt $i/5)..."
+            sleep 10
+          done
+
+      - uses: dtolnay/rust-toolchain@1.91
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Generate usage report (CSV)
+        env:
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+        run: |
+          bash scripts/stripe_report.sh \
+            --days "$DAYS" \
+            --csv-only \
+            --out "${{ github.workspace }}/stripe-report"
+
+      - name: Post digest to Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          node scripts/stripe-report-slack.mjs \
+            "${{ github.workspace }}/stripe-report.csv" \
+            --days "$DAYS"
+
+      # Keep the raw CSV around for 30 days for ad-hoc digging.
+      - name: Upload CSV artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stripe-report-csv
+          path: ${{ github.workspace }}/stripe-report.csv
+          if-no-files-found: ignore
+          retention-days: 30

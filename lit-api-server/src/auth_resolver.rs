@@ -17,7 +17,9 @@ use lit_billing_core::billing_auth::{
     AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload,
 };
 
-use crate::core::eip712::{PRIMARY_TYPE_BILLING_AUTH, verify_eip712_signature};
+use crate::core::eip712::{
+    PRIMARY_TYPE_BILLING_AUTH, verify_eip712_signature_allow_contract_wallet,
+};
 
 pub struct LocalAuthResolver;
 
@@ -39,17 +41,31 @@ impl AuthResolver for LocalAuthResolver {
         &self,
         payload: &WalletAuthPayload,
     ) -> Result<ResolvedIdentity, AuthError> {
-        let wallet = verify_eip712_signature(
+        // Accept both EOA (65-byte ECDSA) and EIP-1271 smart-contract-wallet
+        // signatures, so a ChainSecured account whose admin is a smart wallet
+        // (e.g. a ZeroDev Kernel owned by a passkey) can authenticate to billing
+        // — symmetric with the account-management mint endpoints, which already
+        // use this verifier. The EIP-1271 path does an on-chain
+        // `isValidSignature` call via the read-only client on the node's
+        // configured chain; the EOA path short-circuits before any RPC.
+        let wallet = verify_eip712_signature_allow_contract_wallet(
             &payload.typed_data,
             &payload.signature,
             PRIMARY_TYPE_BILLING_AUTH,
         )
+        .await
         .map_err(|e| {
-            // ApiStatus has 4xx and 5xx variants; we collapse to BadCredentials
-            // since every error path here is some flavour of "this payload did
-            // not authenticate." Chain/RPC failures inside verify_eip712 would
-            // be surfaced through the chain-id check, which is also a 4xx.
-            AuthError::BadCredentials(format!("eip712 verification failed: {e:?}"))
+            // ApiStatus carries the HTTP status. A 5xx is an infra failure
+            // (read-only client unavailable, RPC timeout on the EIP-1271 call)
+            // — that's Transient (503) so lit-payments/the dashboard can retry,
+            // not a credential rejection. Everything else (bad payload, wrong
+            // domain/chain/schema, stale timestamp, signature mismatch) is a
+            // 4xx → BadCredentials (401).
+            if e.status.code >= 500 {
+                AuthError::Transient(format!("eip712 verification infra error: {e:?}"))
+            } else {
+                AuthError::BadCredentials(format!("eip712 verification failed: {e:?}"))
+            }
         })?;
 
         let wallet_address_hex = format!("0x{:x}", wallet);
@@ -76,13 +92,23 @@ impl AuthResolver for LocalAuthResolver {
         let wallet_address_hex = match crate::accounts::get_billing_wallet_address(api_key).await {
             Ok(v) => v,
             Err(e) => {
-                // `accounts::get_billing_wallet_address` bails with "account
-                // has no wallet address" when the on-chain mapping returns
-                // Address::ZERO for this key hash — i.e. the key isn't
-                // registered. Any other anyhow error is transport / RPC /
-                // contract decoding noise → transient.
+                // An unregistered key surfaces two ways depending on the
+                // AccountConfig contract version:
+                //  - Older contract: `get_billing_wallet_address` returns
+                //    Address::ZERO and bails with "account has no wallet
+                //    address".
+                //  - Post-#481 contract: the call reverts with
+                //    `AccountDoesNotExist (0xd4a84737)`, which
+                //    `decode_contract_revert` surfaces as
+                //    "Contract error: AccountDoesNotExist (...)".
+                // Both are permanent credential failures → BadCredentials
+                // (401) so lit-payments stops retrying. Any other anyhow error
+                // is transport / RPC / contract decoding noise → transient.
                 let msg = format!("{e}");
-                if msg.contains("no wallet address") || msg.contains("Address::ZERO") {
+                if msg.contains("no wallet address")
+                    || msg.contains("Address::ZERO")
+                    || msg.contains("AccountDoesNotExist")
+                {
                     return Err(AuthError::BadCredentials(format!(
                         "api key not found on chain: {msg}"
                     )));

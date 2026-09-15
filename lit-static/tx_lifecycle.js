@@ -157,7 +157,9 @@ function extractRevertData(err) {
  *   `simulatedResult` is the eth_call return value from the pre-send
  *   simulation — useful for write methods that return a value that is not
  *   emitted in logs (e.g. `addGroup` returning the new group_id).
- * @throws {Error} with { state: 'failed'|'reorged', cause, decoded } on failure
+ * @throws {Error} with { state: 'failed'|'reorged', cause, decoded, txHash, reverted } on failure.
+ *   `txHash` is non-null once the tx was broadcast; `reverted` is true only for
+ *   a mined tx that reverted (as opposed to a receipt-wait failure or reorg).
  */
 export async function runContractWrite({
   contract,
@@ -169,6 +171,11 @@ export async function runContractWrite({
   onPreview,
 }) {
   let state = TX_STATES.PREPARING;
+  // Set the moment the tx is broadcast. Its presence on a thrown error tells
+  // callers the write left this browser and may land on-chain even though we
+  // failed to observe its receipt — critical for methods that mint a
+  // client-side secret which can never be regenerated (e.g. setUsageApiKey).
+  let txHash = null;
   const emit = (next, payload) => {
     state = next;
     try {
@@ -200,6 +207,7 @@ export async function runContractWrite({
 
     emit(TX_STATES.SIGNING, { method, args });
     const tx = await contract[method](...args, overrides);
+    txHash = tx.hash;
 
     emit(TX_STATES.PENDING, { txHash: tx.hash, method });
     const receipt = await tx.wait(1);
@@ -207,7 +215,9 @@ export async function runContractWrite({
       throw Object.assign(new Error('Transaction receipt was null (possible reorg)'), { reorg: true });
     }
     if (receipt.status !== 1) {
-      throw Object.assign(new Error('Transaction reverted on-chain'), { receipt });
+      // Distinct from a receipt-wait failure: the tx was mined and definitively
+      // reverted, so any client-side secret tied to it is worthless.
+      throw Object.assign(new Error('Transaction reverted on-chain'), { receipt, reverted: true });
     }
 
     if (confirmations > 1) {
@@ -226,6 +236,11 @@ export async function runContractWrite({
     wrapped.state = finalState;
     wrapped.decoded = decoded;
     wrapped.userCancelled = !!err?.userCancelled;
+    // Surface the broadcast hash (if any) and whether the failure was a
+    // definitive on-chain revert. Callers minting client-side secrets use these
+    // to decide whether the secret is still worth surfacing to the user.
+    wrapped.txHash = txHash;
+    wrapped.reverted = !!err?.reverted;
     throw wrapped;
   }
 }

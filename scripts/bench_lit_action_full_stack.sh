@@ -244,7 +244,9 @@ bench_ref() {
   ( cd "$wt/lit-actions" && cargo build --bin lit_actions ) >>"$log" 2>&1
   ( cd "$wt/lit-api-server" && cargo build --bin lit-api-server ) >>"$log" 2>&1
   free_ports
-  ( cd "$wt" && setsid ./local_test.sh >>"$log" 2>&1 ) &
+  # Benchmarks measure Lit Action latency, not billing; run payment-free so the
+  # CPL-330 test-Stripe-key requirement doesn't block stack startup.
+  ( cd "$wt" && LIT_DISABLE_BILLING=true setsid ./local_test.sh >>"$log" 2>&1 ) &
   local stack_pid=$!
   trap "stop_stack $stack_pid; git worktree remove --force '$wt' >/dev/null 2>&1 || true" RETURN
   wait_for_stack || { tail -200 "$log" >&2 || true; return 1; }

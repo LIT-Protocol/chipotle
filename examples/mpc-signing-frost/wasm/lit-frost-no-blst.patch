@@ -1,0 +1,28 @@
+lit-frost: drop the gratuitous BLS/blst stack (prerequisite #2)
+===============================================================
+lit-frost's source uses no BLS, but it depends on lit-rust-crypto WITHOUT
+default-features=false, so lit-rust-crypto's `default` feature (= blsful/default
++ blst) pulls in blsful -> blstrs_plus -> blst, a C library that will not
+cross-compile to wasm32-unknown-unknown (cc-rs: "No available targets are
+compatible with triple wasm32-unknown-unknown").
+
+Fix: set default-features=false on the lit-rust-crypto dependency and drop the
+explicit "blst" feature, keeping only the curve features lit-frost's code needs.
+With this applied, the wrapper compiles to wasm32-unknown-unknown (cargo check,
+0 errors). Upstream: make blst optional in lit-frost (don't enable it by default).
+
+Against: lit-frost 0.4.0 (crates.io). Apply from the crate root:
+    git apply lit-frost-no-blst.patch
+------------------------------------------------------------------------------
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -115,8 +115,8 @@
+ 
+ [dependencies.lit-rust-crypto]
+ version = "0.6.0"
++default-features = false
+ features = [
+-    "blst",
+     "curve25519-dalek-default",
+     "decaf377-default",
+     "elliptic-curve-default",

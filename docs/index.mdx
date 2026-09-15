@@ -44,8 +44,21 @@ Patterns you can build on one programmable runtime.
   <Card title="Conditional signing" icon="shield-check" href="/lit-actions/examples">
     Sign only when on- or off-chain conditions hold — sanctions screens, price thresholds, KYC checks, dispute windows.
   </Card>
-  <Card title="Encrypted secrets" icon="lock" href="/lit-actions/examples#2-encrypt-a-secret">
-    Encrypt API keys, credentials, or user data under a PKP — decryptable only by an action you've authorized on-chain.
+  <Card title="Encrypted secrets" icon="lock" href="/lit-actions/secrets">
+    Encrypt API keys, credentials, or user data under a PKP or to a single immutable action — decryptable only by code you've authorized.
+  </Card>
+</CardGroup>
+
+## Design patterns
+
+The two structural patterns production apps on Chipotle are built from. Both work with no PKP and no trusted backend.
+
+<CardGroup cols={2}>
+  <Card title="Derived Actions" icon="layer-group" href="/lit-actions/derived-actions">
+    One audited template plus a stamped-in constant yields a new immutable action, with its own TEE-held key, per user, secret, or tenant.
+  </Card>
+  <Card title="Signed Data in Untrusted Storage" icon="file-signature" href="/lit-actions/signed-storage">
+    Have an action sign the records you store and verify them at runtime. Your database can fail or roll back, but it can never forge a permission.
   </Card>
 </CardGroup>
 

@@ -29,6 +29,11 @@ export interface AddUsageKeyResponse {
   usage_api_key: string;
 }
 
+export interface PrepareWalletResponse {
+  wallet_address: string;
+  derivation_path: string;
+}
+
 export interface LitActionResponse {
   has_error: boolean;
   response: unknown;
@@ -112,6 +117,14 @@ export class LitApiClient {
     account_description?: string;
   }): Promise<NewAccountResponse> {
     return this.request<NewAccountResponse>('POST', '/new_account', { body: input });
+  }
+
+  /**
+   * Fetch a fresh derived wallet address + derivation path. No auth, no body.
+   * NOT idempotent — every call returns a brand-new wallet.
+   */
+  prepareWallet(): Promise<PrepareWalletResponse> {
+    return this.request<PrepareWalletResponse>('POST', '/prepare_wallet');
   }
 
   addUsageApiKey(

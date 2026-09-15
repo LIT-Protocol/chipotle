@@ -228,6 +228,151 @@ impl OnChainBillingResolver {
         body.result
             .ok_or_else(|| ResolveError::Transient(format!("{method}: missing result")))
     }
+
+    /// Raw `eth_call` for the EIP-1271 path. Distinct from [`Self::json_rpc`]
+    /// because the revert semantics differ: a JSON-RPC execution error here is
+    /// a *definitive* "the contract did not accept this signature" (revert, or
+    /// a non-EIP-1271 contract whose dispatcher reverts), not a transient
+    /// failure — so we return `Ok(None)` rather than `Err(Transient)`. Only
+    /// transport-level problems (can't reach the node, non-2xx HTTP, undecodable
+    /// body, or a success response missing both `result` and `error`) surface as
+    /// `Err(Transient)`. An EOA (no code at the address) returns empty `0x` data
+    /// with no error, which the caller treats as a non-acceptance.
+    async fn eth_call_allow_revert(
+        &self,
+        to: &str,
+        data: &str,
+        gas: &str,
+    ) -> Result<Option<String>, ResolveError> {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0",
+            id: 1,
+            method: "eth_call",
+            params: serde_json::json!([
+                { "to": to, "data": data, "gas": gas },
+                "latest"
+            ]),
+        };
+        let resp = self
+            .client
+            .post(&self.rpc_url)
+            .json(&req)
+            .send()
+            .await
+            .map_err(|e| ResolveError::Transient(format!("POST eth_call: {e}")))?;
+        if !resp.status().is_success() {
+            return Err(ResolveError::Transient(format!(
+                "eth_call HTTP {}",
+                resp.status()
+            )));
+        }
+        let body: JsonRpcResponse<String> = resp
+            .json()
+            .await
+            .map_err(|e| ResolveError::Transient(format!("decode eth_call: {e}")))?;
+        if body.error.is_some() {
+            // Execution revert / non-EIP-1271 contract — a definitive
+            // non-acceptance, not an infra failure.
+            return Ok(None);
+        }
+        match body.result {
+            Some(data) => Ok(Some(data)),
+            None => Err(ResolveError::Transient(
+                "eth_call: response had neither result nor error".to_string(),
+            )),
+        }
+    }
+}
+
+/// Gas ceiling for the EIP-1271 `isValidSignature` `eth_call`. Signature
+/// verification (even a large Safe or a passkey-validated Kernel) costs well
+/// under this; the cap bounds the node/RPC CPU a malicious contract at an
+/// attacker-supplied address can burn per request.
+const ERC1271_CALL_GAS_LIMIT: u64 = 1_000_000;
+
+/// Interpret an `isValidSignature` `eth_call` result. `None` is a revert / EOA
+/// (definitive non-acceptance). A real `returns (bytes4)` is ABI-encoded as one
+/// full 32-byte word with the value left-aligned, so we require a complete word
+/// (64 hex chars) before reading the first 4 bytes — a short or truncated buffer
+/// (including an EOA's empty `0x`) is not a valid acceptance. Trailing padding
+/// bytes are ignored, matching the alloy `FixedBytes<4>` decode on the
+/// lit-api-server account-management path so the two services agree on what
+/// counts as a valid EIP-1271 response.
+fn erc1271_result_is_magic(result: Option<&str>) -> bool {
+    let Some(hexdata) = result else {
+        return false;
+    };
+    let stripped = hexdata.strip_prefix("0x").unwrap_or(hexdata);
+    if stripped.len() < 64 {
+        return false;
+    }
+    matches!(
+        hex::decode(&stripped[..8]),
+        Ok(first4) if first4.as_slice() == crate::eip712::ERC1271_MAGIC_VALUE
+    )
+}
+
+/// ABI-encode the calldata for `isValidSignature(bytes32 hash, bytes signature)`:
+///
+/// ```text
+///   selector (4 bytes) = bytes4(keccak256("isValidSignature(bytes32,bytes)"))
+///   word 0 : the 32-byte digest                (static head for arg0)
+///   word 1 : offset to the dynamic bytes tail = 0x40 (two head words)
+///   word 2 : signature length
+///   word 3+: signature bytes, right-padded to a 32-byte boundary
+/// ```
+fn encode_is_valid_signature_calldata(digest: B256, signature: &[u8]) -> Vec<u8> {
+    let selector = &keccak256(b"isValidSignature(bytes32,bytes)")[..4];
+    let mut calldata = Vec::with_capacity(4 + 96 + signature.len().div_ceil(32) * 32);
+    calldata.extend_from_slice(selector);
+    calldata.extend_from_slice(digest.as_slice());
+    let mut offset_word = [0u8; 32];
+    offset_word[31] = 0x40;
+    calldata.extend_from_slice(&offset_word);
+    let mut len_word = [0u8; 32];
+    len_word[24..32].copy_from_slice(&(signature.len() as u64).to_be_bytes());
+    calldata.extend_from_slice(&len_word);
+    calldata.extend_from_slice(signature);
+    let pad = (32 - signature.len() % 32) % 32;
+    calldata.extend(std::iter::repeat_n(0u8, pad));
+    calldata
+}
+
+#[async_trait::async_trait]
+impl crate::eip712::Erc1271Verifier for OnChainBillingResolver {
+    /// Verify a signature via EIP-1271 `isValidSignature(bytes32,bytes)` against
+    /// an already-deployed smart-contract wallet at `address`, on the chain this
+    /// resolver points at. We hand-roll the ABI encode/decode (matching the
+    /// `getBillingWalletAddress` approach above) to avoid pulling full contract
+    /// bindings into the shared crate.
+    async fn verify_erc1271(
+        &self,
+        address: Address,
+        digest: B256,
+        signature: &[u8],
+    ) -> Result<bool, crate::eip712::Eip712Error> {
+        use crate::eip712::Eip712Error;
+
+        let calldata = encode_is_valid_signature_calldata(digest, signature);
+        let calldata_hex = format!("0x{}", hex::encode(&calldata));
+        let to_hex = format!("0x{address:x}");
+        let gas_hex = format!("0x{ERC1271_CALL_GAS_LIMIT:x}");
+
+        let result = self
+            .eth_call_allow_revert(&to_hex, &calldata_hex, &gas_hex)
+            .await
+            .map_err(|e| {
+                Eip712Error::internal(
+                    format!("EIP-1271 isValidSignature eth_call failed: {e}"),
+                    "Signature verification temporarily unavailable (chain RPC error)",
+                )
+            })?;
+
+        // A revert, an EOA (empty `0x`), a short/truncated buffer, or any
+        // non-magic full-word return is a non-acceptance; only the ERC-1271
+        // magic value left-aligned in a 32-byte word counts.
+        Ok(erc1271_result_is_magic(result.as_deref()))
+    }
 }
 
 /// Failure modes for an on-chain lookup. Mirrored on the lit-api-server
@@ -361,5 +506,88 @@ mod tests {
         let u = U256::from_be_bytes(h.0);
         let h2 = B256::from(u.to_be_bytes());
         assert_eq!(h, h2);
+    }
+
+    /// The `isValidSignature` selector is the ERC-1271 magic value itself
+    /// (`bytes4(keccak256("isValidSignature(bytes32,bytes)"))`).
+    #[test]
+    fn is_valid_signature_selector_is_the_magic_value() {
+        let sel = &keccak256(b"isValidSignature(bytes32,bytes)")[..4];
+        assert_eq!(sel, crate::eip712::ERC1271_MAGIC_VALUE);
+    }
+
+    /// Pin the hand-rolled ABI encoding of `isValidSignature(bytes32,bytes)`
+    /// against a fully spelled-out expected layout. A 65-byte signature lands
+    /// in a 96-byte (3-word) tail: 32-byte length word + 65 bytes + 31 bytes
+    /// of zero padding.
+    #[test]
+    fn encodes_is_valid_signature_calldata() {
+        let digest = B256::repeat_byte(0x11);
+        let signature = [0x22u8; 65];
+        let calldata = encode_is_valid_signature_calldata(digest, &signature);
+
+        // selector ++ 32 (digest) ++ 32 (offset) ++ 32 (len) ++ 65 (sig) ++ 31 (pad)
+        assert_eq!(calldata.len(), 4 + 32 + 32 + 32 + 96);
+        // The calldata after the selector must be a whole number of 32-byte words.
+        assert_eq!((calldata.len() - 4) % 32, 0);
+
+        assert_eq!(&calldata[0..4], &[0x16, 0x26, 0xba, 0x7e], "selector");
+        assert_eq!(&calldata[4..36], &[0x11u8; 32], "digest word");
+
+        let mut expected_offset = [0u8; 32];
+        expected_offset[31] = 0x40;
+        assert_eq!(&calldata[36..68], &expected_offset, "bytes offset = 0x40");
+
+        let mut expected_len = [0u8; 32];
+        expected_len[31] = 65;
+        assert_eq!(&calldata[68..100], &expected_len, "signature length = 65");
+
+        assert_eq!(&calldata[100..165], &[0x22u8; 65], "signature bytes");
+        assert_eq!(
+            &calldata[165..196],
+            &[0u8; 31],
+            "right-pad to word boundary"
+        );
+    }
+
+    /// An empty signature still encodes a valid (zero-length) bytes argument:
+    /// selector + digest + offset + zero length, no tail data.
+    #[test]
+    fn encodes_empty_signature_with_no_padding() {
+        let calldata = encode_is_valid_signature_calldata(B256::ZERO, &[]);
+        assert_eq!(calldata.len(), 4 + 32 + 32 + 32);
+        let mut expected_len = [0u8; 32];
+        expected_len[31] = 0;
+        assert_eq!(&calldata[68..100], &expected_len);
+    }
+
+    /// The `isValidSignature` return decoder must require a full 32-byte ABI
+    /// word and only accept the magic value left-aligned in it. A short buffer
+    /// (e.g. a bare 4-byte `0x1626ba7e`), an EOA's empty `0x`, a revert
+    /// (`None`), or a non-magic word are all non-acceptances. Trailing padding
+    /// is ignored, matching the lit-api-server alloy `FixedBytes<4>` decode.
+    #[test]
+    fn erc1271_result_decode_requires_full_word() {
+        let zeros56 = "0".repeat(56);
+        let ones56 = "f".repeat(56);
+        // Magic value, full 32-byte word, zero-padded -> accepted.
+        assert!(erc1271_result_is_magic(Some(&format!(
+            "0x1626ba7e{zeros56}"
+        ))));
+        // Magic value, full word, trailing junk ignored (matches alloy) -> accepted.
+        assert!(erc1271_result_is_magic(Some(&format!(
+            "0x1626ba7e{ones56}"
+        ))));
+        // Short buffer the old loose decoder accepted -> now rejected.
+        assert!(!erc1271_result_is_magic(Some("0x1626ba7e")));
+        // EOA / empty result -> rejected.
+        assert!(!erc1271_result_is_magic(Some("0x")));
+        assert!(!erc1271_result_is_magic(Some("")));
+        // Revert (no result) -> rejected.
+        assert!(!erc1271_result_is_magic(None));
+        // Full word, wrong magic (the EIP-1271 failure value) -> rejected.
+        assert!(!erc1271_result_is_magic(Some(&format!(
+            "0xffffffff{zeros56}"
+        ))));
     }
 }

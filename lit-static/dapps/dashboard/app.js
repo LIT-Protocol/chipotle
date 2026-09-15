@@ -12,6 +12,7 @@ import { initKeys, loadUsageKeys } from './keys.js';
 import { initActions, loadActions } from './actions.js';
 import { initWallets, loadWallets } from './wallets.js';
 import { initActionRunner } from './runner.js';
+import { initGvisorRunner } from './gvisor_runner.js';
 import { initAbout } from './about.js';
 
 // ----- Preload all tables (with error visibility) -----
@@ -101,15 +102,25 @@ function initChainSecuredRpc() {
 
 // ----- Sidebar scroll -----
 
-const ACTION_RUNNER_ID = 'action-runner';
+// Standalone sections get their own full-page view (like tabs); selecting one
+// hides the scrollable main sections and every other standalone section.
+const STANDALONE_SECTION_IDS = ['action-runner', 'gvisor-runner'];
 const MAIN_SECTION_IDS = ['overview', 'usage-keys', 'groups', 'actions', 'wallets'];
 
-function setActionRunnerVisible(visible) {
-  const actionRunnerSection = document.getElementById('section-' + ACTION_RUNNER_ID);
-  if (actionRunnerSection) actionRunnerSection.style.display = visible ? '' : 'none';
+/**
+ * Show a single standalone section (by id) and hide the main sections, or —
+ * when `standaloneId` is null — show the main sections and hide all
+ * standalone ones.
+ */
+function showStandaloneSection(standaloneId) {
+  STANDALONE_SECTION_IDS.forEach((id) => {
+    const el = document.getElementById('section-' + id);
+    if (el) el.style.display = id === standaloneId ? '' : 'none';
+  });
+  const showMain = standaloneId === null;
   MAIN_SECTION_IDS.forEach((id) => {
     const el = document.getElementById('section-' + id);
-    if (el) el.style.display = visible ? 'none' : '';
+    if (el) el.style.display = showMain ? '' : 'none';
   });
 }
 
@@ -126,11 +137,7 @@ function initSidebar() {
     a.addEventListener('click', (e) => {
       e.preventDefault();
       const id = a.getAttribute('data-scroll');
-      if (id === ACTION_RUNNER_ID) {
-        setActionRunnerVisible(true);
-      } else {
-        setActionRunnerVisible(false);
-      }
+      showStandaloneSection(STANDALONE_SECTION_IDS.includes(id) ? id : null);
       const el = document.getElementById('section-' + id);
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       setActiveSidebarLink(id);
@@ -276,7 +283,7 @@ function refreshChangeOwnershipVisibility() {
 
 // ----- Auth ready callback -----
 
-setOnAuthReady(() => {
+function onAuthReady() {
   updateStatCards();
   preloadAllTables();
   updateUsageKeyOverrideUI();
@@ -284,7 +291,7 @@ setOnAuthReady(() => {
   refreshChangeOwnershipVisibility();
   updateChainSecuredRpcUrlUI();
   handleBillingReturn();
-});
+}
 
 // ----- Init -----
 
@@ -311,6 +318,7 @@ function init() {
   initGroups();
   initActions();
   initActionRunner();
+  initGvisorRunner();
   initSidebar();
   initHeader();
   initBilling();
@@ -322,6 +330,16 @@ function init() {
   initUsageKeyOverride();
   initChainSecuredRpc();
   initAbout();
+
+  // Register the auth-ready callback only after every init* call above has
+  // attached its button listeners. Registering at module-eval time let
+  // initLogin()'s synchronous updateAuthUI() (auth.js) fire _onAuthReady
+  // mid-init for already-logged-in sessions — before button-disable wiring
+  // ran, leaving a brief duplicate-click window. Because initLogin() already
+  // ran (and skipped the then-null callback), trigger the flow once here for
+  // sessions restored from a previous visit.
+  setOnAuthReady(onAuthReady);
+  if (isAuthenticated()) onAuthReady();
 }
 
 init();

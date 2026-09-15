@@ -7,7 +7,7 @@ use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::{
     AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
     AddUsageApiKeyRequest, AddUsageApiKeyWithSignatureRequest, ConvertToChainSecuredAccountRequest,
-    CreateWalletWithSignatureRequest, DeleteActionRequest, NewAccountRequest,
+    CreateWalletWithSignatureRequest, DeleteActionRequest, DeleteWalletRequest, NewAccountRequest,
     RemoveActionFromGroupRequest, RemoveGroupRequest, RemovePkpFromGroupRequest,
     RemoveUsageApiKeyRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
     UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
@@ -16,7 +16,7 @@ use crate::core::v1::models::response::{
     AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse,
     AddUsageApiKeyWithSignatureResponse, ApiKeyItem, ChainConfigKeysResponse, CreateWalletResponse,
     CreateWalletWithSignatureResponse, ListMetadataItem, NewAccountResponse,
-    NodeChainConfigResponse, WalletItem,
+    NodeChainConfigResponse, PrepareWalletResponse, WalletItem,
 };
 use crate::dstack::v1::get_client_key;
 use crate::stripe::StripeState;
@@ -100,6 +100,16 @@ async fn create_new_wallet() -> Result<(String, Address, [u8; 32], U256), ApiSta
     Ok((public_key_string, wallet_address, secret, derivation_u256))
 }
 
+/// True when a contract-write error is the transient read-after-write symptom of a
+/// just-created account not yet being visible to the RPC backend that served the
+/// pre-send simulation. The AccountConfig access check reverts with `NoAccountAccess`
+/// while `allApiKeyHashesToMaster[hash]` is still zero on that backend, so the error
+/// is safe to retry once the account has propagated. Any other revert is a genuine
+/// failure and must not be retried.
+fn is_account_not_yet_visible(err: &anyhow::Error) -> bool {
+    format!("{err:#}").contains("NoAccountAccess")
+}
+
 pub async fn new_account(
     signer_pool: Arc<SignerPool>,
     stripe_state: Option<Arc<StripeState>>,
@@ -124,19 +134,63 @@ pub async fn new_account(
         return Err(e.into());
     }
 
-    // technically this is NOT a derivaton path at all, but it's a stand-in for now
-    accounts::register_wallet_derivation(
-        signer_pool,
-        &api_key,
-        wallet_address,
-        derivation_path,
-        "AMW",
-        "Account Master Wallet",
-    )
-    .await?;
+    // The newAccount tx is now mined, but POST /new_account immediately issues a
+    // second on-chain write (registerWalletDerivation) whose pre-send simulation is
+    // an eth_call. On a load-balanced RPC endpoint that call can land on a backend
+    // that has not yet imported the newAccount block, so the account looks
+    // nonexistent and the AccountConfig access check reverts with NoAccountAccess
+    // (surfaced to the caller as a 500). Block until a read sees the account, then
+    // retry the write a few times to absorb any residual backend lag before failing.
+    // See the Deploy Staging k6 new-account correctness failures introduced by #634.
+    if !accounts::wait_for_account_visible(&api_key).await {
+        tracing::warn!(
+            "new_account: account not yet visible to read RPC after create; \
+             attempting wallet-derivation registration anyway"
+        );
+    }
 
-    // Best-effort: eagerly create the Stripe customer (with $0 balance) and set the email
-    // if provided.  Neither failure should prevent account creation.
+    // technically this is NOT a derivaton path at all, but it's a stand-in for now
+    const REGISTER_MAX_ATTEMPTS: u32 = 3;
+    let mut register_err = None;
+    for attempt in 1..=REGISTER_MAX_ATTEMPTS {
+        match accounts::register_wallet_derivation(
+            signer_pool.clone(),
+            &api_key,
+            wallet_address,
+            derivation_path,
+            "AMW",
+            "Account Master Wallet",
+        )
+        .await
+        {
+            Ok(_) => {
+                register_err = None;
+                break;
+            }
+            Err(e) if attempt < REGISTER_MAX_ATTEMPTS && is_account_not_yet_visible(&e) => {
+                tracing::warn!(
+                    attempt,
+                    "new_account: registerWalletDerivation raced RPC read-after-write \
+                     lag (account not yet visible on the simulating backend); \
+                     retrying after backoff: {e:#}"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
+                let _ = accounts::wait_for_account_visible(&api_key).await;
+                register_err = Some(e);
+            }
+            Err(e) => {
+                register_err = Some(e);
+                break;
+            }
+        }
+    }
+    if let Some(e) = register_err {
+        return Err(e.into());
+    }
+
+    // Best-effort: eagerly create the Stripe customer (with $0 balance), set the email
+    // if provided, and grant starter credits when STARTER_CREDITS_CENTS is configured.
+    // No failure here should prevent account creation.
     if let Some(stripe) = stripe_state {
         let wallet_hex = bytes_to_0x_hex(wallet_address.as_slice());
         match crate::stripe::get_customer_by_wallet(&wallet_hex, &stripe).await {
@@ -144,6 +198,9 @@ pub async fn new_account(
                 if !email.trim().is_empty() {
                     let _ = crate::stripe::set_customer_email(&customer_id, email.trim(), &stripe)
                         .await;
+                }
+                if let Err(e) = crate::stripe::grant_starter_credits(&customer_id, &stripe).await {
+                    tracing::warn!("stripe: failed to grant starter credits: {e}");
                 }
             }
             Err(e) => {
@@ -189,6 +246,48 @@ pub async fn create_wallet(
     })
 }
 
+/// Permanently delete a wallet (PKP) from an account.
+///
+/// HARD DELETE: wipes the on-chain registry entry including the derivation path, so the
+/// key can never be re-derived and anything secured by it becomes unrecoverable. There is
+/// no undo. Master account only (enforced on-chain).
+pub async fn delete_wallet(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    req: Json<DeleteWalletRequest>,
+) -> Result<AccountOpResponse, ApiStatus> {
+    // Accept the address with a `0x`/`0X` prefix or bare hex. hex_to_bytes only strips a
+    // lowercase `0x`, so normalize the uppercase prefix here before decoding.
+    let addr_hex = req
+        .wallet_address
+        .strip_prefix("0x")
+        .or_else(|| req.wallet_address.strip_prefix("0X"))
+        .unwrap_or(&req.wallet_address);
+    let src = hex_to_bytes(addr_hex).map_err(|_| {
+        ApiStatus::bad_request(
+            anyhow::anyhow!("wallet_address is not valid hex"),
+            "wallet_address is not valid hex",
+        )
+    })?;
+    if src.len() != 20 {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("wallet_address must be 20 bytes"),
+            "wallet_address must be 20 bytes",
+        ));
+    }
+    let wallet_address = Address::from_slice(&src);
+    if wallet_address == Address::ZERO {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("wallet_address must be non-zero"),
+            "wallet_address must be non-zero",
+        ));
+    }
+    accounts::remove_wallet_derivation(signer_pool, api_key, wallet_address)
+        .await
+        .map_err(|e| map_contract_error(e, "delete_wallet failed"))?;
+    Ok(AccountOpResponse { success: true })
+}
+
 pub async fn create_wallet_with_signature(
     req: Json<CreateWalletWithSignatureRequest>,
 ) -> Result<CreateWalletWithSignatureResponse, ApiStatus> {
@@ -204,6 +303,44 @@ pub async fn create_wallet_with_signature(
     );
     let (_public_key, wallet_address, _secret, derivation_u256) = create_new_wallet().await?;
     Ok(CreateWalletWithSignatureResponse {
+        wallet_address: bytes_to_0x_hex(wallet_address.as_slice()),
+        derivation_path: format!("0x{:x}", derivation_u256),
+    })
+}
+
+/// Return a fresh derived wallet address + derivation path with **no owner
+/// signature and no API key** — the no-signature equivalent of
+/// `create_wallet_with_signature`. Lets a ChainSecured client obtain a PKP
+/// address before registering it, so the whole owner ceremony collapses into a
+/// single signed bind UserOp instead of one WebAuthn prompt per mint.
+///
+/// The EIP-712 signature on the sibling endpoint authorizes nothing durable: it
+/// gates only the mint API's shape, and a caller can self-sign it trivially, so it
+/// is not an access-control or rate-limit boundary. What actually attaches a PKP to
+/// an account is the client's own on-chain `registerWalletDerivation` (see
+/// `core::eip712`). Dropping the signature only removes UX friction, not a security
+/// check — an un-registered response is equivalent to a discarded keypair
+/// (compute-only cost).
+///
+/// This does NOT make the derivation path a secret: paths are public (emitted by
+/// `registerWalletDerivation` and readable via `getWalletDerivation`), and the
+/// contract's per-account uniqueness does not stop a different account from
+/// registering an observed path. That cross-account hijack is a pre-existing issue
+/// independent of this endpoint (paths/addresses are already public today) and is
+/// tracked in chipotle#575 — this endpoint neither introduces nor widens it.
+///
+/// NOT IDEMPOTENT: every call generates a fresh random derivation path and thus a
+/// brand-new wallet. Retrying returns a *different* address; concurrent callers
+/// each get their own wallet with no server-side dedup. Callers that must
+/// converge on one wallet coordinate client-side. See
+/// `docs/management/api_direct.mdx`.
+pub async fn prepare_wallet() -> Result<PrepareWalletResponse, ApiStatus> {
+    let (_public_key, wallet_address, _secret, derivation_u256) = create_new_wallet().await?;
+    tracing::info!(
+        "prepare_wallet: generated unregistered PKP {:?}",
+        wallet_address
+    );
+    Ok(PrepareWalletResponse {
         wallet_address: bytes_to_0x_hex(wallet_address.as_slice()),
         derivation_path: format!("0x{:x}", derivation_u256),
     })
@@ -867,6 +1004,34 @@ mod tests {
             assert!(
                 !crate::utils::parse_with_hash::is_precomputed_hash_shape(&encoded),
                 "encoded API key {encoded:?} unexpectedly matched precomputed-hash shape",
+            );
+        }
+    }
+
+    /// `NoAccountAccess` is the read-after-write symptom the create flow retries;
+    /// every other revert must be treated as terminal so we don't mask real
+    /// failures behind pointless retries. Pin both directions, including the
+    /// `Simulation failed:`-wrapped shape `registerWalletDerivation` actually
+    /// returns and a nested error chain.
+    #[test]
+    fn is_account_not_yet_visible_matches_only_no_account_access() {
+        let wrapped = anyhow::anyhow!(
+            "Simulation failed: Contract error: NoAccountAccess (0x7b0f9c07…6057a5eb)"
+        );
+        assert!(is_account_not_yet_visible(&wrapped));
+
+        let nested = anyhow::anyhow!("boom").context("NoAccountAccess while simulating");
+        assert!(is_account_not_yet_visible(&nested));
+
+        for other in [
+            "Simulation failed: Contract error: AccountAlreadyExists (0x…)",
+            "ChainSecured accounts must be unmanaged.",
+            "no receipt for transaction 0x… within 30s",
+            "nonce too low",
+        ] {
+            assert!(
+                !is_account_not_yet_visible(&anyhow::anyhow!("{other}")),
+                "unrelated error {other:?} must not be retried as a visibility race"
             );
         }
     }

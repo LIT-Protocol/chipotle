@@ -16,6 +16,7 @@
 //! - Load average: `2 * num_cpus` (`CPU_OVERLOAD_MULTIPLIER`, e.g. `1.5`)
 //! - PSI 1s: `50.0`% (`CPU_PSI_THRESHOLD`, e.g. `70.0`)
 
+use crate::supervisor::TaskState;
 use rocket::http::Status;
 use rocket::request::{FromRequest, Outcome, Request};
 use rocket_okapi::Result as RocketOkapiResult;
@@ -28,15 +29,37 @@ use std::time::Duration;
 
 /// Monitors system load average + CPU pressure and exposes an overload flag.
 ///
-/// Register as Rocket managed state via `.manage(CpuOverloadMonitor::start())`.
+/// Built with [`CpuOverloadMonitor::new`] (which does **not** spawn anything) and
+/// registered as Rocket managed state; the sampling loop [`CpuOverloadMonitor::run`]
+/// is wired into the in-process supervisor so a panic re-spawns it.
 #[derive(Clone)]
 pub struct CpuOverloadMonitor {
     overloaded: Arc<AtomicBool>,
+    /// 1-minute load-average threshold above which we shed load.
+    load_threshold: f64,
+    /// PSI `some` threshold (percent of a 1 s window with a task waiting on CPU).
+    psi_threshold: f64,
+}
+
+/// Resets the overload flag to `false` on drop — the **fail-open** guarantee.
+///
+/// If the sampling loop ever dies (returns or panic-unwinds), shedding turns OFF so
+/// a stale `true` can never wedge `/health` at 503 forever on the single live node.
+/// On re-spawn the loop re-derives the real flag within ~1 s. Drop runs during a
+/// panic unwind because these binaries use `panic = "unwind"`.
+struct FailOpenGuard(Arc<AtomicBool>);
+
+impl Drop for FailOpenGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Relaxed);
+    }
 }
 
 impl CpuOverloadMonitor {
-    /// Starts a background tokio task that samples system load every second.
-    pub fn start() -> Self {
+    /// Build the monitor handle, reading thresholds from the environment. Does
+    /// **not** spawn the sampling loop — wire [`CpuOverloadMonitor::run`] into the
+    /// supervisor.
+    pub fn new() -> Self {
         let load_multiplier: f64 = std::env::var("CPU_OVERLOAD_MULTIPLIER")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -52,22 +75,46 @@ impl CpuOverloadMonitor {
             .and_then(|v| v.parse().ok())
             .unwrap_or(50.0);
 
-        let overloaded = Arc::new(AtomicBool::new(false));
-
         tracing::info!(
             num_cpus = num_cpus as usize,
             load_multiplier,
             load_threshold,
             psi_threshold,
-            "CPU overload monitor started (429 load shedding enabled)"
+            "CPU overload monitor initialized (429 load shedding enabled)"
         );
 
-        let flag = overloaded.clone();
-        tokio::spawn(async move {
+        Self {
+            overloaded: Arc::new(AtomicBool::new(false)),
+            load_threshold,
+            psi_threshold,
+        }
+    }
+
+    /// The supervised sampling loop. Samples `/proc` every second and updates the
+    /// shared overload flag. Fails open on exit (see [`FailOpenGuard`]) and beats
+    /// the supervisor heartbeat each iteration.
+    ///
+    /// Returns an owned, `'static` future so it can be re-invoked by the supervisor
+    /// without borrowing `self` across await points. `use<>` declares the future
+    /// captures nothing from `&self` — it owns clones of the flag and thresholds.
+    pub fn run(
+        &self,
+        state: Arc<TaskState>,
+    ) -> impl std::future::Future<Output = ()> + Send + use<> {
+        let flag = self.overloaded.clone();
+        let load_threshold = self.load_threshold;
+        let psi_threshold = self.psi_threshold;
+
+        async move {
+            // On any exit (return or panic-unwind) the flag is reset to false.
+            let _fail_open = FailOpenGuard(flag.clone());
+
             let mut was_overloaded = false;
             let mut prev_psi_total: Option<u64> = None;
 
             loop {
+                state.beat();
+
                 let load_overloaded = read_1m_load_avg()
                     .await
                     .map(|avg| avg > load_threshold)
@@ -107,19 +154,27 @@ impl CpuOverloadMonitor {
 
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
-        });
-
-        Self { overloaded }
+        }
     }
 
     /// Creates a monitor with a pre-set flag (for testing from other modules).
     #[cfg(test)]
     pub fn new_with_flag(overloaded: Arc<AtomicBool>) -> Self {
-        Self { overloaded }
+        Self {
+            overloaded,
+            load_threshold: 0.0,
+            psi_threshold: 0.0,
+        }
     }
 
     pub fn is_overloaded(&self) -> bool {
         self.overloaded.load(Ordering::Relaxed)
+    }
+}
+
+impl Default for CpuOverloadMonitor {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -242,6 +297,63 @@ mod tests {
 
         let response = client.get("/test").dispatch().await;
         assert_eq!(response.status(), Status::TooManyRequests);
+    }
+
+    /// Fail-open (codex #9): when the sampling loop ends normally, the guard
+    /// resets the flag to `false` so shedding turns off rather than freezing at a
+    /// stale `true`.
+    #[test]
+    fn fail_open_guard_resets_flag_on_drop() {
+        let flag = Arc::new(AtomicBool::new(true));
+        {
+            let _guard = FailOpenGuard(flag.clone());
+            assert!(flag.load(Ordering::Relaxed));
+        }
+        assert!(
+            !flag.load(Ordering::Relaxed),
+            "drop must reset the flag to false"
+        );
+    }
+
+    /// Fail-open also holds across a panic unwind — this is the realistic death
+    /// path, and it doubles as an end-to-end check that these binaries unwind
+    /// (run destructors) rather than abort on panic.
+    #[tokio::test]
+    async fn fail_open_guard_resets_flag_on_panic_unwind() {
+        let flag = Arc::new(AtomicBool::new(true));
+        let f = flag.clone();
+        let handle = tokio::spawn(async move {
+            let _guard = FailOpenGuard(f);
+            panic!("simulated monitor panic");
+        });
+        let result = handle.await;
+        assert!(result.is_err(), "task should have panicked");
+        assert!(
+            !flag.load(Ordering::Relaxed),
+            "flag must fail open (false) after a panic unwind"
+        );
+    }
+
+    /// Re-spawnable: `run()` shares the same flag and bumps its heartbeat. On a
+    /// Linux host (where `/proc` is readable) the loop derives the flag and beats
+    /// within a couple of seconds.
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn run_loop_beats_and_derives_flag() {
+        use crate::supervisor::TaskHealth;
+        let monitor = CpuOverloadMonitor::new();
+        let health = TaskHealth::new();
+        let state = health.register("cpu_test");
+        let before = state.heartbeat_ms();
+
+        let handle = tokio::spawn(monitor.run(state.clone()));
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        handle.abort();
+
+        assert!(
+            state.heartbeat_ms() >= before,
+            "run() loop should bump the heartbeat"
+        );
     }
 
     #[tokio::test]

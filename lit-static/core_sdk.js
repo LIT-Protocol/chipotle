@@ -975,6 +975,41 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
+   * POST /core/v1/lit_binary_action
+   * Executes an any-language action bundle on the gVisor runner. Supply exactly
+   * one bundle source: `bundle` (base64-encoded tar/tar.gz of the payload) or
+   * `checksum` (the content id of a bundle the runner already cached). Like
+   * {@link litAction}, this is a thin passthrough — the server is the single
+   * source of truth and returns a clean 400 if neither is supplied (and derives
+   * the authoritative checksum from the bundle bytes if both are). The sandbox
+   * always runs `bash startup.sh`: `startupScript` here overrides the bundle's
+   * own `startup.sh`. Top-level `jsParams` values are injected as environment
+   * variables. Same billing, auth, and response shape as {@link litAction}.
+   * @param {Object} options
+   * @param {string} options.apiKey - Usage or account API key
+   * @param {string} [options.bundle] - Base64-encoded tar/tar.gz bundle
+   * @param {string} [options.checksum] - Content id (CID) of a cached bundle
+   * @param {string} [options.startupScript] - Bash entrypoint script
+   * @param {*} [options.jsParams] - Parameters exposed to the action
+   * @returns {Promise<LitActionResponse>} { response, logs, has_error }
+   */
+  async litBinaryAction({ apiKey, bundle, checksum, startupScript, jsParams } = {}) {
+    // `js_params` is always sent (as null when absent) to mirror litAction; the
+    // server accepts a missing key too, but keeping the shape identical avoids
+    // divergence between the two execution paths.
+    const body = { js_params: jsParams ?? null };
+    if (bundle) body.bundle = bundle;
+    if (checksum) body.checksum = checksum;
+    if (startupScript) body.startup_script = startupScript;
+    const res = await fetch(`${this.baseUrl}/lit_binary_action`, {
+      method: 'POST',
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'lit_binary_action');
+  }
+
+  /**
    * POST /core/v1/add_group
    * Add a group to an account with permitted action hashes and PKP hashes.
    * @param {AddGroupOptions} options
@@ -1126,6 +1161,43 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
+   * POST /core/v1/delete_wallet
+   * Permanently and irreversibly delete a wallet (PKP).
+   *
+   * HARD DELETE: this wipes the on-chain derivation path for the wallet. Because keys
+   * are stateless derivations of that path and are never stored anywhere else, once it
+   * is deleted the private key can NEVER be re-derived. Anything encrypted or otherwise
+   * secured by this wallet becomes permanently unrecoverable. There is no undo.
+   *
+   * Requires the master (account) API key — a usage API key is rejected on-chain
+   * (`NotMasterAccount`) and the call will revert.
+   *
+   * @param {{ apiKey?: string, walletAddress: string, sovereignLifecycle?: object }} options
+   * @returns {Promise<AccountOpResponse>}
+   */
+  async deleteWallet({ apiKey, walletAddress, sovereignLifecycle } = {}) {
+    if (this.mode === 'sovereign') {
+      const contract = await this._getWriteContract();
+      const hash = await this._adminHash(apiKey);
+      const { txHash } = await runContractWrite({
+        contract, method: 'removeWalletDerivation',
+        args: [hash, walletAddress],
+        ...(sovereignLifecycle ?? {}),
+      });
+      return { success: true, transaction_hash: txHash };
+    }
+    const body = {
+      wallet_address: walletAddress,
+    };
+    const res = await fetch(`${this.baseUrl}/delete_wallet`, {
+      method: 'POST',
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'delete_wallet');
+  }
+
+  /**
    * POST /core/v1/add_usage_api_key
    * Add a usage API key to an account. Server creates and returns the new key.
    * @param {AddUsageApiKeyOptions} options
@@ -1162,25 +1234,45 @@ export class LitNodeSimpleApiClient {
       crypto.getRandomValues(randBytes);
       const newUsageKey = 'lk_' + Array.from(randBytes, (b) => b.toString(16).padStart(2, '0')).join('');
       const usageHash = ethers.keccak256(ethers.toUtf8Bytes(newUsageKey));
-      const { txHash } = await runContractWrite({
-        contract, method: 'setUsageApiKey',
-        args: [
-          hash,
-          usageHash,
-          expirationVal,
-          balanceVal,
-          name ?? '',
-          description ?? '',
-          canCreateGroups,
-          canDeleteGroups,
-          canCreatePkps,
-          manageIpfsIdsInGroups.map((n) => BigInt(n)),
-          addPkpToGroups.map((n) => BigInt(n)),
-          removePkpFromGroups.map((n) => BigInt(n)),
-          executeInGroups.map((n) => BigInt(n)),
-        ],
-        ...(sovereignLifecycle ?? {}),
-      });
+      let txHash;
+      try {
+        ({ txHash } = await runContractWrite({
+          contract, method: 'setUsageApiKey',
+          args: [
+            hash,
+            usageHash,
+            expirationVal,
+            balanceVal,
+            name ?? '',
+            description ?? '',
+            canCreateGroups,
+            canDeleteGroups,
+            canCreatePkps,
+            manageIpfsIdsInGroups.map((n) => BigInt(n)),
+            addPkpToGroups.map((n) => BigInt(n)),
+            removePkpFromGroups.map((n) => BigInt(n)),
+            executeInGroups.map((n) => BigInt(n)),
+          ],
+          ...(sovereignLifecycle ?? {}),
+        }));
+      } catch (err) {
+        // The cleartext usage key was minted in THIS browser; only its
+        // keccak256 hash is ever written on-chain, and the server never sees
+        // it. If the tx was broadcast (`txHash`) but we couldn't confirm its
+        // receipt — RPC timeout, dropped connection, reorg — the on-chain write
+        // may still land, yet the cleartext would be lost forever. Attach it to
+        // the error so the caller can surface it with an "unconfirmed" warning
+        // rather than discarding it. We deliberately do NOT do this for an
+        // explicit on-chain revert (`err.reverted`): there the key was never
+        // registered and is useless, so it should not be shown as valid.
+        if (err && err.txHash && !err.reverted) {
+          err.usage_api_key = newUsageKey;
+          err.hash = usageHash;
+          err.transaction_hash = err.txHash;
+          err.unconfirmed = true;
+        }
+        throw err;
+      }
       return { success: true, usage_api_key: newUsageKey, hash: usageHash, transaction_hash: txHash };
     }
     const body = {
@@ -1681,6 +1773,19 @@ export class LitNodeSimpleApiClient {
       if (rpcUrl) cfg.rpc_url = rpcUrl;
     }
     return cfg;
+  }
+
+  /**
+   * GET /core/v1/get_supported_languages
+   * Advertises the node's language capability surface. Each entry carries an
+   * `execution_model` of `"deno"` (JavaScript) or `"gvisor"` (any-language
+   * runner). Unauthenticated — clients use it to discover capability before
+   * uploading. See lit-api-server `actions::languages`.
+   * @returns {Promise<{ languages: Array<{ name: string, display_name: string, execution_model: string, runtimes: object[], methods: string[] }> }>}
+   */
+  async getSupportedLanguages() {
+    const res = await fetch(`${this.baseUrl}/get_supported_languages`);
+    return parseResponse(res, 'get_supported_languages');
   }
 
   /**

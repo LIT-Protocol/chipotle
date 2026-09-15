@@ -2,11 +2,13 @@ mod account_management;
 mod actions;
 mod billing;
 mod configuration;
+mod stats;
 
 use self::account_management::*;
 use self::actions::*;
 use self::billing::*;
 use self::configuration::*;
+use self::stats::*;
 
 use rocket::Route;
 use rocket_okapi::okapi::openapi3::OpenApi;
@@ -20,8 +22,12 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         convert_to_chain_secured_account,
         account_exists,
         create_wallet,
+        create_wallet_post,
         create_wallet_with_signature,
+        prepare_wallet,
+        delete_wallet,
         lit_action,
+        lit_binary_action,
         get_lit_action_ipfs_id,
         add_group,
         remove_group,
@@ -45,6 +51,8 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         get_node_chain_config,
         get_chain_config_keys,
         get_lit_action_client_config,
+        get_cache_metadata,
+        get_supported_languages,
         get_api_payers,
         get_admin_api_payer,
         billing_stripe_config,
@@ -52,5 +60,6 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         billing_create_payment_intent,
         billing_confirm_payment,
         get_version,
+        get_system_stats,
     ]
 }

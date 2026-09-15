@@ -15,6 +15,12 @@
 #   2. Provision compose file update via Phala Cloud API → get compose hash
 #   3. Propose addComposeHash(hash) to Safe multisig on Base
 #   4. Create draft GitHub release with deployment context for Phase 2
+#   5. Create/advance the release-line branch (release/vX.Y) for hotfixes
+#
+# Release-line branches (CPL-358): each tagged prod release lands its commit on a
+# minor-version branch release/vX.Y. All patch releases on a line share one branch,
+# giving hotfixes to a shipped version a stable home that never moves as main
+# advances. See architectureDocs/deployment/vm-code-upgrade.md ("Release-line branches & hotfixes").
 #
 # Image provenance (DR-1b): Each image is signed with Sigstore (cosign keyless).
 # To verify:
@@ -58,8 +64,82 @@ on:
         required: false
         type: string
         default: ""
+      skip_staging_check:
+        description: "Emergency override: propose even if this commit has no green Deploy Staging run (use only when staging is down for unrelated reasons)."
+        required: false
+        type: boolean
+        default: false
 
 jobs:
+  # Refuse to propose a prod release unless the soak perf gate is green for the
+  # exact code being shipped. Two parts:
+  #   1. Find the most recent first-parent ancestor (mainline) that carries a
+  #      perf-gate/soak status — "the last time the soak ran" — and require it
+  #      to be success.
+  #   2. Require that NO image-affecting path changed between that gated commit
+  #      and the release commit. This is what makes "inherit" sound: a version-
+  #      bump/no-op release commit inherits the gated result, but a deploy-
+  #      relevant change whose soak hasn't run/passed (in-progress, failed before
+  #      the soak, or never gated) is caught here instead of silently inheriting
+  #      an older success.
+  # Overridable on manual dispatch via skip_staging_check (never on a tag push).
+  verify-staging-passed:
+    runs-on: self-hosted
+    permissions:
+      contents: read # checkout + read commit statuses
+      statuses: read
+    steps:
+      - uses: actions/checkout@v4
+        if: ${{ !inputs.skip_staging_check }}
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0 # full history for the first-parent walk + diff
+      - name: Require the soak gate green for the code being released
+        if: ${{ !inputs.skip_staging_check }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          MAX_ANCESTORS: "200"
+        run: |
+          set -euo pipefail
+          # Paths whose contents end up in the prod images / compose. Keep in sync
+          # with deploy-staging.yml's DEPLOY_PATHS (minus the staging-only entries:
+          # the workflow files and k6/, which don't affect prod image content).
+          IMAGE_PATHS=(lit-actions/ lit-api-server/ lit-billing-core/ lit-core/ \
+            otel-collector/ Dockerfile.lit-actions Dockerfile.lit-actions-gvisor \
+            Dockerfile.lit-api-server Dockerfile.otel-collector docker-compose.phala.yml)
+
+          # 1. Most recent first-parent ancestor carrying a perf-gate/soak status.
+          gated=""; state=""
+          while read -r c; do
+            s=$(gh api "repos/${GH_REPO}/commits/${c}/statuses?per_page=100" \
+              --jq 'map(select(.context=="perf-gate/soak")) | (first | .state) // "none"')
+            if [ "$s" != "none" ]; then gated="$c"; state="$s"; break; fi
+          done < <(git rev-list --first-parent -n "${MAX_ANCESTORS}" "${SHA}")
+
+          if [ -z "$gated" ]; then
+            echo "::error::No perf-gate/soak status on any of the last ${MAX_ANCESTORS} first-parent ancestors of ${SHA}. Has Deploy Staging run the soak gate on main recently? Override with skip_staging_check=true (manual dispatch) if appropriate."
+            exit 1
+          fi
+          echo "Last soak-gated commit on mainline: ${gated} (perf-gate/soak=${state})"
+          if [ "$state" != "success" ]; then
+            echo "::error::soak perf gate at ${gated} is '${state}', not 'success'. Fix perf and let Deploy Staging pass before releasing."
+            exit 1
+          fi
+
+          # 2. No ungated image-affecting change between the gated commit and SHA.
+          if ! git diff --quiet "${gated}" "${SHA}" -- "${IMAGE_PATHS[@]}"; then
+            echo "::error::Image-affecting changes between the last soak-gated commit ${gated} and the release commit ${SHA} have NOT been soak-gated:"
+            git diff --name-only "${gated}" "${SHA}" -- "${IMAGE_PATHS[@]}" | sed 's/^/  /'
+            echo "Let Deploy Staging run+pass on the latest deploy-relevant commit before releasing, or override with skip_staging_check=true (manual dispatch)."
+            exit 1
+          fi
+          echo "✓ soak gate passed at ${gated} and no image-affecting change since → release allowed for ${SHA}"
+      - name: Staging check skipped (override)
+        if: ${{ inputs.skip_staging_check }}
+        run: echo "::warning::skip_staging_check=true — proceeding WITHOUT verifying the soak perf gate for ${{ github.sha }}."
+
   validate-secrets:
     runs-on: self-hosted
     steps:
@@ -74,9 +154,10 @@ jobs:
           SAFE_PROPOSER_PRIVATE_KEY: ${{ secrets.SAFE_PROPOSER_PRIVATE_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+          LIT_INTERNAL_SHARED_SECRET: ${{ secrets.LIT_INTERNAL_SHARED_SECRET }}
         run: |
           missing=()
-          for secret in GCP_SERVICE_ACCOUNT_JSON BASE_CHAIN_RPC CERTBOT_AWS_ACCESS_KEY_ID CERTBOT_AWS_SECRET_ACCESS_KEY CERTBOT_AWS_ROLE_ARN PHALA_CLOUD_API_KEY SAFE_PROPOSER_PRIVATE_KEY STRIPE_SECRET_KEY STRIPE_PUBLISHABLE_KEY; do
+          for secret in GCP_SERVICE_ACCOUNT_JSON BASE_CHAIN_RPC CERTBOT_AWS_ACCESS_KEY_ID CERTBOT_AWS_SECRET_ACCESS_KEY CERTBOT_AWS_ROLE_ARN PHALA_CLOUD_API_KEY SAFE_PROPOSER_PRIVATE_KEY STRIPE_SECRET_KEY STRIPE_PUBLISHABLE_KEY LIT_INTERNAL_SHARED_SECRET; do
             if [ -z "${!secret}" ]; then
               missing+=("$secret")
             fi
@@ -87,7 +168,7 @@ jobs:
           fi
 
   build:
-    needs: [validate-secrets]
+    needs: [validate-secrets, verify-staging-passed]
     runs-on: self-hosted
     permissions:
       id-token: write  # required for Sigstore keyless signing (OIDC token)
@@ -98,6 +179,8 @@ jobs:
         include:
           - service: lit-actions
             dockerfile: Dockerfile.lit-actions
+          - service: lit-actions-gvisor
+            dockerfile: Dockerfile.lit-actions-gvisor
           - service: lit-api-server
             dockerfile: Dockerfile.lit-api-server
           - service: otel-collector
@@ -169,16 +252,19 @@ jobs:
       - name: Prepare docker-compose for deployment (digest-pinned)
         run: |
           DIGEST_LIT_ACTIONS=$(cat digest-lit-actions.txt | tr -d '\n' | sed 's/}[}]*$//')
+          DIGEST_LIT_ACTIONS_GVISOR=$(cat digest-lit-actions-gvisor.txt | tr -d '\n' | sed 's/}[}]*$//')
           DIGEST_LIT_API_SERVER=$(cat digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
           DIGEST_OTEL_COLLECTOR=$(cat digest-otel-collector.txt | tr -d '\n' | sed 's/}[}]*$//')
           DOMAIN="api.chipotle.litprotocol.com"
           sed \
             -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|${{ vars.DOCKER_IMAGE }}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
+            -e "s|\${DOCKER_IMAGE_LIT_ACTIONS_GVISOR}|${{ vars.DOCKER_IMAGE }}-lit-actions-gvisor@${DIGEST_LIT_ACTIONS_GVISOR}|g" \
             -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|${{ vars.DOCKER_IMAGE }}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
             -e "s|\${DOCKER_IMAGE_OTEL_COLLECTOR}|${{ vars.DOCKER_IMAGE }}-otel-collector@${DIGEST_OTEL_COLLECTOR}|g" \
             -e "s|\${GCP_PROJECT_ID}|chipotle-prod|g" \
             -e "s|\${CERTBOT_DOMAIN}|${DOMAIN}|g" \
             -e "s|\${CERTBOT_AWS_REGION}|${{ vars.CERTBOT_AWS_REGION }}|g" \
+            -e "s|\${LIT_GVISOR_ENABLED}|false|g" \
             docker-compose.phala.yml > docker-compose.deploy.yml
 
       - name: Setup Node.js
@@ -230,7 +316,8 @@ jobs:
                 "CERTBOT_AWS_ACCESS_KEY_ID",
                 "CERTBOT_AWS_SECRET_ACCESS_KEY",
                 "CERTBOT_AWS_ROLE_ARN",
-                "CERTBOT_AWS_REGION"
+                "CERTBOT_AWS_REGION",
+                "LIT_INTERNAL_SHARED_SECRET"
               ]
             }' > "$PROVISION_FILE"
           echo "Request payload size: $(wc -c < "$PROVISION_FILE") bytes"
@@ -344,6 +431,7 @@ jobs:
           CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
           CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
           CERTBOT_AWS_REGION: ${{ vars.CERTBOT_AWS_REGION }}
+          LIT_INTERNAL_SHARED_SECRET: ${{ secrets.LIT_INTERNAL_SHARED_SECRET }}
           ENCRYPT_PUBKEY: ${{ steps.fetch-pubkey.outputs.encrypt_pubkey }}
         run: |
           set -euo pipefail
@@ -368,6 +456,7 @@ jobs:
               { key: "CERTBOT_AWS_SECRET_ACCESS_KEY", value: process.env.CERTBOT_AWS_SECRET_ACCESS_KEY },
               { key: "CERTBOT_AWS_ROLE_ARN", value: process.env.CERTBOT_AWS_ROLE_ARN },
               { key: "CERTBOT_AWS_REGION", value: process.env.CERTBOT_AWS_REGION },
+              { key: "LIT_INTERNAL_SHARED_SECRET", value: process.env.LIT_INTERNAL_SHARED_SECRET },
             ];
             const pubkey = process.env.ENCRYPT_PUBKEY;
             encryptEnvVars(envs, pubkey).then(hex => process.stdout.write(hex));
@@ -467,3 +556,60 @@ jobs:
             --title "${{ github.ref_name }}" \
             --generate-notes \
             --target "${{ github.sha }}"
+
+  # Land the released commit on a minor-version release-line branch (release/vX.Y)
+  # so hotfixes to a shipped version have a stable home that never moves as main
+  # advances (CPL-358). All patch releases on a line (v1.2.0, v1.2.1, ...) share
+  # one branch. Runs only for tag pushes; workflow_dispatch re-provisions an
+  # existing release and has no tag to key a line off.
+  create-release-branch:
+    needs: [create-draft-release]
+    if: ${{ github.ref_type == 'tag' }}
+    runs-on: self-hosted
+    permissions:
+      contents: write # push the release-line branch
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0 # need history to test fast-forward against an existing branch
+
+      - name: Create or advance the release-line branch
+        env:
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # Derive release/vMAJOR.MINOR from the tag. Prefix-match tolerates
+          # pre-release suffixes (v1.2.0-rc1 → release/v1.2), keeping the whole
+          # 1.2 line on one branch.
+          if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+            echo "::notice::Tag '$TAG' is not vMAJOR.MINOR.PATCH — skipping release-branch creation."
+            exit 0
+          fi
+          BRANCH="release/v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+          echo "Release-line branch: $BRANCH (tag $TAG @ $SHA)"
+
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            # Branch exists — an earlier patch release on this line, or a branch
+            # already carrying hotfix commits. Only fast-forward it to the tagged
+            # commit; never force-push, which would discard those hotfix commits.
+            # Compare against FETCH_HEAD: `git fetch` always writes it, whereas the
+            # origin/$BRANCH remote-tracking ref may not exist under checkout's
+            # narrow fetch refspec.
+            git fetch origin "$BRANCH"
+            if git merge-base --is-ancestor FETCH_HEAD "$SHA"; then
+              echo "Fast-forwarding $BRANCH to $SHA"
+              if ! git push origin "$SHA:refs/heads/$BRANCH"; then
+                echo "::warning::Failed to push $BRANCH to $SHA (branch may have moved). Leaving it untouched."
+              fi
+            else
+              echo "::warning::$BRANCH has diverged from $SHA (likely carries hotfix commits). Leaving it untouched — reconcile manually if this release should advance the line."
+            fi
+          else
+            echo "Creating $BRANCH at $SHA"
+            if ! git push origin "$SHA:refs/heads/$BRANCH"; then
+              echo "::warning::Failed to create $BRANCH at $SHA."
+            fi
+          fi

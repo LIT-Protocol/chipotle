@@ -23,7 +23,8 @@
               "management/pricing",
               "management/crypto",
               "management/litkey",
-              "management/api_keys"
+              "management/api_keys",
+              "management/errors"
             ]
           },
           {
@@ -34,6 +35,8 @@
               "lit-actions/wasm",
               "lit-actions/examples",
               "lit-actions/patterns",
+              "lit-actions/derived-actions",
+              "lit-actions/signed-storage",
               "lit-actions/secrets",
               "lit-actions/limits",
               {
@@ -78,7 +81,9 @@
           },
           {
             "group": "Actions Reference",
-            "pages": ["lit-actions/chipotle"]
+            "pages": [
+              "lit-actions/chipotle"
+            ]
           }
         ]
       }

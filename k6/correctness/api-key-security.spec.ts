@@ -24,6 +24,8 @@ export interface SecuritySetupData {
   walletAddressA: string;
   groupIdX: number;
   groupIdY: number;
+  groupNameX: string;
+  groupNameY: string;
   ipfsId: string;
   hashedCid: string;
   pkpWalletAddress: string;
@@ -122,9 +124,14 @@ export function setup(): SecuritySetupData {
   // Ensure account A has enough credits — this test makes many billed calls.
   ensureAccountCredits(client, adminA, 5000);
 
-  // Create group X
+  // Create group X. Group IDs are account-scoped (per-account auto-incrementing),
+  // so two accounts can hold groups with the same integer id. Cross-account isolation
+  // (Test 9) therefore compares unique per-run names, not raw ids — keep these names
+  // as the single source of truth.
+  const groupNameX = `k6-sec-groupX-${K6_RUN_ID}`;
+  const groupNameY = `k6-sec-groupY-${K6_RUN_ID}`;
   const addGroupXRes = client.addGroup(
-    { group_name: `k6-sec-groupX-${K6_RUN_ID}`, group_description: "Security test group X", pkp_ids_permitted: [], cid_hashes_permitted: [] },
+    { group_name: groupNameX, group_description: "Security test group X", pkp_ids_permitted: [], cid_hashes_permitted: [] },
     adminA,
   );
   if (!assertOk("setup/addGroupX", "POST /add_group", addGroupXRes)) throw new Error("setup failed: addGroupX");
@@ -132,7 +139,7 @@ export function setup(): SecuritySetupData {
 
   // Create group Y
   const addGroupYRes = client.addGroup(
-    { group_name: `k6-sec-groupY-${K6_RUN_ID}`, group_description: "Security test group Y", pkp_ids_permitted: [], cid_hashes_permitted: [] },
+    { group_name: groupNameY, group_description: "Security test group Y", pkp_ids_permitted: [], cid_hashes_permitted: [] },
     adminA,
   );
   if (!assertOk("setup/addGroupY", "POST /add_group", addGroupYRes)) throw new Error("setup failed: addGroupY");
@@ -222,7 +229,7 @@ export function setup(): SecuritySetupData {
   const usageKeyB = createUsageKey(client, adminB, "sec-accountB", { execute_in_groups: [0] });
 
   return {
-    accountKeyA, walletAddressA, groupIdX, groupIdY, ipfsId, hashedCid, pkpWalletAddress,
+    accountKeyA, walletAddressA, groupIdX, groupIdY, groupNameX, groupNameY, ipfsId, hashedCid, pkpWalletAddress,
     usageKey_executeX, usageKey_executeY, usageKey_createGroups, usageKey_deleteGroups, usageKey_createPkps,
     usageKey_manageIpfsX, usageKey_addPkpX, usageKey_removePkpX, usageKey_executeWildcard,
     usageKey_zeroAccess, usageKey_lifecycle, usageKey_revocation,
@@ -418,7 +425,10 @@ export default function (data: SecuritySetupData) {
     );
     assertOk("9-crossAccount-B-executes-own", "POST /lit_action", posRes);
 
-    // Data isolation: Account B's listGroups should NOT contain Account A's groups
+    // Data isolation: Account B's listGroups should NOT contain Account A's groups.
+    // Compare by unique per-run name, NOT raw id: group IDs are account-scoped
+    // (per-account auto-incrementing), so B's own group can share groupIdX/groupIdY's
+    // integer value, which would false-negative an id-based comparison.
     const listBRes = client.listGroups({ page_number: 0, page_size: 100 }, adminB);
     if (assertOk("9-crossAccount-B-listGroups", "GET /list_groups", listBRes)) {
       const bGroups = listBRes.data as Array<{ id: string; name: string }>;
@@ -426,9 +436,9 @@ export default function (data: SecuritySetupData) {
         listBRes.response,
         {
           "B's listGroups does not contain A's groupX": () =>
-            !bGroups.some((g) => parseInt(g.id) === data.groupIdX),
+            !bGroups.some((g) => g.name === data.groupNameX),
           "B's listGroups does not contain A's groupY": () =>
-            !bGroups.some((g) => parseInt(g.id) === data.groupIdY),
+            !bGroups.some((g) => g.name === data.groupNameY),
         },
         "9-crossAccount-isolation",
       );

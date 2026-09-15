@@ -23,7 +23,8 @@ export function renderWalletsTable(items) {
     const tr = document.createElement('tr');
     tr.innerHTML =
       '<td class="mono">' + escapeHtml(description) + '</td>' +
-      '<td class="mono cell-address"></td>';
+      '<td class="mono cell-address"></td>' +
+      '<td class="col-actions cell-actions"></td>';
     const addressCell = tr.querySelector('.cell-address');
     const addressCopyBtn = document.createElement('button');
     addressCopyBtn.type = 'button';
@@ -34,6 +35,17 @@ export function renderWalletsTable(items) {
       copyToClipboard(address, addressCopyBtn);
     });
     addressCell.appendChild(addressCopyBtn);
+
+    const actionsCell = tr.querySelector('.cell-actions');
+    if (address) {
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'btn btn-sm btn-danger';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.title = 'Permanently delete this wallet';
+      deleteBtn.addEventListener('click', () => openDeleteWalletModal(address, description));
+      actionsCell.appendChild(deleteBtn);
+    }
     tbody.appendChild(tr);
   });
 }
@@ -88,6 +100,64 @@ function openAddWalletModal() {
       showStatus('wallets-status', 'Wallet created: ' + (res.wallet_address || ''), 'success');
     } catch (e) {
       logError('createWallet', e);
+      showStatus('wallets-status', 'Error: ' + formatError(e), 'error');
+    } finally {
+      closeActionProgress();
+    }
+  });
+}
+
+// ----- Delete (permanent / irreversible) -----
+
+function openDeleteWalletModal(address, description) {
+  const label = description ? (escapeHtml(description) + ' (' + escapeHtml(address) + ')') : escapeHtml(address);
+  const body =
+    '<div class="danger-panel">' +
+      '<p class="danger-lead"><strong>This permanently and irreversibly deletes this wallet (PKP).</strong></p>' +
+      '<ul class="danger-list">' +
+        '<li>The wallet’s on-chain derivation path is <strong>wiped</strong>. Keys are derived on demand from that path and stored nowhere else — once it is gone the private key can <strong>never be re-derived</strong>.</li>' +
+        '<li><strong>Anything encrypted or secured by this wallet becomes permanently unretrievable.</strong> This includes any data whose access control depends on this PKP.</li>' +
+        '<li>The wallet is removed from <strong>every group</strong> it belongs to.</li>' +
+        '<li>Any on-chain assets held by this wallet address on other chains are <strong>not</strong> transferred and become inaccessible through this account.</li>' +
+        '<li><strong>There is no undo. Recreating a wallet produces a different key.</strong></li>' +
+      '</ul>' +
+      '<p class="danger-target">Deleting: <span class="mono">' + label + '</span></p>' +
+      '<div class="form-group">' +
+        '<label for="delete-wallet-confirm-input">Type the wallet address to confirm:</label>' +
+        '<p class="form-hint mono danger-confirm-target">' + escapeHtml(address) + '</p>' +
+        '<input type="text" id="delete-wallet-confirm-input" class="input" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="0x…" style="font-family:ui-monospace,\'JetBrains Mono\',monospace;" />' +
+      '</div>' +
+    '</div>';
+  const footer =
+    '<button type="button" class="btn btn-outline" id="modal-cancel-btn">Cancel</button>' +
+    '<button type="button" class="btn btn-danger" id="modal-delete-btn" disabled>Permanently delete</button>';
+  openModal('Delete wallet permanently', body, footer);
+
+  const input = document.getElementById('delete-wallet-confirm-input');
+  const deleteBtn = document.getElementById('modal-delete-btn');
+  // Enable the delete button only once the typed value matches the address exactly
+  // (case-insensitive, since hex addresses are case-insensitive).
+  const target = address.trim().toLowerCase();
+  input.addEventListener('input', () => {
+    deleteBtn.disabled = input.value.trim().toLowerCase() !== target;
+  });
+
+  document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
+  deleteBtn.addEventListener('click', async () => {
+    if (input.value.trim().toLowerCase() !== target) return;
+    const apiKey = getEffectiveApiKey();
+    if (!isAuthenticated()) return;
+    deleteBtn.disabled = true;
+    closeModal();
+    hideStatus('wallets-status');
+    try {
+      showActionProgress('Deleting wallet', 'Permanently removing this wallet from the account. This cannot be undone.');
+      const client = await getClient();
+      await client.deleteWallet({ apiKey, walletAddress: address });
+      await loadWallets();
+      showStatus('wallets-status', 'Wallet permanently deleted: ' + address, 'success');
+    } catch (e) {
+      logError('deleteWallet', e);
       showStatus('wallets-status', 'Error: ' + formatError(e), 'error');
     } finally {
       closeActionProgress();

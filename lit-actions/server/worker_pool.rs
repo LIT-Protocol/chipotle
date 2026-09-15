@@ -403,26 +403,20 @@ fn run_worker_thread(pool: Arc<WorkerPool>) {
     } = work;
 
     let shared = pool.shared.clone();
-    let mut prepared = prepared;
 
     rt.block_on(
         async move {
-            // Per-request JS injection: namespace globals first (so user
-            // code sees Lit.*), PatchDeno + everything else is owned by
-            // execute_with_worker — preserves today's bootstrap order.
-            if let Err(err) =
-                runtime::inject_lit_namespace(&mut prepared.worker, &auth_context, &http_headers)
-            {
-                error!("pool worker failed to inject Lit namespace: {err:#}");
-                server::send_execution_result(&outbound_tx, Err(err)).await;
-                return;
-            }
-
+            // Per-request JS injection (LitNamespace, PatchDeno, params) is
+            // owned by execute_with_worker so it runs AFTER the controller
+            // thread and near-heap-limit callback arm — materializing
+            // caller-supplied auth_context / http_headers / js_params into V8
+            // must be subject to the same timeout/OOM guards as user code (F-008).
             let res = runtime::execute_with_worker(
                 prepared,
                 shared,
                 code,
                 js_params,
+                auth_context,
                 http_headers,
                 timeout_ms,
                 outbound_tx.clone(),

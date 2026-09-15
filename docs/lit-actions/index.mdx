@@ -1,103 +1,121 @@
 ---
 title: "Overview"
-description: "Lit Actions are immutable JavaScript programs stored on IPFS and executed by the Lit network. They can sign data, encrypt and decrypt secrets, and make arbitrary HTTP requests — all in a verifiable, trustless way."
+description: "Lit Actions are immutable JavaScript programs identified by their IPFS CID and executed inside the Lit network's TEE. They can sign with PKP wallets or with their own code-bound key, encrypt and decrypt secrets, and make HTTP requests — all verifiably."
 ---
 
 ## What is a Lit Action?
 
-Lit Actions are immutable JavaScript programs stored on IPFS and executed by the Lit network. Each action is identified by its IPFS CID, which serves as both its address and an immutable commitment to its code. Once published to IPFS, an action's behavior can never be changed.
+A Lit Action is an immutable JavaScript program identified by its IPFS CID and executed inside the Lit network's TEE. The CID is both the action's address and a commitment to its code: change one byte and you have a different action.
 
-Actions are executed on-node and have access to a set of [SDK functions](/lit-actions/chipotle) that let them:
+Actions have access to a small [SDK](/lit-actions/chipotle) that lets them:
 
-- **Sign data** using the private key of a Programmable Key Pair (PKP)
-- **Encrypt and decrypt** data using a symmetric key derived from a PKP
-- **Make HTTP requests** to external data sources (APIs, oracles, blockchains)
-- **Set a response** that is returned to the caller after execution
+- **Sign data** with the private key of a Programmable Key Pair (PKP) or with the action's own identity key
+- **Encrypt and decrypt** data with a symmetric key derived from a PKP, or with keys derived from the action's identity
+- **Make HTTP requests** to APIs, oracles, and blockchains
+- **Return a value** to the caller
 
-Because actions run on the Lit network and results are signed by PKPs, the outputs they produce carry a cryptographic proof of their origin and integrity.
+Because the code is immutable and the keys never leave the enclave, an action's signed output is a proof that *this exact code* produced *this exact result*.
 
-## Programmable Key Pairs (PKPs)
+## Two kinds of keys
 
-A Programmable Key Pair (PKP) is a wallet — an elliptic-curve key pair — managed by the Lit network. An account can hold many PKPs and organize them into groups alongside permitted IPFS actions.
+Every action can reach two different kinds of key. Knowing which to use is most of the design work.
 
-When a Lit Action executes, it can retrieve the private key of a PKP using `Lit.Actions.getPrivateKey({ pkpId })` and use it (via [ethers.js](https://docs.ethers.org/v5/)) to sign transactions, messages, or any arbitrary data.
+| | PKP key | Action identity key |
+|---|---|---|
+| Get it with | `Lit.Actions.getPrivateKey({ pkpId })` | `Lit.Actions.getLitActionPrivateKey()` |
+| Identity is bound to | A wallet you minted and manage in a [group](/architecture/groups) | The action's code (its CID) |
+| Who can use it | Any action whose CID is in the same group as the PKP | Only this action |
+| Public key discovery | `list_wallets`, the Dashboard | `Lit.Actions.getLitActionPublicKey({ ipfsId })` from any action, for any CID |
+| Setup | Mint the PKP, add it and the action to a group | None. Enroll the CID in a group. |
+| Best for | Long-lived accounts whose code will evolve: treasuries, user wallets, vaults that several actions share | Anything that should be operable by exactly one piece of code: proofs, per-user wallets, per-secret encryption keys |
 
-Which actions are permitted to use which PKPs is enforced **on-chain** through the `AccountConfig` contract and managed via the [Dashboard](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/).
+A PKP outlives its code. When you ship a new version of an action, you add the new CID to the group and the PKP keeps its address. An identity key dies with its code. Ship a new version and you have a new key, which is exactly what you want when the key's whole meaning is "this code approved it".
 
-## What is a Proof?
+The identity key also unlocks a factory: stamp a small config constant into an audited template and each instance is a new immutable action with a new key. See [Derived Actions](/lit-actions/derived-actions).
 
-When a Lit Action retrieves data from an external source — for example, a price feed, a weather API, or another blockchain — and signs the result with a PKP, that signed output is called a **proof**.
+## What is a proof?
 
-A proof answers the question: *"How do I know this data is authentic?"*
+When an action fetches external data (a price, a weather reading, another chain's state) and signs the result, that signed output is a **proof**. Anyone holding the signer's public key can verify that the specific computation produced it. Smart contracts cannot make HTTP requests; a Lit Action can, and can deliver the result on-chain with a signature the contract checks with `ecrecover`.
 
-Traditionally, when you send a transaction on Ethereum you sign it with your private key to prove you authorized it. A Lit Action proof works the same way: the data output is signed by a PKP to attest that it came from a specific, verifiable computation — not from an arbitrary off-chain script.
+- **Trustless data ingestion.** The action fetches and signs; the contract verifies.
+- **Verifiable computation.** The signature is tied either to a PKP you registered or to the exact CID that ran.
+- **No trusted intermediary.** Neither the action author nor a single node can forge a result, because the code is immutable and the key never leaves the TEE.
 
-### Why proofs matter
+## How actions fit into Chipotle
 
-- **Trustless data ingestion** — Smart contracts cannot make HTTP requests. A Lit Action can fetch external data and deliver it on-chain with a signature that the contract can verify.
-- **Verifiable computation** — Any party can independently verify that the signed output was produced by the specific action code (identified by IPFS CID) and signed by the specific PKP (identified by its public key / token ID).
-- **No trusted intermediary** — Because the action code is immutable on IPFS and the signing key is managed by the Lit network, neither the action author nor any single node can forge a result.
-
-## How Actions Fit into Chipotle
-
-In the Chipotle system, actions are organized within **groups**. A group ties together:
-
-- One or more **PKPs** (wallets available for signing inside the action)
-- One or more **IPFS CIDs** (the permitted action code)
-- **Usage API keys** scoped to run actions within that group
-
-This means access to both compute (which action runs) and key material (which PKP it can use) is controlled by a single on-chain configuration, managed through the Dashboard or directly via the `AccountConfig` smart contract on Base.
+Actions are organized within **groups**. A group binds PKPs to the action CIDs allowed to use them, and usage API keys are scoped to execute within groups.
 
 ```
 Account
  └── Group
-      ├── PKP (wallet)
+      ├── PKP (wallet)            ← optional: identity-key actions need none
       ├── IPFS CID (action)
-      └── Usage API Key
+      └── Usage API Key (execute_in_groups)
 ```
 
-When you call the `/core/v1/lit_action` endpoint, the server validates that the API key is permitted to execute the submitted code against the requested PKP — before any execution begins.
+When you call `/core/v1/lit_action`, the server hashes the submitted code to its CID, checks that the API key may execute in a group containing that CID, and only then runs it. Inside the action, every `getPrivateKey` / `Encrypt` / `Decrypt` call is checked again: the named PKP must be in a group with the running CID. There is no IPFS upload step. You send the source and the server derives the CID.
 
-## The Action Runtime
+## Patterns that make Chipotle easier
 
-Inside a Lit Action, the `Lit.Actions` namespace exposes the current SDK. Key functions include:
+These four pages describe the load-bearing design patterns. They are what production apps on Chipotle, including the [Lit Agent Keychain](https://github.com/LIT-Protocol/chipotle/tree/main/lit-agent-keychain), are actually built from.
+
+<CardGroup cols={2}>
+  <Card title="Derived Actions" icon="layer-group" href="/lit-actions/derived-actions">
+    One audited template, a stamped-in constant, and a new immutable action with its own key per user, secret, or tenant. No PKP to mint.
+  </Card>
+  <Card title="Signed Data in Untrusted Storage" icon="file-signature" href="/lit-actions/signed-storage">
+    Have an action sign the records you store. Consumers verify at runtime, so your database can never forge a permission.
+  </Card>
+  <Card title="Patterns" icon="puzzle-piece" href="/lit-actions/patterns">
+    Gating logic as code, hostname-pinned RPCs, multi-source consensus, action-identity signing, PKP vaults.
+  </Card>
+  <Card title="Secrets" icon="key" href="/lit-actions/secrets">
+    API keys and credentials inside actions: PKP vaults, encrypt-to-action, storage, rotation.
+  </Card>
+</CardGroup>
+
+## The action runtime
+
+Inside an action, the `Lit.Actions` namespace exposes the SDK. The most used functions:
 
 | Function | Description |
 |---|---|
-| `return value` (from `main`) | Return a value to the caller — the preferred response method |
-| `Lit.Actions.setResponse({ response })` | Legacy: set the response returned to the caller |
+| `return value` (from `main`) | Return a value to the caller. Preferred over `setResponse`. |
 | `Lit.Actions.getPrivateKey({ pkpId })` | Retrieve a PKP private key for signing |
-| `Lit.Actions.getLitActionPrivateKey()` | Retrieve this action's own identity key |
+| `Lit.Actions.getLitActionPrivateKey()` | Retrieve this action's own identity key (0x-prefixed secp256k1 hex) |
+| `Lit.Actions.getLitActionPublicKey({ ipfsId })` | Public key of any action by CID. No permission needed. |
+| `Lit.Actions.getLitActionWalletAddress({ ipfsId })` | EVM address of any action by CID |
 | `Lit.Actions.Encrypt({ pkpId, message })` | Encrypt a string with a PKP-derived AES key |
-| `Lit.Actions.Decrypt({ pkpId, ciphertext })` | Decrypt ciphertext with a PKP-derived AES key |
+| `Lit.Actions.Decrypt({ pkpId, ciphertext })` | Decrypt with a PKP-derived AES key |
 
-The `ethers` library (v5) is available as a global, making it straightforward to sign messages, construct transactions, or interact with any EVM chain.
+`ethers` v5 is a global. Third-party ESM packages can be [imported from jsDelivr](/lit-actions/imports) with pinned versions. Key operations are limited to ten per execution and outbound `fetch` calls to fifty; see [Limits](/lit-actions/limits).
 
-For the full API reference, see [Lit Actions SDK](/lit-actions/chipotle).
+Full reference: [Lit Actions SDK](/lit-actions/chipotle).
 
-## A Minimal Example
+## A minimal example
 
 ```javascript
-// Fetch ETH price from an API and sign it with a PKP.
-// pkpId is injected via js_params.
-async function main({ pkpId }) {
+// Fetch ETH price from an API and sign it with the action's own key.
+// No PKP, no js_params, no setup beyond enrolling the CID in a group.
+async function main() {
   const res = await fetch("https://api.example.com/eth-price");
   const { price } = await res.json();
 
-  const wallet = new ethers.Wallet(
-    await Lit.Actions.getPrivateKey({ pkpId })
-  );
-  const signature = await wallet.signMessage(`ETH price: ${price}`);
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  const payload = `ETH price: ${price}`;
+  const signature = await wallet.signMessage(payload);
 
-  return { price, signature };
+  return { payload, signature, signer: wallet.address };
 }
 ```
 
-The caller receives both the price and a signature that can be verified against the PKP's public key — a cryptographic proof that this specific action fetched and attested to this specific price.
+Anyone can verify the output with `ethers.utils.verifyMessage(payload, signature)` and compare the recovered address to the address of this CID, obtained through `getLitActionWalletAddress` from any other action. Swap `getLitActionPrivateKey()` for `getPrivateKey({ pkpId })` if you want the proof bound to a wallet you manage instead.
 
-## Next Steps
+## Next steps
 
-- [Module Imports](/lit-actions/imports) — Import third-party npm packages from jsDelivr with integrity verification
-- [Examples](/lit-actions/examples) — Working code for common patterns
-- [Lit Actions SDK](/lit-actions/chipotle) — Full API reference for the current runtime
-- [Migration from Naga](/lit-actions/migration/changes) — Mapping deprecated Naga actions to current equivalents
+- [Derived Actions](/lit-actions/derived-actions) — per-user and per-secret immutable actions from one template
+- [Signed Data in Untrusted Storage](/lit-actions/signed-storage) — verifiable off-chain state for stateless actions
+- [Examples](/lit-actions/examples) — working code for common patterns and links to full runnable projects
+- [Module Imports](/lit-actions/imports) — third-party packages with integrity verification
+- [Lit Actions SDK](/lit-actions/chipotle) — full API reference
+- [Migration from Naga](/lit-actions/migration/changes) — mapping deprecated Naga actions to current equivalents

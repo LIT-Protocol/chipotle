@@ -227,6 +227,69 @@ Packages that will **not** work:
 
 ---
 
+## Composability — Publish Your Own Packages
+
+The same import mechanism that pulls in `zod` or `date-fns` works for **packages you publish yourself**. This is the recommended way to share business logic and reusable functions across many Lit Actions: extract the common code into an npm package, publish it, and import it — version-pinned — in every action that needs it.
+
+Lit Actions are standalone programs. There is no shared filesystem between them, relative imports (`./util.js`) are rejected, and there is no project-level bundling step. Without a shared module mechanism, every action would have to inline its own copy of any helper. Publishing reusable code to npm turns that copy-paste into a real dependency:
+
+- **One source of truth** — fix a bug or add a feature in the package, publish a new version, and bump the pinned version in each action that consumes it.
+- **Smaller, readable actions** — each action expresses only its unique logic; shared validation, encoding, RPC helpers, and domain logic live in the package.
+- **Auditable, immutable dependencies** — every published version is integrity-verified and pinned exactly like any third-party package.
+
+### Requirements for your package
+
+Your package must meet the same [compatibility requirements](#package-compatibility) as any other import:
+
+1. **Ship ESM.** Set `"type": "module"` and point `"exports"` (or `"module"`) at an ESM build. If you write TypeScript, compile to ESM (`"module": "ESNext"`, `"target": "ESNext"`) and publish the `.js` output.
+2. **No Node.js built-ins or native addons.** The code runs in the Deno/V8 sandbox — avoid `fs`, `path`, `crypto`, `http`, and the like. `ethers` (v5) and the `Lit.Actions` SDK are runtime globals; reference them as globals or accept them as arguments rather than bundling them.
+3. **Keep the dependency tree small and ESM-only.** Each transitive dependency is fetched and verified too, and must itself ship ESM. Zero-dependency packages are the easiest to audit and the most reliable.
+
+A minimal `package.json`:
+
+```json
+{
+  "name": "@your-org/lit-helpers",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": "./dist/index.js",
+  "files": ["dist"]
+}
+```
+
+### Consuming it in an action
+
+Once published to npm, import it like any other package — with a pinned version:
+
+```javascript
+import { assertAllowedRpc, requireStrictAgreement } from "@your-org/lit-helpers@1.0.0";
+
+// js_params: { pkpId, chainId, rpcUrl, message }
+async function main({ pkpId, chainId, rpcUrl, message }) {
+  assertAllowedRpc(chainId, rpcUrl); // shared trust-anchor logic from your package
+
+  const wallet = new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId }));
+  return { signature: await wallet.signMessage(message) };
+}
+```
+
+The first time the network sees this version it is fetched from jsDelivr, double-fetched and verified (TOFU), and pinned to `integrity.lock`. Every subsequent execution — from any action — is served from cache and checked against the pinned hash.
+
+### Versioning and action identity
+
+Because the import specifier (including the version) is part of your action's source, the version you pin is baked into the action's IPFS CID:
+
+- A published npm version is **immutable** — npm will not let you republish different bytes under the same version number. So a pinned import always resolves to the same code, which keeps your action's CID — and therefore its [action-derived identity key](/lit-actions/patterns#action-identity-signing-immutable-proofs) — stable.
+- Bumping the version (`@1.0.0` → `@1.1.0`) changes the action source, which produces a new CID and a new action identity. Treat a dependency bump like any other change to action code: re-deploy, re-permission, and — if you rely on action-identity signing — update any verifier that pins the old address.
+
+This is a feature: anyone verifying your action can read the import statement and see exactly which version of your logic it runs.
+
+<Warning>
+  Imported code — including your own packages and all of their transitive dependencies — runs with the same permissions as your action, including access to `Lit.Actions.getPrivateKey()`. Audit your dependency tree and pin every version. An unpinned or compromised transitive dependency is a direct path to your keys. Prefer zero-dependency packages for logic that runs near signing.
+</Warning>
+
+---
+
 ## Why jsDelivr
 
 We evaluated several CDN options for serving npm packages as ESM. The choice came down to a set of non-negotiable requirements for running third-party code inside a cryptographic signing environment.

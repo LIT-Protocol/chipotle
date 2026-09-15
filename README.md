@@ -57,7 +57,7 @@ A REST API with a JS SDK. Create an account, get an API key, call one endpoint. 
 
 ## Quickstart
 
-Everything below works right now against the live API. No SDK needed — just `curl`.
+Five steps against the live API. No SDK needed — just `curl`. Steps 3–5 consume credits, so you'll fund the account in step 2 (read-only calls are always free).
 
 ### 1. Create an account
 
@@ -74,9 +74,13 @@ curl -s -X POST https://api.chipotle.litprotocol.com/core/v1/new_account \
 }
 ```
 
+This call takes **~15 seconds** — it registers your account on-chain (Base) before returning. Everything after it is sub-second. Your account starts with one wallet already attached: wallet id `0`, the Account Master Wallet shown in the response.
+
 ### 2. Add funds
 
-Lit Action execution and write/metered management operations require credits. Add funds via credit card in the [Dashboard](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/) — click **Add Funds** in the top-right corner and select a credit package (minimum $5.00). See [Pricing](https://developer.litprotocol.com/management/pricing) for details.
+Lit Action execution and write/metered management operations require credits. Add funds in the [Dashboard](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/) — click **Add Funds** in the top-right corner and select a credit package (minimum $5.00). Pay with a credit card, [crypto](https://developer.litprotocol.com/management/crypto) (ETH, USDC, SOL and more), or [LITKEY](https://developer.litprotocol.com/management/litkey). See [Pricing](https://developer.litprotocol.com/management/pricing) for details.
+
+Skipping this step? Steps 3–5 will answer `402 Payment Required` — the error body tells you exactly how to fund. See [Errors](https://developer.litprotocol.com/management/errors).
 
 ### 3. Create a usage API key
 
@@ -110,7 +114,7 @@ Save this key — it's shown only once. Use it in place of your account key for 
 ### 4. Create a wallet (PKP)
 
 ```bash
-curl -s https://api.chipotle.litprotocol.com/core/v1/create_wallet \
+curl -s -X POST https://api.chipotle.litprotocol.com/core/v1/create_wallet \
   -H "X-Api-Key: $API_KEY" | jq
 ```
 
@@ -194,7 +198,7 @@ Full OpenAPI spec: [`/core/v1/swagger-ui`](https://api.chipotle.litprotocol.com/
 
 ```
 POST   /core/v1/new_account        Create an account → { api_key, wallet_address }
-GET    /core/v1/create_wallet       Mint a new PKP wallet
+POST   /core/v1/create_wallet       Mint a new PKP wallet
 POST   /core/v1/lit_action          Execute JavaScript in the TEE
 POST   /core/v1/add_action          Register a Lit Action (IPFS CID or inline)
 POST   /core/v1/add_group           Create a permission group
@@ -202,6 +206,8 @@ GET    /core/v1/list_wallets        List all PKP wallets for the account
 GET    /core/v1/list_actions        List registered Lit Actions
 GET    /core/v1/version             Server version and commit hash
 ```
+
+Errors are always JSON — `{ "error", "message", "fix", "docs_url" }` — with the status codes documented in the [Errors reference](https://developer.litprotocol.com/management/errors). Failed requests are never charged.
 
 ---
 
@@ -241,6 +247,26 @@ Press **Ctrl+C** to stop all services.
 |---------------------|---------|-------------|
 | `SIMULATOR_DIR` | `~/GitHub/dstack/sdk/simulator` | Path to the dstack simulator directory |
 | `DSTACK_SOCKET` | Auto-detected | Override the simulator socket path |
+| `STRIPE_SECRET_KEY` | — | Stripe secret key. Local runs **require** a test key (`sk_test_…` / `rk_test_…`). |
+| `STRIPE_PUBLISHABLE_KEY` | — | Stripe publishable key. Local runs **require** a test key (`pk_test_…`). |
+| `LIT_DISABLE_BILLING` | unset | Set to `true` to opt out of the local test-Stripe requirement and run payment-free. |
+
+### Billing in local development
+
+By default a local (non-`production`) build of `lit-api-server` **requires a configured
+test Stripe account** so the billing path is actually exercised instead of silently running
+payment-free (CPL-330). On startup the server will refuse to run when:
+
+- the Stripe keys are missing, or
+- the keys are not role-correct *test* keys. The secret must start with `sk_test_` or
+  `rk_test_` and the publishable must start with `pk_test_`. This rejects live keys (so a
+  dev machine can't charge real cards), arbitrary non-Stripe strings (which would otherwise
+  start "in test mode" and only fail on the first real request), and a secret key mistakenly
+  placed in `STRIPE_PUBLISHABLE_KEY` (which is served to unauthenticated clients via
+  `GET /billing/stripe_config`).
+
+Set both `STRIPE_SECRET_KEY` (test) and `STRIPE_PUBLISHABLE_KEY` (test) before starting the
+server. To run payment-free anyway, set `LIT_DISABLE_BILLING=true`.
 
 ---
 

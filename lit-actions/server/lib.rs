@@ -1,5 +1,6 @@
 mod bundler;
 pub mod cdn_module_loader;
+mod egress;
 mod import_rewriter;
 mod runtime;
 pub mod v8_code_cache;

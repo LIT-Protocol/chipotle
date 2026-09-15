@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Lock down script sources: any script execution on this page can forge the
+      verdict. connect-src stays broad (https: + loopback) because the API and RPC
+      endpoints are user-supplied. style-src keeps 'unsafe-inline' for the inline
+      <style> block below; moving that to a file would let us drop it.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https: http://localhost:* http://127.0.0.1:*; base-uri 'none'; form-action 'none'"
+    />
+    <title>Verify Lit Chipotle – TEE Attestation</title>
+    <script src="theme-init.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root,
+      :root[data-theme='dark'] {
+        color-scheme: dark;
+        --bg: #0f0f12;
+        --card: #18181c;
+        --border: #2a2a30;
+        --text: #e4e4e7;
+        --muted: #71717a;
+        --accent: #a78bfa;
+        --success: #34d399;
+        --warning: #fbbf24;
+        --critical: #f87171;
+      }
+      :root[data-theme='light'] {
+        color-scheme: light;
+        --bg: #f5f5f7;
+        --card: #ffffff;
+        --border: #e2e2e7;
+        --text: #1c1c20;
+        --muted: #6b6b73;
+        --accent: #7c3aed;
+        --success: #059669;
+        --warning: #b45309;
+        --critical: #dc2626;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0 auto;
+        min-height: 100vh;
+        font-family: 'Outfit', sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        padding: 2rem 3rem;
+        max-width: 1080px;
+        line-height: 1.5;
+      }
+      a {
+        color: var(--accent);
+      }
+      .page-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+      h1 {
+        font-size: 1.6rem;
+        font-weight: 700;
+        margin-bottom: 0.35rem;
+      }
+      .theme-toggle {
+        flex-shrink: 0;
+        margin-top: 0.25rem;
+        padding: 0.5rem 0.85rem;
+        font-size: 0.82rem;
+        font-weight: 500;
+        background: var(--card);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      .theme-toggle:hover {
+        border-color: var(--accent);
+        opacity: 1;
+      }
+      .subtitle {
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin-bottom: 1.75rem;
+        max-width: 70ch;
+      }
+      code,
+      .mono {
+        font-family: 'JetBrains Mono', monospace;
+      }
+
+      /* ── Config card ── */
+      .config {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.25rem 1.5rem;
+        margin-bottom: 1.5rem;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem 1.5rem;
+        align-items: end;
+      }
+      .config .full {
+        grid-column: 1 / -1;
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .form-group label {
+        display: block;
+        font-size: 0.75rem;
+        color: var(--muted);
+        margin-bottom: 0.35rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .form-group input {
+        width: 100%;
+        padding: 0.6rem 0.75rem;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.85rem;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+      }
+      .form-group input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      button {
+        font-family: 'Outfit', sans-serif;
+        font-size: 0.95rem;
+        font-weight: 600;
+        padding: 0.7rem 1.6rem;
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      button:hover {
+        opacity: 0.9;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .link-btn {
+        background: none;
+        color: var(--muted);
+        padding: 0.4rem 0;
+        font-size: 0.8rem;
+        font-weight: 400;
+        text-decoration: underline;
+      }
+      .link-btn:hover {
+        color: var(--text);
+      }
+
+      /* ── Verdict banner ── */
+      .verdict {
+        border-radius: 12px;
+        padding: 1.1rem 1.5rem;
+        margin-bottom: 1.75rem;
+        border: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        font-size: 1.05rem;
+        font-weight: 600;
+      }
+      .verdict.hidden {
+        display: none;
+      }
+      .verdict .dot {
+        width: 0.9rem;
+        height: 0.9rem;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .verdict small {
+        display: block;
+        font-weight: 400;
+        font-size: 0.85rem;
+        color: var(--muted);
+        margin-top: 0.15rem;
+      }
+      .verdict.pass {
+        border-color: var(--success);
+        background: rgba(52, 211, 153, 0.08);
+      }
+      .verdict.pass .dot {
+        background: var(--success);
+      }
+      .verdict.warn {
+        border-color: var(--warning);
+        background: rgba(251, 191, 36, 0.08);
+      }
+      .verdict.warn .dot {
+        background: var(--warning);
+      }
+      .verdict.fail {
+        border-color: var(--critical);
+        background: rgba(248, 113, 113, 0.08);
+      }
+      .verdict.fail .dot {
+        background: var(--critical);
+      }
+      .verdict.running {
+        border-color: var(--accent);
+      }
+      .verdict.running .dot {
+        background: var(--accent);
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.3;
+        }
+      }
+
+      /* ── Step cards ── */
+      .step {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.1rem 1.5rem;
+        margin-bottom: 1rem;
+      }
+      .step-head {
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+      }
+      .step-num {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.8rem;
+        color: var(--muted);
+        min-width: 1.5rem;
+      }
+      .step-title {
+        font-size: 1rem;
+        font-weight: 600;
+        flex: 1;
+      }
+      .step-desc {
+        color: var(--muted);
+        font-size: 0.85rem;
+        margin: 0.4rem 0 0 2.35rem;
+      }
+      .pill {
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 0.2rem 0.6rem;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .pill.pass {
+        color: var(--success);
+        border-color: var(--success);
+      }
+      .pill.fail {
+        color: var(--critical);
+        border-color: var(--critical);
+      }
+      .pill.warn {
+        color: var(--warning);
+        border-color: var(--warning);
+      }
+      .pill.running {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .pill.info {
+        color: var(--accent);
+        border-color: var(--border);
+      }
+
+      /* ── Step detail (key/value + code) ── */
+      .detail {
+        margin: 0.9rem 0 0 2.35rem;
+        font-size: 0.85rem;
+      }
+      .detail:empty {
+        display: none;
+      }
+      .kv {
+        display: flex;
+        gap: 0.75rem;
+        padding: 0.4rem 0;
+        border-bottom: 1px solid var(--border);
+        align-items: baseline;
+      }
+      .kv:last-child {
+        border-bottom: none;
+      }
+      .kv .k {
+        min-width: 160px;
+        color: var(--muted);
+        font-size: 0.8rem;
+      }
+      .kv .v {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.82rem;
+        word-break: break-all;
+        flex: 1;
+      }
+      .v.good {
+        color: var(--success);
+      }
+      .v.bad {
+        color: var(--critical);
+      }
+      .note {
+        margin-top: 0.75rem;
+        font-size: 0.83rem;
+        color: var(--muted);
+      }
+      .note.bad {
+        color: var(--critical);
+      }
+      pre {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.85rem;
+        overflow: auto;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.78rem;
+        max-height: 320px;
+        margin: 0.75rem 0 0;
+      }
+      details summary {
+        cursor: pointer;
+        color: var(--muted);
+        font-size: 0.82rem;
+        margin-top: 0.75rem;
+        user-select: none;
+      }
+      details summary:hover {
+        color: var(--text);
+      }
+
+      footer {
+        margin-top: 2rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
+      footer a {
+        margin-right: 1.25rem;
+      }
+      @media (max-width: 720px) {
+        body {
+          padding: 1.5rem 1.25rem;
+        }
+        .config {
+          grid-template-columns: 1fr;
+        }
+        .kv {
+          flex-direction: column;
+          gap: 0.15rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page-head">
+      <h1>Verify Lit Chipotle</h1>
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle light or dark theme">
+        <span id="theme-icon">☀</span><span id="theme-label">Light</span>
+      </button>
+    </div>
+    <p class="subtitle">
+      Run the in-browser
+      <a href="https://developer.litprotocol.com/architecture/verification/quick-verify" target="_blank" rel="noopener noreferrer"
+        >quick-verify</a
+      >
+      checks against a Lit Chipotle API server: read its live attestation, recompute and match its
+      configuration hash, confirm its identity, and check the on-chain whitelist on Base. These prove
+      the server reports a whitelisted configuration. Proving it actually runs inside a genuine Intel
+      TDX enclave requires validating the hardware quote, which a browser cannot do — complete that at
+      the Phala Trust Center (step 5).
+    </p>
+
+    <div class="config">
+      <div class="form-group">
+        <label for="api-url">API base URL</label>
+        <input id="api-url" type="text" spellcheck="false" />
+      </div>
+      <div class="form-group">
+        <label for="rpc-url">Base RPC URL</label>
+        <input id="rpc-url" type="text" spellcheck="false" />
+      </div>
+      <div class="form-group">
+        <label for="app-id">Expected app id (DstackApp address)</label>
+        <input id="app-id" type="text" spellcheck="false" />
+      </div>
+      <div class="full">
+        <button id="verify-btn">Verify</button>
+        <button id="reset-btn" class="link-btn">Reset to production defaults</button>
+      </div>
+    </div>
+
+    <div id="verdict" class="verdict hidden">
+      <span class="dot"></span>
+      <div>
+        <span id="verdict-text"></span>
+        <small id="verdict-sub"></small>
+      </div>
+    </div>
+
+    <!-- Steps are rendered/updated by app.js -->
+    <div id="step-info" class="step">
+      <div class="step-head">
+        <span class="step-num">1</span>
+        <span class="step-title">Live attestation</span>
+        <span class="pill" data-pill>idle</span>
+      </div>
+      <p class="step-desc">
+        Fetch <code>/info</code> and <code>/attestation</code> from the running server and read its
+        reported identity and TDX quote.
+      </p>
+      <div class="detail" data-detail></div>
+    </div>
+
+    <div id="step-compose" class="step">
+      <div class="step-head">
+        <span class="step-num">2</span>
+        <span class="step-title">Configuration-hash integrity</span>
+        <span class="pill" data-pill>idle</span>
+      </div>
+      <p class="step-desc">
+        Recompute <code>SHA-256(app_compose)</code> in your browser and confirm it equals the
+        <code>compose_hash</code> the server reports.
+      </p>
+      <div class="detail" data-detail></div>
+    </div>
+
+    <div id="step-identity" class="step">
+      <div class="step-head">
+        <span class="step-num">3</span>
+        <span class="step-title">App identity</span>
+        <span class="pill" data-pill>idle</span>
+      </div>
+      <p class="step-desc">
+        Confirm the server's <code>app_id</code> matches the expected Lit Chipotle DstackApp address —
+        the on-chain contract that governs its allowed configurations.
+      </p>
+      <div class="detail" data-detail></div>
+    </div>
+
+    <div id="step-onchain" class="step">
+      <div class="step-head">
+        <span class="step-num">4</span>
+        <span class="step-title">On-chain whitelist</span>
+        <span class="pill" data-pill>idle</span>
+      </div>
+      <p class="step-desc">
+        Call <code>allowedComposeHashes(bytes32)</code> on the DstackApp contract on Base to confirm
+        this exact configuration is whitelisted by the Lit Safe multisig.
+      </p>
+      <div class="detail" data-detail></div>
+    </div>
+
+    <div id="step-trust" class="step">
+      <div class="step-head">
+        <span class="step-num">5</span>
+        <span class="step-title">Hardware quote &amp; TLS-in-TEE</span>
+        <span class="pill" data-pill>idle</span>
+      </div>
+      <p class="step-desc">
+        Full Intel DCAP quote validation and TLS-certificate pinning require introspection a browser
+        cannot perform. Verify these with the Phala Trust Center, which checks all four properties
+        automatically.
+      </p>
+      <div class="detail" data-detail></div>
+    </div>
+
+    <footer>
+      <a href="https://developer.litprotocol.com/architecture/verification/quick-verify" target="_blank" rel="noopener noreferrer"
+        >Verification docs</a
+      >
+      <a href="https://docs.phala.com/phala-cloud/attestation/get-attestation" target="_blank" rel="noopener noreferrer"
+        >Phala attestation</a
+      >
+      <a href="https://basescan.org/" target="_blank" rel="noopener noreferrer">BaseScan</a>
+    </footer>
+
+    <script
+      src="https://cdn.jsdelivr.net/npm/ethers@6.13.0/dist/ethers.umd.min.js"
+      integrity="sha384-JjzOKxQsr+Jhx75Ot1XldVFnWF2UCtB4Ig2JuEcuBt4VAdUG6alucV+sHrYjPn5C"
+      crossorigin="anonymous"
+    ></script>
+    <script src="app.js"></script>
+  </body>
+</html>

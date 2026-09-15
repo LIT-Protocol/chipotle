@@ -1,5 +1,5 @@
 [workspace]
-members = ["cli", "ext", "grpc", "server", "snapshot", "tests"]
+members = ["cli", "ext", "grpc", "gvisor-server", "server", "snapshot", "tests"]
 resolver = "2"
 
 [workspace.package]
@@ -60,3 +60,7 @@ incremental = false
 # rusty-v8 needs at least -O1 to not miscompile
 [profile.dev.package.v8]
 opt-level = 1
+
+# Keep action CIDs consistent at exact UnixFS chunk boundaries.
+[patch.crates-io]
+ipfs-hasher = { path = "../vendor/ipfs-hasher" }

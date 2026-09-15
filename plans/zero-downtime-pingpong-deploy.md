@@ -1,5 +1,18 @@
 # Zero-Downtime Ping-Pong Deploys on Phala (prod2 ↔ prod4)
 
+> **Update (2026-06-15) — the `/health` healthcheck gate was dropped.** The first
+> attempt at this (PR #437) added a `lit-api-server` healthcheck (+ `curl` in the
+> Dockerfile) and gated the ingress on `service_healthy` so the domain only claimed
+> once `/health` passed. That broke deploys (the gate prevented `dstack-ingress`
+> from starting / claiming the domain) and was reverted (#493). This re-landing keeps
+> **only the CI side** — `dstack-ingress` now depends on `lit-api-server:
+> service_started` (claims the domain as soon as the container starts, no `/health`
+> gate). The boot→ready exposure window is covered by the CI flow: verify on the cold
+> box's direct URL, then `confirm-cutover`, with `rollback-on-failure` flipping the
+> domain back if any post-cutover check fails. So in the sections below, treat every
+> "add a healthcheck + `service_healthy` dependency" recommendation as **not done on
+> purpose** — the CI verify + auto-rollback is the mitigation instead.
+
 **Status:** Design settled (validated by a manual prod cutover 2026-06-02). Ready to automate.
 **Scope:** One app, two long-lived instances on two Phala nodes. Each deploy targets the *cold* node; the new CVM's `dstack-ingress` **auto-claims** the custom domain on boot (the cutover); the old node is shut down once the new one is verified. Single `app_id` → one identity / shared keys preserved. Do `next`/staging first, then prod.
 

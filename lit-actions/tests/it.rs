@@ -518,9 +518,19 @@ async fn set_response(mut client: TestClient) {
     assert!(client.received::<ExecutionResult>().success);
 }
 
+/// A malicious action must not reach an internal service by *literal IP* — the
+/// classic SSRF vector (`http://127.0.0.1:5001` → the co-located kubo IPFS
+/// daemon). Deno's `deny_net` rejects it at the permission layer before any
+/// socket opens (CPL-295). `op_increment_fetch_count` still fires first (the
+/// JS wrapper increments before the real fetch), and the mock — bound to
+/// loopback — must observe zero requests.
+///
+/// NB: this replaces the old happy-path `fetch` test, which fetched the
+/// loopback-bound mock directly; that path is now (correctly) blocked. Real
+/// outbound `fetch` success is covered by `proxied_fetch` (ignored, real net).
 #[rstest]
 #[tokio::test]
-async fn fetch(mut client: TestClient) {
+async fn fetch_blocks_loopback_literal_ip(mut client: TestClient) {
     use wiremock::matchers::method;
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -530,9 +540,15 @@ async fn fetch(mut client: TestClient) {
         .mount(&mock_server)
         .await;
 
+    // mock_server.uri() is http://127.0.0.1:<port> — a literal loopback IP.
     let code = formatdoc! {r#"
         async function main() {{
-            await fetch("{uri}")
+            try {{
+                await fetch("{uri}");
+                Lit.Actions.setResponse({{ response: "REACHED" }});
+            }} catch (e) {{
+                Lit.Actions.setResponse({{ response: "BLOCKED:" + e }});
+            }}
         }}
         "#,
         uri = &mock_server.uri()
@@ -540,14 +556,197 @@ async fn fetch(mut client: TestClient) {
 
     client
         .respond_with(IncrementFetchCountResponse { fetch_count: 1 })
+        .respond_with(SetResponseResponse {})
         .execute_js(code)
         .await
         .unwrap();
 
-    assert_eq!(
-        client.received::<IncrementFetchCountRequest>(),
-        IncrementFetchCountRequest {}
+    let response = client.received::<SetResponseRequest>().response;
+    assert!(
+        response.starts_with("BLOCKED:"),
+        "loopback literal-IP fetch must be blocked, got: {response}"
     );
+
+    let hits = mock_server.received_requests().await.unwrap_or_default();
+    assert!(
+        hits.is_empty(),
+        "no request may reach the internal service, got {} hit(s)",
+        hits.len()
+    );
+
+    let _ = client.received::<IncrementFetchCountRequest>();
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+/// The same block must hold when the internal address is reached by *hostname*
+/// rather than literal IP. `deny_net` only inspects the URL host string, so
+/// `http://localhost:<port>` slips past it — but the egress DNS resolver
+/// resolves `localhost` to loopback, drops every disallowed address, and the
+/// connection never happens. This is the DNS-rebinding / internal-hostname
+/// layer (CPL-295).
+#[rstest]
+#[tokio::test]
+async fn fetch_blocks_hostname_resolving_to_loopback(mut client: TestClient) {
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&mock_server)
+        .await;
+
+    // Same loopback-bound mock, reached via the "localhost" hostname on its
+    // port — so only DNS resolution (not the literal-IP deny rule) can catch it.
+    let port = mock_server.address().port();
+    let code = formatdoc! {r#"
+        async function main() {{
+            try {{
+                await fetch("http://localhost:{port}/");
+                Lit.Actions.setResponse({{ response: "REACHED" }});
+            }} catch (e) {{
+                Lit.Actions.setResponse({{ response: "BLOCKED:" + e }});
+            }}
+        }}
+        "#,
+        port = port
+    };
+
+    client
+        .respond_with(IncrementFetchCountResponse { fetch_count: 1 })
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    let response = client.received::<SetResponseRequest>().response;
+    assert!(
+        response.starts_with("BLOCKED:"),
+        "localhost fetch must be blocked by the egress resolver, got: {response}"
+    );
+
+    let hits = mock_server.received_requests().await.unwrap_or_default();
+    assert!(
+        hits.is_empty(),
+        "no request may reach the internal service via hostname, got {} hit(s)",
+        hits.len()
+    );
+
+    let _ = client.received::<IncrementFetchCountRequest>();
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+/// `Lit.Actions.proxiedFetch` is a separate egress surface (a raw `reqwest`
+/// op that never touches Deno's permission engine), so it must be filtered
+/// independently (CPL-295). A *direct* (proxy-less) proxiedFetch to a loopback
+/// literal IP must be rejected before any socket opens, and the loopback-bound
+/// mock must observe zero requests.
+#[rstest]
+#[tokio::test]
+async fn proxied_fetch_blocks_loopback_literal_ip(mut client: TestClient) {
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&mock_server)
+        .await;
+
+    // No proxy → the destination URL host (127.0.0.1) is the connect target.
+    let code = formatdoc! {r#"
+        async function main() {{
+            try {{
+                await Lit.Actions.proxiedFetch({{ url: "{uri}" }});
+                Lit.Actions.setResponse({{ response: "REACHED" }});
+            }} catch (e) {{
+                Lit.Actions.setResponse({{ response: "BLOCKED:" + e }});
+            }}
+        }}
+        "#,
+        uri = &mock_server.uri()
+    };
+
+    client
+        .respond_with(IncrementFetchCountResponse { fetch_count: 1 })
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    let response = client.received::<SetResponseRequest>().response;
+    assert!(
+        response.starts_with("BLOCKED:"),
+        "loopback proxiedFetch must be blocked, got: {response}"
+    );
+
+    let hits = mock_server.received_requests().await.unwrap_or_default();
+    assert!(
+        hits.is_empty(),
+        "no request may reach the internal service via proxiedFetch, got {} hit(s)",
+        hits.len()
+    );
+
+    let _ = client.received::<IncrementFetchCountRequest>();
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+/// Exercises `Lit.Actions.proxiedFetch` against real Binance through a real
+/// egress proxy, executed in the actual runtime in-process. Opt-in: set
+/// `LIT_VENUES_TEST_PROXY` to a proxy URL (`http://user:pass@host:port`); skips
+/// cleanly when unset so CI stays green and no credentials are committed.
+/// (The direct-request control — geo-blocked 451 from a US IP vs. 200 via the
+/// proxy — is validated separately; the test mock holds one response per op
+/// type, so we keep this to a single proxied call.)
+///
+/// `#[ignore]` like `import_rewrite_cdn`: needs real outbound network, which the
+/// default CI/dev sandbox does not grant the test process. Run with
+/// `LIT_VENUES_TEST_PROXY=... cargo test -p lit-actions-tests --test integration proxied_fetch -- --ignored --nocapture`.
+#[rstest]
+#[ignore = "requires real network egress + LIT_VENUES_TEST_PROXY (see import_rewrite_cdn)"]
+#[tokio::test]
+async fn proxied_fetch(mut client: TestClient) {
+    let Ok(proxy) = std::env::var("LIT_VENUES_TEST_PROXY") else {
+        eprintln!("skipping proxied_fetch: set LIT_VENUES_TEST_PROXY to run");
+        return;
+    };
+
+    // proxy is embedded as a JS string literal via {:?}; setResponse below only
+    // ever echoes status/flags, never the proxy URL, so creds don't leak.
+    let code = formatdoc! {r#"
+        async function main() {{
+            const viaProxy = await Lit.Actions.proxiedFetch({{
+                url: "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
+                proxy: {proxy:?},
+            }});
+            const body = await viaProxy.text();
+            Lit.Actions.setResponse({{ response:
+                "proxyStatus=" + viaProxy.status + ";hasPrice=" + body.includes("price") }});
+        }}
+        "#,
+        proxy = proxy
+    };
+
+    client
+        .respond_with(IncrementFetchCountResponse { fetch_count: 1 })
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    let response = client.received::<SetResponseRequest>().response;
+    eprintln!("proxied_fetch → {response}");
+    assert!(
+        response.contains("proxyStatus=200"),
+        "binance via proxy should return 200: {response}"
+    );
+    assert!(
+        response.contains("hasPrice=true"),
+        "expected a price field in the proxied response body: {response}"
+    );
+
+    // Drain queued op-request records so the GothamStore Drop check passes.
+    let _ = client.received::<IncrementFetchCountRequest>();
     assert!(client.received::<ExecutionResult>().success);
 }
 
@@ -662,6 +861,25 @@ async fn async_await(mut client: TestClient) {
     }
 }
 
+/// Normalize the volatile `__litEvalCached` frame's `line:col` in a JS stack
+/// trace. That frame lives in the generated runtime file `99_patches.js`,
+/// whose line numbers shift whenever that file changes (e.g. the secp256k1
+/// warmup block at its tail). We still assert the frame is present and the full
+/// user-code stack is exact; we just stop pinning a line number we don't own.
+fn normalize_patches_line(s: &str) -> String {
+    let marker = "ext:lit_actions/99_patches.js:";
+    match s.find(marker) {
+        Some(start) => {
+            let after = start + marker.len();
+            match s[after..].find(')') {
+                Some(rel) => format!("{}LINE:COL{}", &s[..after], &s[after + rel..]),
+                None => s.to_string(),
+            }
+        }
+        None => s.to_string(),
+    }
+}
+
 #[rstest]
 #[tokio::test]
 async fn reference_error(mut client: TestClient) {
@@ -679,13 +897,13 @@ async fn reference_error(mut client: TestClient) {
         get_lit_action_ipfs_id(code)
     );
     assert_eq!(
-        res.unwrap_err().to_string(),
+        normalize_patches_line(&res.unwrap_err().to_string()),
         formatdoc! {r#"
             Uncaught (in promise) ReferenceError: nonexisting_function is not defined
                 at main ({script}:2:33)
                 at {script}:6:28
                 at {script}:10:11
-                at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:56:21)
+                at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:LINE:COL)
                 at <user_provided_script>:1:1
         "#, script = script}
         .trim()
@@ -711,13 +929,13 @@ async fn throw_error(mut client: TestClient) {
             get_lit_action_ipfs_id(code)
         );
         assert_eq!(
-            res.unwrap_err().to_string(),
+            normalize_patches_line(&res.unwrap_err().to_string()),
             formatdoc! {r#"
                 Uncaught (in promise) Error: boom
                     at main ({script}:3:7)
                     at {script}:9:28
                     at {script}:13:11
-                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:56:21)
+                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:LINE:COL)
                     at <user_provided_script>:1:1
             "#, script = script}
             .trim(),
@@ -738,13 +956,13 @@ async fn throw_error(mut client: TestClient) {
             get_lit_action_ipfs_id(code)
         );
         assert_eq!(
-            res.unwrap_err().to_string(),
+            normalize_patches_line(&res.unwrap_err().to_string()),
             formatdoc! {r#"
                 Uncaught (in promise) Error: boom
                     at main ({script}:3:11)
                     at {script}:9:28
                     at {script}:13:11
-                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:56:21)
+                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:LINE:COL)
                     at <user_provided_script>:1:1
             "#, script = script}
             .trim(),
@@ -1198,3 +1416,93 @@ async fn raw_execute_no_op_once(socket_path: &std::path::Path) -> Result<()> {
 /// — kept here as a documentation marker so future readers find it.
 #[allow(dead_code)]
 fn pool_isolation_doc() {}
+
+/// The snapshot-build-time secp256k1 warmup (tail of `99_patches.js`) must run
+/// successfully and survive into every fresh, one-shot per-request isolate.
+/// `__litSecp256k1Warmed` is set true at build time only if the ethers sign
+/// path executed end-to-end. If ethers' API drifts (e.g. `SigningKey` or
+/// `signDigest` renamed) or the warmup throws, the marker is false and signing
+/// actions silently pay the cold base-point precompute (~100-150ms on the prod
+/// TEE) on every request. Assert the marker here so that regression is a loud
+/// CI failure, not a silent perf cliff. (That the precompute *table itself*
+/// survives serialization was validated separately via an A/B latency harness;
+/// this guards the warmup from quietly becoming a no-op.)
+#[rstest]
+#[tokio::test]
+async fn secp256k1_precompute_warmed_in_snapshot(mut client: TestClient) {
+    client
+        .respond_with(SetResponseResponse {})
+        .execute_js(
+            r#"async function main() { Lit.Actions.setResponse({ response: String(globalThis.__litSecp256k1Warmed) }) }"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        client.received::<SetResponseRequest>().response,
+        "true",
+        "secp256k1 warmup did not run at snapshot-build time; signing actions will pay \
+         the cold base-point precompute. Check the warmup block at the tail of \
+         lit-actions/ext/js/99_patches.js (ethers SigningKey/signDigest API drift?)."
+    );
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+/// Runs the complete Keychain decryptor bundle in the actual Deno worker. The
+/// fixture's key derivation is synthetic; this is not a live TEE attestation test.
+/// Start lit-agent-keychain/scripts/runtime-vector.ts and set KEYCHAIN_RUNTIME_VECTOR.
+#[rstest]
+#[tokio::test]
+#[ignore = "requires the Keychain runtime fixture server"]
+async fn keychain_encrypted_release(mut client: TestClient) {
+    let path = std::env::var("KEYCHAIN_RUNTIME_VECTOR").unwrap();
+    let trace_path = format!("{path}.trace");
+    let trace_file = std::fs::File::create(&trace_path).unwrap();
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer(std::sync::Mutex::new(trace_file))
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+    let vector: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let mut request: ExecutionRequest = vector["code"].as_str().unwrap().to_owned().into();
+    request.js_params = Some(serde_json::to_vec(&vector["params"]).unwrap());
+    client
+        .respond_with(IncrementFetchCountResponse { fetch_count: 1 })
+        .respond_with(GetLitActionPublicKeyResponse {
+            public_key: vector["authorityPublicKey"].as_str().unwrap().into(),
+        })
+        .respond_with(GetLitActionPrivateKeyResponse {
+            secret: vector["privateKey"].as_str().unwrap().into(),
+        })
+        .respond_with(SetResponseResponse {});
+    let result = client.execute_js(request).await.unwrap();
+    assert!(result.success);
+    let response = client.received::<SetResponseRequest>().response;
+    let parsed: serde_json::Value = serde_json::from_str(&response).unwrap();
+    assert_eq!(
+        parsed["ok"], true,
+        "runtime rejected Keychain bundle: {response}"
+    );
+    assert!(parsed["result"]["payload"]["sealed"]["ciphertext"].is_string());
+    assert!(!response.contains(vector["expected"].as_str().unwrap()));
+    std::fs::write(format!("{path}.response"), response).unwrap();
+    client.received::<IncrementFetchCountRequest>();
+    client.received::<GetLitActionPublicKeyRequest>();
+    client.received::<GetLitActionPrivateKeyRequest>();
+    client.received::<ExecutionResult>();
+    let trace = std::fs::read_to_string(trace_path).unwrap();
+    assert!(
+        !trace.contains(
+            vector["privateKey"]
+                .as_str()
+                .unwrap()
+                .trim_start_matches("0x")
+        ),
+        "private action key leaked to tracing"
+    );
+    assert!(
+        !trace.contains(vector["expected"].as_str().unwrap()),
+        "protected plaintext leaked to tracing"
+    );
+}

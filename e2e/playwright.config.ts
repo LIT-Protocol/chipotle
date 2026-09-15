@@ -30,7 +30,10 @@ export default defineConfig({
   use: {
     baseURL: DASHBOARD_URL,
     trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
+    // AI agents run with AGENT_SCREENSHOTS=1 so passing tests leave visual
+    // evidence too (see AGENTS.md). Default stays failure-only to keep CI
+    // artifacts lean.
+    screenshot: process.env.AGENT_SCREENSHOTS === '1' ? 'on' : 'only-on-failure',
     video: 'retain-on-failure',
   },
 

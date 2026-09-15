@@ -28,7 +28,6 @@ use deno_runtime::{
 use indoc::formatdoc;
 use ipfs_hasher::IpfsHasher;
 use lit_actions_grpc::proto::{ExecuteJsRequest, ExecuteJsResponse};
-use lit_api_core::context::HEADER_KEY_X_PRIVACY_MODE;
 use lit_observability::channels::TracedReceiver;
 use lit_observability::logging::clear_task_request_context;
 use sys_traits::impls::RealSys;
@@ -57,6 +56,29 @@ fn lit_actions_ops_extension() -> deno_core::Extension {
 // Same default limits as in lit-node's action client
 const DEFAULT_TIMEOUT_MS: u64 = 1000 * 60 * 15; // 15 minutes
 pub(crate) const DEFAULT_MEMORY_LIMIT_MB: usize = 64; // 64MB
+// Hard ceilings for caller-supplied `timeout` / `memory_limit`. The proto
+// types (`uint64 timeout`, `uint32 memory_limit`) let a client request values
+// far larger than any host can honor: an effectively unbounded timeout pins a
+// worker forever, and an oversized heap request outruns the near-heap OOM
+// guard so the host OOM-killer takes down the runner (and any co-located
+// lit_node) instead. Mirrors the sibling gvisor-server's clamps
+// (`supervisor.rs`); see CPL-371.
+const MAX_TIMEOUT_MS: u64 = 1000 * 60 * 150; // 150 minutes
+pub(crate) const MAX_MEMORY_LIMIT_MB: usize = 2048; // 2GB
+
+/// Resolve a caller-supplied execution timeout: fall back to the default when
+/// unset, then clamp to `MAX_TIMEOUT_MS` (CPL-371).
+fn clamp_timeout_ms(requested: Option<u64>) -> u64 {
+    requested.unwrap_or(DEFAULT_TIMEOUT_MS).min(MAX_TIMEOUT_MS)
+}
+
+/// Resolve a caller-supplied heap limit: fall back to the default when unset,
+/// then clamp to `MAX_MEMORY_LIMIT_MB` (CPL-371).
+fn clamp_memory_limit_mb(requested: Option<usize>) -> usize {
+    requested
+        .unwrap_or(DEFAULT_MEMORY_LIMIT_MB)
+        .min(MAX_MEMORY_LIMIT_MB)
+}
 const MEMORY_SAMPLE_INTERVAL_MS: u64 = 500; // 500ms
 const EXECUTION_TERMINATED_ERROR: &str = "Uncaught Error: execution terminated";
 const MAX_ACTION_CODE_CACHE_BYTES: usize = 100 * 1024 * 1024;
@@ -73,7 +95,15 @@ static BASE_PERMISSIONS: LazyLock<Permissions> = LazyLock::new(|| {
     Permissions::from_options(
         PERMISSION_DESC_PARSER.as_ref(),
         &PermissionsOptions {
+            // Empty `allow_net` = allow all outbound hosts (so `fetch()` works),
+            // but `deny_net` carves out internal address space that a malicious
+            // action must never reach (loopback, RFC1918, link-local incl. cloud
+            // metadata, …). Deny always wins over the allow-all grant. This only
+            // catches *literal-IP* URLs; hostnames that resolve into that space
+            // are handled by the egress-filtering DNS resolver wired in below.
+            // See `egress` module (CPL-295).
             allow_net: Some(vec![]),
+            deny_net: Some(crate::egress::effective_deny_net()),
             ..Default::default()
         },
     )
@@ -405,6 +435,38 @@ async fn get_or_prepare_action_code(
     Ok(prepared_code)
 }
 
+/// Bound pre-execution bundling to the request's shared wall-clock budget. The
+/// V8 timeout controller can only `terminate_execution` on the isolate; it
+/// cannot touch the Rust-side CDN fetch / SWC work driven by `fut`, so without
+/// this deadline a slow or hostile dep graph pins a worker for up to
+/// `MAX_TIMEOUT_MS` of unbilled wall-clock before execution (and its usage
+/// ticks) ever begin (CPL-372).
+///
+/// `deadline` is anchored to the same instant the controller thread's clock
+/// starts, so bundling and execution draw from one end-to-end budget rather
+/// than each getting a fresh `timeout_ms`. `timeout_ms` is passed only to
+/// phrase the error message.
+///
+/// On expiry the bundling future is dropped, which cancels the in-flight async
+/// CDN dependency walk — the fetch-timeout amplification this fix targets. The
+/// final SWC pass runs on `tokio::task::spawn_blocking`, so dropping the future
+/// stops awaiting its join handle but does not interrupt an SWC pass already
+/// underway; that pass is CPU-bound and self-terminating rather than the
+/// unbounded-wait vector. Either way the caller sees the same
+/// `deadline_exceeded` status an over-long execution would produce.
+async fn prepare_action_code_within_deadline(
+    deadline: tokio::time::Instant,
+    timeout_ms: u64,
+    fut: impl std::future::Future<Output = Result<CachedActionCode>>,
+) -> Result<CachedActionCode> {
+    match tokio::time::timeout_at(deadline, fut).await {
+        Ok(result) => result,
+        Err(_) => bail!(Status::deadline_exceeded(format!(
+            "Bundling your function's imports exceeded the maximum runtime of {timeout_ms}ms and was terminated."
+        ))),
+    }
+}
+
 /// Build a `MainWorker` from the V8 snapshot. Warm-time safe: does no JS
 /// injection, so it can run off the request path before `auth_context` and
 /// `http_headers` are known. The single `LoadedModules` handle wired into
@@ -473,7 +535,11 @@ pub(crate) fn build_worker_base(shared: &PoolSharedState) -> Result<PreparedWork
             npm_process_state_provider: Default::default(),
             permissions: PermissionsContainer::new(desc_parser, perms),
             root_cert_store_provider: Default::default(),
-            fetch_dns_resolver: Default::default(),
+            // Resolve user `fetch()` hostnames through a filter that drops any
+            // address in internal space, so a hostname (or DNS-rebinding answer)
+            // pointing at loopback/RFC1918/link-local cannot be reached even
+            // though `deny_net` only inspects the URL host string (CPL-295).
+            fetch_dns_resolver: crate::egress::egress_filtered_resolver(),
             shared_array_buffer_store: Default::default(),
             compiled_wasm_module_store: Default::default(),
             v8_code_cache: Some(shared.v8_code_cache.clone()),
@@ -500,13 +566,14 @@ pub(crate) fn inject_lit_namespace(
 ) -> Result<()> {
     let _span = info_span!("LitNamespace.js").entered();
 
-    if http_headers
-        .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
-        .is_some_and(|v| v == "true")
-    {
-        debug!("Populating LitHeaders: **PRIVACY MODE**");
-    } else {
+    // Request headers can carry user secrets: redact by default (CPL-369).
+    if lit_observability::sensitive_logging_enabled() {
         debug!("Populating LitHeaders: {http_headers:?}");
+    } else {
+        debug!(
+            "Populating LitHeaders: <redacted> ({} headers)",
+            http_headers.len()
+        );
     }
 
     // NB: globalThis.LitActions is already part of the V8 snapshot
@@ -581,7 +648,6 @@ fn execute_patch_deno(worker: &mut MainWorker) -> Result<()> {
 fn inject_params_globals(
     worker: &mut MainWorker,
     globals_to_inject: &Option<serde_json::Value>,
-    http_headers: &BTreeMap<String, String>,
 ) -> Result<()> {
     // Omitted js_params => inject `null`, matching the pre-change `main(null)`
     // semantics rather than handing user code `undefined`.
@@ -590,13 +656,12 @@ fn inject_params_globals(
 
     let _span = info_span!("Params.js").entered();
 
-    if http_headers
-        .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
-        .is_some_and(|v| v == "true")
-    {
-        debug!("Injecting js_params global: **PRIVACY MODE**");
-    } else {
+    // js_params is the documented place for customer secrets: redact by
+    // default (CPL-369).
+    if lit_observability::sensitive_logging_enabled() {
         debug!("Injecting js_params global: {params:?}");
+    } else {
+        debug!("Injecting js_params global: <redacted>");
     }
 
     // Bind the whole params object to a single internal global. JSON is a
@@ -680,21 +745,20 @@ pub(crate) async fn execute_js(
         module_cache,
         lockfile_path,
         http_client,
-        memory_limit_mb: memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB),
+        memory_limit_mb: clamp_memory_limit_mb(memory_limit_mb),
         v8_code_cache,
     });
 
-    let mut prepared = build_worker_base(&shared)
+    let prepared = build_worker_base(&shared)
         .context("Error building main worker")
         .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context when downcasting JS errors later
-
-    inject_lit_namespace(&mut prepared.worker, &auth_context, &http_headers)?;
 
     execute_with_worker(
         prepared,
         shared,
         code,
         js_params,
+        auth_context,
         http_headers,
         timeout_ms,
         outbound_tx,
@@ -719,6 +783,7 @@ pub(crate) async fn execute_with_worker(
     shared: Arc<PoolSharedState>,
     code: String,
     js_params: Option<serde_json::Value>,
+    auth_context: Option<serde_json::Value>,
     http_headers: BTreeMap<String, String>,
     timeout_ms: Option<u64>,
     outbound_tx: flume::Sender<tonic::Result<ExecuteJsResponse>>,
@@ -731,6 +796,7 @@ pub(crate) async fn execute_with_worker(
         shared,
         code,
         js_params,
+        auth_context,
         http_headers,
         timeout_ms,
         outbound_tx,
@@ -756,6 +822,7 @@ async fn execute_with_worker_inner(
     shared: Arc<PoolSharedState>,
     code: String,
     js_params: Option<serde_json::Value>,
+    auth_context: Option<serde_json::Value>,
     http_headers: BTreeMap<String, String>,
     timeout_ms: Option<u64>,
     outbound_tx: flume::Sender<tonic::Result<ExecuteJsResponse>>,
@@ -768,12 +835,8 @@ async fn execute_with_worker_inner(
         loaded_modules,
     } = prepared;
 
-    let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
+    let timeout_ms = clamp_timeout_ms(timeout_ms);
     let memory_limit_mb = shared.memory_limit_mb;
-
-    // PatchDeno.js must run AFTER LitNamespace.js (which the caller already
-    // injected) to preserve the original bootstrap order.
-    execute_patch_deno(&mut worker)?;
 
     // Check the action code cache early so we can skip prepare_action_code
     // on cache hit (the real performance win). We always use CdnModuleLoader
@@ -797,11 +860,24 @@ async fn execute_with_worker_inner(
         state.put(outbound_tx);
         state.put(inbound_rx);
         state.put(loaded_modules.clone());
+        // Cap concurrent native buffering by `op_lit_proxied_fetch` to the
+        // isolate's memory budget (CPL-373): each in-flight proxied fetch can
+        // hold up to 10 MiB off-heap, invisible to the heap-limit OOM guard.
+        state.put(
+            lit_actions_ext::bindings::ProxiedFetchLimiter::for_memory_budget_mb(memory_limit_mb),
+        );
         drop(state);
     }
 
     let (halt_isolate_tx, mut halt_isolate_rx) = oneshot::channel::<ExecutionResult>();
     let (memory_limit_tx, memory_limit_rx) = mpsc::unbounded_channel::<usize>();
+
+    // Anchor the request's wall-clock budget here, alongside the controller
+    // thread that enforces it for the isolate. Pre-execution bundling reuses
+    // this same absolute deadline (see prepare_action_code_within_deadline), so
+    // bundling and execution share one end-to-end budget instead of each
+    // getting a fresh timeout_ms (CPL-372).
+    let request_deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
 
     start_controller_thread(
         &mut worker.js_runtime,
@@ -818,6 +894,18 @@ async fn execute_with_worker_inner(
             current_limit * 2
         });
 
+    // Materialize the per-request Lit namespace globals AFTER the controller
+    // thread and near-heap-limit callback above. auth_context and http_headers
+    // are caller-supplied and may be multi-MB; serializing them into V8 must be
+    // subject to the same timeout/OOM guards as user code so an oversized blob
+    // surfaces as a resource-exhausted error instead of a hard V8
+    // FatalProcessOutOfMemory abort (F-008).
+    inject_lit_namespace(&mut worker, &auth_context, &http_headers)?;
+
+    // PatchDeno.js must run AFTER LitNamespace.js to preserve the original
+    // bootstrap order.
+    execute_patch_deno(&mut worker)?;
+
     // Inject the caller's js_params as a single global (`__litJsParams`), via
     // execute_script — which deliberately bypasses the eval-context code cache.
     // This keeps js_params OUT of the source that flows through
@@ -832,7 +920,7 @@ async fn execute_with_worker_inner(
     // materializing a large params object into V8 is subject to the same
     // timeout/OOM guards as user code, so an oversized params blob surfaces as
     // a normal resource-exhausted/timeout error instead of a hard V8 abort.
-    inject_params_globals(&mut worker, &js_params, &http_headers)?;
+    inject_params_globals(&mut worker, &js_params)?;
 
     let mut interval = tokio::time::interval(Duration::from_millis(MEMORY_SAMPLE_INTERVAL_MS));
 
@@ -861,8 +949,24 @@ async fn execute_with_worker_inner(
             lockfile_path: &shared.lockfile_path,
             module_cache: &shared.module_cache,
         };
-        get_or_prepare_action_code(&code, &action_ipfs_id, &action_code_cache, &prepare_context)
-            .await?
+        // Pre-execution bundling (CDN fetch + SWC) runs on the Rust side, out of
+        // reach of the V8 timeout controller: `terminate_execution` interrupts
+        // the isolate, not an in-flight reqwest `.await`. A cold action importing
+        // a wide/deep graph of slow or nonexistent packages could otherwise pin a
+        // worker for up to ~MAX_TIMEOUT_MS of wall-clock that starts *before* any
+        // usage ticks are charged (CPL-372). Bound it to `request_deadline`, the
+        // shared budget anchored at controller start above.
+        prepare_action_code_within_deadline(
+            request_deadline,
+            timeout_ms,
+            get_or_prepare_action_code(
+                &code,
+                &action_ipfs_id,
+                &action_code_cache,
+                &prepare_context,
+            ),
+        )
+        .await?
     };
     record_loaded_modules(&loaded_modules, &cached_code);
     let user_code = cached_code.to_executable_code();
@@ -1041,6 +1145,87 @@ mod tests {
             code: code.to_string(),
             loaded_modules: Vec::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn bundling_within_deadline_returns_result() {
+        // A bundle that finishes before the deadline passes straight through.
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(60_000);
+        let out = prepare_action_code_within_deadline(deadline, 60_000, async {
+            Ok(cached_code("console.log('ok')"))
+        })
+        .await
+        .expect("fast bundle should succeed");
+        assert_eq!(out.code, "console.log('ok')");
+    }
+
+    #[tokio::test]
+    async fn bundling_past_deadline_fails_with_deadline_exceeded() {
+        // A bundle that outlives the deadline (e.g. slow/nonexistent CDN deps,
+        // CPL-372) is cancelled and surfaced as a `deadline_exceeded` status
+        // rather than pinning the worker for the full sleep. The 30s sleep never
+        // runs to completion: the 20ms deadline fires first and drops the
+        // future, so the test finishes in ~20ms of real time.
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(20);
+        let err = prepare_action_code_within_deadline(deadline, 20, async {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            Ok(cached_code("never reached"))
+        })
+        .await
+        .expect_err("slow bundle should hit the deadline");
+
+        let status = err
+            .downcast_ref::<Status>()
+            .expect("bundling timeout should surface as a tonic Status");
+        assert_eq!(status.code(), tonic::Code::DeadlineExceeded);
+    }
+
+    #[tokio::test]
+    async fn bundling_error_propagates_unchanged() {
+        // A bundling failure that occurs before the deadline is forwarded as-is,
+        // not masked as a timeout.
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(60_000);
+        let err = prepare_action_code_within_deadline(deadline, 60_000, async {
+            bail!("Failed to bundle CDN imports: boom")
+        })
+        .await
+        .expect_err("bundle error should propagate");
+        assert!(err.to_string().contains("Failed to bundle CDN imports"));
+    }
+
+    #[test]
+    fn clamp_timeout_ms_bounds_caller_values() {
+        // Unset falls back to the default.
+        assert_eq!(clamp_timeout_ms(None), DEFAULT_TIMEOUT_MS);
+        // Values at or below the ceiling pass through untouched.
+        assert_eq!(clamp_timeout_ms(Some(500)), 500);
+        assert_eq!(clamp_timeout_ms(Some(MAX_TIMEOUT_MS)), MAX_TIMEOUT_MS);
+        // Anything above the ceiling — including the proto's `u64::MAX` — is
+        // clamped down, so a worker can never be pinned indefinitely.
+        assert_eq!(clamp_timeout_ms(Some(MAX_TIMEOUT_MS + 1)), MAX_TIMEOUT_MS);
+        assert_eq!(clamp_timeout_ms(Some(u64::MAX)), MAX_TIMEOUT_MS);
+    }
+
+    #[test]
+    fn clamp_memory_limit_mb_bounds_caller_values() {
+        // Unset falls back to the default.
+        assert_eq!(clamp_memory_limit_mb(None), DEFAULT_MEMORY_LIMIT_MB);
+        // Values at or below the ceiling pass through untouched.
+        assert_eq!(clamp_memory_limit_mb(Some(100)), 100);
+        assert_eq!(
+            clamp_memory_limit_mb(Some(MAX_MEMORY_LIMIT_MB)),
+            MAX_MEMORY_LIMIT_MB
+        );
+        // Anything above the ceiling — including the proto's `u32::MAX` (MB) —
+        // is clamped down so V8's heap limit stays below what the host can OOM.
+        assert_eq!(
+            clamp_memory_limit_mb(Some(MAX_MEMORY_LIMIT_MB + 1)),
+            MAX_MEMORY_LIMIT_MB
+        );
+        assert_eq!(
+            clamp_memory_limit_mb(Some(u32::MAX as usize)),
+            MAX_MEMORY_LIMIT_MB
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 ---
 title: "Examples"
-description: "Common Lit Action patterns covering signing, encryption, decryption, HTTP fetching, contract calls, sending ETH, gating ERC-20 transfers on sanctions data, multi-source price oracles, AI-consensus prediction-market resolution, permissionless cross-chain token bridging, non-custodial threshold-ECDSA co-signing, and keyless Solana (ed25519) transaction signing."
+description: "Common Lit Action patterns covering signing, encryption, decryption, HTTP fetching, contract calls, sending ETH, gating ERC-20 transfers on sanctions data, multi-source price oracles, AI-consensus prediction-market resolution, permissionless cross-chain token bridging, non-custodial threshold-ECDSA co-signing, keyless Solana (ed25519) transaction signing, and a production agent secrets keychain built from derived actions and signed off-chain policy."
 ---
 
 Each example below is a self-contained Lit Action. Pass the code string to the `/core/v1/lit_action` endpoint with any required `js_params`. The `pkpId` parameter is the wallet address of the PKP you want to use, passed in via `js_params`.
@@ -789,4 +789,119 @@ async function main({ action, message, recipient }) {
 
 <Info>
   The full runnable example — the policy-enforcing `solanaSigner` action (with a from-scratch legacy-message parser), a one-shot setup that derives the wallet's Solana address, and `airdrop` / `transfer` client scripts that fund the wallet and round-trip a signed transfer on **devnet** (including an over-cap send the action refuses) — lives at [`examples/solana-signer/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/solana-signer) in the repo.
+</Info>
+
+---
+
+## 18. Non-Custodial Co-Signer: Threshold FROST for Solana, Bitcoin, and Zcash
+
+The same non-custodial **2-of-3** model as [§16](#16-non-custodial-co-signer-threshold-ecdsa-split-between-lit-and-you), for the **Schnorr / EdDSA** signature family instead of ECDSA. The key is split by a real **FROST** distributed key generation — Lit's Kudelski-audited [`lit-frost`](https://github.com/LIT-Protocol/lit-frost) + [`frost-dkg`](https://github.com/mikelodder7/frost-dkg), run in WASM — so **Lit cannot sign without you, the full key never exists anywhere, and you hold 2 of 3 shares** (hot + cold) for a no-Lit recovery path. This build signs **Ed25519**, so the threshold group key *is* a **Solana** address: there is no on-chain program to deploy — you just sign a `SystemProgram.transfer` and submit it.
+
+FROST signing is hardened against the protocol's sharpest footgun — nonce reuse. The action signs **atomically in one stateless call**: it generates its single-use nonce, signs over the full `[user, action]` commitment set, and discards the nonce. It is never sealed or relayed, so the user (the transport) has nothing to replay; a replay just gets a fresh nonce. The action also only co-signs with the **hot** share (the allowed peer set is sealed into the keyshare at keygen), pins the wasm's SHA-256, and is locked to its own CID.
+
+### Which chains and assets
+
+This build emits a standard **Ed25519** signature, so the threshold key is an ordinary account on any chain that verifies RFC-8032 Ed25519. Because `lit-frost` is the whole FROST *family*, switching the ciphersuite (a one-line `Scheme` change) and rebuilding the wasm reuses the exact same DKG + co-signing flow for the rest of the Schnorr/EdDSA world:
+
+| FROST ciphersuite | Chains / assets |
+| --- | --- |
+| **Ed25519** *(this build)* | **Solana** (verified end-to-end), and other standard-Ed25519 chains — NEAR, Stellar, Aptos, Sui, TON, Cardano, Hedera, Algorand |
+| **secp256k1 Taproot** (BIP-340) | **Bitcoin Taproot** (P2TR key-path spends) and other BIP-340 Schnorr signers |
+| **RedDSA** (Jubjub / Pallas) | **Zcash** shielded spend authorization — Sapling (Jubjub) and Orchard (Pallas) |
+| **Schnorrkel / sr25519** | **Polkadot**, **Kusama**, and other Substrate chains |
+| **Ristretto255 / P-256 / P-384 / Decaf377** | Schnorr over those curves (e.g. Penumbra uses Decaf377) |
+
+For the **ECDSA** world — every EVM chain, plus Bitcoin **legacy/SegWit**, Tron, and Cosmos secp256k1 accounts — use the [secp256k1-ECDSA sibling](#16-non-custodial-co-signer-threshold-ecdsa-split-between-lit-and-you). Between the two examples, **one share per signature-scheme family covers essentially every chain**, with no multisig contract anywhere.
+
+<Note>
+  Only the Ed25519 / Solana path is verified end-to-end. The other ciphersuites are supported by the audited `lit-frost` library, but each target chain still needs its own address derivation and transaction format — and Bitcoin Taproot needs the BIP-341 key tweak, Zcash shielded needs the RedDSA signature randomizer. The threshold-signature primitive is there; the chain glue is the remaining work (the same way Solana needed its transaction builder).
+</Note>
+
+```javascript
+// Abridged: the Lit-side party signs ATOMICALLY in one stateless call. It holds
+// ONE FROST share and cannot sign without the user's share.
+// js_params: { op:"sign", pkpId, encActionKeyshare, message, peerCommitments }
+async function signRound({ pkpId, encActionKeyshare, message, peerCommitments }) {
+  await ensureWasm(); // lit-frost FROST (Ed25519), run in WASM inside the node
+
+  // Unseal this party's share + the parameters bound at keygen: the group key,
+  // threshold, and the ONLY peers it may co-sign with (the hot share). The action
+  // trusts these, not caller-supplied values, and refuses any other quorum.
+  const { bytes: share, meta } = await unseal(pkpId, encActionKeyshare, "keyshare");
+  assertAllowedQuorum(peerCommitments, meta); // reject cold+Lit, dup/unknown/self
+
+  // BOTH FROST rounds in ONE call: a fresh nonce, sign over [user, action], then
+  // discard the nonce. It is never sealed or relayed, so it can never be reused
+  // (reusing a FROST nonce across two transcripts would leak the secret share).
+  const r1 = sign_round1(share);
+  const commits = [...peerCommitments, { id: meta.myId, data: r1.commitment }].sort(byId);
+  const r2 = sign_round2(message, meta.myId, share, meta.verifyingKey, meta.threshold, commits, r1.nonce);
+  return { commitment: r1.commitment, signatureShare: r2.signature_share, verifyingShare: r2.verifying_share };
+}
+```
+
+<Info>
+  The full runnable example — the stateless `mpcSigner` action, the user-side client + local share store, a `wasm/` wrapper that compiles `lit-frost` + `frost-dkg` to WebAssembly, and `setup` / `keygen` / `fund` / `sign` scripts covering the FROST DKG and both quorums (hot + Lit, and the no-Lit hot + cold recovery path) — lives at [`examples/mpc-signing-frost/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/mpc-signing-frost) in the repo. Verified end-to-end on Solana devnet (DKG + a hot + Lit transfer + a hot + cold recovery transfer); `npm run keygen -- --basic` does a simpler 2-of-2 (Lit + hot, no recovery).
+</Info>
+
+---
+
+## 19. Agent Secrets Keychain (Derived Actions + Signed Storage)
+
+Every example above is one action. This one shows what a whole product looks like when it is built from the two structural patterns: [Derived Actions](./derived-actions) and [Signed Data in Untrusted Storage](./signed-storage). The [Lit Agent Keychain](https://github.com/LIT-Protocol/chipotle/tree/main/lit-agent-keychain) lets a human give an AI agent scoped access to credentials (API keys, tokens) that the human can revoke, with no operator able to read or forge anything.
+
+There are **no PKPs** and **no trusted backend**. A vault is *N+1* immutable actions derived from three templates:
+
+- The **authority action** has the owner's identity (wallet address, passkey public key, or Google subject) stamped in. It verifies the owner's proof and signs a receipt over whatever object the owner approved: a ciphertext envelope, an access policy, a recovery-credential list.
+- One **secret action per stored secret** has the vault ID, secret ID, and the authority action's CID stamped in. Its CID-derived key, run through HKDF, is the X25519 key the owner encrypts to in the browser. It only ever decrypts after verifying an agent's signed request against a policy the authority action signed.
+- A fixed **public-key helper** lets browsers and SDKs look up any action's identity key directly from the trusted Lit origin.
+
+The Keychain's Postgres database stores plaintext policy JSON plus receipts. It can roll back or withhold, but cannot mint a grant, extend an expiry, or read a secret.
+
+```javascript
+// Abridged core of the per-secret action. Full source: lit-agent-keychain/actions/secret-common.ts
+async function main(params) {
+  try {
+    // 1. Agent's signed, short-lived request. Binds exact policy hash, envelope hash,
+    //    operation, and a fresh response encryption key.
+    const { request, signature } = params.signedRequest;
+    requireThat(request.secretId === MANIFEST.secretId && request.vaultId === MANIFEST.vaultId);
+    verifyWindow(request.issuedAt, request.expiresAt, now(), 120);
+    verifyAgent(request, signature, request.agentPublicKey);            // Ed25519
+
+    // 2. Fetch the current signed policy from the (untrusted) registry and verify the
+    //    receipt against the AUTHORITY action's key, looked up by the CID stamped in.
+    const { policy } = await jsonFetch(`${MANIFEST.registry}/api/registry/secrets/${MANIFEST.secretId}`, {}, 8000, 256 * 1024);
+    const authorityKey = await Lit.Actions.getLitActionPublicKey({ ipfsId: MANIFEST.authorityCid });
+    verifyReceipt(policy, authorityKey, MANIFEST.vaultId);
+    const p = policy.document;
+    requireThat(digest(p) === request.policyHash && !p.disabled && p.notBefore <= now() && now() < p.expiresAt);
+    requireThat(p.grants.some((g) => g.agentPublicKey === request.agentPublicKey
+      && g.operations.includes(request.operation)
+      && g.versions.some((v) => v.envelopeHash === request.envelopeHash)));
+
+    // 3. The ciphertext envelope is also owner-signed and bound to this exact action.
+    verifyReceipt(params.envelope, authorityKey, MANIFEST.vaultId);
+    requireThat(digest(params.envelope.document) === request.envelopeHash
+      && params.envelope.document.metadata.actionCid === request.actionCid);
+
+    // 4. Only now derive the decryption key from this action's identity key.
+    const actionKey = unhex((await Lit.Actions.getLitActionPrivateKey()).replace(/^0x/, ""));
+    const x25519Key = hkdf(sha256, actionKey, utf8("lit-keychain/v2"), utf8("secret-envelope-x25519"), 32);
+    const plaintext = await decryptEnvelope(params.envelope.document, x25519Key);      // HPKE unwrap + AES-GCM
+
+    // 5. Encrypt the result to the requester and sign it, so no proxy can read or forge it.
+    const payload = { domain: "lit-keychain/response/v2", requestHash: digest(request),
+      sealed: await seal(request.responsePublicKey, plaintext, { requestHash: digest(request) }) };
+    return { ok: true, result: { payload, signature: signAction(payload, actionKey) } };
+  } catch {
+    return { ok: false, error: "access_denied" };
+  }
+}
+```
+
+A second template, `stripe-balance`, uses the same manifest and the same verification but can only call one fixed Stripe endpoint and return bounded numbers. That credential has no export path, even for the owner, and the difference is auditable from the CID.
+
+<Info>
+  The full project, including the three action templates, the browser client that derives CIDs and encrypts locally, the Rust API that verifies receipts before storing them, the agent SDK/CLI/MCP server, client-side TEE attestation of the Lit endpoint, and the [security contract](https://github.com/LIT-Protocol/chipotle/blob/main/lit-agent-keychain/SECURITY.md) spelling out what the operator can and cannot do, lives at [`lit-agent-keychain/`](https://github.com/LIT-Protocol/chipotle/tree/main/lit-agent-keychain) in the repo. It runs against the production Chipotle API with execute-only usage keys.
 </Info>

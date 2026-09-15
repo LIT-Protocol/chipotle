@@ -90,3 +90,20 @@ If a call is made when your balance is exhausted, the API returns a `402 Payment
 ## Billing Identity
 
 Your billing account is tied to the **wallet address derived from your account API key**. This wallet address is used as the Stripe customer identifier. If you provide an email address when creating your account, it is forwarded to Stripe for your customer record and for payment receipts.
+
+In **ChainSecured (sovereign) mode** there is no account API key — billing is tied to the account's **billing wallet** instead. This wallet is fixed at account creation and preserved across conversion to ChainSecured and across ownership transfers, so your Stripe credit balance follows the account even as the admin wallet rotates.
+
+---
+
+## Billing in ChainSecured (sovereign) mode
+
+[ChainSecured mode](/management/account_modes) splits billing across two rails, and the split is worth calling out explicitly:
+
+| What you do | API mode | ChainSecured (sovereign) mode |
+|---|---|---|
+| Admin write (create group, add action, mint usage key, ...) | $0.01 credit charged via Stripe; the server relays the tx and covers gas | **Not charged to Stripe.** You sign and submit the tx yourself and pay **Base gas** from your connected wallet |
+| Lit Action execution | $0.01/second via Stripe | $0.01/second via Stripe — **identical to API mode** |
+
+In other words, converting to ChainSecured moves only the **admin-write** half of billing off Stripe (onto your wallet's gas). Lit Action **execution** is metered against your Stripe credit balance in both modes, because execution always runs through the server. A ChainSecured account that performs admin writes but no executions can legitimately show **zero** Stripe charges — admin-write gas is paid on-chain and never reaches Stripe.
+
+This is the expected behavior, not a billing fault: there is no `$0.01` management charge for sovereign admin writes because those writes never pass through the server's metered endpoint.

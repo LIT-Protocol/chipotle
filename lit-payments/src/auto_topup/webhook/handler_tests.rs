@@ -22,14 +22,12 @@
 //!   - cap reached: pre-existing PIs already at/above cap →  second
 //!     top-up skipped  (gap #7, partial of gap #11)
 
-use std::sync::Arc;
-
 use hmac::{Hmac, Mac};
 use lit_billing_core::StripeClient;
 use rocket::http::{Header, Status};
 use rocket::local::asynchronous::Client;
 use rocket::{Rocket, routes};
-use serde_json::{Value, json};
+use serde_json::json;
 use sha2::Sha256;
 use sqlx::PgPool;
 
@@ -82,7 +80,10 @@ fn test_config(stripe_secret_key: String, db_url: String) -> Config {
         lit_accounts_contract_address: alloy_primitives::Address::ZERO,
         stripe_webhook_secret: WEBHOOK_SECRET.into(),
         reconciler_interval_secs: 900,
+        enterprise_billing_interval_secs: 3600,
+        stripe_dashboard_base: "https://dashboard.stripe.com".to_string(),
         cors_allowed_origins: vec!["http://localhost".to_string()],
+        gas_funder: None,
     }
 }
 

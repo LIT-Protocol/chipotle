@@ -9,6 +9,7 @@
 //! - [`StripeClient`] — credentials + HTTP plumbing, no caching.
 //! - [`customer`] — wallet ↔ Stripe customer lookup, email updates.
 //! - [`balance`] — credit-balance reads.
+//! - [`invoice`] — draft-invoice + line-item creation (enterprise billing).
 //! - [`reporting`] — pagination helpers + per-day aggregation for the
 //!   `stripe_report` binary.
 //! - [`format`] — pure helpers (`cents_to_display`, `unix_to_utc_date`).
@@ -24,6 +25,7 @@ pub mod customer;
 pub mod eip712;
 pub mod format;
 pub mod http;
+pub mod invoice;
 pub mod on_chain;
 pub mod reporting;
 

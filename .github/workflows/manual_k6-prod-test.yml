@@ -1,11 +1,27 @@
 # Manually run k6 smoke + correctness tests against production.
 # Does NOT trigger a deployment — only runs the test suite against the live prod API
 # using pre-funded accounts from the K6_ACCOUNTS_PROD_JSON secret.
+#
+# Set run_soak=true to also capture a low-VU soak latency baseline against prod
+# (e.g. before/after a release to eyeball regressions until Phase 2 deltas land).
+# The soak uses the SAME pre-funded prod pool — NOT create_accounts, which can't
+# fund accounts in prod (top-ups are test-mode only).
 
 name: "k6 Prod Test (manual)"
 
 on:
   workflow_dispatch:
+    inputs:
+      run_soak:
+        description: "Also run a low-VU soak latency baseline (spends real Stripe credits on the pre-funded prod accounts)"
+        required: false
+        type: boolean
+        default: false
+      soak_duration:
+        description: "Soak steady-state duration (longer = steadier p95; adds ~4m ramps + cost)"
+        required: false
+        type: string
+        default: '5m'
 
 jobs:
   k6-smoke:
@@ -22,5 +38,27 @@ jobs:
     with:
       api_root_url: https://${{ vars.DOMAIN_PROD }}/core/v1
       env: prod
+    secrets:
+      accounts_json: ${{ secrets.K6_ACCOUNTS_PROD_JSON }}
+
+  # Opt-in (run_soak=true) prod latency baseline. Runs AFTER correctness so the
+  # cheap checks validate the box first and their traffic doesn't skew the p95.
+  # Uses the pre-funded prod pool (NOT create_accounts — prod can't fund test
+  # accounts). p95 ceilings overridden very high: this is a MEASUREMENT run, so
+  # read the per-endpoint p95 in the summary; it should not gate on prod latency
+  # that differs from the staging-tuned defaults.
+  k6-soak-baseline:
+    if: ${{ inputs.run_soak }}
+    needs: [k6-correctness]
+    uses: ./.github/workflows/k6-loadtest.yml
+    with:
+      api_root_url: https://${{ vars.DOMAIN_PROD }}/core/v1
+      env: prod
+      test: soak
+      vus: '2'
+      duration: ${{ inputs.soak_duration }}
+      scenario: soak
+      p95_encrypt_ms: '100000'
+      p95_ecdsa_ms: '100000'
     secrets:
       accounts_json: ${{ secrets.K6_ACCOUNTS_PROD_JSON }}
