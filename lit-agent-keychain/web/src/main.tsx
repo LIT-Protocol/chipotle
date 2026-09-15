@@ -39,6 +39,7 @@ import {
   LIT_URL,
   type Identity,
 } from "./identities.ts";
+import { Landing, LandingNav, LandingFooter } from "./Landing.tsx";
 import "@rainbow-me/rainbowkit/styles.css";
 import "./style.css";
 
@@ -284,6 +285,7 @@ function App() {
         <a href="/" className="brand">
           <span className="brand-mark">L</span> Lit <span>Agent Keychain</span>
         </a>
+        {!client && <LandingNav />}
         <div className="header-right">
           <span className="pill">Encrypted locally</span>
           {client && (
@@ -326,179 +328,191 @@ function App() {
         </div>
       )}
       {!client ? (
-        <main className="welcome">
-          <section>
-            <p className="eyebrow">CREDENTIALS, UNDER YOUR CONTROL</p>
-            <h1>
-              Your agents.
-              <br />
-              Your keys.
-              <br />
-              <em>Your permission.</em>
-            </h1>
-            <p className="intro">
-              Encrypt secrets on your device. Decide which agents can use them.
-              Lit Actions check your authorization before every release.
-            </p>
-            <div className="trust-note">
-              <span>01</span>
-              <div>
-                <strong>Owner-approved access</strong>
-                <p>
-                  Wallet, passkey, or Google. Keychain cannot invent
-                  permissions.
-                </p>
-              </div>
-            </div>
-            <div className="trust-note">
-              <span>02</span>
-              <div>
-                <strong>Encrypted storage</strong>
-                <p>
-                  Only ciphertext reaches our database. Agents prove they hold
-                  their own key.
-                </p>
-              </div>
-            </div>
-            <div className="trust-note">
-              <span>03</span>
-              <div>
-                <strong>A clear trust boundary</strong>
-                <p>
-                  You trust the client, Lit, your sign-in provider, and Keychain
-                  to honor the latest revocations.
-                </p>
-              </div>
-            </div>
-            <section className="pricing-card" aria-label="Pricing">
-              <p className="eyebrow">SIMPLE PRICING</p>
-              <h2>
-                Free <small>for 5 secrets</small>
-              </h2>
-              <p>
-                Try it with no card. All sign-in methods, agent access,
-                rotation, and recovery included.
+        <>
+          <main className="welcome">
+            <section>
+              <p className="eyebrow">CREDENTIALS, UNDER YOUR CONTROL</p>
+              <h1>
+                Your agents.
+                <br />
+                Your keys.
+                <br />
+                <em>Your permission.</em>
+              </h1>
+              <p className="intro">
+                Encrypt API keys on your device. Approve exactly which agents
+                may use them. Lit Protocol’s hardware enclaves check your
+                authorization on every request, so nobody else can grant access,
+                not even us.
               </p>
-              <h2>
-                $10 <small>/ month</small>
-              </h2>
-              <p>Up to 1,000 secrets per account.</p>
-              <p>
-                Execution included under fair use. No automatic overage charges.
-                Rotations do not use extra secret slots.
+              <p className="hero-links">
+                <a href="#how">How it works</a>
+                <a href="#agents">SDK, CLI &amp; MCP server</a>
+                <a href="#faq">Security FAQ</a>
               </p>
-              <a
-                href={`mailto:${encodeURIComponent(settings?.pricing?.contactEmail || "support@litprotocol.com")}?subject=Keychain%20custom%20plan`}
-              >
-                More secrets or high-volume usage? Contact us
-              </a>
-            </section>
-          </section>
-          <section className="login-card">
-            <p className="eyebrow">GET STARTED</p>
-            <h2>Choose how you sign in</h2>
-            <p>
-              Each method can own a vault. Google requires no wallet or passkey.
-            </p>
-            {settings?.googleClientId && (
-              <GoogleButton
-                clientId={settings.googleClientId}
-                network={settings.network}
-                onIdentity={(identity) => void signIn(identity)}
-                onError={setError}
-              />
-            )}
-            <div className="wallet-row">
-              <ConnectButton chainStatus="none" showBalance={false} />
-              {address && (
-                <button
-                  disabled={!!busy || !settings}
-                  onClick={() =>
-                    void signIn(
-                      walletIdentity(address, signTypedDataAsync as any),
-                    )
-                  }
+              <div className="trust-note">
+                <span>01</span>
+                <div>
+                  <strong>Owner-approved access</strong>
+                  <p>
+                    Wallet, passkey, or Google. Keychain cannot invent
+                    permissions.
+                  </p>
+                </div>
+              </div>
+              <div className="trust-note">
+                <span>02</span>
+                <div>
+                  <strong>Encrypted storage</strong>
+                  <p>
+                    Only ciphertext reaches our database. Agents prove they hold
+                    their own key.
+                  </p>
+                </div>
+              </div>
+              <div className="trust-note">
+                <span>03</span>
+                <div>
+                  <strong>Verifiable, not just promised</strong>
+                  <p>
+                    Immutable actions pinned by content hash, attested Intel TDX
+                    hardware, open source. The exact trust boundary is spelled
+                    out in the <a href="#faq">FAQ</a>.
+                  </p>
+                </div>
+              </div>
+              <section className="pricing-card" aria-label="Pricing">
+                <p className="eyebrow">SIMPLE PRICING</p>
+                <h2>
+                  Free <small>for 5 secrets</small>
+                </h2>
+                <p>
+                  Try it with no card. All sign-in methods, agent access,
+                  rotation, and recovery included.
+                </p>
+                <h2>
+                  $10 <small>/ month</small>
+                </h2>
+                <p>Up to 1,000 secrets per account.</p>
+                <p>
+                  Execution included under fair use. No automatic overage
+                  charges. Rotations do not use extra secret slots.
+                </p>
+                <a
+                  href={`mailto:${encodeURIComponent(settings?.pricing?.contactEmail || "support@litprotocol.com")}?subject=Keychain%20custom%20plan`}
                 >
-                  Sign in with wallet
-                </button>
-              )}
-            </div>
-            <div className="divider">or use a passkey</div>
-            <button
-              className="secondary full"
-              disabled={!!busy || !settings}
-              onClick={() =>
-                work("Creating a passkey…", async () => {
-                  const identity = await createPasskey("My Keychain");
-                  const c = ownerClient(identity, settings.network, recovery);
-                  c.progress = setBusy;
-                  await c.login();
-                  setBusy("Loading your vault…");
-                  setClient(c);
-                  await c.api("/api/billing/refresh", { method: "POST" });
-                  setRecoveryOwners([identity.owner]);
-                  await refresh(c);
-                })
-              }
-            >
-              Create a passkey
-            </button>
-            <button
-              className="ghost full"
-              disabled={!!busy || !settings}
-              onClick={() =>
-                work("Finding your passkey…", async () => {
-                  const found = await discoverPasskey();
-                  const c = ownerClient(
-                    found.identity,
-                    settings.network,
-                    found.authority || recovery,
-                  );
-                  c.progress = setBusy;
-                  await c.login();
-                  setBusy("Loading your vault…");
-                  setClient(c);
-                  await c.api("/api/billing/refresh", { method: "POST" });
-                  await refresh(c);
-                  const policy = await c.getCredentials();
-                  setRecoveryOwners(
-                    policy?.document.owners || [c.authority.owner],
-                  );
-                })
-              }
-            >
-              Use an existing passkey
-            </button>
-            <details>
-              <summary>Recover an existing vault</summary>
+                  More secrets or high-volume usage? Contact us
+                </a>
+              </section>
+            </section>
+            <section className="login-card">
+              <p className="eyebrow">GET STARTED</p>
+              <h2>Choose how you sign in</h2>
               <p>
-                Load its encrypted backup or recovery descriptor, then sign in
-                with an approved recovery credential.
+                Each method can own a vault. Google requires no wallet or
+                passkey.
               </p>
-              <input
-                aria-label="Recovery file"
-                type="file"
-                accept="application/json"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f)
-                    void work("Loading recovery descriptor…", async () => {
-                      const data = await readFile(f);
-                      await OwnerClient.restoreCredentials(
-                        data,
-                        new LitConnection(LIT_URL),
-                      );
-                      setRecovery(data.authority);
-                      setNotice(
-                        "Recovery vault selected. Sign in with one of its approved credentials.",
-                      );
-                    });
-                }}
-              />
-              {recovery && <p>Vault {brief(digest(recovery))} selected.</p>}
-            </details>
-          </section>
-        </main>
+              {settings?.googleClientId && (
+                <GoogleButton
+                  clientId={settings.googleClientId}
+                  network={settings.network}
+                  onIdentity={(identity) => void signIn(identity)}
+                  onError={setError}
+                />
+              )}
+              <div className="wallet-row">
+                <ConnectButton chainStatus="none" showBalance={false} />
+                {address && (
+                  <button
+                    disabled={!!busy || !settings}
+                    onClick={() =>
+                      void signIn(
+                        walletIdentity(address, signTypedDataAsync as any),
+                      )
+                    }
+                  >
+                    Sign in with wallet
+                  </button>
+                )}
+              </div>
+              <div className="divider">or use a passkey</div>
+              <button
+                className="secondary full"
+                disabled={!!busy || !settings}
+                onClick={() =>
+                  work("Creating a passkey…", async () => {
+                    const identity = await createPasskey("My Keychain");
+                    const c = ownerClient(identity, settings.network, recovery);
+                    c.progress = setBusy;
+                    await c.login();
+                    setBusy("Loading your vault…");
+                    setClient(c);
+                    await c.api("/api/billing/refresh", { method: "POST" });
+                    setRecoveryOwners([identity.owner]);
+                    await refresh(c);
+                  })
+                }
+              >
+                Create a passkey
+              </button>
+              <button
+                className="ghost full"
+                disabled={!!busy || !settings}
+                onClick={() =>
+                  work("Finding your passkey…", async () => {
+                    const found = await discoverPasskey();
+                    const c = ownerClient(
+                      found.identity,
+                      settings.network,
+                      found.authority || recovery,
+                    );
+                    c.progress = setBusy;
+                    await c.login();
+                    setBusy("Loading your vault…");
+                    setClient(c);
+                    await c.api("/api/billing/refresh", { method: "POST" });
+                    await refresh(c);
+                    const policy = await c.getCredentials();
+                    setRecoveryOwners(
+                      policy?.document.owners || [c.authority.owner],
+                    );
+                  })
+                }
+              >
+                Use an existing passkey
+              </button>
+              <details>
+                <summary>Recover an existing vault</summary>
+                <p>
+                  Load its encrypted backup or recovery descriptor, then sign in
+                  with an approved recovery credential.
+                </p>
+                <input
+                  aria-label="Recovery file"
+                  type="file"
+                  accept="application/json"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f)
+                      void work("Loading recovery descriptor…", async () => {
+                        const data = await readFile(f);
+                        await OwnerClient.restoreCredentials(
+                          data,
+                          new LitConnection(LIT_URL),
+                        );
+                        setRecovery(data.authority);
+                        setNotice(
+                          "Recovery vault selected. Sign in with one of its approved credentials.",
+                        );
+                      });
+                  }}
+                />
+                {recovery && <p>Vault {brief(digest(recovery))} selected.</p>}
+              </details>
+            </section>
+          </main>
+          <Landing />
+        </>
       ) : (
         <div className="workspace">
           <aside>
@@ -1200,12 +1214,13 @@ function App() {
           </main>
         </div>
       )}
-      <footer>
-        Open source client · Lit Action authorization ·{" "}
-        <span>
-          Revocation relies on Keychain serving the latest signed policy.
-        </span>
-      </footer>
+      <LandingFooter
+        contactEmail={
+          settings?.pricing?.contactEmail ||
+          billing?.contactEmail ||
+          "support@litprotocol.com"
+        }
+      />
     </>
   );
 }
