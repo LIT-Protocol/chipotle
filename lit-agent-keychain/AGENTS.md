@@ -17,7 +17,7 @@ See README.md and SECURITY.md for the protocol and its explicit trust boundary.
   API responses or action logs. Master/bootstrap keys never reach clients. Per-vault
   execution-only usage keys are deliberately returned to owners/agents and stored
   encrypted with a separate vault-bound AEAD key. They provide billing, not authority.
-- Standard is $10/month for 1,000 stored secrets. Rotations consume no extra slot.
+- Free is 5 stored secrets; Standard is $10/month for 1,000. Rotations consume no extra slot.
   Custom plans require explicit operator settings. No automatic overage charges.
   Direct Chipotle usage has no hard per-user spending cap (accepted launch limit).
 - Owner verification is pinned in an immutable authorization action. Receipts bind

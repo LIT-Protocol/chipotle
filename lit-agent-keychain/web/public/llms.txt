@@ -1,0 +1,34 @@
+# Lit Agent Keychain
+
+> Owner-authorized, locally encrypted credentials for AI agents. Each secret is encrypted in the owner's browser to its own immutable Lit Action, whose key is derived inside an Intel TDX enclave on the Lit Protocol network. An agent holds a local Ed25519 identity; the owner approves its public key per secret with an expiry (default 30 days, max 90). The action verifies the owner's signed receipt and the agent's signature on every request, then returns the value encrypted to that agent only. The Keychain service stores ciphertext and signed policies; it cannot forge approvals or read secrets.
+
+Key facts for agents:
+
+- Install: `npm install @lit-protocol/keychain` (Node 22+). CLI binary: `keychain`.
+- Generate an identity locally: `npx @lit-protocol/keychain init ./agent-identity.json`. Share ONLY `publicKey` with the owner.
+- The owner approves that public key in the web app and downloads an agent config (`*.keychain.json`) containing public locators plus a scoped Chipotle execution key. The execution key pays for Lit execution; it cannot read a secret by itself.
+- Read at runtime: `new Keychain(identity.privateKey, config).get("NAME")`, or `keychain get ./agent-identity.json ./NAME.keychain.json NAME`.
+- MCP (local stdio, never hosted): `claude mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp ./agent-identity.json ./NAME.keychain.json`. Tools: `list_secrets`, `get_secret`, `stripe_balance`, `agent_public_key`.
+- Release modes: `export` (plaintext delivered encrypted to the agent) and `stripe_balance` (credential used only inside the enclave for a fixed Stripe balance call; value never revealed).
+- The SDK attests the Lit endpoint (TDX quote, RTMR replay, on-chain whitelist on Base, TLS binding in Node) before the first request and fails closed. Never disable attestation outside local development.
+- There are no setup tokens, management bearer tokens, or server-minted grants. Never ask the owner for a private key or Google token.
+
+## Docs
+
+- [Agent skill / setup playbook](/SKILL.md): step-by-step instructions for agents, and how to tell the identity, config and secret value apart.
+- [SDK, CLI and MCP reference](/sdk/README.md): executable examples, attestation details, MCP client configuration.
+- [Security contract](/SECURITY.md): what the cryptography enforces, accepted operator trust, identity proofs, encryption protocol.
+- [Source code](https://github.com/LIT-Protocol/chipotle/tree/main/lit-agent-keychain): client, API, immutable actions (Apache-2.0).
+- [npm package](https://www.npmjs.com/package/@lit-protocol/keychain)
+
+## Underlying platform
+
+- [Derived Actions](https://developer.litprotocol.com/lit-actions/derived-actions): per-secret immutable actions and key derivation.
+- [Signed data in untrusted storage](https://developer.litprotocol.com/lit-actions/signed-storage): how owner receipts make the operator unable to forge policy.
+- [Lit attestation](https://developer.litprotocol.com/architecture/verification/attestation): verifying the TEE endpoint.
+- [Lit Protocol developer docs](https://developer.litprotocol.com)
+
+## Optional
+
+- [Web app](/): owner dashboard; sign in with wallet, passkey or Google.
+- [Health check](/health): returns `ok`.

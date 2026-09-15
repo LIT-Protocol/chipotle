@@ -481,11 +481,34 @@ hr {
   color: inherit;
 }
 .progress {
-  padding: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 9px 16px;
   text-align: center;
   background: #31452c;
   color: #d9f5be;
   font-size: 12px;
+}
+.spinner {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(217, 245, 190, 0.3);
+  border-top-color: #d9f5be;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2s;
+  }
 }
 footer {
   padding: 24px 5vw;
@@ -615,4 +638,210 @@ footer span {
   align-items: center;
   flex-wrap: wrap;
   gap: 12px;
+}
+
+/* Landing: nav, hero links, sections, FAQ, footer */
+.site-nav {
+  margin: 0;
+  display: flex;
+  flex-direction: row;
+  gap: 26px;
+  font-size: 13px;
+  color: #a7b5aa;
+}
+.site-nav a:hover {
+  color: #e8ece6;
+}
+.hero-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin: -14px 0 10px;
+  font-size: 13px;
+}
+.hero-links a,
+.trust-note a {
+  color: #bded8a;
+  border-bottom: 1px solid #3a5a3c;
+}
+.hero-links a:hover,
+.trust-note a:hover {
+  border-bottom-color: #bded8a;
+}
+.landing {
+  border-top: 1px solid #2a352e;
+}
+.landing-section {
+  max-width: 1220px;
+  margin: 0 auto;
+  padding: 72px 48px;
+}
+.landing-section + .landing-section {
+  border-top: 1px solid #2a352e;
+}
+.landing-section h2 {
+  max-width: 720px;
+  font-size: 30px;
+  margin-bottom: 18px;
+}
+.section-lede {
+  max-width: 600px;
+  font-size: 15px;
+  line-height: 1.65;
+  margin-bottom: 26px;
+}
+.landing a {
+  color: #bded8a;
+}
+.landing a:hover {
+  text-decoration: underline;
+}
+.step-grid,
+.doc-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  margin-top: 30px;
+}
+.doc-grid {
+  grid-template-columns: repeat(4, 1fr);
+  margin-top: 22px;
+}
+.step-card,
+.doc-card {
+  background: #18221c;
+  border: 1px solid #334035;
+  border-radius: 14px;
+  padding: 24px;
+  display: block;
+}
+.doc-card {
+  color: inherit;
+  transition: border-color 0.15s;
+}
+.doc-card:hover {
+  border-color: #6f9a63;
+  text-decoration: none !important;
+}
+.doc-card h3 {
+  color: #c2ed8b;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+.step-card h3 {
+  margin: 12px 0 8px;
+}
+.step-card p,
+.doc-card p {
+  font-size: 13.5px;
+  line-height: 1.6;
+  margin: 0;
+}
+.step-num {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  font-weight: 700;
+  color: #78966d;
+}
+.terminal {
+  background: #0c120e;
+  border: 1px solid #2a352e;
+  border-radius: 12px;
+  padding: 18px 20px;
+  overflow-x: auto;
+  margin: 0;
+}
+.terminal code {
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: #d3dccf;
+  white-space: pre;
+}
+.faq-group {
+  margin: 36px 0 6px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #78966d;
+}
+.faq-item {
+  margin: 0;
+  padding: 0;
+  border-top: 0;
+  border-bottom: 1px solid #2a352e;
+  font-size: 14px;
+}
+.faq-item summary {
+  padding: 18px 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: #e8ece6;
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.faq-item summary::-webkit-details-marker {
+  display: none;
+}
+.faq-item summary::after {
+  content: "+";
+  color: #78966d;
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.faq-item[open] summary::after {
+  content: "–";
+}
+.faq-item > div {
+  max-width: 720px;
+  padding: 0 0 20px;
+}
+.faq-item p {
+  font-size: 14px;
+  line-height: 1.7;
+  margin: 0 0 12px;
+}
+.faq-item strong {
+  color: #e8ece6;
+}
+.site-footer {
+  padding: 28px 5vw;
+  border-top: 1px solid #2a352e;
+  font-size: 12px;
+  color: #91a394;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+.footer-links a:hover {
+  color: #e8ece6;
+}
+@media (max-width: 1100px) {
+  .doc-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 860px) {
+  .site-nav {
+    display: none;
+  }
+  .step-grid,
+  .doc-grid {
+    grid-template-columns: 1fr;
+  }
+  .landing-section {
+    padding: 48px 24px;
+  }
+  .landing-section h2 {
+    font-size: 24px;
+  }
 }

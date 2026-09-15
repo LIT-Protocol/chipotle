@@ -1,9 +1,15 @@
 # Subscriptions and sponsored execution
 
-Standard costs **USD $10 per month per vault/account for up to 1,000 stored secrets**.
-Every retained secret counts once, including disabled secrets. Rotation adds a version,
-not a slot. Fair use execution is included; there is no metered invoice or automatic
+Every vault starts on **Free: 5 stored secrets, no card required**. Standard costs
+**USD $10 per month per vault/account for up to 1,000 stored secrets**. Every retained
+secret counts once, including disabled secrets. Rotation adds a version, not a slot.
+Fair use execution is included on both plans; there is no metered invoice or automatic
 overage charge. More storage or high-volume usage goes through **Contact us**.
+
+Free exists so the product can be tried without friction. Someone determined to dodge
+$10/month by creating many vaults can, and that is accepted: each vault costs the
+operator only two Chipotle groups plus a usage key, and execution runs on the same
+Chipotle account at cost.
 
 ## Stripe configuration
 
@@ -68,13 +74,13 @@ execution-limit settings cover only server-sponsored login attempts.
 
 ## Cancellation, recovery and custom accounts
 
-Normal cancellation preserves access until the paid period ends. At expiry, new
-secrets, restore writes and rotations require a subscription; sign-in, owner policy
-revocation, metadata and encrypted backups remain available. No data is automatically
-deleted. A worker reconciles Chipotle permissions every minute; delayed provider calls,
-permission caches or outages can delay sponsorship cutoff. Subscription state does
-not replace signed secret access policies, and an independently funded Lit payer may
-continue to execute an otherwise authorized action.
+Normal cancellation preserves access until the paid period ends. At expiry the vault
+returns to Free. Nothing is deleted and enrolled secrets keep executing, but while the
+vault holds more secrets than the Free limit, new secrets, restore writes and rotations
+return `402 subscription_required` until the owner resubscribes or deletes down to the
+limit. Sign-in, owner policy revocation, metadata and encrypted backups always remain
+available. Subscription state does not replace signed secret access policies, and an
+independently funded Lit payer may continue to execute an otherwise authorized action.
 
 For a negotiated plan, apply a bounded storage limit and explicit expiry using the
 operator-only binary with `DATABASE_URL` configured:
@@ -88,7 +94,8 @@ The limit may be 1–100,000. The command only adjusts storage/sponsorship entit
 it cannot create owner approvals or agent grants. It writes an audit event in the
 same transaction. Custom billing is agreed manually and is not automatically charged
 by this command. Set an expiry in the past to end a custom entitlement; any still-paid
-Standard subscription then applies. A downgrade never deletes retained records.
+Standard subscription then applies, otherwise Free. A downgrade never deletes retained
+records.
 
 ## Validation
 

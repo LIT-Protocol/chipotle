@@ -1234,25 +1234,45 @@ export class LitNodeSimpleApiClient {
       crypto.getRandomValues(randBytes);
       const newUsageKey = 'lk_' + Array.from(randBytes, (b) => b.toString(16).padStart(2, '0')).join('');
       const usageHash = ethers.keccak256(ethers.toUtf8Bytes(newUsageKey));
-      const { txHash } = await runContractWrite({
-        contract, method: 'setUsageApiKey',
-        args: [
-          hash,
-          usageHash,
-          expirationVal,
-          balanceVal,
-          name ?? '',
-          description ?? '',
-          canCreateGroups,
-          canDeleteGroups,
-          canCreatePkps,
-          manageIpfsIdsInGroups.map((n) => BigInt(n)),
-          addPkpToGroups.map((n) => BigInt(n)),
-          removePkpFromGroups.map((n) => BigInt(n)),
-          executeInGroups.map((n) => BigInt(n)),
-        ],
-        ...(sovereignLifecycle ?? {}),
-      });
+      let txHash;
+      try {
+        ({ txHash } = await runContractWrite({
+          contract, method: 'setUsageApiKey',
+          args: [
+            hash,
+            usageHash,
+            expirationVal,
+            balanceVal,
+            name ?? '',
+            description ?? '',
+            canCreateGroups,
+            canDeleteGroups,
+            canCreatePkps,
+            manageIpfsIdsInGroups.map((n) => BigInt(n)),
+            addPkpToGroups.map((n) => BigInt(n)),
+            removePkpFromGroups.map((n) => BigInt(n)),
+            executeInGroups.map((n) => BigInt(n)),
+          ],
+          ...(sovereignLifecycle ?? {}),
+        }));
+      } catch (err) {
+        // The cleartext usage key was minted in THIS browser; only its
+        // keccak256 hash is ever written on-chain, and the server never sees
+        // it. If the tx was broadcast (`txHash`) but we couldn't confirm its
+        // receipt — RPC timeout, dropped connection, reorg — the on-chain write
+        // may still land, yet the cleartext would be lost forever. Attach it to
+        // the error so the caller can surface it with an "unconfirmed" warning
+        // rather than discarding it. We deliberately do NOT do this for an
+        // explicit on-chain revert (`err.reverted`): there the key was never
+        // registered and is useless, so it should not be shown as valid.
+        if (err && err.txHash && !err.reverted) {
+          err.usage_api_key = newUsageKey;
+          err.hash = usageHash;
+          err.transaction_hash = err.txHash;
+          err.unconfirmed = true;
+        }
+        throw err;
+      }
       return { success: true, usage_api_key: newUsageKey, hash: usageHash, transaction_hash: txHash };
     }
     const body = {

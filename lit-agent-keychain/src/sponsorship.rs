@@ -7,7 +7,7 @@ use crate::{
     config::Config,
     crypto,
     models::{field, Manifest, Signed},
-    subscriptions,
+    subscriptions::{self, FREE_LIMIT},
 };
 use aes_gcm::{
     aead::{Aead, Payload},
@@ -17,7 +17,6 @@ use rand::RngCore;
 use rocket::{http::Status, post, serde::json::Json, State};
 use serde_json::{json, Value};
 use sqlx::{PgPool, Postgres, Transaction};
-use time::OffsetDateTime;
 
 fn unavailable(_: impl std::fmt::Display) -> ApiError {
     api::err(Status::BadGateway, "sponsorship_unavailable")
@@ -66,8 +65,9 @@ async fn reconcile_locked(
     issue: bool,
     requested_cid: Option<&str>,
 ) -> Result<Option<String>, ApiError> {
-    let sub = subscriptions::lock(tx, vault).await?;
-    let active = sub.plan(OffsetDateTime::now_utc()).active;
+    // Every plan, including Free, sponsors execution of enrolled secret actions.
+    // Billing bounds storage; nothing is revoked when a subscription lapses.
+    subscriptions::lock(tx, vault).await?;
     let pending: Option<String> =
         sqlx::query_scalar("SELECT revoking_key FROM kc_execution_accounts WHERE vault_id=$1")
             .bind(vault)
@@ -124,19 +124,16 @@ async fn reconcile_locked(
         .map_err(api::internal)?;
         (group, secret_group, None, None)
     };
-    let groups = if active {
-        vec![group, secret_group]
-    } else {
-        vec![group]
-    };
+    let groups = vec![group, secret_group];
     let hash = crypto::digest(&json!(groups)).map_err(api::invalid)?;
     let existing_key = encrypted
         .as_deref()
         .map(|value| decrypt_key(value, vault, &cfg.usage_key_encryption_key))
         .transpose()
         .map_err(unavailable)?;
-    // Toggle the secret group on the key itself. Never rebuild a thousand-CID
-    // group on cancellation/renewal. Retrying an ambiguous response is idempotent.
+    // Keys issued before the Free plan carried only the owner group; bring
+    // them up to the full scope without rebuilding a thousand-CID group.
+    // Retrying an ambiguous response is idempotent.
     if old_hash.as_deref() != Some(&hash) {
         if let Some(key) = &existing_key {
             lit.update_usage_key(key, &groups)
@@ -150,7 +147,7 @@ async fn reconcile_locked(
                 .map_err(api::internal)?;
         }
     }
-    if active && !issue {
+    if !issue {
         // Bulk group replacement is capped at 10 CIDs by Chipotle's contract.
         // Incremental addition has no such cap and is idempotent. A bounded batch
         // resumes abandoned enrollments in the worker. Foreground enrollment
@@ -281,7 +278,7 @@ pub async fn enroll(
 ) -> ApiResult<Value> {
     let vault = &session.vault_id;
     let mut tx = pool.begin().await.map_err(api::internal)?;
-    let plan = subscriptions::require_active(&mut tx, vault).await?;
+    let plan = subscriptions::require_capacity(&mut tx, vault, false).await?;
     let authority: String = sqlx::query_scalar("SELECT authority_cid FROM kc_vaults WHERE id=$1")
         .bind(vault)
         .fetch_one(&mut *tx)
@@ -321,7 +318,10 @@ pub async fn enroll(
                 .fetch_one(&mut *tx)
                 .await
                 .map_err(api::internal)?;
-        if count >= plan.secret_limit + 100 {
+        // Headroom for re-enrollment after deletes; kept small on Free so an
+        // unpaid vault cannot grow the sponsored group far past its limit.
+        let headroom = if plan.active { 100 } else { FREE_LIMIT };
+        if count >= plan.secret_limit + headroom {
             return Err(api::err(Status::Conflict, "secret_limit_reached"));
         }
         sqlx::query(
