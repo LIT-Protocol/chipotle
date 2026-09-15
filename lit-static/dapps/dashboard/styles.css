@@ -1760,6 +1760,16 @@ textarea.input.textarea-sm {
   border: 1px solid rgba(22, 163, 74, 0.25);
 }
 
+.status.warning {
+  background: rgba(217, 119, 6, 0.1);
+  color: #b45309;
+  border: 1px solid rgba(217, 119, 6, 0.3);
+}
+
+[data-theme="dark"] .status.warning {
+  color: #fbbf24;
+}
+
 /* ----- Data tables ----- */
 .table-wrap {
   overflow-x: auto;
