@@ -157,10 +157,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Makefile). A missing file means "no removals" — the deployer keeps its prior
 /// Replace/Add-only behavior.
 fn removals_path(named: &std::collections::HashMap<String, String>) -> String {
-    named
-        .get("removals")
-        .cloned()
-        .unwrap_or_else(|| "diamond-removals.json".to_string())
+    match named.get("removals") {
+        Some(path) => {
+            // An explicitly requested manifest that isn't there is an operator
+            // error (typically a wrong working directory), not "no removals":
+            // silently proceeding would leave every listed selector callable.
+            if !std::path::Path::new(path).is_file() {
+                eprintln!("--removals={path} does not exist or is not a file");
+                std::process::exit(1);
+            }
+            path.clone()
+        }
+        None => "diamond-removals.json".to_string(),
+    }
 }
 
 fn parse_diamond_address(

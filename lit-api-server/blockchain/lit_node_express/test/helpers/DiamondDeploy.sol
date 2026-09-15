@@ -146,7 +146,7 @@ library DiamondDeploy {
     }
 
     function writesSelectors() internal pure returns (bytes4[] memory s) {
-        s = new bytes4[](20);
+        s = new bytes4[](21);
         s[0] = WritesFacet.newChainSecuredAccount.selector;
         s[1] = WritesFacet.newAccount.selector;
         s[2] = WritesFacet.convertToChainSecuredAccount.selector;
@@ -167,6 +167,7 @@ library DiamondDeploy {
         s[17] = WritesFacet.registerWalletDerivation.selector;
         s[18] = WritesFacet.removeWalletDerivation.selector;
         s[19] = WritesFacet.setNodeConfiguration.selector;
+        s[20] = WritesFacet.transferChainSecuredAccountOwnership.selector;
     }
 
     function apiConfigSelectors() internal pure returns (bytes4[] memory s) {
