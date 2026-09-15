@@ -146,25 +146,6 @@ pub(crate) fn get_read_only_client() -> Result<SigningClient> {
     })
 }
 
-/// Read-only provider + the AccountConfig address, for ad-hoc scoped `sol!`
-/// interfaces that target functions not yet present in the regenerated giant
-/// binding (e.g. the spending-rules view from lambda-parity PR 3). Tracks the
-/// workspace alloy version directly; fold callers into the generated binding
-/// once it is regenerated on the canonical toolchain.
-pub(crate) fn read_only_client_and_address() -> Result<(SigningClient, Address)> {
-    Ok((get_read_only_client()?, account_config_address()?))
-}
-
-/// The configured AccountConfig diamond address.
-pub(crate) fn account_config_address() -> Result<Address> {
-    let node_config = GLOBAL_NODE_CONFIG
-        .get()
-        .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))?;
-    Ok(Address::from_slice(&hex_to_bytes(
-        &node_config.contract_address,
-    )?))
-}
-
 pub(crate) async fn get_read_only_account_config_contract() -> Result<AccountConfigInstance> {
     let client = GLOBAL_READ_ONLY_CLIENT
         .get()

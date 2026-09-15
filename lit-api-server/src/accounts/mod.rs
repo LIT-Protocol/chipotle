@@ -911,32 +911,21 @@ pub async fn can_execute_action(api_key: &str, cid_hash: U256) -> Result<bool> {
     Ok(can_execute)
 }
 
-/// Scoped binding for the spending-rules view added in lambda-parity PR 3.
-/// Defined here (not via the giant generated binding) so it tracks the workspace
-/// alloy version directly; fold into the generated binding once it is
-/// regenerated on the canonical toolchain. See `plans/chipotle-lambda-parity.md`.
-mod spending_view {
-    alloy::sol! {
-        #[sol(rpc)]
-        contract SpendingView {
-            function canExecuteActionWithSpendingRules(
-                uint256 apiKeyHash,
-                uint256 cidHash
-            ) external view returns (bool canExecute, bool hasSpendingRules);
-            function getSpendingRulesFlag(uint256 apiKeyHash) external view returns (bool);
-            function setSpendingRulesFlag(
-                uint256 accountApiKeyHash,
-                uint256 usageApiKeyHash,
-                bool hasSpendingRules
-            ) external;
-        }
-    }
+async fn fetch_execute_and_spending(
+    account_api_key_hash: U256,
+    cid_hash_eth: U256,
+) -> Result<(bool, bool)> {
+    let contract = get_read_only_account_config_contract().await?;
+    let result = contract
+        .canExecuteActionWithSpendingRules(account_api_key_hash, cid_hash_eth)
+        .call()
+        .await?;
+    Ok((result.canExecute, result.hasSpendingRules))
 }
 
 /// Read a usage key's on-chain `hasSpendingRules` flag (uncached; owner path).
 pub async fn get_spending_rules_flag(usage_api_key_or_hash: &str) -> Result<bool> {
-    let (client, address) = crate::accounts::signable_contract::read_only_client_and_address()?;
-    let contract = spending_view::SpendingView::new(address, client);
+    let contract = get_read_only_account_config_contract().await?;
     let usage_hash = usage_api_key_to_hash(usage_api_key_or_hash);
     Ok(contract.getSpendingRulesFlag(usage_hash).call().await?)
 }
@@ -952,14 +941,8 @@ pub async fn set_spending_rules_flag(
     usage_api_key_or_hash: &str,
     has_spending_rules: bool,
 ) -> Result<bool> {
-    let signer_handle = signer_pool.request().await?;
-    let client = signer_handle
-        .client
-        .ok_or(anyhow::anyhow!("No signer available"))?;
-    let lease = signer_handle.lease;
-    let address = crate::accounts::signable_contract::account_config_address()?;
-    let contract = spending_view::SpendingView::new(address, client.clone());
-
+    let (contract, signer_lease, client) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let usage_api_key_hash = usage_api_key_to_hash(usage_api_key_or_hash);
     tracing::info!(
@@ -971,22 +954,9 @@ pub async fn set_spending_rules_flag(
 
     let function_call =
         contract.setSpendingRulesFlag(account_api_key_hash, usage_api_key_hash, has_spending_rules);
-    let result = send_transaction(function_call, signer_pool, lease, client).await?;
+    let result = send_transaction(function_call, signer_pool, signer_lease, client).await?;
     blockchain_cache::invalidate_for_keys(api_key, usage_api_key_or_hash);
     Ok(result)
-}
-
-async fn fetch_execute_and_spending(
-    account_api_key_hash: U256,
-    cid_hash_eth: U256,
-) -> Result<(bool, bool)> {
-    let (client, address) = crate::accounts::signable_contract::read_only_client_and_address()?;
-    let contract = spending_view::SpendingView::new(address, client);
-    let result = contract
-        .canExecuteActionWithSpendingRules(account_api_key_hash, cid_hash_eth)
-        .call()
-        .await?;
-    Ok((result.canExecute, result.hasSpendingRules))
 }
 
 /// Combined hot-path check: `(can_execute, has_spending_rules)` in a single RPC.
