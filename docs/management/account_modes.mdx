@@ -248,9 +248,14 @@ How long the stale decision can persist:
   **denials** clear within **30s**, stale **grants** within **5 minutes**.
   A dead listener regresses the window to those TTLs; it is never open-ended.
 
-If you need a permission change to take effect immediately everywhere,
-wait out one poll interval (~10s) before relying on the new authorization
-on the execute path.
+If you need to rely on a permission change right after it lands, don't
+sleep a fixed amount — **poll the real path** (retry the action with the
+real key until it behaves as expected). The window is normally ~one poll
+interval (~10s), but stretches toward the TTL bounds above on a lagging or
+just-restarted instance, so a fixed wait is usually too long and
+occasionally too short. This is the same "poll, don't sleep" guidance the
+[derived-actions guide](/lit-actions/derived-actions) gives for newly
+granted permissions.
 
 <Note>
 A healthy instance keeps its listener lag at or below the poll interval. The
