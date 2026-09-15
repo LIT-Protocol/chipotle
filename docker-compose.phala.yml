@@ -129,6 +129,11 @@ services:
       # internal cache-invalidation endpoint (/internal/invalidate_balance_cache).
       # Must match the value set on lit-payments (Railway env var of the same name).
       LIT_INTERNAL_SHARED_SECRET: ${LIT_INTERNAL_SHARED_SECRET}
+      # Base URL of lit-payments, for the per-key spending-rules store
+      # (/internal/spending-*; authed with LIT_INTERNAL_SHARED_SECRET above).
+      # Unset/empty = spending-rules enforcement and the set_spending_rules
+      # endpoints are disabled on this node. See lit-api-server/src/core/spending_rules.rs.
+      LIT_PAYMENTS_INTERNAL_URL: ${LIT_PAYMENTS_INTERNAL_URL}
       # gVisor any-language runner gate (CPL-359, CPL-361). Rendered per-deploy:
       # testing/manual deploys substitute "true"; the production workflow
       # substitutes "false" (see deploy-staging.yml / deploy-prod-1-propose.yml /
