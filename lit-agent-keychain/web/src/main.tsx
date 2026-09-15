@@ -30,7 +30,7 @@ import {
   type SecretBundle,
   type AgentConfig,
 } from "../../sdk/src/index.ts";
-import { jsonFetch } from "../../protocol/http.ts";
+import { jsonFetch } from "../../protocol/client-http.ts";
 import { ownerSchema, type Owner } from "../../protocol/schema.ts";
 import {
   ownerClient,
