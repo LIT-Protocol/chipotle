@@ -923,8 +923,57 @@ mod spending_view {
                 uint256 apiKeyHash,
                 uint256 cidHash
             ) external view returns (bool canExecute, bool hasSpendingRules);
+            function getSpendingRulesFlag(uint256 apiKeyHash) external view returns (bool);
+            function setSpendingRulesFlag(
+                uint256 accountApiKeyHash,
+                uint256 usageApiKeyHash,
+                bool hasSpendingRules
+            ) external;
         }
     }
+}
+
+/// Read a usage key's on-chain `hasSpendingRules` flag (uncached; owner path).
+pub async fn get_spending_rules_flag(usage_api_key_or_hash: &str) -> Result<bool> {
+    let (client, address) = crate::accounts::signable_contract::read_only_client_and_address()?;
+    let contract = spending_view::SpendingView::new(address, client);
+    let usage_hash = usage_api_key_to_hash(usage_api_key_or_hash);
+    Ok(contract.getSpendingRulesFlag(usage_hash).call().await?)
+}
+
+/// Flip a usage key's on-chain `hasSpendingRules` flag
+/// (AccountConfig.setSpendingRulesFlag). The master `api_key` must own the
+/// account; the contract reverts with `NoAccountAccess` otherwise. Invalidates
+/// the permission cache for both keys so the gateway's combined
+/// execute+spending lookup refetches on the next call.
+pub async fn set_spending_rules_flag(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    usage_api_key_or_hash: &str,
+    has_spending_rules: bool,
+) -> Result<bool> {
+    let signer_handle = signer_pool.request().await?;
+    let client = signer_handle
+        .client
+        .ok_or(anyhow::anyhow!("No signer available"))?;
+    let lease = signer_handle.lease;
+    let address = crate::accounts::signable_contract::account_config_address()?;
+    let contract = spending_view::SpendingView::new(address, client.clone());
+
+    let account_api_key_hash = api_key_hash(api_key);
+    let usage_api_key_hash = usage_api_key_to_hash(usage_api_key_or_hash);
+    tracing::info!(
+        "Setting spending-rules flag: account_api_key_hash={:#x}, usage_api_key_hash={:#x}, flag={}",
+        account_api_key_hash,
+        usage_api_key_hash,
+        has_spending_rules
+    );
+
+    let function_call =
+        contract.setSpendingRulesFlag(account_api_key_hash, usage_api_key_hash, has_spending_rules);
+    let result = send_transaction(function_call, signer_pool, lease, client).await?;
+    blockchain_cache::invalidate_for_keys(api_key, usage_api_key_or_hash);
+    Ok(result)
 }
 
 async fn fetch_execute_and_spending(

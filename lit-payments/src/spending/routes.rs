@@ -1,7 +1,10 @@
 //! Spending-rules HTTP routes.
 //!
 //! Operator-authed CRUD under `/api/spending-rules` (browser admin UI) and
-//! `ServiceAuth`-authed endpoints under `/internal` (the gateway).
+//! `ServiceAuth`-authed endpoints under `/internal` (the gateway: read rules,
+//! record spend, and write/clear rules on behalf of an account owner who
+//! called lit-api-server's `/set_spending_rules` — lit-api-server owns the
+//! on-chain `hasSpendingRules` flag flip that goes with each write).
 
 use rocket::http::Status;
 use rocket::serde::json::Json;
@@ -82,7 +85,9 @@ pub async fn list_rules(
     limit: Option<i64>,
     pool: &State<PgPool>,
 ) -> ApiResult<RulesListResponse> {
-    let limit = limit.unwrap_or(DEFAULT_RULES_LIMIT).clamp(1, MAX_RULES_LIMIT);
+    let limit = limit
+        .unwrap_or(DEFAULT_RULES_LIMIT)
+        .clamp(1, MAX_RULES_LIMIT);
     let rules = db::list_rules(pool, limit).await.map_err(server_err)?;
     Ok(Json(RulesListResponse { rules }))
 }
@@ -116,6 +121,42 @@ pub async fn internal_get_rules(
         .ok_or_else(|| err(Status::NotFound, "no rules for that key"))?;
     let usage = db::get_usage(pool, &hash).await.map_err(server_err)?;
     Ok(Json(RulesWithUsage { rules, usage }))
+}
+
+/// `PUT /internal/spending-rules/<hash>` — create or replace a key's rules on
+/// behalf of the account owner. lit-api-server authenticates the owner (master
+/// API key) and flips the on-chain flag; this just stores the row.
+#[put(
+    "/internal/spending-rules/<api_key_hash>",
+    format = "json",
+    data = "<req>"
+)]
+pub async fn internal_put_rules(
+    _svc: ServiceAuth,
+    api_key_hash: &str,
+    req: Json<UpsertRulesRequest>,
+    pool: &State<PgPool>,
+) -> ApiResult<SpendingRules> {
+    let hash = parse_hash(api_key_hash)?;
+    let req = req.into_inner();
+    req.validate().map_err(|e| err(Status::BadRequest, e))?;
+    let rules = db::upsert_rules(pool, &hash, &req)
+        .await
+        .map_err(server_err)?;
+    Ok(Json(rules))
+}
+
+/// `DELETE /internal/spending-rules/<hash>` — clear a key's rules + usage
+/// counter on behalf of the account owner (see `internal_put_rules`).
+#[delete("/internal/spending-rules/<api_key_hash>")]
+pub async fn internal_delete_rules(
+    _svc: ServiceAuth,
+    api_key_hash: &str,
+    pool: &State<PgPool>,
+) -> ApiResult<DeleteResponse> {
+    let hash = parse_hash(api_key_hash)?;
+    let deleted = db::delete_rules(pool, &hash).await.map_err(server_err)?;
+    Ok(Json(DeleteResponse { deleted }))
 }
 
 /// `POST /internal/spending-usage/<hash>/charge` — add to the rolling spend

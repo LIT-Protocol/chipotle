@@ -127,6 +127,8 @@ async fn rocket() -> _ {
                 spending_routes::list_rules,
                 spending_routes::delete_rules,
                 spending_routes::internal_get_rules,
+                spending_routes::internal_put_rules,
+                spending_routes::internal_delete_rules,
                 spending_routes::internal_charge,
                 billing_routes::setup_intent::setup_intent,
                 billing_routes::auto_topup_config::get_auto_topup_config,
