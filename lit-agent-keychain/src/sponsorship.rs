@@ -108,11 +108,14 @@ async fn reconcile_locked(
                 .fetch_one(&mut **tx)
                 .await
                 .map_err(api::internal)?;
-        let group = lit
-            .create_group(vault, &[authority, actions::cid(actions::PUBLIC_KEY)])
-            .await
-            .map_err(unavailable)?;
-        let secret_group = lit.create_group(vault, &[]).await.map_err(unavailable)?;
+        // Both groups are independent on-chain writes; issue them concurrently so
+        // first sign-in pays for two transaction confirmations, not three.
+        let owner_cids = [authority, actions::cid(actions::PUBLIC_KEY)];
+        let (group, secret_group) = rocket::tokio::try_join!(
+            lit.create_group(vault, &owner_cids),
+            lit.create_group(vault, &[]),
+        )
+        .map_err(unavailable)?;
         sqlx::query(
             "INSERT INTO kc_execution_accounts(vault_id,group_id,secret_group_id) VALUES($1,$2,$3)",
         )
