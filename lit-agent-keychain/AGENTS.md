@@ -45,8 +45,12 @@ See README.md and SECURITY.md for the protocol and its explicit trust boundary.
   be indefinite. Agent access policies always have finite signed expiry.
 - Every successful mutation commits its audit entry in the same transaction.
   Bootstrap execution counters are atomic and enforced before sponsored login calls.
-- Preserve deployed action releases byte for byte. Source/dependency changes alter
-  CIDs/keys and require an explicit new release and owner-controlled transition.
+- Preserve deployed action releases byte for byte: `actions/archive/` is append-only
+  and every version is compiled into the server. Source/dependency changes alter
+  CIDs/keys and are an explicit `--update-lock` release; the archive, per-vault
+  authority records and the authority action's root-owner fallback (SECURITY.md,
+  "Authority releases") are what let existing vaults and secrets keep working. Never
+  delete or edit an archived template.
 
 ## Required validation
 

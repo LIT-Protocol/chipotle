@@ -107,6 +107,38 @@ collection and provider/browser internals do not offer guaranteed memory erasure
 No secrets, owner private keys or agent private keys are persisted by the API.
 Names, public identities, permissions and traffic metadata are not encrypted.
 
+## Authority releases
+
+The immutable authorization action is released in versions, and every released
+version is kept forever in `actions/archive/` (content-addressed, append-only; the
+build refuses to run if an archived file is missing or altered). A vault's identity is
+the hash of its owner document, not of any code, so a vault keeps working across
+releases:
+
+- The API accepts a sign-in receipt from any released authority version bound to the
+  vault's owner document. The version that verifies is recorded for the vault
+  (`kc_vault_authorities`) and granted to its execution group the first time it is
+  used. The vault's current authority only ever moves to a newer release.
+- Each secret pins the authority release that approved it. Policy updates, rotations
+  and restores for that secret are verified, by the API and by the secret action
+  itself, under exactly that release. Clients run the pinned release's bytes,
+  fetched by hash from `/api/templates/<sha256>` and checked against the hash list
+  compiled into the client, so the registry cannot introduce a release the client was
+  not built to trust.
+- New secrets pin the newest release the client knows. Sign-in tries the newest
+  release first and falls back to the vault's recorded release if the newest denies
+  the owner.
+
+Credentials (the vault's owner set) are receipted by whichever release approved
+them, and a release can only verify its own receipts. A release that cannot verify
+the current credentials receipt treats the vault as having no credentials policy:
+the root owner from the vault document is accepted and nothing else is. This grants
+no capability beyond the documented operator trust, since the operator can already
+serve a null credentials state for any vault, and it never accepts an unverifiable
+owner set. Consequence: a vault whose root owner was replaced under release A keeps
+operating under A (its recorded release) until the root owner, or an owner approved
+under a newer release, re-approves the owner set there.
+
 ## "Use inside Lit" actions
 
 Every non-export action comes from the reviewed public catalog

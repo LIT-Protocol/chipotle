@@ -102,15 +102,18 @@ async fn reconcile_locked(
             }
             return Ok(None);
         }
-        let authority: String =
-            sqlx::query_scalar("SELECT authority_cid FROM kc_vaults WHERE id=$1")
-                .bind(vault)
-                .fetch_one(&mut **tx)
-                .await
-                .map_err(api::internal)?;
+        // Every authority release this vault has signed in with, so secrets created
+        // under any of them stay manageable.
+        let mut owner_cids: Vec<String> = sqlx::query_scalar(
+            "SELECT authority_cid FROM kc_vault_authorities WHERE vault_id=$1 ORDER BY created_at",
+        )
+        .bind(vault)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(api::internal)?;
+        owner_cids.push(actions::cid(actions::PUBLIC_KEY));
         // Both groups are independent on-chain writes; issue them concurrently so
         // first sign-in pays for two transaction confirmations, not three.
-        let owner_cids = [authority, actions::cid(actions::PUBLIC_KEY)];
         let (group, secret_group) = rocket::tokio::try_join!(
             lit.create_group(vault, &owner_cids),
             lit.create_group(vault, &[]),
@@ -282,26 +285,24 @@ pub async fn enroll(
     let vault = &session.vault_id;
     let mut tx = pool.begin().await.map_err(api::internal)?;
     let plan = subscriptions::require_capacity(&mut tx, vault, false).await?;
-    let authority: String = sqlx::query_scalar("SELECT authority_cid FROM kc_vaults WHERE id=$1")
-        .bind(vault)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(api::internal)?;
-    let key = lit.public_key(&authority).await.map_err(unavailable)?;
-    crypto::verify_signed(&body, &key, vault).map_err(api::denied)?;
     if field(&body.document, "kind").map_err(api::invalid)? != "manifest" {
         return Err(api::err(Status::BadRequest, "manifest_required"));
     }
     let manifest: Manifest =
         serde_json::from_value(body.document["manifest"].clone()).map_err(api::invalid)?;
     manifest.validate(cfg).map_err(api::invalid)?;
-    let cid = actions::cid(&actions::secret_source(&manifest).map_err(api::invalid)?);
-    if manifest.vault_id != *vault
-        || manifest.authority_cid != authority
-        || field(&body.document, "actionCid").map_err(api::invalid)? != cid
-    {
+    // The manifest names the authority release that approved it; it must be one of
+    // this vault's releases, and its receipt must verify under that release's key.
+    let key = crate::authority::key_for(pool, lit, vault, &manifest.authority_cid).await?;
+    crypto::verify_signed(&body, &key, vault).map_err(api::denied)?;
+    let cid = field(&body.document, "actionCid")
+        .map_err(api::invalid)?
+        .to_owned();
+    let cids = actions::secret_cids(&manifest).map_err(api::invalid)?;
+    if manifest.vault_id != *vault || !cids.contains(&cid) {
         return Err(api::err(Status::Forbidden, "wrong_manifest"));
     }
+    crate::authority::ensure_granted(&mut tx, lit, vault, &manifest.authority_cid).await?;
     let existing: Option<String> = sqlx::query_scalar(
         "SELECT action_cid FROM kc_execution_actions WHERE vault_id=$1 AND secret_id=$2",
     )
