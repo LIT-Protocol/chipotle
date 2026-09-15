@@ -80,14 +80,31 @@ impl std::fmt::Debug for DebugExecutionRequest<'_> {
             req.code.as_str()
         };
 
-        f.debug_struct("ExecutionRequest")
-            .field("code", &truncated_code)
-            .field("js_params", &req.js_params)
-            .field("auth_context", &req.auth_context)
-            .field("timeout", &req.timeout)
-            .field("memory_limit", &req.memory_limit)
-            .field("http_headers", &req.http_headers)
-            .field("ipfs_id", &req.ipfs_id)
+        // `js_params`, `auth_context`, and `http_headers` carry user-supplied
+        // secrets. Redact them by default so they never reach logs / the GCP
+        // export; operators opt in for local debugging via
+        // LIT_LOG_SENSITIVE_DATA (CPL-369). Redaction here does NOT depend on
+        // any client-controlled signal.
+        const REDACTED: &str = "<redacted>";
+        let log_sensitive = lit_observability::sensitive_logging_enabled();
+
+        let mut s = f.debug_struct("ExecutionRequest");
+        s.field("code", &truncated_code);
+        if log_sensitive {
+            s.field("js_params", &req.js_params)
+                .field("auth_context", &req.auth_context);
+        } else {
+            s.field("js_params", &REDACTED)
+                .field("auth_context", &REDACTED);
+        }
+        s.field("timeout", &req.timeout)
+            .field("memory_limit", &req.memory_limit);
+        if log_sensitive {
+            s.field("http_headers", &req.http_headers);
+        } else {
+            s.field("http_headers", &REDACTED);
+        }
+        s.field("ipfs_id", &req.ipfs_id)
             .field(
                 "startup_script",
                 &req.startup_script.as_ref().map(String::len),
@@ -134,3 +151,69 @@ decl_op!(IncrementFetchCount);
 decl_op!(Print);
 decl_op!(SetResponse);
 decl_op!(UpdateResourceUsage);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// By default (without the `LIT_LOG_SENSITIVE_DATA` opt-in), the Debug
+    /// rendering used for logging must never expose user-supplied secrets in
+    /// `js_params`, `auth_context`, or `http_headers` (CPL-369). This asserts
+    /// the redacted path.
+    #[test]
+    fn debug_redacts_user_secrets_by_default() {
+        // `sensitive_logging_enabled()` caches its env read on first call, so
+        // clear the opt-in before that first call to keep this test
+        // deterministic regardless of the ambient environment. Removing (never
+        // setting) the var only moves toward the safe default, so it cannot
+        // affect other tests in this binary.
+        // SAFETY: single-threaded test entry, before any other env access.
+        unsafe { std::env::remove_var(lit_observability::LOG_SENSITIVE_DATA_ENV) };
+        assert!(
+            !lit_observability::sensitive_logging_enabled(),
+            "opt-in must be off for the default-redaction assertion"
+        );
+
+        let mut req = ExecutionRequest {
+            code: "console.log('hi')".to_string(),
+            js_params: Some(b"SECRET_PARAM_VALUE".to_vec()),
+            auth_context: Some(b"SECRET_AUTH_SIG".to_vec()),
+            ..Default::default()
+        };
+        req.http_headers.insert(
+            "authorization".to_string(),
+            "SECRET_BEARER_TOKEN".to_string(),
+        );
+
+        let rendered = format!("{:?}", DebugExecutionRequest::from(&req));
+
+        // Secrets must not leak.
+        assert!(
+            !rendered.contains("SECRET_PARAM_VALUE"),
+            "js_params leaked: {rendered}"
+        );
+        assert!(
+            !rendered.contains("SECRET_AUTH_SIG"),
+            "auth_context leaked: {rendered}"
+        );
+        assert!(
+            !rendered.contains("SECRET_BEARER_TOKEN"),
+            "header value leaked: {rendered}"
+        );
+        assert!(
+            !rendered.contains("authorization"),
+            "header name leaked: {rendered}"
+        );
+
+        // Sensitive fields render as the redaction placeholder; non-sensitive
+        // fields (code) remain visible for debugging.
+        assert!(
+            rendered.contains("<redacted>"),
+            "expected redaction marker: {rendered}"
+        );
+        assert!(
+            rendered.contains("console.log"),
+            "code should stay visible: {rendered}"
+        );
+    }
+}
