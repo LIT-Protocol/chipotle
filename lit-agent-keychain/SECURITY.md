@@ -210,8 +210,8 @@ the root authority descriptor, and signed recovery credential settings. They con
 neither private keys nor historical ciphertext versions. Credential restoration only
 initializes a missing vault and cannot overwrite existing credential settings. Restoring does not overwrite a different existing secret. Google-only users
 recover by signing in to the same Google account. Alternative recovery credentials
-must be approved while an existing owner is available; retain the root vault descriptor
-when changing credentials. Lost owner credentials without an approved recovery path
+must be approved while an existing owner is available; download a fresh encrypted
+export when changing credentials, since it carries the root authority descriptor. Lost owner credentials without an approved recovery path
 cannot be replaced by an operator-issued reset token.
 
 ## Release validation boundaries
