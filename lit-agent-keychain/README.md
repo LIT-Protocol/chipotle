@@ -43,7 +43,7 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 - Strict Stripe balance integration: fixed HTTPS request and bounded numeric projection;
   no credential-export, arbitrary URL, code, redirect, or migration path.
 - Encrypted backups of current versions and policies; restore never overwrites another secret.
-- $10/month for 1,000 stored secrets; rotations use the same slot. Contact us for more.
+- Free for 5 stored secrets, $10/month for 1,000; rotations use the same slot. Contact us for more.
 - Stripe Checkout and customer portal, period-end cancellation, retained encrypted backups.
 - Transactional mutation audit, paginated secrets/activity, scoped user execution keys.
 - Agent SDK, CLI and a local stdio MCP server (`npx @lit-protocol/keychain mcp`);
@@ -76,7 +76,7 @@ The service serves `web/dist` and applies migrations on startup.
 `CHIPOTLE_MASTER_API_KEY` belongs to a dedicated managed Chipotle account. The API
 creates two groups per vault and an execution-only usage key. The browser/agent gets
 that key; it can execute only the immutable owner action, fixed public-key helper,
-and (while subscribed) the vault's enrolled secret actions. It cannot manage the
+and the vault's enrolled secret actions on every plan. It cannot manage the
 account or authorize access to a secret without the corresponding owner/agent proof.
 The API encrypts usage keys at rest with `USAGE_KEY_ENCRYPTION_KEY` and vault-bound AAD.
 Owners can replace an execution key; distribute the replacement to their agents.
@@ -86,7 +86,7 @@ used for login bootstrap and server receipt verification. The three execution-li
 environment settings cap server-sponsored login attempts, including failures. User
 keys execute directly on Chipotle, share the parent balance, and have **no hard
 per-user dollar or execution cap**. This is the accepted launch limitation. Fair use
-is included in the subscription; there are no automatic user overage charges.
+is included on Free and Standard alike; there are no automatic user overage charges.
 See [BILLING.md](BILLING.md) for Stripe setup and the custom-plan operator command.
 
 Google-only sign-in requires `GOOGLE_CLIENT_ID` and the frontend origin registered

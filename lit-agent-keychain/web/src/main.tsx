@@ -193,7 +193,9 @@ function App() {
   const signIn = async (identity: Identity, authority?: Authority) =>
     work("Verifying owner authorization…", async () => {
       const c = ownerClient(identity, settings.network, authority || recovery);
+      c.progress = setBusy;
       await c.login();
+      setBusy("Loading your vault…");
       setClient(c);
       await c.api("/api/billing/refresh", { method: "POST" });
       await refresh(c);
@@ -305,7 +307,8 @@ function App() {
         </div>
       </header>
       {busy && (
-        <div className="progress" role="status">
+        <div className="progress" role="status" aria-live="polite">
+          <span className="spinner" aria-hidden="true" />
           {busy}
         </div>
       )}
@@ -370,12 +373,16 @@ function App() {
             <section className="pricing-card" aria-label="Pricing">
               <p className="eyebrow">SIMPLE PRICING</p>
               <h2>
-                $10 <small>/ month</small>
+                Free <small>for 5 secrets</small>
               </h2>
               <p>
-                Up to 1,000 secrets per account. All sign-in methods, agent
-                access, rotation, and recovery included.
+                Try it with no card. All sign-in methods, agent access,
+                rotation, and recovery included.
               </p>
+              <h2>
+                $10 <small>/ month</small>
+              </h2>
+              <p>Up to 1,000 secrets per account.</p>
               <p>
                 Execution included under fair use. No automatic overage charges.
                 Rotations do not use extra secret slots.
@@ -424,7 +431,9 @@ function App() {
                 work("Creating a passkey…", async () => {
                   const identity = await createPasskey("My Keychain");
                   const c = ownerClient(identity, settings.network, recovery);
+                  c.progress = setBusy;
                   await c.login();
+                  setBusy("Loading your vault…");
                   setClient(c);
                   await c.api("/api/billing/refresh", { method: "POST" });
                   setRecoveryOwners([identity.owner]);
@@ -445,7 +454,9 @@ function App() {
                     settings.network,
                     found.authority || recovery,
                   );
+                  c.progress = setBusy;
                   await c.login();
+                  setBusy("Loading your vault…");
                   setClient(c);
                   await c.api("/api/billing/refresh", { method: "POST" });
                   await refresh(c);
@@ -525,13 +536,13 @@ function App() {
                 <strong>
                   {billing?.subscription?.plan === "custom"
                     ? "Custom plan"
-                    : "$10/month · Standard"}
+                    : billing?.subscription?.active
+                      ? "$10/month · Standard"
+                      : "Free"}
                 </strong>
                 <p>
                   {secrets.length.toLocaleString()} /{" "}
-                  {(
-                    billing?.subscription?.secretLimit ?? 1000
-                  ).toLocaleString()}{" "}
+                  {(billing?.subscription?.secretLimit ?? 5).toLocaleString()}{" "}
                   secrets
                 </p>
                 {billing?.subscription?.active ? (
@@ -545,8 +556,8 @@ function App() {
                   </small>
                 ) : (
                   <small>
-                    Subscribe to add and use secrets. Your encrypted backups
-                    remain available.
+                    Free includes 5 secrets. Subscribe for up to 1,000. Your
+                    secrets and encrypted backups are never deleted.
                   </small>
                 )}
               </div>
@@ -607,10 +618,10 @@ function App() {
               <details>
                 <summary>Execution and account access</summary>
                 <p>
-                  Execution is included under fair use, with no automatic
-                  overage charges. Canceled subscriptions remain active through
-                  the paid period. Cancellation never deletes your secrets or
-                  encrypted backups.
+                  Execution is included under fair use on every plan, with no
+                  automatic overage charges. Canceled subscriptions remain
+                  active through the paid period, then return to Free.
+                  Cancellation never deletes your secrets or encrypted backups.
                 </p>
                 <p>
                   Agent configurations include a scoped execution key. Replacing
@@ -651,7 +662,7 @@ function App() {
                   <button
                     disabled={
                       !!busy ||
-                      !billing?.subscription?.active ||
+                      !billing ||
                       secrets.length >= billing.subscription.secretLimit
                     }
                     onClick={() => {

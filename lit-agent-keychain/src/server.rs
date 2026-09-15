@@ -71,7 +71,7 @@ fn config(cfg: &State<Config>) -> Json<Value> {
     Json(
         json!({"protocol":2,"network":cfg.network,"registry":cfg.public_base_url,"googleClientId":cfg.google_client_id,
     "maxSecretBytes":16384,"maxPolicyDays":90,"revocationTrust":"operator_can_replay_prior_signed_permissions",
-    "pricing":{"priceCents":1000,"currency":"usd","interval":"month","secretLimit":1000,"contactEmail":cfg.contact_email}}),
+    "pricing":{"priceCents":1000,"currency":"usd","interval":"month","secretLimit":1000,"freeSecretLimit":5,"contactEmail":cfg.contact_email}}),
     )
 }
 #[get("/")]
