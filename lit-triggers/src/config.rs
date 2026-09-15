@@ -84,6 +84,21 @@ pub const CHAIN_SPECS: &[ChainSpec] = &[
         default_rpc_envvar: "POLYGON_RPC_URL",
         default_ws_envvar: Some("POLYGON_WS_RPC_URL"),
     },
+    // Testnets — used by lit-bridge's dev relayer (Base Sepolia <-> Arb Sepolia).
+    ChainSpec {
+        key: "base-sepolia",
+        chain_id: 84532,
+        kind: ChainKind::Evm,
+        default_rpc_envvar: "BASE_SEPOLIA_RPC_URL",
+        default_ws_envvar: Some("BASE_SEPOLIA_WS_RPC_URL"),
+    },
+    ChainSpec {
+        key: "arbitrum-sepolia",
+        chain_id: 421614,
+        kind: ChainKind::Evm,
+        default_rpc_envvar: "ARBITRUM_SEPOLIA_RPC_URL",
+        default_ws_envvar: Some("ARBITRUM_SEPOLIA_WS_RPC_URL"),
+    },
 ];
 
 pub fn chain_spec_by_key(key: &str) -> Option<&'static ChainSpec> {
