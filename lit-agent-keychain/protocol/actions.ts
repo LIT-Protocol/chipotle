@@ -16,9 +16,11 @@ export function actionSource(manifest: Authority | Manifest): string {
     : manifestSchema.parse(manifest);
   const base = isAuthority
     ? templates.authority
-    : (manifest as Manifest).release === "export"
-      ? templates.export
-      : templates["stripe-balance"];
+    : templates[(manifest as Manifest).release];
+  if (typeof base !== "string")
+    throw new Error(
+      `Unknown action release ${(manifest as Manifest).release}; update the Keychain client`,
+    );
   return (
     base +
     "\nconst KEYCHAIN_MANIFEST=" +

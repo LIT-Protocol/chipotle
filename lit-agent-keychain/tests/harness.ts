@@ -3,6 +3,7 @@ import { webcrypto } from "node:crypto";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { privateKeyToAccount } from "viem/accounts";
 import { actionCid, actionSource } from "../protocol/actions.ts";
+import catalog from "../generated/catalog.ts";
 import {
   digest,
   unhex,
@@ -86,7 +87,7 @@ export class Harness {
     });
     if (process.env.KEYCHAIN_TEST_DEBUG)
       code = code.replace(
-        'catch{return{ok:!1,error:"authorization_denied"}}',
+        'catch{return{ok:!1,error:"access_denied"}}',
         "catch(error){throw error}",
       );
     const result = await vm.runInContext(
@@ -97,9 +98,23 @@ export class Harness {
     return JSON.parse(JSON.stringify(result));
   }
 }
+/** Well-formed sample credentials per catalog action (test values, not real keys). */
+export const SAMPLE_CREDENTIALS: Record<string, string> = {
+  export: "super-secret-☃",
+  stripe_balance: "sk_test_abcdefghijklmnopqrstuvwxyz",
+  openai_chat: "sk-" + "a".repeat(40),
+  github_read_file: "ghp_" + "A".repeat(36),
+  slack_post_message: "xoxb-1234567890-abcdefghijkl",
+};
+export const operationFor = (release: string) => {
+  const definition = catalog[release];
+  if (!definition) throw new Error(`Unknown release ${release}`);
+  return definition.operation;
+};
 export async function fixture(
   release: Manifest["release"] = "export",
   registry = "https://keychain.test",
+  options: { secret?: string; input?: Record<string, unknown> } = {},
 ) {
   const h = new Harness();
   const ownerKey = randomBytes();
@@ -124,10 +139,10 @@ export async function fixture(
   const cid = await actionCid(manifest);
   const agentKey = randomBytes();
   const responseKey = randomBytes();
-  const secret =
-    release === "export"
-      ? "super-secret-☃"
-      : "sk_test_abcdefghijklmnopqrstuvwxyz";
+  const secret = options.secret ?? SAMPLE_CREDENTIALS[release];
+  if (secret === undefined)
+    throw new Error(`No sample credential for ${release}`);
+  const operation = operationFor(release);
   const envelope = await encryptEnvelope(
     {
       v: V,
@@ -159,7 +174,7 @@ export async function fixture(
       {
         agentPublicKey: agentPublicKey(agentKey),
         label: "test",
-        operations: [release === "export" ? "get" : "stripe.balance"],
+        operations: [operation],
         versions: [{ version: 1, envelopeHash: digest(envelope) }],
       },
     ],
@@ -180,8 +195,8 @@ export async function fixture(
     envelopeHash: digest(envelope),
     policyHash: digest(policy),
     agentPublicKey: agentPublicKey(agentKey),
-    operation:
-      release === "export" ? ("get" as const) : ("stripe.balance" as const),
+    operation,
+    ...(options.input !== undefined ? { input: options.input } : {}),
     responsePublicKey: encryptionPublicKey(responseKey),
     nonce: randomId(),
     issuedAt: now,

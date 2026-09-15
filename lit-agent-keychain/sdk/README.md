@@ -26,10 +26,19 @@ const config = JSON.parse(
 );
 const keychain = new Keychain(identity.privateKey, config);
 const secret = await keychain.get("STRIPE_API_KEY");
-// Use it without logging it. For strict Stripe-only secrets:
-// const balances = await keychain.stripeBalance('STRIPE_API_KEY');
+// Use it without logging it. For "use inside Lit" secrets the value never leaves
+// the enclave; run the secret's catalog action instead:
+// const balances = await keychain.use("STRIPE_API_KEY");
+// const reply = await keychain.use("OPENAI_API_KEY", {
+//   model: "gpt-4o-mini",
+//   messages: [{ role: "user", content: "Summarize this ticket" }],
+// });
 keychain.destroy();
 ```
+
+`keychain.list()` reports each secret's action and input shape; `ACTIONS` exports the
+full catalog compiled into the client. `keychain actions` prints it from the CLI and
+`keychain use <identity> <config> <name> '<json-input>'` runs one.
 
 CLI reads write the requested result to stdout. Avoid sending credential output to logs:
 
@@ -105,8 +114,11 @@ Cursor, Windsurf and similar clients take the same command in their JSON config:
 }
 ```
 
-Tools: `list_secrets` (names and permitted operation, no values), `get_secret`,
-`stripe_balance`, and `agent_public_key` (for the owner to approve). The server is
+Tools: `list_secrets` (names, permitted operation and input shape, no values),
+`get_secret`, one tool per catalog action (`stripe_balance`, `openai_chat`,
+`github_read_file`, `slack_post_message`; each takes `name` and, where the action
+declares one, `input`), `list_actions`, and `agent_public_key` (for the owner to
+approve). The server is
 intentionally local rather than hosted: decryption needs the agent's private
 identity, and a remote endpoint would hand that key and every plaintext to whoever
 runs it, which the Keychain trust boundary forbids. Nothing but JSON-RPC is written

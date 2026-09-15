@@ -4,7 +4,7 @@
   "version": "2.0.0",
   "type": "module",
   "scripts": {
-    "build:actions": "node scripts/build-actions.mjs",
+    "build:actions": "tsx scripts/build-actions.ts",
     "build": "npm run build:actions && node scripts/build-sdk.mjs && tsc --noEmit && vite build --config web/vite.config.ts",
     "dev": "vite --config web/vite.config.ts",
     "test": "npm run build:actions && node scripts/build-sdk.mjs && tsx --test tests/*.test.ts",

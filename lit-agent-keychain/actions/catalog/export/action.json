@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "id": "export",
+  "kind": "export",
+  "name": "Encrypted release",
+  "description": "Decrypts the value inside the enclave and re-encrypts it to the approved agent's key. The agent receives the plaintext on its own machine.",
+  "category": "other",
+  "author": "Lit Protocol",
+  "license": "Apache-2.0",
+  "operation": "get",
+  "ui": {
+    "label": "Receive an encrypted copy",
+    "hint": "Only an authorized agent can decrypt its response locally.",
+    "placeholder": "API_KEY"
+  },
+  "tier": "verified",
+  "deprecated": false
+}

@@ -5,6 +5,7 @@ export type KeychainLike = {
   readonly publicKey: string;
   list(): { name: string; release: string; operation: string }[];
   get(name: string): Promise<string>;
+  use(name: string, input?: Record<string, unknown>): Promise<unknown>;
   stripeBalance(name: string): Promise<unknown>;
   destroy(): void;
 };

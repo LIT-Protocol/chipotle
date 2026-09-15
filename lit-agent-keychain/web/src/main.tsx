@@ -23,6 +23,8 @@ import {
   LitConnection,
   Keychain,
   digest,
+  ACTIONS,
+  availableActions,
   type Authority,
   type Grant,
   type SecretBundle,
@@ -75,6 +77,13 @@ async function readFile(file: File) {
   return JSON.parse(await file.text());
 }
 const brief = (s: string) => s.slice(0, 8) + "…" + s.slice(-6);
+/** Short label for a secret's action: how agents may use it. */
+const actionLabel = (release: string) =>
+  release === "export"
+    ? "Encrypted release"
+    : (ACTIONS[release]?.name ?? "Use in Lit only");
+// Owners pick from reviewed catalog actions; community-tier actions stay SDK-only until promoted.
+const CREATABLE_ACTIONS = availableActions("verified");
 function GoogleButton({
   clientId,
   network,
@@ -153,7 +162,7 @@ function App() {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
-  const [release, setRelease] = useState<"export" | "stripe_balance">("export");
+  const [release, setRelease] = useState<string>("export");
   const [agentKey, setAgentKey] = useState("");
   const [agentName, setAgentName] = useState("");
   const [rotation, setRotation] = useState("");
@@ -714,10 +723,7 @@ function App() {
                         <span>
                           <strong>{s.name}</strong>
                           <small>
-                            {s.release === "export"
-                              ? "Encrypted release"
-                              : "Use in Lit only"}{" "}
-                            · v{s.version}
+                            {actionLabel(s.release)} · v{s.version}
                           </small>
                         </span>
                         <span className={"status " + (s.disabled ? "off" : "")}>
@@ -763,7 +769,9 @@ function App() {
                             pattern="[A-Z][A-Z0-9_]{0,63}"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
-                            placeholder="STRIPE_API_KEY"
+                            placeholder={
+                              ACTIONS[release]?.ui.placeholder ?? "API_KEY"
+                            }
                             autoComplete="off"
                           />
                         </label>
@@ -782,20 +790,24 @@ function App() {
                           How agents may use it
                           <select
                             value={release}
-                            onChange={(e) => setRelease(e.target.value as any)}
+                            onChange={(e) => setRelease(e.target.value)}
                           >
-                            <option value="export">
-                              Receive an encrypted copy
-                            </option>
-                            <option value="stripe_balance">
-                              Read Stripe balance inside Lit
-                            </option>
+                            {CREATABLE_ACTIONS.map((action) => (
+                              <option key={action.id} value={action.id}>
+                                {action.ui.label}
+                              </option>
+                            ))}
                           </select>
                         </label>
                         <p className="hint">
-                          {release === "stripe_balance"
-                            ? "This action cannot export the credential, even for recovery. Keep your original credential elsewhere."
-                            : "Only an authorized agent can decrypt its response locally."}
+                          {ACTIONS[release]?.ui.hint}
+                          {ACTIONS[release]?.kind === "use" && (
+                            <>
+                              {" "}
+                              Reaches only{" "}
+                              {ACTIONS[release].allowedHosts.join(", ")}.
+                            </>
+                          )}
                         </p>
                         <button disabled={!!busy}>Encrypt & save</button>
                         <button
@@ -815,7 +827,9 @@ function App() {
                           {selected.manifest.document.manifest.release ===
                           "export"
                             ? "ENCRYPTED RELEASE"
-                            : "STRICT USE WITHOUT REVEAL"}
+                            : `USE WITHOUT REVEAL · ${actionLabel(
+                                selected.manifest.document.manifest.release,
+                              ).toUpperCase()}`}
                         </p>
                         <h2>{selected.envelope.document.metadata.name}</h2>
                         <p className="hint">

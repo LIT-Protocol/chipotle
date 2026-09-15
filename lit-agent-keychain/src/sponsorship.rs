@@ -312,6 +312,9 @@ pub async fn enroll(
             return Err(api::err(Status::Conflict, "action_already_registered"));
         }
     } else {
+        if actions::release(&manifest.release).is_none_or(|release| release.deprecated) {
+            return Err(api::err(Status::BadRequest, "release_deprecated"));
+        }
         let count: i64 =
             sqlx::query_scalar("SELECT count(*) FROM kc_execution_actions WHERE vault_id=$1")
                 .bind(vault)

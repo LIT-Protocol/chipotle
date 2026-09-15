@@ -1,0 +1,61 @@
+{
+  "v": 1,
+  "id": "stripe_balance",
+  "kind": "use",
+  "name": "Read Stripe balance",
+  "description": "Reads the account's available and pending balances with a fixed GET to api.stripe.com and returns only bounded numeric amounts, currency codes and the live-mode flag.",
+  "category": "payments",
+  "author": "Lit Protocol",
+  "license": "Apache-2.0",
+  "operation": "stripe.balance",
+  "credentialPattern": "^(?:sk|rk)_(?:test|live)_[A-Za-z0-9]{12,256}$",
+  "allowedHosts": ["api.stripe.com"],
+  "input": null,
+  "output": {
+    "type": "object",
+    "properties": {
+      "available": {
+        "type": "array",
+        "maxItems": 100,
+        "items": {
+          "type": "object",
+          "properties": {
+            "amount": { "type": "integer" },
+            "currency": {
+              "type": "string",
+              "maxLength": 3,
+              "pattern": "^[a-z]{3}$"
+            }
+          },
+          "required": ["amount", "currency"]
+        }
+      },
+      "pending": {
+        "type": "array",
+        "maxItems": 100,
+        "items": {
+          "type": "object",
+          "properties": {
+            "amount": { "type": "integer" },
+            "currency": {
+              "type": "string",
+              "maxLength": 3,
+              "pattern": "^[a-z]{3}$"
+            }
+          },
+          "required": ["amount", "currency"]
+        }
+      },
+      "livemode": { "type": "boolean" }
+    },
+    "required": ["available", "pending", "livemode"]
+  },
+  "limits": { "timeoutMs": 8000, "maxResponseBytes": 65536, "maxRequests": 1 },
+  "ui": {
+    "label": "Read Stripe balance inside Lit",
+    "hint": "This action cannot export the credential, even for recovery. Keep your original credential elsewhere.",
+    "placeholder": "STRIPE_API_KEY"
+  },
+  "tier": "verified",
+  "deprecated": false
+}

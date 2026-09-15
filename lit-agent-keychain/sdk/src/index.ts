@@ -1,5 +1,14 @@
 import { actionCid, actionSource } from "../../protocol/actions.ts";
 import discoverySource from "../../generated/discovery.ts";
+import catalog from "../../generated/catalog.ts";
+import {
+  shapeToZod,
+  shapeToJsonSchema,
+  type ActionDefinition,
+  type Catalog,
+  type Shape,
+} from "../../actions/catalog/schema.ts";
+export { shapeToJsonSchema };
 import {
   authoritySchema,
   manifestSchema,
@@ -71,6 +80,7 @@ export {
   hex,
   unhex,
 };
+export type { ActionDefinition, Catalog, Shape };
 export type {
   Authority,
   Manifest,
@@ -84,6 +94,22 @@ export type {
   Credentials,
 };
 export const DEFAULT_LIT_API_URL = "https://api.chipotle.litprotocol.com";
+/**
+ * The action catalog compiled into this client: every release id an owner can
+ * choose for a secret, with the single operation it permits and, for "use inside
+ * Lit" actions, the agent input and result shapes the enclave enforces.
+ */
+export const ACTIONS: Catalog = catalog;
+export function actionDefinition(release: string): ActionDefinition {
+  const definition = ACTIONS[release];
+  requireThat(definition, `Unknown action release ${release}`);
+  return definition;
+}
+/** Catalog actions owners may pick for a new secret (not deprecated). */
+export const availableActions = (tier?: ActionDefinition["tier"]) =>
+  Object.values(ACTIONS).filter(
+    (d) => !d.deprecated && (tier === undefined || d.tier === tier),
+  );
 export type OwnerSigner = (challenge: Challenge) => Promise<OwnerProof>;
 export type SecretBundle = {
   manifest: Signed<Extract<Document, { kind: "manifest" }>>;
@@ -448,6 +474,13 @@ export class OwnerClient {
     plaintext: string,
     release: Manifest["release"] = "export",
   ) {
+    const definition = actionDefinition(release);
+    requireThat(!definition.deprecated, "This action release is deprecated");
+    if (definition.kind === "use")
+      requireThat(
+        new RegExp(definition.credentialPattern).test(plaintext),
+        `The value does not look like a credential for ${definition.name}`,
+      );
     const manifest: Manifest = {
       v: V,
       network: this.authority.network,
@@ -546,9 +579,7 @@ export class OwnerClient {
       agentPublicKey: publicKey,
       label,
       operations: [
-        bundle.manifest.document.manifest.release === "export"
-          ? "get"
-          : "stripe.balance",
+        actionDefinition(bundle.manifest.document.manifest.release).operation,
       ],
       versions: [
         {
@@ -774,14 +805,22 @@ export class Keychain {
   attest() {
     return this.lit.attest();
   }
-  /** Secret names with the single operation each release mode permits. */
-  list(): { name: string; release: Manifest["release"]; operation: string }[] {
-    return Object.entries(this.config.secrets).map(([name, locator]) => ({
-      name,
-      release: locator.manifest.release,
-      operation:
-        locator.manifest.release === "export" ? "get" : "stripe.balance",
-    }));
+  /** Secret names with the single operation each release permits and its input shape, if any. */
+  list(): {
+    name: string;
+    release: Manifest["release"];
+    operation: string;
+    input?: Shape | null;
+  }[] {
+    return Object.entries(this.config.secrets).map(([name, locator]) => {
+      const definition = ACTIONS[locator.manifest.release];
+      return {
+        name,
+        release: locator.manifest.release,
+        operation: definition?.operation ?? "unknown",
+        ...(definition?.kind === "use" ? { input: definition.input } : {}),
+      };
+    });
   }
   static generateKey() {
     const key = randomBytes();
@@ -790,15 +829,46 @@ export class Keychain {
   destroy() {
     this.key.fill(0);
   }
+  /** Decrypts an export-release secret locally and returns its value. */
   async get(name: string): Promise<string> {
     return this.read(name, "get");
   }
+  /**
+   * Runs a "use inside Lit" catalog action with the credential, never revealing it.
+   * `input` is validated here against the action's declared shape before signing,
+   * and again inside the enclave. Returns the action's bounded result object.
+   */
+  async use(name: string, input?: Record<string, unknown>): Promise<any> {
+    const locator = this.config.secrets[name];
+    requireThat(locator, "Unknown secret");
+    const definition = actionDefinition(locator.manifest.release);
+    requireThat(
+      definition.kind === "use",
+      "Secret is an export release; call get()",
+    );
+    let validated: Record<string, unknown> | undefined;
+    if (definition.input) {
+      const parsed = shapeToZod(definition.input).safeParse(input ?? {});
+      requireThat(
+        parsed.success,
+        `Invalid input for ${definition.name}: ${parsed.success ? "" : parsed.error.issues.map((i) => `${i.path.join(".") || "input"} ${i.message}`).join("; ")}`,
+      );
+      validated = parsed.data as Record<string, unknown>;
+    } else {
+      requireThat(
+        input === undefined || Object.keys(input).length === 0,
+        `${definition.name} takes no input`,
+      );
+    }
+    return JSON.parse(await this.read(name, definition.operation, validated));
+  }
   async stripeBalance(name: string) {
-    return JSON.parse(await this.read(name, "stripe.balance"));
+    return this.use(name);
   }
   private async read(
     name: string,
-    operation: "get" | "stripe.balance",
+    operation: string,
+    input?: Record<string, unknown>,
   ): Promise<string> {
     const locator = this.config.secrets[name];
     requireThat(locator, "Unknown secret");
@@ -808,9 +878,7 @@ export class Keychain {
       "Pinned action CID mismatch",
     );
     requireThat(
-      (operation === "get" && manifest.release === "export") ||
-        (operation === "stripe.balance" &&
-          manifest.release === "stripe_balance"),
+      actionDefinition(manifest.release).operation === operation,
       "Unsupported release operation",
     );
     const bundle: SecretBundle = await jsonFetch(
@@ -836,6 +904,7 @@ export class Keychain {
       policyHash: digest(bundle.policy.document),
       agentPublicKey: this.publicKey,
       operation,
+      ...(input !== undefined ? { input } : {}),
       responsePublicKey: encryptionPublicKey(responseKey),
       nonce: randomId(),
       issuedAt: now,
