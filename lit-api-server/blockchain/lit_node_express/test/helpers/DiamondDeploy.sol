@@ -167,7 +167,7 @@ library DiamondDeploy {
         s[17] = WritesFacet.registerWalletDerivation.selector;
         s[18] = WritesFacet.removeWalletDerivation.selector;
         s[19] = WritesFacet.setNodeConfiguration.selector;
-        s[20] = WritesFacet.backfillPkpOwners.selector;
+        s[20] = WritesFacet.transferChainSecuredAccountOwnership.selector;
     }
 
     function apiConfigSelectors() internal pure returns (bytes4[] memory s) {

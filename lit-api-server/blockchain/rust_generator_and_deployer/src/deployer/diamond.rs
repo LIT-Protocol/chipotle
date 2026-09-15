@@ -126,11 +126,14 @@ pub struct RemovalPlan {
 
 /// Decide which selectors to Remove in this upgrade. Safe by construction: a
 /// selector is removed only if it is BOTH explicitly listed in the manifest AND
-/// detected as orphaned by this upgrade — i.e. it currently lives on the old
-/// address of a facet we are re-installing, yet is absent from every new managed
-/// facet ABI. Core facets (DiamondCut/Loupe) are never touched: none of their
-/// selectors appear in the managed set, so their addresses are never classified
-/// as "managed", so their selectors are never orphan candidates.
+/// detected as orphaned by this upgrade — i.e. it is absent from every new
+/// managed facet ABI and currently lives either on the old address of a facet
+/// we are re-installing, or on a "stranded" address where every remaining
+/// selector is itself re-installed or listed (the leftover of an earlier upgrade
+/// that ran without the manifest). Core facets (DiamondCut/Loupe) are never
+/// touched: none of their selectors appear in the managed set, so their
+/// addresses are never classified as "managed", and they can only become
+/// "stranded" if the manifest explicitly lists every one of their selectors.
 pub fn plan_removals(
     selector_to_addr: &HashMap<FixedBytes<4>, Address>,
     new_managed: &HashSet<FixedBytes<4>>,
@@ -143,10 +146,48 @@ pub fn plan_removals(
         .map(|(_, addr)| *addr)
         .collect();
 
-    // On-chain selectors on a managed facet's old address that the new ABIs drop.
+    // Selectors the manifest asks for (signature-hashed; mismatches are
+    // rejected below, so an entry with a bad `selector` never counts here).
+    let listed: HashSet<FixedBytes<4>> = manifest
+        .iter()
+        .filter(|e| match &e.selector {
+            Some(expected) => {
+                expected.trim_start_matches("0x").to_lowercase()
+                    == hex::encode(selector_of(&e.signature).as_slice())
+            }
+            None => true,
+        })
+        .map(|e| selector_of(&e.signature))
+        .collect();
+
+    // Addresses left behind by an earlier upgrade that ran without the manifest:
+    // every selector still routed there is either being re-installed elsewhere
+    // or explicitly listed for removal. Nothing on such an address survives
+    // this upgrade by design, so its listed selectors are orphans too. A core
+    // facet (DiamondCut/Loupe/Ownership) never qualifies unless the manifest
+    // explicitly lists every one of its selectors, which is an unmistakable act.
+    let mut stranded_addresses: HashSet<Address> = HashSet::new();
+    for (_, addr) in selector_to_addr.iter() {
+        if managed_old_addresses.contains(addr) || stranded_addresses.contains(addr) {
+            continue;
+        }
+        let fully_accounted = selector_to_addr
+            .iter()
+            .filter(|(_, a)| *a == addr)
+            .all(|(sel, _)| new_managed.contains(sel) || listed.contains(sel));
+        if fully_accounted {
+            stranded_addresses.insert(*addr);
+        }
+    }
+
+    // On-chain selectors the new ABIs drop, hosted either on a managed facet's
+    // old address or on a fully-accounted stranded address.
     let orphans: HashSet<FixedBytes<4>> = selector_to_addr
         .iter()
-        .filter(|(sel, addr)| managed_old_addresses.contains(*addr) && !new_managed.contains(*sel))
+        .filter(|(sel, addr)| {
+            !new_managed.contains(*sel)
+                && (managed_old_addresses.contains(*addr) || stranded_addresses.contains(*addr))
+        })
         .map(|(sel, _)| *sel)
         .collect();
 
@@ -778,6 +819,46 @@ mod removal_tests {
                 .iter()
                 .any(|w| w.contains("selector mismatch"))
         );
+    }
+
+    #[test]
+    fn removes_listed_selector_stranded_alone_on_old_facet() {
+        // An earlier upgrade moved every other WritesFacet selector but ran
+        // without the manifest, so `gone` is the only selector left on the old
+        // address. A retry with the manifest must still be able to drop it.
+        let sig = "someRemovedFn()";
+        let gone = selector_of(sig);
+        let keep = sel([0x11, 0x11, 0x11, 0x11]);
+        let core = sel([0x33, 0x33, 0x33, 0x33]);
+        let mut s2a = HashMap::new();
+        s2a.insert(gone, Address::repeat_byte(0xAA)); // stranded old facet
+        s2a.insert(keep, Address::repeat_byte(0xBB)); // current facet, re-installed
+        s2a.insert(core, Address::repeat_byte(0xCC));
+        let mut managed = HashSet::new();
+        managed.insert(keep);
+
+        let plan = plan_removals(&s2a, &managed, &[entry(sig)]);
+        assert_eq!(plan.to_remove, vec![gone]);
+    }
+
+    #[test]
+    fn stranded_rule_never_touches_core_facet_with_unlisted_selectors() {
+        // Listing one core selector must not make its facet "stranded": the
+        // other core selector on that address is neither re-installed nor listed.
+        let sig = "diamondCut((address,uint8,bytes4[])[],address,bytes)";
+        let cut = selector_of(sig);
+        let loupe = sel([0x33, 0x33, 0x33, 0x33]);
+        let keep = sel([0x11, 0x11, 0x11, 0x11]);
+        let mut s2a = HashMap::new();
+        s2a.insert(cut, Address::repeat_byte(0xCC));
+        s2a.insert(loupe, Address::repeat_byte(0xCC));
+        s2a.insert(keep, Address::repeat_byte(0xBB));
+        let mut managed = HashSet::new();
+        managed.insert(keep);
+
+        let plan = plan_removals(&s2a, &managed, &[entry(sig)]);
+        assert!(plan.to_remove.is_empty(), "core selector must be refused");
+        assert!(plan.warnings.iter().any(|w| w.contains("REFUSING")));
     }
 
     #[test]

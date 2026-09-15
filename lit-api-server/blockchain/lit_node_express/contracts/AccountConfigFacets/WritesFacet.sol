@@ -68,10 +68,6 @@ contract WritesFacet {
         uint256 indexed apiKeyHash,
         address indexed pkpId
     );
-    event PkpOwnerBackfilled(
-        address indexed pkpId,
-        uint256 indexed masterHash
-    );
     event UsageApiKeyRemoved(
         uint256 indexed accountApiKeyHash,
         uint256 indexed usageApiKeyHash
@@ -760,35 +756,6 @@ contract WritesFacet {
         }
 
         emit WalletDerivationRemoved(apiKeyHash, pkpId);
-    }
-
-    /// @notice One-time migration helper: bind wallets registered before the global
-    ///         owner binding existed to their original master account.
-    /// @dev Pairs should be derived off-chain from the EARLIEST
-    ///      `WalletDerivationRegistered(masterHash, pkpId, ...)` event per pkpId
-    ///      (first registration wins, matching the rule `registerWalletDerivation`
-    ///      now enforces). Already-bound pkpIds are skipped, never re-assigned, so
-    ///      the call is idempotent and safe to run in batches / re-run. Restricted
-    ///      to the diamond owner or config operator.
-    function backfillPkpOwners(
-        address[] calldata pkpIds,
-        uint256[] calldata masterHashes
-    ) public {
-        SecurityLib.revertIfNotConfigOperatorOrOwner(msg.sender);
-        if (pkpIds.length != masterHashes.length) {
-            revert AppStorage.InvalidRequest("array length mismatch");
-        }
-        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        for (uint256 i = 0; i < pkpIds.length; i++) {
-            if (masterHashes[i] == 0) {
-                revert AppStorage.InvalidRequest("masterHash must be non-zero");
-            }
-            if (s.pkpIdToOwnerMaster[pkpIds[i]] != 0) {
-                continue; // already bound — never re-assign ownership
-            }
-            s.pkpIdToOwnerMaster[pkpIds[i]] = masterHashes[i];
-            emit PkpOwnerBackfilled(pkpIds[i], masterHashes[i]);
-        }
     }
 
     function setNodeConfiguration(
