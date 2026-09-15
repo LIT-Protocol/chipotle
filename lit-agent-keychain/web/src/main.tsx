@@ -493,17 +493,17 @@ function App() {
               <details>
                 <summary>Recover an existing vault</summary>
                 <p>
-                  Load its encrypted backup or recovery descriptor, then sign in
-                  with an approved recovery credential.
+                  Choose the backup file you downloaded from this vault, then
+                  sign in with an approved credential.
                 </p>
                 <input
-                  aria-label="Recovery file"
+                  aria-label="Backup file"
                   type="file"
                   accept="application/json"
                   onChange={(e) => {
                     const f = e.target.files?.[0];
                     if (f)
-                      void work("Loading recovery descriptor…", async () => {
+                      void work("Reading backup file…", async () => {
                         const data = await readFile(f);
                         await OwnerClient.restoreCredentials(
                           data,
@@ -511,7 +511,7 @@ function App() {
                         );
                         setRecovery(data.authority);
                         setNotice(
-                          "Recovery vault selected. Sign in with one of its approved credentials.",
+                          "Backup loaded. Sign in with one of this vault's approved credentials.",
                         );
                       });
                   }}
@@ -1042,35 +1042,23 @@ function App() {
                   </div>
                 </div>
                 <section className="detail-card wide">
-                  <h2>Encrypted backup</h2>
+                  <h2>Back up this vault</h2>
                   <p>
-                    Includes current secret versions, signed policies, and the
-                    vault descriptor. Store it somewhere you control. You still
-                    need an approved sign-in method.
+                    One file with everything needed to recover this vault on a
+                    new device: your encrypted secrets, their signed policies,
+                    and the vault identity. It cannot be read without an
+                    approved sign-in method. Download a fresh copy after adding
+                    secrets or changing credentials.
                   </p>
                   <button
                     disabled={!!busy}
                     onClick={() =>
                       void work("Verifying and exporting backup…", async () =>
-                        download(
-                          "keychain-encrypted-backup.json",
-                          await client.backup(),
-                        ),
+                        download("keychain-backup.json", await client.backup()),
                       )
                     }
                   >
-                    Download encrypted backup
-                  </button>
-                  <button
-                    className="ghost"
-                    onClick={() =>
-                      download("keychain-recovery.json", {
-                        v: 2,
-                        authority: client.authority,
-                      })
-                    }
-                  >
-                    Recovery descriptor
+                    Download backup
                   </button>
                   <label>
                     Restore missing secrets
@@ -1095,8 +1083,8 @@ function App() {
                   <h2>Approved owner credentials</h2>
                   <p>
                     Changes require your current owner’s approval and end
-                    existing browser sessions. Save your recovery descriptor
-                    before changing credentials.
+                    existing browser sessions. Download a fresh backup before
+                    changing credentials.
                   </p>
                   {recoveryOwners.map((o, i) => (
                     <div className="agent-row" key={digest(o)}>
@@ -1122,7 +1110,7 @@ function App() {
                               );
                               setClient(undefined);
                               setNotice(
-                                "Credentials updated. Sign in with an approved credential and your recovery descriptor.",
+                                "Credentials updated. Sign in again with an approved credential.",
                               );
                             },
                           )
@@ -1172,9 +1160,7 @@ function App() {
                           identity.owner,
                         ]);
                         setClient(undefined);
-                        setNotice(
-                          "Recovery passkey added. Use your recovery descriptor to sign in.",
-                        );
+                        setNotice("Recovery passkey added. Sign in again.");
                       })
                     }
                   >

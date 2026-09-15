@@ -254,14 +254,14 @@ ${MCP_COMMAND}`}
         <Faq q="What if I lose my passkey or wallet?">
           <p>
             Under Recovery &amp; backups you can approve additional owner
-            credentials and download an encrypted backup and recovery
-            descriptor. On a new device, choose “Recover an existing vault”,
-            load the descriptor and sign in with any approved credential.
+            credentials and download a backup file. On a new device, choose
+            “Recover an existing vault”, load the backup and sign in with any
+            approved credential.
           </p>
           <p>
-            If your only credential is gone and you have no descriptor, nobody
-            can recover the vault, including us. That is the point of
-            self-custody, so add a second credential early.
+            If your only credential is gone and you have no backup, nobody can
+            recover the vault, including us. That is the point of self-custody,
+            so add a second credential early.
           </p>
         </Faq>
 
