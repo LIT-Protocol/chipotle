@@ -147,9 +147,11 @@ each deployed release. Changing action bytes changes encryption keys.
 `actions/catalog.lock.json` pins the SHA-256 of every built template (authority and
 each catalog action); `npm run build:actions` fails on drift, so a rebuild against
 different sources or dependencies is an explicit `--update-lock` release, never a
-silent change. Introduce a new action id and an explicit owner-approved transition
-instead of changing a deployed one. "Use inside Lit" secrets require reimporting the
-original credential. An encrypted DB backup alone cannot recover
+silent change. Every released version is retained in `actions/archive/` and served
+by content hash from `/api/templates/<sha256>`, so vaults and secrets created under
+an earlier release keep working (see "Authority releases" in SECURITY.md). Introduce
+a new action id instead of changing a deployed one; "use inside Lit" secrets require
+reimporting the original credential to move to a new action. An encrypted DB backup alone cannot recover
 from loss of Lit's key derivation root or an incompatible network derivation change.
 
 ## Verification

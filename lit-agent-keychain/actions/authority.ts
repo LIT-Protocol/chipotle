@@ -31,6 +31,7 @@ export async function run(
   params: { document: unknown; proof: OwnerProof },
 ) {
   let privateKey: Uint8Array | undefined;
+  let publicKey: string | undefined;
   try {
     const authority = authoritySchema.parse(rawAuthority);
     const document = documentSchema.parse(params.document);
@@ -46,7 +47,7 @@ export async function run(
     privateKey = unhex(
       (await Lit.Actions.getLitActionPrivateKey()).replace(/^0x/, ""),
     );
-    const publicKey = hex(secp256k1.getPublicKey(privateKey));
+    publicKey = hex(secp256k1.getPublicKey(privateKey));
     // Null denotes the original credential. Missing/failed HTTP responses fail closed.
     const state = await jsonFetch(
       `${authority.registry}/api/registry/credentials/${vaultId}`,
@@ -56,9 +57,14 @@ export async function run(
     );
     let owners = [authority.owner];
     let credentialExpiresAt: number | null = null;
-    if (state.policy !== null) {
+    // Authority releases are versioned: each vault may have credentials receipts
+    // signed by an earlier or later release of this action, whose key this
+    // release cannot verify. Such a receipt is treated exactly like a null state
+    // (root owner only). The operator can already serve null for any vault, so
+    // this grants nothing beyond the documented rollback trust; it never accepts
+    // an unverifiable owner set.
+    if (state.policy !== null && signedByThisRelease(state.policy)) {
       const signed = signedSchema(credentialsSchema).parse(state.policy);
-      verifyReceipt(signed, publicKey, vaultId);
       requireThat(signed.document.notBefore <= now);
       if (signed.document.expiresAt !== null)
         verifyWindow(
@@ -113,5 +119,18 @@ export async function run(
     return { ok: false, error: "authorization_denied" };
   } finally {
     privateKey?.fill(0);
+  }
+  function signedByThisRelease(policy: unknown) {
+    try {
+      const signed = signedSchema(credentialsSchema).parse(policy);
+      verifyReceipt(
+        signed,
+        publicKey!,
+        digest(authoritySchema.parse(rawAuthority)),
+      );
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
