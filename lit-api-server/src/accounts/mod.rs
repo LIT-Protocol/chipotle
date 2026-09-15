@@ -911,6 +911,86 @@ pub async fn can_execute_action(api_key: &str, cid_hash: U256) -> Result<bool> {
     Ok(can_execute)
 }
 
+async fn fetch_execute_and_spending(
+    account_api_key_hash: U256,
+    cid_hash_eth: U256,
+) -> Result<(bool, bool)> {
+    let contract = get_read_only_account_config_contract().await?;
+    let result = contract
+        .canExecuteActionWithSpendingRules(account_api_key_hash, cid_hash_eth)
+        .call()
+        .await?;
+    Ok((result.canExecute, result.hasSpendingRules))
+}
+
+/// Read a usage key's on-chain `hasSpendingRules` flag (uncached; owner path).
+pub async fn get_spending_rules_flag(usage_api_key_or_hash: &str) -> Result<bool> {
+    let contract = get_read_only_account_config_contract().await?;
+    let usage_hash = usage_api_key_to_hash(usage_api_key_or_hash);
+    Ok(contract.getSpendingRulesFlag(usage_hash).call().await?)
+}
+
+/// Flip a usage key's on-chain `hasSpendingRules` flag
+/// (AccountConfig.setSpendingRulesFlag). The master `api_key` must own the
+/// account; the contract reverts with `NoAccountAccess` otherwise. Invalidates
+/// the permission cache for both keys so the gateway's combined
+/// execute+spending lookup refetches on the next call.
+pub async fn set_spending_rules_flag(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    usage_api_key_or_hash: &str,
+    has_spending_rules: bool,
+) -> Result<bool> {
+    let (contract, signer_lease, client) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let usage_api_key_hash = usage_api_key_to_hash(usage_api_key_or_hash);
+    tracing::info!(
+        "Setting spending-rules flag: account_api_key_hash={:#x}, usage_api_key_hash={:#x}, flag={}",
+        account_api_key_hash,
+        usage_api_key_hash,
+        has_spending_rules
+    );
+
+    let function_call =
+        contract.setSpendingRulesFlag(account_api_key_hash, usage_api_key_hash, has_spending_rules);
+    let result = send_transaction(function_call, signer_pool, signer_lease, client).await?;
+    blockchain_cache::invalidate_for_keys(api_key, usage_api_key_or_hash);
+    Ok(result)
+}
+
+/// Combined hot-path check: `(can_execute, has_spending_rules)` in a single RPC.
+///
+/// `has_spending_rules` is the zero-latency gate for per-key Lambda-parity
+/// controls — false for every key that never set it, so the common path does no
+/// extra work. See `plans/chipotle-lambda-parity.md`.
+#[instrument(
+    name = "accounts::can_execute_action_with_spending_rules",
+    level = "debug",
+    skip_all,
+    err
+)]
+pub async fn can_execute_action_with_spending_rules(
+    api_key: &str,
+    cid_hash: U256,
+) -> Result<(bool, bool)> {
+    let account_api_key_hash = api_key_hash(api_key);
+    let cid_hash_eth = cid_hash;
+
+    if let Some(cache) = blockchain_cache::get() {
+        let key = cache.execute_and_spending_key(account_api_key_hash, cid_hash);
+        return cache
+            .execute_and_spending_cache()
+            .try_get_with(key, async move {
+                fetch_execute_and_spending(account_api_key_hash, cid_hash_eth).await
+            })
+            .await
+            .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{:#}", e));
+    }
+
+    fetch_execute_and_spending(account_api_key_hash, cid_hash_eth).await
+}
+
 #[instrument(
     name = "accounts::can_use_wallet_in_action",
     level = "debug",

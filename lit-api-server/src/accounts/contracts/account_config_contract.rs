@@ -1649,6 +1649,7 @@ interface AccountConfig {
     event RebalanceAmountUpdated(uint256 newRebalanceAmount);
     event RequestedApiPayerCountUpdated(uint256 newCount);
     event ServerTriggered(uint256 value, address indexed sender);
+    event SpendingRulesFlagSet(uint256 indexed accountApiKeyHash, uint256 indexed usageApiKeyHash, bool hasSpendingRules);
     event UsageApiKeyRemoved(uint256 indexed accountApiKeyHash, uint256 indexed usageApiKeyHash);
     event UsageApiKeySet(uint256 indexed accountApiKeyHash, uint256 indexed usageApiKeyHash);
     event WalletDerivationRegistered(uint256 indexed apiKeyHash, address indexed pkpId, uint256 derivationPath);
@@ -1669,6 +1670,7 @@ interface AccountConfig {
     function canExecuteAction(uint256 apiKeyHash, uint256 cidHash) external view returns (bool);
     function canExecuteActionAndUseWallet(uint256 apiKeyHash, uint256 cidHash, address walletAddress) external view returns (bool canExecute, bool canUseWallet);
     function canExecuteActionFast(uint256 apiKeyHash, uint256 cidHash) external view returns (bool);
+    function canExecuteActionWithSpendingRules(uint256 apiKeyHash, uint256 cidHash) external view returns (bool canExecute, bool hasSpendingRules);
     function canUseWalletInAction(uint256 apiKeyHash, uint256 cidHash, address walletAddress) external view returns (bool);
     function canUseWalletInActionFast(uint256 apiKeyHash, uint256 cidHash, address walletAddress) external view returns (bool);
     function configOperator() external view returns (address);
@@ -1679,6 +1681,7 @@ interface AccountConfig {
     function getBillingWalletAddress(uint256 apiKeyHash) external view returns (address);
     function getPkpOwnerMaster(address pkpId) external view returns (uint256);
     function getPricing(uint256 pricingItemId) external view returns (uint256);
+    function getSpendingRulesFlag(uint256 apiKeyHash) external view returns (bool);
     function getWalletDerivation(uint256 apiKeyHash, address walletAddress) external view returns (uint256);
     function groupIdsForAction(uint256 apiKeyHash, uint256 cidHash) external view returns (uint256[] memory);
     function groupIdsForActionAndWallet(uint256 apiKeyHash, uint256 cidHash, address walletAddress) external view returns (uint256[] memory);
@@ -1716,6 +1719,7 @@ interface AccountConfig {
     function setPricingOperator(address newPricingOperator) external;
     function setRebalanceAmount(uint256 newRebalanceAmount) external;
     function setRequestedApiPayerCount(uint256 newRequestedApiPayerCount) external;
+    function setSpendingRulesFlag(uint256 accountApiKeyHash, uint256 usageApiKeyHash, bool hasSpendingRules) external;
     function setUsageApiKey(uint256 accountApiKeyHash, uint256 usageApiKeyHash, uint256 expiration, uint256 balance, string memory name, string memory description, bool createGroups, bool deleteGroups, bool createPKPs, uint256[] memory manageIPFSIdsInGroups, uint256[] memory addPkpToGroups, uint256[] memory removePkpFromGroups, uint256[] memory executeInGroups) external;
     function transferChainSecuredAccountOwnership(uint256 apiKeyHash, address newAdminWalletAddress) external;
     function updateActionMetadata(uint256 accountApiKeyHash, uint256 actionHash, uint256 groupId, string memory name, string memory description) external;
@@ -2057,6 +2061,35 @@ interface AccountConfig {
   },
   {
     "type": "function",
+    "name": "canExecuteActionWithSpendingRules",
+    "inputs": [
+      {
+        "name": "apiKeyHash",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "cidHash",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "canExecute",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "hasSpendingRules",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "canUseWalletInAction",
     "inputs": [
       {
@@ -2252,6 +2285,25 @@ interface AccountConfig {
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getSpendingRulesFlag",
+    "inputs": [
+      {
+        "name": "apiKeyHash",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
@@ -3222,6 +3274,29 @@ interface AccountConfig {
   },
   {
     "type": "function",
+    "name": "setSpendingRulesFlag",
+    "inputs": [
+      {
+        "name": "accountApiKeyHash",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "usageApiKeyHash",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "hasSpendingRules",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "setUsageApiKey",
     "inputs": [
       {
@@ -3871,6 +3946,31 @@ interface AccountConfig {
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SpendingRulesFlagSet",
+    "inputs": [
+      {
+        "name": "accountApiKeyHash",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "usageApiKeyHash",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "hasSpendingRules",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
       }
     ],
     "anonymous": false
@@ -8520,6 +8620,127 @@ pub mod AccountConfig {
         }
     };
     #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
+    /*Event with signature `SpendingRulesFlagSet(uint256,uint256,bool)` and selector `0x0122856f3a0558721b304826e38d25763a158254a1cd76c6bc2c3e6299309971`.
+    ```solidity
+    event SpendingRulesFlagSet(uint256 indexed accountApiKeyHash, uint256 indexed usageApiKeyHash, bool hasSpendingRules);
+    ```*/
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
+    #[derive(Clone)]
+    pub struct SpendingRulesFlagSet {
+        #[allow(missing_docs)]
+        pub accountApiKeyHash: alloy::sol_types::private::primitives::aliases::U256,
+        #[allow(missing_docs)]
+        pub usageApiKeyHash: alloy::sol_types::private::primitives::aliases::U256,
+        #[allow(missing_docs)]
+        pub hasSpendingRules: bool,
+    }
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
+    const _: () = {
+        use alloy::sol_types as alloy_sol_types;
+        #[automatically_derived]
+        impl alloy_sol_types::SolEvent for SpendingRulesFlagSet {
+            type DataTuple<'a> = (alloy::sol_types::sol_data::Bool,);
+            type DataToken<'a> = <Self::DataTuple<'a> as alloy_sol_types::SolType>::Token<'a>;
+            type TopicList = (
+                alloy_sol_types::sol_data::FixedBytes<32>,
+                alloy::sol_types::sol_data::Uint<256>,
+                alloy::sol_types::sol_data::Uint<256>,
+            );
+            const SIGNATURE: &'static str = "SpendingRulesFlagSet(uint256,uint256,bool)";
+            const SIGNATURE_HASH: alloy_sol_types::private::B256 =
+                alloy_sol_types::private::B256::new([
+                    1u8, 34u8, 133u8, 111u8, 58u8, 5u8, 88u8, 114u8, 27u8, 48u8, 72u8, 38u8, 227u8,
+                    141u8, 37u8, 118u8, 58u8, 21u8, 130u8, 84u8, 161u8, 205u8, 118u8, 198u8, 188u8,
+                    44u8, 62u8, 98u8, 153u8, 48u8, 153u8, 113u8,
+                ]);
+            const ANONYMOUS: bool = false;
+            #[allow(unused_variables)]
+            #[inline]
+            fn new(
+                topics: <Self::TopicList as alloy_sol_types::SolType>::RustType,
+                data: <Self::DataTuple<'_> as alloy_sol_types::SolType>::RustType,
+            ) -> Self {
+                Self {
+                    accountApiKeyHash: topics.1,
+                    usageApiKeyHash: topics.2,
+                    hasSpendingRules: data.0,
+                }
+            }
+            #[inline]
+            fn check_signature(
+                topics: &<Self::TopicList as alloy_sol_types::SolType>::RustType,
+            ) -> alloy_sol_types::Result<()> {
+                if topics.0 != Self::SIGNATURE_HASH {
+                    return Err(alloy_sol_types::Error::invalid_event_signature_hash(
+                        Self::SIGNATURE,
+                        topics.0,
+                        Self::SIGNATURE_HASH,
+                    ));
+                }
+                Ok(())
+            }
+            #[inline]
+            fn tokenize_body(&self) -> Self::DataToken<'_> {
+                (
+                    <alloy::sol_types::sol_data::Bool as alloy_sol_types::SolType>::tokenize(
+                        &self.hasSpendingRules,
+                    ),
+                )
+            }
+            #[inline]
+            fn topics(&self) -> <Self::TopicList as alloy_sol_types::SolType>::RustType {
+                (
+                    Self::SIGNATURE_HASH.into(),
+                    self.accountApiKeyHash.clone(),
+                    self.usageApiKeyHash.clone(),
+                )
+            }
+            #[inline]
+            fn encode_topics_raw(
+                &self,
+                out: &mut [alloy_sol_types::abi::token::WordToken],
+            ) -> alloy_sol_types::Result<()> {
+                if out.len() < <Self::TopicList as alloy_sol_types::TopicList>::COUNT {
+                    return Err(alloy_sol_types::Error::Overrun);
+                }
+                out[0usize] = alloy_sol_types::abi::token::WordToken(Self::SIGNATURE_HASH);
+                out[1usize] = <alloy::sol_types::sol_data::Uint<
+                    256,
+                > as alloy_sol_types::EventTopic>::encode_topic(&self.accountApiKeyHash);
+                out[2usize] = <alloy::sol_types::sol_data::Uint<
+                    256,
+                > as alloy_sol_types::EventTopic>::encode_topic(&self.usageApiKeyHash);
+                Ok(())
+            }
+        }
+        #[automatically_derived]
+        impl alloy_sol_types::private::IntoLogData for SpendingRulesFlagSet {
+            fn to_log_data(&self) -> alloy_sol_types::private::LogData {
+                From::from(self)
+            }
+            fn into_log_data(self) -> alloy_sol_types::private::LogData {
+                From::from(&self)
+            }
+        }
+        #[automatically_derived]
+        impl From<&SpendingRulesFlagSet> for alloy_sol_types::private::LogData {
+            #[inline]
+            fn from(this: &SpendingRulesFlagSet) -> alloy_sol_types::private::LogData {
+                alloy_sol_types::SolEvent::encode_log_data(this)
+            }
+        }
+    };
+    #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
     /*Event with signature `UsageApiKeyRemoved(uint256,uint256)` and selector `0xde3420c9ebe0c0c3f0c0d1d25c55a1b97f758f2cf48e0c8f2b287f5536de1c80`.
     ```solidity
     event UsageApiKeyRemoved(uint256 indexed accountApiKeyHash, uint256 indexed usageApiKeyHash);
@@ -11253,6 +11474,177 @@ pub mod AccountConfig {
         }
     };
     #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
+    /*Function with signature `canExecuteActionWithSpendingRules(uint256,uint256)` and selector `0x92f09a52`.
+    ```solidity
+    function canExecuteActionWithSpendingRules(uint256 apiKeyHash, uint256 cidHash) external view returns (bool canExecute, bool hasSpendingRules);
+    ```*/
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
+    #[derive(Clone)]
+    pub struct canExecuteActionWithSpendingRulesCall {
+        #[allow(missing_docs)]
+        pub apiKeyHash: alloy::sol_types::private::primitives::aliases::U256,
+        #[allow(missing_docs)]
+        pub cidHash: alloy::sol_types::private::primitives::aliases::U256,
+    }
+    #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
+    //Container type for the return parameters of the [`canExecuteActionWithSpendingRules(uint256,uint256)`](canExecuteActionWithSpendingRulesCall) function.
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
+    #[derive(Clone)]
+    pub struct canExecuteActionWithSpendingRulesReturn {
+        #[allow(missing_docs)]
+        pub canExecute: bool,
+        #[allow(missing_docs)]
+        pub hasSpendingRules: bool,
+    }
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
+    const _: () = {
+        use alloy::sol_types as alloy_sol_types;
+        {
+            #[doc(hidden)]
+            #[allow(dead_code)]
+            type UnderlyingSolTuple<'a> = (
+                alloy::sol_types::sol_data::Uint<256>,
+                alloy::sol_types::sol_data::Uint<256>,
+            );
+            #[doc(hidden)]
+            type UnderlyingRustTuple<'a> = (
+                alloy::sol_types::private::primitives::aliases::U256,
+                alloy::sol_types::private::primitives::aliases::U256,
+            );
+            #[cfg(test)]
+            #[allow(dead_code, unreachable_patterns)]
+            fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
+                match _t {
+                    alloy_sol_types::private::AssertTypeEq::<
+                        <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
+                    >(_) => {}
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<canExecuteActionWithSpendingRulesCall> for UnderlyingRustTuple<'_> {
+                fn from(value: canExecuteActionWithSpendingRulesCall) -> Self {
+                    (value.apiKeyHash, value.cidHash)
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<UnderlyingRustTuple<'_>> for canExecuteActionWithSpendingRulesCall {
+                fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
+                    Self {
+                        apiKeyHash: tuple.0,
+                        cidHash: tuple.1,
+                    }
+                }
+            }
+        }
+        {
+            #[doc(hidden)]
+            #[allow(dead_code)]
+            type UnderlyingSolTuple<'a> = (
+                alloy::sol_types::sol_data::Bool,
+                alloy::sol_types::sol_data::Bool,
+            );
+            #[doc(hidden)]
+            type UnderlyingRustTuple<'a> = (bool, bool);
+            #[cfg(test)]
+            #[allow(dead_code, unreachable_patterns)]
+            fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
+                match _t {
+                    alloy_sol_types::private::AssertTypeEq::<
+                        <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
+                    >(_) => {}
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<canExecuteActionWithSpendingRulesReturn> for UnderlyingRustTuple<'_> {
+                fn from(value: canExecuteActionWithSpendingRulesReturn) -> Self {
+                    (value.canExecute, value.hasSpendingRules)
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<UnderlyingRustTuple<'_>> for canExecuteActionWithSpendingRulesReturn {
+                fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
+                    Self {
+                        canExecute: tuple.0,
+                        hasSpendingRules: tuple.1,
+                    }
+                }
+            }
+        }
+        impl canExecuteActionWithSpendingRulesReturn {
+            fn _tokenize(
+                &self,
+            ) -> <canExecuteActionWithSpendingRulesCall as alloy_sol_types::SolCall>::ReturnToken<'_>
+            {
+                (
+                    <alloy::sol_types::sol_data::Bool as alloy_sol_types::SolType>::tokenize(
+                        &self.canExecute,
+                    ),
+                    <alloy::sol_types::sol_data::Bool as alloy_sol_types::SolType>::tokenize(
+                        &self.hasSpendingRules,
+                    ),
+                )
+            }
+        }
+        #[automatically_derived]
+        impl alloy_sol_types::SolCall for canExecuteActionWithSpendingRulesCall {
+            type Parameters<'a> = (
+                alloy::sol_types::sol_data::Uint<256>,
+                alloy::sol_types::sol_data::Uint<256>,
+            );
+            type Token<'a> = <Self::Parameters<'a> as alloy_sol_types::SolType>::Token<'a>;
+            type Return = canExecuteActionWithSpendingRulesReturn;
+            type ReturnTuple<'a> = (
+                alloy::sol_types::sol_data::Bool,
+                alloy::sol_types::sol_data::Bool,
+            );
+            type ReturnToken<'a> = <Self::ReturnTuple<'a> as alloy_sol_types::SolType>::Token<'a>;
+            const SIGNATURE: &'static str = "canExecuteActionWithSpendingRules(uint256,uint256)";
+            const SELECTOR: [u8; 4] = [146u8, 240u8, 154u8, 82u8];
+            #[inline]
+            fn new<'a>(
+                tuple: <Self::Parameters<'a> as alloy_sol_types::SolType>::RustType,
+            ) -> Self {
+                tuple.into()
+            }
+            #[inline]
+            fn tokenize(&self) -> Self::Token<'_> {
+                (
+                    <alloy::sol_types::sol_data::Uint<256> as alloy_sol_types::SolType>::tokenize(
+                        &self.apiKeyHash,
+                    ),
+                    <alloy::sol_types::sol_data::Uint<256> as alloy_sol_types::SolType>::tokenize(
+                        &self.cidHash,
+                    ),
+                )
+            }
+            #[inline]
+            fn tokenize_returns(ret: &Self::Return) -> Self::ReturnToken<'_> {
+                canExecuteActionWithSpendingRulesReturn::_tokenize(ret)
+            }
+            #[inline]
+            fn abi_decode_returns(data: &[u8]) -> alloy_sol_types::Result<Self::Return> {
+                <Self::ReturnTuple<'_> as alloy_sol_types::SolType>::abi_decode_sequence(data)
+                    .map(Into::into)
+            }
+            #[inline]
+            fn abi_decode_returns_validate(data: &[u8]) -> alloy_sol_types::Result<Self::Return> {
+                <Self::ReturnTuple<'_> as alloy_sol_types::SolType>::abi_decode_sequence_validate(
+                    data,
+                )
+                .map(Into::into)
+            }
+        }
+    };
+    #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
     /*Function with signature `canUseWalletInAction(uint256,uint256,address)` and selector `0x25284ac1`.
     ```solidity
     function canUseWalletInAction(uint256 apiKeyHash, uint256 cidHash, address walletAddress) external view returns (bool);
@@ -12704,6 +13096,143 @@ pub mod AccountConfig {
                 )
                 .map(|r| {
                     let r: getPricingReturn = r.into();
+                    r._0
+                })
+            }
+        }
+    };
+    #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
+    /*Function with signature `getSpendingRulesFlag(uint256)` and selector `0xadb95c8b`.
+    ```solidity
+    function getSpendingRulesFlag(uint256 apiKeyHash) external view returns (bool);
+    ```*/
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
+    #[derive(Clone)]
+    pub struct getSpendingRulesFlagCall {
+        #[allow(missing_docs)]
+        pub apiKeyHash: alloy::sol_types::private::primitives::aliases::U256,
+    }
+    #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
+    //Container type for the return parameters of the [`getSpendingRulesFlag(uint256)`](getSpendingRulesFlagCall) function.
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
+    #[derive(Clone)]
+    pub struct getSpendingRulesFlagReturn {
+        #[allow(missing_docs)]
+        pub _0: bool,
+    }
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
+    const _: () = {
+        use alloy::sol_types as alloy_sol_types;
+        {
+            #[doc(hidden)]
+            #[allow(dead_code)]
+            type UnderlyingSolTuple<'a> = (alloy::sol_types::sol_data::Uint<256>,);
+            #[doc(hidden)]
+            type UnderlyingRustTuple<'a> = (alloy::sol_types::private::primitives::aliases::U256,);
+            #[cfg(test)]
+            #[allow(dead_code, unreachable_patterns)]
+            fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
+                match _t {
+                    alloy_sol_types::private::AssertTypeEq::<
+                        <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
+                    >(_) => {}
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<getSpendingRulesFlagCall> for UnderlyingRustTuple<'_> {
+                fn from(value: getSpendingRulesFlagCall) -> Self {
+                    (value.apiKeyHash,)
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<UnderlyingRustTuple<'_>> for getSpendingRulesFlagCall {
+                fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
+                    Self {
+                        apiKeyHash: tuple.0,
+                    }
+                }
+            }
+        }
+        {
+            #[doc(hidden)]
+            #[allow(dead_code)]
+            type UnderlyingSolTuple<'a> = (alloy::sol_types::sol_data::Bool,);
+            #[doc(hidden)]
+            type UnderlyingRustTuple<'a> = (bool,);
+            #[cfg(test)]
+            #[allow(dead_code, unreachable_patterns)]
+            fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
+                match _t {
+                    alloy_sol_types::private::AssertTypeEq::<
+                        <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
+                    >(_) => {}
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<getSpendingRulesFlagReturn> for UnderlyingRustTuple<'_> {
+                fn from(value: getSpendingRulesFlagReturn) -> Self {
+                    (value._0,)
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<UnderlyingRustTuple<'_>> for getSpendingRulesFlagReturn {
+                fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
+                    Self { _0: tuple.0 }
+                }
+            }
+        }
+        #[automatically_derived]
+        impl alloy_sol_types::SolCall for getSpendingRulesFlagCall {
+            type Parameters<'a> = (alloy::sol_types::sol_data::Uint<256>,);
+            type Token<'a> = <Self::Parameters<'a> as alloy_sol_types::SolType>::Token<'a>;
+            type Return = bool;
+            type ReturnTuple<'a> = (alloy::sol_types::sol_data::Bool,);
+            type ReturnToken<'a> = <Self::ReturnTuple<'a> as alloy_sol_types::SolType>::Token<'a>;
+            const SIGNATURE: &'static str = "getSpendingRulesFlag(uint256)";
+            const SELECTOR: [u8; 4] = [173u8, 185u8, 92u8, 139u8];
+            #[inline]
+            fn new<'a>(
+                tuple: <Self::Parameters<'a> as alloy_sol_types::SolType>::RustType,
+            ) -> Self {
+                tuple.into()
+            }
+            #[inline]
+            fn tokenize(&self) -> Self::Token<'_> {
+                (
+                    <alloy::sol_types::sol_data::Uint<256> as alloy_sol_types::SolType>::tokenize(
+                        &self.apiKeyHash,
+                    ),
+                )
+            }
+            #[inline]
+            fn tokenize_returns(ret: &Self::Return) -> Self::ReturnToken<'_> {
+                (<alloy::sol_types::sol_data::Bool as alloy_sol_types::SolType>::tokenize(ret),)
+            }
+            #[inline]
+            fn abi_decode_returns(data: &[u8]) -> alloy_sol_types::Result<Self::Return> {
+                <Self::ReturnTuple<'_> as alloy_sol_types::SolType>::abi_decode_sequence(data).map(
+                    |r| {
+                        let r: getSpendingRulesFlagReturn = r.into();
+                        r._0
+                    },
+                )
+            }
+            #[inline]
+            fn abi_decode_returns_validate(data: &[u8]) -> alloy_sol_types::Result<Self::Return> {
+                <Self::ReturnTuple<'_> as alloy_sol_types::SolType>::abi_decode_sequence_validate(
+                    data,
+                )
+                .map(|r| {
+                    let r: getSpendingRulesFlagReturn = r.into();
                     r._0
                 })
             }
@@ -18278,6 +18807,168 @@ pub mod AccountConfig {
         }
     };
     #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
+    /*Function with signature `setSpendingRulesFlag(uint256,uint256,bool)` and selector `0xb8520809`.
+    ```solidity
+    function setSpendingRulesFlag(uint256 accountApiKeyHash, uint256 usageApiKeyHash, bool hasSpendingRules) external;
+    ```*/
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
+    #[derive(Clone)]
+    pub struct setSpendingRulesFlagCall {
+        #[allow(missing_docs)]
+        pub accountApiKeyHash: alloy::sol_types::private::primitives::aliases::U256,
+        #[allow(missing_docs)]
+        pub usageApiKeyHash: alloy::sol_types::private::primitives::aliases::U256,
+        #[allow(missing_docs)]
+        pub hasSpendingRules: bool,
+    }
+    //Container type for the return parameters of the [`setSpendingRulesFlag(uint256,uint256,bool)`](setSpendingRulesFlagCall) function.
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
+    #[derive(Clone)]
+    pub struct setSpendingRulesFlagReturn {}
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
+    const _: () = {
+        use alloy::sol_types as alloy_sol_types;
+        {
+            #[doc(hidden)]
+            #[allow(dead_code)]
+            type UnderlyingSolTuple<'a> = (
+                alloy::sol_types::sol_data::Uint<256>,
+                alloy::sol_types::sol_data::Uint<256>,
+                alloy::sol_types::sol_data::Bool,
+            );
+            #[doc(hidden)]
+            type UnderlyingRustTuple<'a> = (
+                alloy::sol_types::private::primitives::aliases::U256,
+                alloy::sol_types::private::primitives::aliases::U256,
+                bool,
+            );
+            #[cfg(test)]
+            #[allow(dead_code, unreachable_patterns)]
+            fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
+                match _t {
+                    alloy_sol_types::private::AssertTypeEq::<
+                        <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
+                    >(_) => {}
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<setSpendingRulesFlagCall> for UnderlyingRustTuple<'_> {
+                fn from(value: setSpendingRulesFlagCall) -> Self {
+                    (
+                        value.accountApiKeyHash,
+                        value.usageApiKeyHash,
+                        value.hasSpendingRules,
+                    )
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<UnderlyingRustTuple<'_>> for setSpendingRulesFlagCall {
+                fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
+                    Self {
+                        accountApiKeyHash: tuple.0,
+                        usageApiKeyHash: tuple.1,
+                        hasSpendingRules: tuple.2,
+                    }
+                }
+            }
+        }
+        {
+            #[doc(hidden)]
+            #[allow(dead_code)]
+            type UnderlyingSolTuple<'a> = ();
+            #[doc(hidden)]
+            type UnderlyingRustTuple<'a> = ();
+            #[cfg(test)]
+            #[allow(dead_code, unreachable_patterns)]
+            fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
+                match _t {
+                    alloy_sol_types::private::AssertTypeEq::<
+                        <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
+                    >(_) => {}
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<setSpendingRulesFlagReturn> for UnderlyingRustTuple<'_> {
+                fn from(value: setSpendingRulesFlagReturn) -> Self {
+                    ()
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<UnderlyingRustTuple<'_>> for setSpendingRulesFlagReturn {
+                fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
+                    Self {}
+                }
+            }
+        }
+        impl setSpendingRulesFlagReturn {
+            fn _tokenize(
+                &self,
+            ) -> <setSpendingRulesFlagCall as alloy_sol_types::SolCall>::ReturnToken<'_>
+            {
+                ()
+            }
+        }
+        #[automatically_derived]
+        impl alloy_sol_types::SolCall for setSpendingRulesFlagCall {
+            type Parameters<'a> = (
+                alloy::sol_types::sol_data::Uint<256>,
+                alloy::sol_types::sol_data::Uint<256>,
+                alloy::sol_types::sol_data::Bool,
+            );
+            type Token<'a> = <Self::Parameters<'a> as alloy_sol_types::SolType>::Token<'a>;
+            type Return = setSpendingRulesFlagReturn;
+            type ReturnTuple<'a> = ();
+            type ReturnToken<'a> = <Self::ReturnTuple<'a> as alloy_sol_types::SolType>::Token<'a>;
+            const SIGNATURE: &'static str = "setSpendingRulesFlag(uint256,uint256,bool)";
+            const SELECTOR: [u8; 4] = [184u8, 82u8, 8u8, 9u8];
+            #[inline]
+            fn new<'a>(
+                tuple: <Self::Parameters<'a> as alloy_sol_types::SolType>::RustType,
+            ) -> Self {
+                tuple.into()
+            }
+            #[inline]
+            fn tokenize(&self) -> Self::Token<'_> {
+                (
+                    <alloy::sol_types::sol_data::Uint<256> as alloy_sol_types::SolType>::tokenize(
+                        &self.accountApiKeyHash,
+                    ),
+                    <alloy::sol_types::sol_data::Uint<256> as alloy_sol_types::SolType>::tokenize(
+                        &self.usageApiKeyHash,
+                    ),
+                    <alloy::sol_types::sol_data::Bool as alloy_sol_types::SolType>::tokenize(
+                        &self.hasSpendingRules,
+                    ),
+                )
+            }
+            #[inline]
+            fn tokenize_returns(ret: &Self::Return) -> Self::ReturnToken<'_> {
+                setSpendingRulesFlagReturn::_tokenize(ret)
+            }
+            #[inline]
+            fn abi_decode_returns(data: &[u8]) -> alloy_sol_types::Result<Self::Return> {
+                <Self::ReturnTuple<'_> as alloy_sol_types::SolType>::abi_decode_sequence(data)
+                    .map(Into::into)
+            }
+            #[inline]
+            fn abi_decode_returns_validate(data: &[u8]) -> alloy_sol_types::Result<Self::Return> {
+                <Self::ReturnTuple<'_> as alloy_sol_types::SolType>::abi_decode_sequence_validate(
+                    data,
+                )
+                .map(Into::into)
+            }
+        }
+    };
+    #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
     /*Function with signature `setUsageApiKey(uint256,uint256,uint256,uint256,string,string,bool,bool,bool,uint256[],uint256[],uint256[],uint256[])` and selector `0x2da0cf16`.
     ```solidity
     function setUsageApiKey(uint256 accountApiKeyHash, uint256 usageApiKeyHash, uint256 expiration, uint256 balance, string memory name, string memory description, bool createGroups, bool deleteGroups, bool createPKPs, uint256[] memory manageIPFSIdsInGroups, uint256[] memory addPkpToGroups, uint256[] memory removePkpFromGroups, uint256[] memory executeInGroups) external;
@@ -19457,6 +20148,8 @@ pub mod AccountConfig {
         #[allow(missing_docs)]
         canExecuteActionFast(canExecuteActionFastCall),
         #[allow(missing_docs)]
+        canExecuteActionWithSpendingRules(canExecuteActionWithSpendingRulesCall),
+        #[allow(missing_docs)]
         canUseWalletInAction(canUseWalletInActionCall),
         #[allow(missing_docs)]
         canUseWalletInActionFast(canUseWalletInActionFastCall),
@@ -19476,6 +20169,8 @@ pub mod AccountConfig {
         getPkpOwnerMaster(getPkpOwnerMasterCall),
         #[allow(missing_docs)]
         getPricing(getPricingCall),
+        #[allow(missing_docs)]
+        getSpendingRulesFlag(getSpendingRulesFlagCall),
         #[allow(missing_docs)]
         getWalletDerivation(getWalletDerivationCall),
         #[allow(missing_docs)]
@@ -19551,6 +20246,8 @@ pub mod AccountConfig {
         #[allow(missing_docs)]
         setRequestedApiPayerCount(setRequestedApiPayerCountCall),
         #[allow(missing_docs)]
+        setSpendingRulesFlag(setSpendingRulesFlagCall),
+        #[allow(missing_docs)]
         setUsageApiKey(setUsageApiKeyCall),
         #[allow(missing_docs)]
         transferChainSecuredAccountOwnership(transferChainSecuredAccountOwnershipCall),
@@ -19613,16 +20310,19 @@ pub mod AccountConfig {
             [134u8, 68u8, 113u8, 67u8],
             [144u8, 34u8, 44u8, 173u8],
             [146u8, 20u8, 21u8, 82u8],
+            [146u8, 240u8, 154u8, 82u8],
             [147u8, 200u8, 188u8, 67u8],
             [155u8, 128u8, 254u8, 131u8],
             [159u8, 229u8, 25u8, 222u8],
             [166u8, 103u8, 102u8, 101u8],
             [166u8, 182u8, 182u8, 114u8],
+            [173u8, 185u8, 92u8, 139u8],
             [174u8, 140u8, 73u8, 165u8],
             [178u8, 2u8, 138u8, 151u8],
             [180u8, 53u8, 149u8, 193u8],
             [180u8, 155u8, 139u8, 137u8],
             [184u8, 3u8, 127u8, 254u8],
+            [184u8, 82u8, 8u8, 9u8],
             [192u8, 1u8, 188u8, 121u8],
             [193u8, 47u8, 26u8, 66u8],
             [193u8, 175u8, 248u8, 153u8],
@@ -19684,16 +20384,19 @@ pub mod AccountConfig {
             ::core::stringify!(canUseWalletInActionFast),
             ::core::stringify!(getWalletDerivation),
             ::core::stringify!(registerWalletDerivation),
+            ::core::stringify!(canExecuteActionWithSpendingRules),
             ::core::stringify!(api_payers),
             ::core::stringify!(setNodeConfiguration),
             ::core::stringify!(canExecuteActionFast),
             ::core::stringify!(groupIdsForActionAndWallet),
             ::core::stringify!(updateActionMetadata),
+            ::core::stringify!(getSpendingRulesFlag),
             ::core::stringify!(setApiPayers),
             ::core::stringify!(canExecuteActionAndUseWallet),
             ::core::stringify!(getPkpOwnerMaster),
             ::core::stringify!(addAction),
             ::core::stringify!(apiPayerCount),
+            ::core::stringify!(setSpendingRulesFlag),
             ::core::stringify!(setAdminApiPayerAccount),
             ::core::stringify!(getPricing),
             ::core::stringify!(pricingAt),
@@ -19755,16 +20458,19 @@ pub mod AccountConfig {
             <canUseWalletInActionFastCall as alloy_sol_types::SolCall>::SIGNATURE,
             <getWalletDerivationCall as alloy_sol_types::SolCall>::SIGNATURE,
             <registerWalletDerivationCall as alloy_sol_types::SolCall>::SIGNATURE,
+            <canExecuteActionWithSpendingRulesCall as alloy_sol_types::SolCall>::SIGNATURE,
             <api_payersCall as alloy_sol_types::SolCall>::SIGNATURE,
             <setNodeConfigurationCall as alloy_sol_types::SolCall>::SIGNATURE,
             <canExecuteActionFastCall as alloy_sol_types::SolCall>::SIGNATURE,
             <groupIdsForActionAndWalletCall as alloy_sol_types::SolCall>::SIGNATURE,
             <updateActionMetadataCall as alloy_sol_types::SolCall>::SIGNATURE,
+            <getSpendingRulesFlagCall as alloy_sol_types::SolCall>::SIGNATURE,
             <setApiPayersCall as alloy_sol_types::SolCall>::SIGNATURE,
             <canExecuteActionAndUseWalletCall as alloy_sol_types::SolCall>::SIGNATURE,
             <getPkpOwnerMasterCall as alloy_sol_types::SolCall>::SIGNATURE,
             <addActionCall as alloy_sol_types::SolCall>::SIGNATURE,
             <apiPayerCountCall as alloy_sol_types::SolCall>::SIGNATURE,
+            <setSpendingRulesFlagCall as alloy_sol_types::SolCall>::SIGNATURE,
             <setAdminApiPayerAccountCall as alloy_sol_types::SolCall>::SIGNATURE,
             <getPricingCall as alloy_sol_types::SolCall>::SIGNATURE,
             <pricingAtCall as alloy_sol_types::SolCall>::SIGNATURE,
@@ -19805,7 +20511,7 @@ pub mod AccountConfig {
     impl alloy_sol_types::SolInterface for AccountConfigCalls {
         const NAME: &'static str = "AccountConfigCalls";
         const MIN_DATA_LENGTH: usize = 0usize;
-        const COUNT: usize = 68usize;
+        const COUNT: usize = 71usize;
         #[inline]
         fn selector(&self) -> [u8; 4] {
             match self {
@@ -19840,6 +20546,9 @@ pub mod AccountConfig {
                 Self::canExecuteActionFast(_) => {
                     <canExecuteActionFastCall as alloy_sol_types::SolCall>::SELECTOR
                 }
+                Self::canExecuteActionWithSpendingRules(_) => {
+                    <canExecuteActionWithSpendingRulesCall as alloy_sol_types::SolCall>::SELECTOR
+                }
                 Self::canUseWalletInAction(_) => {
                     <canUseWalletInActionCall as alloy_sol_types::SolCall>::SELECTOR
                 }
@@ -19864,6 +20573,9 @@ pub mod AccountConfig {
                     <getPkpOwnerMasterCall as alloy_sol_types::SolCall>::SELECTOR
                 }
                 Self::getPricing(_) => <getPricingCall as alloy_sol_types::SolCall>::SELECTOR,
+                Self::getSpendingRulesFlag(_) => {
+                    <getSpendingRulesFlagCall as alloy_sol_types::SolCall>::SELECTOR
+                }
                 Self::getWalletDerivation(_) => {
                     <getWalletDerivationCall as alloy_sol_types::SolCall>::SELECTOR
                 }
@@ -19950,6 +20662,9 @@ pub mod AccountConfig {
                 }
                 Self::setRequestedApiPayerCount(_) => {
                     <setRequestedApiPayerCountCall as alloy_sol_types::SolCall>::SELECTOR
+                }
+                Self::setSpendingRulesFlag(_) => {
+                    <setSpendingRulesFlagCall as alloy_sol_types::SolCall>::SELECTOR
                 }
                 Self::setUsageApiKey(_) => {
                     <setUsageApiKeyCall as alloy_sol_types::SolCall>::SELECTOR
@@ -20364,6 +21079,17 @@ pub mod AccountConfig {
                     registerWalletDerivation
                 },
                 {
+                    fn canExecuteActionWithSpendingRules(
+                        data: &[u8],
+                    ) -> alloy_sol_types::Result<AccountConfigCalls> {
+                        <canExecuteActionWithSpendingRulesCall as alloy_sol_types::SolCall>::abi_decode_raw(
+                                data,
+                            )
+                            .map(AccountConfigCalls::canExecuteActionWithSpendingRules)
+                    }
+                    canExecuteActionWithSpendingRules
+                },
+                {
                     fn api_payers(data: &[u8]) -> alloy_sol_types::Result<AccountConfigCalls> {
                         <api_payersCall as alloy_sol_types::SolCall>::abi_decode_raw(data)
                             .map(AccountConfigCalls::api_payers)
@@ -20409,6 +21135,15 @@ pub mod AccountConfig {
                     updateActionMetadata
                 },
                 {
+                    fn getSpendingRulesFlag(
+                        data: &[u8],
+                    ) -> alloy_sol_types::Result<AccountConfigCalls> {
+                        <getSpendingRulesFlagCall as alloy_sol_types::SolCall>::abi_decode_raw(data)
+                            .map(AccountConfigCalls::getSpendingRulesFlag)
+                    }
+                    getSpendingRulesFlag
+                },
+                {
                     fn setApiPayers(data: &[u8]) -> alloy_sol_types::Result<AccountConfigCalls> {
                         <setApiPayersCall as alloy_sol_types::SolCall>::abi_decode_raw(data)
                             .map(AccountConfigCalls::setApiPayers)
@@ -20448,6 +21183,15 @@ pub mod AccountConfig {
                             .map(AccountConfigCalls::apiPayerCount)
                     }
                     apiPayerCount
+                },
+                {
+                    fn setSpendingRulesFlag(
+                        data: &[u8],
+                    ) -> alloy_sol_types::Result<AccountConfigCalls> {
+                        <setSpendingRulesFlagCall as alloy_sol_types::SolCall>::abi_decode_raw(data)
+                            .map(AccountConfigCalls::setSpendingRulesFlag)
+                    }
+                    setSpendingRulesFlag
                 },
                 {
                     fn setAdminApiPayerAccount(
@@ -21019,6 +21763,17 @@ pub mod AccountConfig {
                     registerWalletDerivation
                 },
                 {
+                    fn canExecuteActionWithSpendingRules(
+                        data: &[u8],
+                    ) -> alloy_sol_types::Result<AccountConfigCalls> {
+                        <canExecuteActionWithSpendingRulesCall as alloy_sol_types::SolCall>::abi_decode_raw_validate(
+                                data,
+                            )
+                            .map(AccountConfigCalls::canExecuteActionWithSpendingRules)
+                    }
+                    canExecuteActionWithSpendingRules
+                },
+                {
                     fn api_payers(data: &[u8]) -> alloy_sol_types::Result<AccountConfigCalls> {
                         <api_payersCall as alloy_sol_types::SolCall>::abi_decode_raw_validate(data)
                             .map(AccountConfigCalls::api_payers)
@@ -21070,6 +21825,17 @@ pub mod AccountConfig {
                     updateActionMetadata
                 },
                 {
+                    fn getSpendingRulesFlag(
+                        data: &[u8],
+                    ) -> alloy_sol_types::Result<AccountConfigCalls> {
+                        <getSpendingRulesFlagCall as alloy_sol_types::SolCall>::abi_decode_raw_validate(
+                                data,
+                            )
+                            .map(AccountConfigCalls::getSpendingRulesFlag)
+                    }
+                    getSpendingRulesFlag
+                },
+                {
                     fn setApiPayers(data: &[u8]) -> alloy_sol_types::Result<AccountConfigCalls> {
                         <setApiPayersCall as alloy_sol_types::SolCall>::abi_decode_raw_validate(
                             data,
@@ -21115,6 +21881,17 @@ pub mod AccountConfig {
                         .map(AccountConfigCalls::apiPayerCount)
                     }
                     apiPayerCount
+                },
+                {
+                    fn setSpendingRulesFlag(
+                        data: &[u8],
+                    ) -> alloy_sol_types::Result<AccountConfigCalls> {
+                        <setSpendingRulesFlagCall as alloy_sol_types::SolCall>::abi_decode_raw_validate(
+                                data,
+                            )
+                            .map(AccountConfigCalls::setSpendingRulesFlag)
+                    }
+                    setSpendingRulesFlag
                 },
                 {
                     fn setAdminApiPayerAccount(
@@ -21345,6 +22122,11 @@ pub mod AccountConfig {
                         inner,
                     )
                 }
+                Self::canExecuteActionWithSpendingRules(inner) => {
+                    <canExecuteActionWithSpendingRulesCall as alloy_sol_types::SolCall>::abi_encoded_size(
+                        inner,
+                    )
+                }
                 Self::canUseWalletInAction(inner) => {
                     <canUseWalletInActionCall as alloy_sol_types::SolCall>::abi_encoded_size(
                         inner,
@@ -21392,6 +22174,11 @@ pub mod AccountConfig {
                 }
                 Self::getPricing(inner) => {
                     <getPricingCall as alloy_sol_types::SolCall>::abi_encoded_size(inner)
+                }
+                Self::getSpendingRulesFlag(inner) => {
+                    <getSpendingRulesFlagCall as alloy_sol_types::SolCall>::abi_encoded_size(
+                        inner,
+                    )
                 }
                 Self::getWalletDerivation(inner) => {
                     <getWalletDerivationCall as alloy_sol_types::SolCall>::abi_encoded_size(
@@ -21566,6 +22353,11 @@ pub mod AccountConfig {
                         inner,
                     )
                 }
+                Self::setSpendingRulesFlag(inner) => {
+                    <setSpendingRulesFlagCall as alloy_sol_types::SolCall>::abi_encoded_size(
+                        inner,
+                    )
+                }
                 Self::setUsageApiKey(inner) => {
                     <setUsageApiKeyCall as alloy_sol_types::SolCall>::abi_encoded_size(
                         inner,
@@ -21691,6 +22483,12 @@ pub mod AccountConfig {
                         out,
                     )
                 }
+                Self::canExecuteActionWithSpendingRules(inner) => {
+                    <canExecuteActionWithSpendingRulesCall as alloy_sol_types::SolCall>::abi_encode_raw(
+                        inner,
+                        out,
+                    )
+                }
                 Self::canUseWalletInAction(inner) => {
                     <canUseWalletInActionCall as alloy_sol_types::SolCall>::abi_encode_raw(
                         inner,
@@ -21747,6 +22545,12 @@ pub mod AccountConfig {
                 }
                 Self::getPricing(inner) => {
                     <getPricingCall as alloy_sol_types::SolCall>::abi_encode_raw(
+                        inner,
+                        out,
+                    )
+                }
+                Self::getSpendingRulesFlag(inner) => {
+                    <getSpendingRulesFlagCall as alloy_sol_types::SolCall>::abi_encode_raw(
                         inner,
                         out,
                     )
@@ -21969,6 +22773,12 @@ pub mod AccountConfig {
                 }
                 Self::setRequestedApiPayerCount(inner) => {
                     <setRequestedApiPayerCountCall as alloy_sol_types::SolCall>::abi_encode_raw(
+                        inner,
+                        out,
+                    )
+                }
+                Self::setSpendingRulesFlag(inner) => {
+                    <setSpendingRulesFlagCall as alloy_sol_types::SolCall>::abi_encode_raw(
                         inner,
                         out,
                     )
@@ -22899,6 +23709,8 @@ pub mod AccountConfig {
         #[allow(missing_docs)]
         ServerTriggered(ServerTriggered),
         #[allow(missing_docs)]
+        SpendingRulesFlagSet(SpendingRulesFlagSet),
+        #[allow(missing_docs)]
         UsageApiKeyRemoved(UsageApiKeyRemoved),
         #[allow(missing_docs)]
         UsageApiKeySet(UsageApiKeySet),
@@ -22915,6 +23727,11 @@ pub mod AccountConfig {
         //
         // Prefer using `SolInterface` methods instead.
         pub const SELECTORS: &'static [[u8; 32usize]] = &[
+            [
+                1u8, 34u8, 133u8, 111u8, 58u8, 5u8, 88u8, 114u8, 27u8, 48u8, 72u8, 38u8, 227u8,
+                141u8, 37u8, 118u8, 58u8, 21u8, 130u8, 84u8, 161u8, 205u8, 118u8, 198u8, 188u8,
+                44u8, 62u8, 98u8, 153u8, 48u8, 153u8, 113u8,
+            ],
             [
                 1u8, 244u8, 55u8, 145u8, 139u8, 103u8, 250u8, 246u8, 192u8, 35u8, 225u8, 74u8,
                 111u8, 114u8, 2u8, 164u8, 92u8, 140u8, 53u8, 46u8, 141u8, 219u8, 211u8, 229u8,
@@ -23053,6 +23870,7 @@ pub mod AccountConfig {
         ];
         // The names of the variants in the same order as `SELECTORS`.
         pub const VARIANT_NAMES: &'static [&'static str] = &[
+            ::core::stringify!(SpendingRulesFlagSet),
             ::core::stringify!(PricingOperatorUpdated),
             ::core::stringify!(ApiPayersUpdated),
             ::core::stringify!(ActionAddedToGroup),
@@ -23083,6 +23901,7 @@ pub mod AccountConfig {
         ];
         // The signatures in the same order as `SELECTORS`.
         pub const SIGNATURES: &'static [&'static str] = &[
+            <SpendingRulesFlagSet as alloy_sol_types::SolEvent>::SIGNATURE,
             <PricingOperatorUpdated as alloy_sol_types::SolEvent>::SIGNATURE,
             <ApiPayersUpdated as alloy_sol_types::SolEvent>::SIGNATURE,
             <ActionAddedToGroup as alloy_sol_types::SolEvent>::SIGNATURE,
@@ -23133,7 +23952,7 @@ pub mod AccountConfig {
     #[automatically_derived]
     impl alloy_sol_types::SolEventInterface for AccountConfigEvents {
         const NAME: &'static str = "AccountConfigEvents";
-        const COUNT: usize = 27usize;
+        const COUNT: usize = 28usize;
         fn decode_raw_log(
             topics: &[alloy_sol_types::Word],
             data: &[u8],
@@ -23323,6 +24142,15 @@ pub mod AccountConfig {
                         .map(Self::ServerTriggered)
                 }
                 Some(
+                    <SpendingRulesFlagSet as alloy_sol_types::SolEvent>::SIGNATURE_HASH,
+                ) => {
+                    <SpendingRulesFlagSet as alloy_sol_types::SolEvent>::decode_raw_log(
+                            topics,
+                            data,
+                        )
+                        .map(Self::SpendingRulesFlagSet)
+                }
+                Some(
                     <UsageApiKeyRemoved as alloy_sol_types::SolEvent>::SIGNATURE_HASH,
                 ) => {
                     <UsageApiKeyRemoved as alloy_sol_types::SolEvent>::decode_raw_log(
@@ -23443,6 +24271,9 @@ pub mod AccountConfig {
                 Self::ServerTriggered(inner) => {
                     alloy_sol_types::private::IntoLogData::to_log_data(inner)
                 }
+                Self::SpendingRulesFlagSet(inner) => {
+                    alloy_sol_types::private::IntoLogData::to_log_data(inner)
+                }
                 Self::UsageApiKeyRemoved(inner) => {
                     alloy_sol_types::private::IntoLogData::to_log_data(inner)
                 }
@@ -23526,6 +24357,9 @@ pub mod AccountConfig {
                     alloy_sol_types::private::IntoLogData::into_log_data(inner)
                 }
                 Self::ServerTriggered(inner) => {
+                    alloy_sol_types::private::IntoLogData::into_log_data(inner)
+                }
+                Self::SpendingRulesFlagSet(inner) => {
                     alloy_sol_types::private::IntoLogData::into_log_data(inner)
                 }
                 Self::UsageApiKeyRemoved(inner) => {
@@ -23797,6 +24631,17 @@ pub mod AccountConfig {
                 cidHash,
             })
         }
+        //Creates a new call builder for the [`canExecuteActionWithSpendingRules`] function.
+        pub fn canExecuteActionWithSpendingRules(
+            &self,
+            apiKeyHash: alloy::sol_types::private::primitives::aliases::U256,
+            cidHash: alloy::sol_types::private::primitives::aliases::U256,
+        ) -> alloy_contract::SolCallBuilder<&P, canExecuteActionWithSpendingRulesCall, N> {
+            self.call_builder(&canExecuteActionWithSpendingRulesCall {
+                apiKeyHash,
+                cidHash,
+            })
+        }
         //Creates a new call builder for the [`canUseWalletInAction`] function.
         pub fn canUseWalletInAction(
             &self,
@@ -23881,6 +24726,13 @@ pub mod AccountConfig {
             pricingItemId: alloy::sol_types::private::primitives::aliases::U256,
         ) -> alloy_contract::SolCallBuilder<&P, getPricingCall, N> {
             self.call_builder(&getPricingCall { pricingItemId })
+        }
+        //Creates a new call builder for the [`getSpendingRulesFlag`] function.
+        pub fn getSpendingRulesFlag(
+            &self,
+            apiKeyHash: alloy::sol_types::private::primitives::aliases::U256,
+        ) -> alloy_contract::SolCallBuilder<&P, getSpendingRulesFlagCall, N> {
+            self.call_builder(&getSpendingRulesFlagCall { apiKeyHash })
         }
         //Creates a new call builder for the [`getWalletDerivation`] function.
         pub fn getWalletDerivation(
@@ -24249,6 +25101,19 @@ pub mod AccountConfig {
                 newRequestedApiPayerCount,
             })
         }
+        //Creates a new call builder for the [`setSpendingRulesFlag`] function.
+        pub fn setSpendingRulesFlag(
+            &self,
+            accountApiKeyHash: alloy::sol_types::private::primitives::aliases::U256,
+            usageApiKeyHash: alloy::sol_types::private::primitives::aliases::U256,
+            hasSpendingRules: bool,
+        ) -> alloy_contract::SolCallBuilder<&P, setSpendingRulesFlagCall, N> {
+            self.call_builder(&setSpendingRulesFlagCall {
+                accountApiKeyHash,
+                usageApiKeyHash,
+                hasSpendingRules,
+            })
+        }
         //Creates a new call builder for the [`setUsageApiKey`] function.
         pub fn setUsageApiKey(
             &self,
@@ -24497,6 +25362,12 @@ pub mod AccountConfig {
         //Creates a new event filter for the [`ServerTriggered`] event.
         pub fn ServerTriggered_filter(&self) -> alloy_contract::Event<&P, ServerTriggered, N> {
             self.event_filter::<ServerTriggered>()
+        }
+        //Creates a new event filter for the [`SpendingRulesFlagSet`] event.
+        pub fn SpendingRulesFlagSet_filter(
+            &self,
+        ) -> alloy_contract::Event<&P, SpendingRulesFlagSet, N> {
+            self.event_filter::<SpendingRulesFlagSet>()
         }
         //Creates a new event filter for the [`UsageApiKeyRemoved`] event.
         pub fn UsageApiKeyRemoved_filter(

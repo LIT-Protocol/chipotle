@@ -535,6 +535,31 @@
           "internalType": "uint256",
           "name": "usageApiKeyHash",
           "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "bool",
+          "name": "hasSpendingRules",
+          "type": "bool"
+        }
+      ],
+      "name": "SpendingRulesFlagSet",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "usageApiKeyHash",
+          "type": "uint256"
         }
       ],
       "name": "UsageApiKeyRemoved",
@@ -985,6 +1010,29 @@
           "type": "uint256"
         },
         {
+          "internalType": "bool",
+          "name": "hasSpendingRules",
+          "type": "bool"
+        }
+      ],
+      "name": "setSpendingRulesFlag",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "usageApiKeyHash",
+          "type": "uint256"
+        },
+        {
           "internalType": "uint256",
           "name": "expiration",
           "type": "uint256"
@@ -1397,6 +1445,35 @@
           "internalType": "uint256",
           "name": "cidHash",
           "type": "uint256"
+        }
+      ],
+      "name": "canExecuteActionWithSpendingRules",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "canExecute",
+          "type": "bool"
+        },
+        {
+          "internalType": "bool",
+          "name": "hasSpendingRules",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "cidHash",
+          "type": "uint256"
         },
         {
           "internalType": "address",
@@ -1509,6 +1586,25 @@
           "internalType": "uint256",
           "name": "",
           "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "getSpendingRulesFlag",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
         }
       ],
       "stateMutability": "view",

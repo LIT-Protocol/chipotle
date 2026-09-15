@@ -170,6 +170,15 @@ impl ApiStatus {
             message,
         }
     }
+
+    pub fn too_many_requests(message: impl Into<String>) -> Self {
+        let message = message.into();
+        warn!("too_many_requests: {:?}", message);
+        Self {
+            status: Status::TooManyRequests,
+            message,
+        }
+    }
     pub fn option_not_found(message: impl Into<String>) -> Self {
         let message = message.into();
         warn!("Option not found: {:?}", message);

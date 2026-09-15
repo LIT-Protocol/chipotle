@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::accounts::signer_pool::SignerPool;
 use crate::core::account_management;
+use crate::core::spending_rules::SpendingRulesState;
 use crate::core::v1::guards::apikey::ApiKey;
 use crate::core::v1::guards::billing::BilledManagementApiKey;
 use crate::core::v1::guards::cpu_overload::CpuAvailable;
@@ -13,14 +14,15 @@ use crate::core::v1::models::request::{
     AddUsageApiKeyRequest, AddUsageApiKeyWithSignatureRequest, ConvertToChainSecuredAccountRequest,
     CreateWalletWithSignatureRequest, DeleteActionRequest, DeleteWalletRequest, NewAccountRequest,
     RemoveActionFromGroupRequest, RemoveGroupRequest, RemovePkpFromGroupRequest,
-    RemoveUsageApiKeyRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
-    UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
+    RemoveUsageApiKeyRequest, SetSpendingRulesRequest, UpdateActionMetadataRequest,
+    UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
+    UsageKeySpendingRulesRequest,
 };
 use crate::core::v1::models::response::{
     AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse,
     AddUsageApiKeyWithSignatureResponse, ApiKeyItem, ChainConfigKeysResponse, CreateWalletResponse,
     CreateWalletWithSignatureResponse, ListMetadataItem, NewAccountResponse,
-    NodeChainConfigResponse, PrepareWalletResponse, WalletItem,
+    NodeChainConfigResponse, PrepareWalletResponse, SpendingRulesResponse, WalletItem,
 };
 use crate::stripe::StripeState;
 use rocket::State;
@@ -583,6 +585,83 @@ pub(super) async fn update_usage_api_key_metadata(
                 signer_pool.inner().clone(),
                 api_key.0.as_str(),
                 req,
+            )
+            .await,
+        )
+        .into(),
+    }
+}
+
+/// Set (create or replace) the spending rules for one of your usage API keys and
+/// turn on its on-chain `hasSpendingRules` gate. Use this to make a usage key
+/// safe to embed in a frontend: a rolling spend cap (402 when reached), per-key
+/// and per-client-IP rate limits and a concurrency cap (429), and a browser
+/// origin allowlist (403). Keys without rules pay no extra latency.
+///
+/// Requires the account's master API key. Returns 503 if this node is not
+/// connected to the spending-rules store, 400 if the rules are invalid, and 403
+/// if the usage key does not belong to your account.
+#[openapi(tag = "Account Management")]
+#[post("/set_spending_rules", format = "json", data = "<req>")]
+pub(super) async fn set_spending_rules(
+    signer_pool: &State<Arc<SignerPool>>,
+    spending: &State<SpendingRulesState>,
+    api_key: BilledManagementApiKey,
+    req: Json<SetSpendingRulesRequest>,
+) -> OpenApiResponse<SpendingRulesResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(
+            account_management::set_spending_rules(
+                signer_pool.inner().clone(),
+                spending.inner(),
+                api_key.0.as_str(),
+                req,
+            )
+            .await,
+        )
+        .into(),
+    }
+}
+
+/// Remove the spending rules from one of your usage API keys and clear its
+/// on-chain gate, returning it to unrestricted (account-level) limits.
+#[openapi(tag = "Account Management")]
+#[post("/remove_spending_rules", format = "json", data = "<req>")]
+pub(super) async fn remove_spending_rules(
+    signer_pool: &State<Arc<SignerPool>>,
+    spending: &State<SpendingRulesState>,
+    api_key: BilledManagementApiKey,
+    req: Json<UsageKeySpendingRulesRequest>,
+) -> OpenApiResponse<SpendingRulesResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(
+            account_management::remove_spending_rules(
+                signer_pool.inner().clone(),
+                spending.inner(),
+                api_key.0.as_str(),
+                req,
+            )
+            .await,
+        )
+        .into(),
+    }
+}
+
+/// Read the spending rules, current-window spend and on-chain gate state for
+/// one of your usage API keys. `usage_api_key` may be the raw key or its hash.
+#[openapi(tag = "Account Management")]
+#[get("/get_spending_rules?<usage_api_key>")]
+pub(super) async fn get_spending_rules(
+    spending: &State<SpendingRulesState>,
+    api_key: ApiKey,
+    usage_api_key: &str,
+) -> OpenApiResponse<SpendingRulesResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(
+            account_management::get_spending_rules(
+                spending.inner(),
+                api_key.0.as_str(),
+                usage_api_key,
             )
             .await,
         )
