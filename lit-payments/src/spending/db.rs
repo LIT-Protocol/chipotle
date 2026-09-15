@@ -16,8 +16,9 @@ pub async fn upsert_rules(
     let row = sqlx::query_as::<_, SpendingRules>(
         "INSERT INTO spending_rules (
              api_key_hash, account_wallet_address, spend_cap_cents, spend_window_seconds,
-             rate_limit_rps, rate_limit_burst, max_concurrency, allowed_origins, enabled, updated_at
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+             rate_limit_rps, rate_limit_burst, max_concurrency,
+             ip_rate_limit_rps, ip_rate_limit_burst, allowed_origins, enabled, updated_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now())
          ON CONFLICT (api_key_hash) DO UPDATE SET
              account_wallet_address = EXCLUDED.account_wallet_address,
              spend_cap_cents        = EXCLUDED.spend_cap_cents,
@@ -25,6 +26,8 @@ pub async fn upsert_rules(
              rate_limit_rps         = EXCLUDED.rate_limit_rps,
              rate_limit_burst       = EXCLUDED.rate_limit_burst,
              max_concurrency        = EXCLUDED.max_concurrency,
+             ip_rate_limit_rps      = EXCLUDED.ip_rate_limit_rps,
+             ip_rate_limit_burst    = EXCLUDED.ip_rate_limit_burst,
              allowed_origins        = EXCLUDED.allowed_origins,
              enabled                = EXCLUDED.enabled,
              updated_at             = now()
@@ -37,6 +40,8 @@ pub async fn upsert_rules(
     .bind(req.rate_limit_rps)
     .bind(req.rate_limit_burst)
     .bind(req.max_concurrency)
+    .bind(req.ip_rate_limit_rps)
+    .bind(req.ip_rate_limit_burst)
     .bind(req.allowed_origins.as_deref())
     .bind(req.enabled)
     .fetch_one(pool)
@@ -45,22 +50,20 @@ pub async fn upsert_rules(
 }
 
 pub async fn get_rules(pool: &PgPool, api_key_hash: &str) -> Result<Option<SpendingRules>> {
-    let row = sqlx::query_as::<_, SpendingRules>(
-        "SELECT * FROM spending_rules WHERE api_key_hash = $1",
-    )
-    .bind(api_key_hash)
-    .fetch_optional(pool)
-    .await?;
+    let row =
+        sqlx::query_as::<_, SpendingRules>("SELECT * FROM spending_rules WHERE api_key_hash = $1")
+            .bind(api_key_hash)
+            .fetch_optional(pool)
+            .await?;
     Ok(row)
 }
 
 pub async fn get_usage(pool: &PgPool, api_key_hash: &str) -> Result<Option<SpendingUsage>> {
-    let row = sqlx::query_as::<_, SpendingUsage>(
-        "SELECT * FROM spending_usage WHERE api_key_hash = $1",
-    )
-    .bind(api_key_hash)
-    .fetch_optional(pool)
-    .await?;
+    let row =
+        sqlx::query_as::<_, SpendingUsage>("SELECT * FROM spending_usage WHERE api_key_hash = $1")
+            .bind(api_key_hash)
+            .fetch_optional(pool)
+            .await?;
     Ok(row)
 }
 

@@ -25,6 +25,9 @@ CREATE TABLE spending_rules (
 
     -- Max simultaneous in-flight executions. NULL = no concurrency cap.
     max_concurrency         INTEGER     CHECK (max_concurrency IS NULL OR max_concurrency > 0),
+    -- Per-client-IP token bucket (P0.2), enforced in addition to the per-key one.
+    ip_rate_limit_rps       INTEGER     CHECK (ip_rate_limit_rps IS NULL OR ip_rate_limit_rps > 0),
+    ip_rate_limit_burst     INTEGER     CHECK (ip_rate_limit_burst IS NULL OR ip_rate_limit_burst > 0),
 
     -- Browser origin allowlist (defense-in-depth). NULL/empty = no restriction.
     allowed_origins         TEXT[],
@@ -42,6 +45,9 @@ CREATE TABLE spending_rules (
     -- A rate limit needs both halves or neither.
     CONSTRAINT rate_limit_complete CHECK (
         (rate_limit_rps IS NULL) = (rate_limit_burst IS NULL)
+    ),
+    CONSTRAINT ip_rate_limit_complete CHECK (
+        (ip_rate_limit_rps IS NULL) = (ip_rate_limit_burst IS NULL)
     )
 );
 

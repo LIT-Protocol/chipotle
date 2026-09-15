@@ -8,6 +8,7 @@ use crate::core::core_features;
 use crate::core::spending_rules::SpendingRulesState;
 use crate::core::v1::guards::billing::BilledLitActionApiKey;
 use crate::core::v1::guards::cpu_overload::CpuAvailable;
+use crate::core::v1::guards::request_meta::SpendingContext;
 use crate::core::v1::health::LitActionsGvisorSocketPath;
 use crate::core::v1::helpers::api_status::{ApiResult, ErrMessage};
 use crate::core::v1::helpers::open_api_response::OpenApiResponse;
@@ -36,6 +37,7 @@ pub(super) async fn lit_action(
     chain_config: &State<Arc<ChainConfig>>,
     stripe_state: &State<Option<Arc<StripeState>>>,
     spending: &State<SpendingRulesState>,
+    spending_ctx: SpendingContext,
     lit_action_request: Json<LitActionRequest>,
 ) -> OpenApiResponse<LitActionResponse, ErrMessage> {
     OpenApiResponse {
@@ -50,6 +52,7 @@ pub(super) async fn lit_action(
                 chain_config.inner().clone(),
                 stripe_state.inner().clone(),
                 spending.inner(),
+                &spending_ctx,
                 lit_action_request,
             )
             .await,
@@ -81,6 +84,8 @@ pub(super) async fn lit_binary_action(
     http_client: &State<reqwest::Client>,
     chain_config: &State<Arc<ChainConfig>>,
     stripe_state: &State<Option<Arc<StripeState>>>,
+    spending: &State<SpendingRulesState>,
+    spending_ctx: SpendingContext,
     gvisor_socket: &State<LitActionsGvisorSocketPath>,
     request: Json<LitBinaryActionRequest>,
 ) -> OpenApiResponse<LitActionResponse, ErrMessage> {
@@ -94,6 +99,8 @@ pub(super) async fn lit_binary_action(
                 http_client.inner(),
                 chain_config.inner().clone(),
                 stripe_state.inner().clone(),
+                spending.inner(),
+                &spending_ctx,
                 gvisor_socket.0.clone(),
                 request,
             )

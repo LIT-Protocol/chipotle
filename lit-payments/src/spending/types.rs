@@ -18,6 +18,8 @@ pub struct SpendingRules {
     pub rate_limit_rps: Option<i32>,
     pub rate_limit_burst: Option<i32>,
     pub max_concurrency: Option<i32>,
+    pub ip_rate_limit_rps: Option<i32>,
+    pub ip_rate_limit_burst: Option<i32>,
     pub allowed_origins: Option<Vec<String>>,
     pub enabled: bool,
     #[serde(with = "time::serde::rfc3339")]
@@ -54,6 +56,15 @@ pub struct UpsertRulesRequest {
     pub rate_limit_burst: Option<i32>,
     #[serde(default)]
     pub max_concurrency: Option<i32>,
+    /// Per-client-IP token bucket, enforced in addition to the per-key one.
+    #[serde(default)]
+    pub ip_rate_limit_rps: Option<i32>,
+    #[serde(default)]
+    pub ip_rate_limit_burst: Option<i32>,
+    /// Browser `Origin` values allowed to use this key. `None`/empty = no
+    /// origin check. Entries are `scheme://host[:port]`; a leading `*.` on the
+    /// host matches any subdomain. Requests without an `Origin` header are
+    /// rejected when this is set.
     #[serde(default)]
     pub allowed_origins: Option<Vec<String>>,
     /// Defaults to enabled when omitted.
@@ -106,6 +117,9 @@ impl UpsertRulesRequest {
         if self.rate_limit_rps.is_some() != self.rate_limit_burst.is_some() {
             return Err("rate_limit_rps and rate_limit_burst must be set together".into());
         }
+        if self.ip_rate_limit_rps.is_some() != self.ip_rate_limit_burst.is_some() {
+            return Err("ip_rate_limit_rps and ip_rate_limit_burst must be set together".into());
+        }
         for (name, v) in [
             ("spend_cap_cents", self.spend_cap_cents),
             ("spend_window_seconds", self.spend_window_seconds),
@@ -120,6 +134,8 @@ impl UpsertRulesRequest {
             ("rate_limit_rps", self.rate_limit_rps),
             ("rate_limit_burst", self.rate_limit_burst),
             ("max_concurrency", self.max_concurrency),
+            ("ip_rate_limit_rps", self.ip_rate_limit_rps),
+            ("ip_rate_limit_burst", self.ip_rate_limit_burst),
         ] {
             if let Some(v) = v
                 && v <= 0
@@ -127,13 +143,46 @@ impl UpsertRulesRequest {
                 return Err(format!("{name} must be positive"));
             }
         }
-        if let Some(origins) = &self.allowed_origins
-            && origins.iter().any(|o| o.trim().is_empty())
-        {
-            return Err("allowed_origins must not contain empty entries".into());
+        if let Some(origins) = &self.allowed_origins {
+            for o in origins {
+                validate_origin_pattern(o)?;
+            }
         }
         Ok(())
     }
+}
+
+/// An allowed-origin entry must be `scheme://host[:port]` with no path, query
+/// or fragment — exactly the shape a browser sends in `Origin`. The host may
+/// start with `*.` to match any subdomain. Rejects empty/whitespace entries.
+pub fn validate_origin_pattern(raw: &str) -> Result<(), String> {
+    let o = raw.trim();
+    if o.is_empty() {
+        return Err("allowed_origins must not contain empty entries".into());
+    }
+    let Some((scheme, rest)) = o.split_once("://") else {
+        return Err(format!(
+            "allowed_origins entry {o:?} must be scheme://host[:port]"
+        ));
+    };
+    if !matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https") {
+        return Err(format!(
+            "allowed_origins entry {o:?} must use http or https"
+        ));
+    }
+    if rest.is_empty() || rest.contains(['/', '?', '#', '@', ' ']) {
+        return Err(format!(
+            "allowed_origins entry {o:?} must not contain a path, query, credentials or fragment"
+        ));
+    }
+    let host = rest.strip_prefix("*.").unwrap_or(rest);
+    let host = host.rsplit_once(':').map(|(h, _)| h).unwrap_or(host);
+    if host.is_empty() || host.contains('*') {
+        return Err(format!(
+            "allowed_origins entry {o:?}: wildcard is only allowed as a leading `*.`"
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -182,5 +231,38 @@ mod tests {
         let mut r = base();
         r.allowed_origins = Some(vec!["https://app.example.com".into(), "  ".into()]);
         assert!(r.validate().is_err());
+    }
+
+    #[test]
+    fn ip_rate_limit_requires_both_halves() {
+        let mut r = base();
+        r.ip_rate_limit_burst = Some(5);
+        assert!(r.validate().is_err());
+        r.ip_rate_limit_rps = Some(1);
+        assert!(r.validate().is_ok());
+    }
+
+    #[test]
+    fn origin_patterns() {
+        for ok in [
+            "https://app.example.com",
+            "http://localhost:3000",
+            "https://*.example.com",
+            "HTTPS://App.Example.com:8443",
+        ] {
+            assert!(validate_origin_pattern(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "app.example.com",
+            "ftp://x.example.com",
+            "https://app.example.com/",
+            "https://app.example.com/path",
+            "https://user@app.example.com",
+            "https://*",
+            "https://a.*.example.com",
+            "https://*.",
+        ] {
+            assert!(validate_origin_pattern(bad).is_err(), "{bad}");
+        }
     }
 }
