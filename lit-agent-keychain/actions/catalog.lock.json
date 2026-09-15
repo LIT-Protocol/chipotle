@@ -3,10 +3,10 @@
   "templates": {
     "authority": "1c042eed5e526f747a7533cedb0f3b02dff8ad05143d07299717193b4f6e8e2b",
     "export": "6d0e0adbb593c441d5728a774ec5b79b7014c42d8615a659e6aaf2f159ce9c8c",
-    "github_read_file": "393973aad1c005a3b7f3a0d34950cc1e3ba687f9cd6050c200357ad4704d0a94",
-    "openai_chat": "348426c1b5c45d77175d22ef5a28caecfe3f94389a230ad0904b447bc8bd7893",
-    "slack_post_message": "e0f8d5a63c1ff2acbb16fbcdaa25d7a0c7c328b48dfaa0f117ff8ddfaf0320a8",
-    "stripe_balance": "c35e58aeea03c1a640eb70ec7f3c73d684cdbcf289c28b98c3c4c3c0ad03d7ca",
+    "github_read_file": "90a64801adf34ef711fe0a209531184e4609ab63ad349464f02d1ce32d7c3fc3",
+    "openai_chat": "7b223a816747fd89a6422b8054f76cd6afa9ec5a3e5e8c28db50321225d40cbc",
+    "slack_post_message": "be81264e7f560056d31508a6f7dac6e8f2176334d5cf6f04d0358f3a6bcf4889",
+    "stripe_balance": "1af36f5ef365e22fde152487a18f182ef12564299fc70358a589db4a0320abf7",
     "discovery": "b2a9e5871070e5287ce1f416138dde57167ff09d2def77c93b89a2b0313d55a5"
   }
 }

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build:actions": "tsx scripts/build-actions.ts",
+    "library:pin": "node scripts/pin-library.mjs",
     "build": "npm run build:actions && node scripts/build-sdk.mjs && tsc --noEmit && vite build --config web/vite.config.ts",
     "dev": "vite --config web/vite.config.ts",
     "test": "npm run build:actions && node scripts/build-sdk.mjs && tsx --test tests/*.test.ts",
@@ -17,6 +18,7 @@
   "dependencies": {
     "@hpke/core": "1.9.0",
     "@hpke/dhkem-x25519": "1.8.0",
+    "@lit-protocol/agent-keychain-library": "https://codeload.github.com/LIT-Protocol/agent-keychain-library/tar.gz/9428cede9d165499db00af80cff2b91c7d84a26e",
     "@noble/curves": "2.4.0",
     "@noble/hashes": "2.0.1",
     "@rainbow-me/rainbowkit": "2.2.11",

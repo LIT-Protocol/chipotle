@@ -28,10 +28,19 @@ import {
 } from "../protocol/crypto.ts";
 import { verifyWindow } from "../protocol/identity.ts";
 import { jsonFetch, textFetch } from "../protocol/http.ts";
-import { shapeToZod, MAX_OUTPUT_BYTES } from "./catalog/shape.ts";
+import {
+  shapeToZod,
+  MAX_OUTPUT_BYTES,
+} from "@lit-protocol/agent-keychain-library/shape";
 // Type-only: the definition schema itself is never bundled into a template.
-import type { ActionDefinition, UseDefinition } from "./catalog/schema.ts";
-import type { ActionRequestInit, ActionUse } from "./lib.ts";
+import type {
+  ActionDefinition,
+  UseDefinition,
+} from "@lit-protocol/agent-keychain-library/schema";
+import type {
+  ActionRequestInit,
+  ActionUse,
+} from "@lit-protocol/agent-keychain-library/lib";
 import type { LitRuntime } from "./types.ts";
 declare const Lit: LitRuntime;
 

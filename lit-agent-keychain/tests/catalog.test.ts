@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
+import path from "node:path";
 import { fixture, json } from "./harness.ts";
 import { decode, open, responseContext } from "../protocol/crypto.ts";
 import { actionSource } from "../protocol/actions.ts";
@@ -11,12 +13,17 @@ import {
   shapeToZod,
   shapeToJsonSchema,
   type UseDefinition,
-} from "../actions/catalog/schema.ts";
-import { lintActionSource } from "../actions/catalog/lint.ts";
+} from "@lit-protocol/agent-keychain-library/schema";
+import { lintActionSource } from "@lit-protocol/agent-keychain-library/lint";
 import { boundFetch } from "../actions/secret-common.ts";
 import catalog from "../generated/catalog.ts";
 import templates from "../generated/templates.ts";
 
+const libraryDir = path.dirname(
+  createRequire(import.meta.url).resolve(
+    "@lit-protocol/agent-keychain-library/package.json",
+  ),
+);
 const unseal = async (f: any, out: any) =>
   JSON.parse(
     decode(
@@ -30,21 +37,29 @@ const unseal = async (f: any, out: any) =>
 
 test("every catalog entry validates, matches its directory, and is pinned in the lock", async () => {
   assert.ok(catalogSchema.safeParse(catalog).success);
-  const dirs = (await readdir("actions/catalog", { withFileTypes: true }))
+  const dirs = (
+    await readdir(path.join(libraryDir, "actions"), { withFileTypes: true })
+  )
     .filter((d) => d.isDirectory())
     .map((d) => d.name)
     .sort();
   assert.deepEqual(Object.keys(catalog).sort(), dirs);
   for (const id of dirs) {
     const raw = JSON.parse(
-      await readFile(`actions/catalog/${id}/action.json`, "utf8"),
+      await readFile(
+        path.join(libraryDir, `actions/${id}/action.json`),
+        "utf8",
+      ),
     );
     const parsed = definitionSchema.parse(raw);
     assert.equal(parsed.id, id);
     if (parsed.kind === "use")
       assert.deepEqual(
         lintActionSource(
-          await readFile(`actions/catalog/${id}/action.ts`, "utf8"),
+          await readFile(
+            path.join(libraryDir, `actions/${id}/action.ts`),
+            "utf8",
+          ),
         ),
         [],
       );

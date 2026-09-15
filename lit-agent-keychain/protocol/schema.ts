@@ -3,7 +3,7 @@ import {
   releaseIdSchema,
   operationSchema,
   MAX_INPUT_BYTES,
-} from "../actions/catalog/shape.ts";
+} from "@lit-protocol/agent-keychain-library/shape";
 
 export const V = 2 as const;
 export const DOMAIN = "lit-keychain/v2" as const;

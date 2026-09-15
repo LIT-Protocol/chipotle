@@ -40,11 +40,14 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
   owner-approved renewal, atomic rotation, and credential replacement/recovery.
 - New secrets grant no agent access. Permissions default to 30 days, with a 90-day maximum.
   Owner credential membership is independent and normally lasts until revoked.
-- "Use inside Lit" action catalog (`actions/catalog/`): Stripe balance, OpenAI chat,
-  GitHub file reads, Slack messages. Each action's manifest pins the hosts it may
-  reach, the credential shape, agent input and result shapes; the harness enforces
-  them in the enclave. No credential-export, arbitrary URL, code, redirect, or
-  migration path. Contributors add actions by PR; see `actions/catalog/README.md`.
+- "Use inside Lit" action catalog from the public
+  [agent-keychain-library](https://github.com/LIT-Protocol/agent-keychain-library)
+  repo, pinned to a commit in `package.json`: Stripe balance, OpenAI chat, GitHub
+  file reads, Slack messages. Each action's manifest pins the hosts it may reach,
+  the credential shape, agent input and result shapes; the harness in
+  `actions/secret-common.ts` enforces them in the enclave. No credential-export,
+  arbitrary URL, code, redirect, or migration path. Contributors add actions by PR
+  to that repo; Keychain picks them up with `npm run library:pin <sha>`.
 - Encrypted backups of current versions and policies; restore never overwrites another secret.
 - Free for 5 stored secrets, $10/month for 1,000; rotations use the same slot. Contact us for more.
 - Stripe Checkout and customer portal, period-end cancellation, retained encrypted backups.

@@ -109,7 +109,9 @@ Names, public identities, permissions and traffic metadata are not encrypted.
 
 ## "Use inside Lit" actions
 
-Every non-export action comes from the reviewed catalog in `actions/catalog/`. An
+Every non-export action comes from the reviewed public catalog
+[agent-keychain-library](https://github.com/LIT-Protocol/agent-keychain-library),
+pinned to an exact commit and integrity hash in `package.json`/`package-lock.json`. An
 action cannot export, rewrap, sign arbitrary data, follow redirects, or execute caller
 code. Its manifest declares, and the shared harness enforces inside the enclave: a
 credential pattern the plaintext must match before the action runs; an exact HTTPS

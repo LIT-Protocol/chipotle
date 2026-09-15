@@ -7,7 +7,7 @@ import {
   type ActionDefinition,
   type Catalog,
   type Shape,
-} from "../../actions/catalog/schema.ts";
+} from "@lit-protocol/agent-keychain-library/schema";
 export { shapeToJsonSchema };
 import {
   authoritySchema,
