@@ -5962,6 +5962,7 @@ dependencies = [
  "deno_runtime",
  "flume",
  "futures",
+ "hyper-util",
  "indoc",
  "ipfs-hasher",
  "lit-actions-ext",
