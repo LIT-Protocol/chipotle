@@ -131,6 +131,100 @@ for (const scenario of [
   });
 }
 
+// Real UI/WebAuthn, mocked public network; stop before backend/TEE login.
+for (const scenario of [
+  "duplicate root vault",
+  "missing backend account",
+  "unknown selected credential",
+] as const) {
+  test(`explicit backup: ${scenario}`, async ({ page, context }) => {
+    const cdp = await context.newCDPSession(page);
+    await cdp.send("WebAuthn.enable");
+    const { authenticatorId } = await cdp.send(
+      "WebAuthn.addVirtualAuthenticator",
+      {
+        options: {
+          protocol: "ctap2",
+          transport: "internal",
+          hasResidentKey: true,
+          hasUserVerification: true,
+          isUserVerified: true,
+          automaticPresenceSimulation: true,
+        },
+      },
+    );
+    const owners = await page.evaluate(async () => {
+      const { createPasskey } = await import(
+        /* @vite-ignore */ String("/src/identities.ts")
+      );
+      return {
+        original: (await createPasskey("Original")).owner,
+        recovery: (await createPasskey("Recovery")).owner,
+      };
+    });
+    await cdp.send("WebAuthn.removeCredential", {
+      authenticatorId,
+      credentialId: Buffer.from(
+        unb64u(
+          owners[
+            scenario === "missing backend account" ? "recovery" : "original"
+          ].credentialId,
+        ),
+      ).toString("base64"),
+    });
+    const authority = {
+      v: 2,
+      network: "test",
+      registry: "http://localhost:55449",
+      owner: owners.original,
+    };
+    await page.route("**/api/config", (route) =>
+      route.fulfill({ json: { network: "test" } }),
+    );
+    await page.route("**/api/passkeys/*", (route) =>
+      scenario !== "duplicate root vault"
+        ? route.fulfill({
+            status: 404,
+            json: { error: "passkey_not_registered" },
+          })
+        : route.fulfill({
+            json: {
+              owner: owners.recovery,
+              authority: { ...authority, owner: owners.recovery },
+            },
+          }),
+    );
+    let requested: unknown;
+    await page.route("**/auth/challenge", (route) => {
+      requested = route.request().postDataJSON();
+      return route.fulfill({ status: 503, json: { error: "test_boundary" } });
+    });
+    await page.goto("/");
+    await page.getByText("Recover an existing vault", { exact: true }).click();
+    await page.getByLabel("Backup file").setInputFiles({
+      name: "synthetic-backup.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(
+        JSON.stringify({ v: 2, authority, credentials: null, bundles: [] }),
+      ),
+    });
+    await expect(
+      page.getByText("Backup loaded.", { exact: false }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Use an existing passkey", exact: true })
+      .click();
+    if (scenario === "unknown selected credential") {
+      await expect(page.getByRole("alert")).toContainText(
+        "passkey_not_registered",
+      );
+      expect(requested).toBeUndefined();
+    } else {
+      await expect.poll(() => requested).toEqual(authority);
+    }
+  });
+}
+
 for (const operation of ["discover", "create", "approve"] as const) {
   test(`${operation}: cancellation gives retry and recovery guidance without auto-retrying`, async ({
     page,

@@ -132,7 +132,7 @@ export function passkeyIdentity(
     },
   };
 }
-export async function discoverPasskey(): Promise<{
+export async function discoverPasskey(recovery?: Authority): Promise<{
   identity: Identity;
   authority?: Authority;
 }> {
@@ -152,6 +152,11 @@ export async function discoverPasskey(): Promise<{
   );
   if (!credential) throw new Error("Passkey sign-in cancelled");
   const id = b64u(new Uint8Array(credential.rawId));
+  // A backup carries the root's public descriptor even if the backend account
+  // is gone. Match the selected credential exactly; this does not authorize it.
+  // Recovery members are discovered after restoreCredentials restores the policy.
+  if (recovery?.owner.kind === "passkey" && recovery.owner.credentialId === id)
+    return { identity: passkeyIdentity(recovery.owner), authority: recovery };
   const result = await jsonFetch(`/api/passkeys/${id}`);
   const owner = result.owner as Extract<Owner, { kind: "passkey" }>;
   localStorage.setItem("keychain.passkey", JSON.stringify(owner));

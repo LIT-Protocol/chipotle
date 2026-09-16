@@ -465,11 +465,13 @@ function App() {
                 disabled={!!busy || !settings}
                 onClick={() =>
                   work("Finding your passkey…", async () => {
-                    const found = await discoverPasskey();
+                    const found = await discoverPasskey(recovery);
                     const c = ownerClient(
                       found.identity,
                       settings.network,
-                      found.authority || recovery,
+                      // An explicitly loaded backup selects the vault, even if lookup
+                      // finds an empty duplicate rooted at the recovery credential.
+                      recovery || found.authority,
                     );
                     c.progress = setBusy;
                     await c.login();
