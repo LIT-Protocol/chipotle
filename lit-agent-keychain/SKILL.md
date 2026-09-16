@@ -1,7 +1,7 @@
 ---
 name: lit-agent-keychain
 description: Use Lit Agent Keychain v2 for owner-approved agent access to encrypted credentials.
-version: 2.0.0
+version: 2.0.3
 ---
 
 # Lit Agent Keychain v2

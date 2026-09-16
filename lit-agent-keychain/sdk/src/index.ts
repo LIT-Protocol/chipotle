@@ -397,7 +397,17 @@ export class LitConnection {
         },
       },
       this.timeoutMs,
-    );
+    ).catch((error: unknown) => {
+      // Chipotle answers 401 when the scoped execution key no longer resolves,
+      // which for an agent almost always means the owner replaced it. Keep the
+      // HttpError type and status: login() retries 401/403 for fresh keys.
+      if (error instanceof HttpError && error.status === 401)
+        throw new HttpError(
+          401,
+          `${(error.detail || "execution key rejected").replace(/[.\s]+$/, "")}. The scoped execution key in this agent config is not accepted by Lit; the owner most likely replaced it in Keychain (Execution and account access). Ask them for a fresh Agent config, or set CHIPOTLE_USAGE_API_KEY`,
+        );
+      throw error;
+    });
     requireThat(result.has_error === false, "Lit execution failed");
     requireThat(
       result.response?.ok === true,
@@ -779,7 +789,13 @@ export class OwnerClient {
         epoch: bundle.policy.document.epoch + 1,
         previousHash: digest(bundle.policy.document),
         notBefore: now,
-        expiresAt: now + 30 * 86400,
+        // Rotating the value must not shorten (or silently extend) a renewal
+        // the owner already approved; an expired policy restarts at the default.
+        expiresAt:
+          bundle.policy.document.expiresAt !== null &&
+          bundle.policy.document.expiresAt > now
+            ? bundle.policy.document.expiresAt
+            : now + 30 * 86400,
         grants: bundle.policy.document.grants.map((g) => ({
           ...g,
           versions: [
@@ -1096,7 +1112,7 @@ export class Keychain {
    */
   async use(name: string, input?: Record<string, unknown>): Promise<any> {
     this.assertActive();
-    requireThat(Object.hasOwn(this.config.secrets, name), "Unknown secret");
+    this.requireSecret(name);
     const locator = this.config.secrets[name];
     const definition = actionDefinition(locator.manifest.release);
     requireThat(
@@ -1122,13 +1138,21 @@ export class Keychain {
   async stripeBalance(name: string) {
     return this.use(name);
   }
+  /** Names the config's secrets in the error so a typo is obvious. */
+  private requireSecret(name: string) {
+    const names = Object.keys(this.config.secrets);
+    requireThat(
+      Object.hasOwn(this.config.secrets, name),
+      `Unknown secret "${name}". This agent config contains: ${names.join(", ") || "no secrets"}`,
+    );
+  }
   private async read(
     name: string,
     operation: string,
     input?: Record<string, unknown>,
   ): Promise<string> {
     this.assertActive();
-    requireThat(Object.hasOwn(this.config.secrets, name), "Unknown secret");
+    this.requireSecret(name);
     const locator = this.config.secrets[name];
     const manifest = manifestSchema.parse(locator.manifest);
     // The exact release this secret was created under; fetched by hash if older

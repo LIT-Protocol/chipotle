@@ -142,3 +142,65 @@ test("CLI conventional help and version succeed on stdout", () => {
       );
   }
 });
+
+test("unknown secrets name the config's secrets so a typo is obvious", async () => {
+  const locator = { manifest: { release: "export" }, actionCid: "test" } as any;
+  const client = new Keychain(Keychain.generateKey().privateKey, {
+    ...config,
+    secrets: { OPENAI_API_KEY: locator, DB_URL: locator },
+  });
+  try {
+    await assert.rejects(
+      client.get("OPENAI_KEY"),
+      /Unknown secret "OPENAI_KEY"\. This agent config contains: OPENAI_API_KEY, DB_URL/,
+    );
+    const empty = new Keychain(Keychain.generateKey().privateKey, config);
+    await assert.rejects(empty.get("X"), /contains: no secrets/);
+    empty.destroy();
+  } finally {
+    client.destroy();
+  }
+});
+
+test("a 401 from Lit explains that the execution key was probably replaced", async () => {
+  const { createServer } = await import("node:http");
+  const server = createServer((_req, res) => {
+    res.statusCode = 401;
+    res.setHeader("content-type", "application/json");
+    res.end(
+      JSON.stringify({
+        message: "API key not recognized — it does not resolve to any account.",
+      }),
+    );
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const { port } = server.address() as { port: number };
+  const identity = Keychain.generateKey();
+  const client = new Keychain(
+    identity.privateKey,
+    {
+      ...config,
+      litApiUrl: `http://127.0.0.1:${port}`,
+      secrets: {},
+    },
+    { usageApiKey: "a".repeat(44), attestation: false },
+  );
+  try {
+    await assert.rejects(
+      (client.lit as any).direct("// code", {}),
+      (error: any) => {
+        assert.equal(error.name, "HttpError");
+        assert.equal(error.status, 401);
+        assert.match(
+          error.message,
+          /Request failed \(401\): API key not recognized — it does not resolve to any account\. The scoped execution key in this agent config is not accepted by Lit; the owner most likely replaced it/,
+        );
+        assert.match(error.message, /fresh Agent config/);
+        return true;
+      },
+    );
+  } finally {
+    client.destroy();
+    server.close();
+  }
+});
