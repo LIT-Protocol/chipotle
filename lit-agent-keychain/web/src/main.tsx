@@ -842,6 +842,42 @@ function App() {
                             </button>
                           )}
                         </div>
+                        {isStored(
+                          selected.manifest.document.manifest.release,
+                        ) && (
+                          <details className="docs-details">
+                            <summary>How agents use this secret</summary>
+                            <p>
+                              Hand the value to one command without ever
+                              printing it. It reaches only that process's
+                              environment, as{" "}
+                              <code>
+                                {selected.envelope.document.metadata.name}
+                              </code>
+                              .
+                            </p>
+                            <pre className="terminal">
+                              <code>
+                                {`keychain run ./agent-identity.json ./${selected.envelope.document.metadata.name}.keychain.json -- <command>`}
+                              </code>
+                            </pre>
+                            <p>
+                              For tools that read credentials from a path, add{" "}
+                              <code>
+                                --file{" "}
+                                {selected.envelope.document.metadata.name}
+                                =PATH
+                              </code>{" "}
+                              to write a private file that is removed when the
+                              command exits.
+                            </p>
+                            <p>
+                              In code, <code>keychain.get(name)</code> returns
+                              the value; the <code>get_secret</code> MCP tool
+                              does the same for MCP clients.
+                            </p>
+                          </details>
+                        )}
                         {!isStored(
                           selected.manifest.document.manifest.release,
                         ) &&

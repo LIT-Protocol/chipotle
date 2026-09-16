@@ -248,3 +248,336 @@ test("stdio MCP server speaks JSON-RPC, exposes tools, and never prints the priv
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("`keychain run` parses its arguments and refuses anything it cannot inject", async () => {
+  const { parseRunArgs, planInjection, runWithSecrets } =
+    await import("../sdk/run.mjs");
+  assert.deepEqual(
+    parseRunArgs([
+      "id.json",
+      "cfg.json",
+      "--only",
+      "A, B",
+      "--env",
+      "A=STRIPE_KEY",
+      "--",
+      "stripe",
+      "balance",
+      "--live",
+    ]),
+    {
+      identityFile: "id.json",
+      configFile: "cfg.json",
+      only: ["A", "B"],
+      rename: { A: "STRIPE_KEY" },
+      files: {},
+      command: ["stripe", "balance", "--live"],
+    },
+  );
+  assert.deepEqual(
+    parseRunArgs(["id", "cfg", "--file", "SA=./sa.json", "--", "gcloud"]).files,
+    { SA: "./sa.json" },
+  );
+  assert.throws(
+    () => parseRunArgs(["id", "cfg", "--file", "SA=/tmp/", "--", "x"]),
+    /must name a file/,
+  );
+  assert.throws(
+    () =>
+      parseRunArgs([
+        "id",
+        "cfg",
+        "--file",
+        "SA=a",
+        "--file",
+        "SA=b",
+        "--",
+        "x",
+      ]),
+    /given twice/,
+  );
+  assert.throws(
+    () => parseRunArgs(["id", "cfg", "--file", "SA", "--", "x"]),
+    /SECRET_NAME=PATH/,
+  );
+  assert.throws(() => parseRunArgs(["id", "cfg", "echo"]), /`--`/);
+  assert.throws(() => parseRunArgs(["id", "cfg", "--"]), /command after/);
+  assert.throws(() => parseRunArgs(["id", "--", "echo"]), /identity-file/);
+  assert.throws(
+    () => parseRunArgs(["id", "cfg", "--env", "A=1BAD", "--", "x"]),
+    /not a valid environment variable/,
+  );
+  assert.throws(
+    () => parseRunArgs(["id", "cfg", "--verbose", "--", "x"]),
+    /Unknown run option/,
+  );
+  assert.throws(
+    () => parseRunArgs(["id", "cfg", "--only", "--", "x"]),
+    /needs a value/,
+  );
+
+  const list = [
+    { name: "API_KEY", release: "export", operation: "get" },
+    { name: "my-token", release: "export", operation: "get" },
+    { name: "STRIPE", release: "stripe_balance", operation: "stripe.balance" },
+  ];
+  assert.deepEqual(
+    planInjection(list, { only: null, rename: { "my-token": "MY_TOKEN" } }),
+    {
+      plan: [
+        { name: "API_KEY", envVar: "API_KEY" },
+        { name: "my-token", envVar: "MY_TOKEN" },
+      ],
+      skipped: ["STRIPE"],
+    },
+  );
+  // A --file secret stays out of the environment unless --env names it too,
+  // and an awkward name is fine when it only goes to a file.
+  assert.deepEqual(
+    planInjection(list, {
+      only: null,
+      rename: {},
+      files: { "my-token": "/tmp/x/token" },
+    }).plan,
+    [
+      { name: "API_KEY", envVar: "API_KEY" },
+      { name: "my-token", file: "/tmp/x/token" },
+    ],
+  );
+  assert.deepEqual(
+    planInjection(list, {
+      only: ["API_KEY"],
+      rename: { API_KEY: "KEY" },
+      files: { API_KEY: "key.txt" },
+    }).plan,
+    [{ name: "API_KEY", envVar: "KEY", file: path.resolve("key.txt") }],
+  );
+  assert.throws(
+    () =>
+      planInjection(list, {
+        only: null,
+        rename: {},
+        files: { API_KEY: "/tmp/same", "my-token": "/tmp/same" },
+      }),
+    /both map to \/tmp\/same/,
+  );
+  assert.throws(
+    () =>
+      planInjection(list, {
+        only: ["API_KEY"],
+        rename: {},
+        files: { "my-token": "/tmp/t" },
+      }),
+    /mapped but not listed under --only/,
+  );
+  assert.throws(
+    () => planInjection(list, { only: null, rename: {} }),
+    /"my-token" is not a valid environment variable name/,
+  );
+  assert.throws(
+    () => planInjection(list, { only: ["STRIPE"], rename: {} }),
+    /use inside Lit/,
+  );
+  assert.throws(
+    () => planInjection(list, { only: ["NOPE"], rename: {} }),
+    /Unknown secret "NOPE"/,
+  );
+  assert.throws(
+    () => planInjection(list, { only: null, rename: { NOPE: "X" } }),
+    /Unknown secret "NOPE"/,
+  );
+  assert.throws(
+    () =>
+      planInjection(list, {
+        only: ["API_KEY", "my-token"],
+        rename: { "my-token": "API_KEY" },
+      }),
+    /both map to API_KEY/,
+  );
+  assert.throws(
+    () => planInjection([list[2]], { only: null, rename: {} }),
+    /no export-release secrets/,
+  );
+
+  // The spawn contract: secrets land only in the child's env, the parent's
+  // env is untouched, the client is destroyed, and the child's exit code wins.
+  let destroyed = false;
+  const client = {
+    list: () => list,
+    get: async (name: string) => `value-of-${name}`,
+    destroy: () => {
+      destroyed = true;
+    },
+  };
+  const parentEnv = { PATH: "/bin" };
+  const stderr: string[] = [];
+  const spawned: any[] = [];
+  const dir = mkdtempSync(path.join(tmpdir(), "keychain-run-file-"));
+  const tokenFile = path.join(dir, "token");
+  const spawn = (file: string, args: string[], options: any) => {
+    // The file exists, holds the exact value, and is private while the child runs.
+    assert.equal(readFileSync(tokenFile, "utf8"), "value-of-my-token");
+    assert.equal(statSync(tokenFile).mode & 0o777, 0o600);
+    spawned.push({ file, args, env: { ...options.env }, stdio: options.stdio });
+    const handlers: Record<string, Function> = {};
+    return {
+      once(event: string, handler: Function) {
+        handlers[event] = handler;
+        if (event === "exit") setImmediate(() => handler(3, null));
+      },
+      kill() {},
+    };
+  };
+  const fakeProcess = { on() {}, off() {} };
+  try {
+    const code = await runWithSecrets(
+      client,
+      {
+        only: null,
+        rename: {},
+        files: { "my-token": tokenFile },
+        command: ["env"],
+      },
+      {
+        spawn,
+        env: parentEnv,
+        stderr: { write: (s: string) => stderr.push(s) },
+        process: fakeProcess,
+      },
+    );
+    assert.equal(code, 3);
+    assert.equal(destroyed, true);
+    assert.deepEqual(parentEnv, { PATH: "/bin" });
+    assert.deepEqual(spawned, [
+      {
+        file: "env",
+        args: [],
+        env: { PATH: "/bin", API_KEY: "value-of-API_KEY" },
+        stdio: "inherit",
+      },
+    ]);
+    assert.match(stderr.join(""), /skipping "STRIPE"/);
+    assert.ok(!stderr.join("").includes("value-of"));
+    // Removed once the child exits.
+    assert.throws(() => statSync(tokenFile), /ENOENT/);
+    // Never overwrites, and nothing is spawned when a file cannot be created.
+    writeFileSync(tokenFile, "precious");
+    await assert.rejects(
+      runWithSecrets(
+        client,
+        {
+          only: ["my-token"],
+          rename: {},
+          files: { "my-token": tokenFile },
+          command: ["env"],
+        },
+        {
+          spawn: () => assert.fail("spawned despite file error"),
+          env: {},
+          stderr: { write() {} },
+          process: fakeProcess,
+        },
+      ),
+      /already exists; run will not overwrite/,
+    );
+    assert.equal(readFileSync(tokenFile, "utf8"), "precious");
+    await assert.rejects(
+      runWithSecrets(
+        client,
+        {
+          only: ["API_KEY"],
+          rename: {},
+          files: { API_KEY: path.join(dir, "missing-dir", "key") },
+          command: ["env"],
+        },
+        {
+          spawn: () => assert.fail("spawned despite file error"),
+          env: {},
+          stderr: { write() {} },
+          process: fakeProcess,
+        },
+      ),
+      /Cannot create .*missing-dir/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  // A missing executable is reported without leaking anything.
+  await assert.rejects(
+    runWithSecrets(
+      client,
+      {
+        only: ["API_KEY"],
+        rename: {},
+        files: {},
+        command: ["/nonexistent/bin"],
+      },
+      {
+        spawn: () => ({
+          once(event: string, handler: Function) {
+            if (event === "error")
+              setImmediate(() => handler(new Error("ENOENT")));
+          },
+          kill() {},
+        }),
+        env: {},
+        stderr: { write() {} },
+        process: fakeProcess,
+      },
+    ),
+    /Cannot start \/nonexistent\/bin: ENOENT/,
+  );
+});
+
+test("`keychain run` via the CLI rejects bad arguments before touching the network", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "keychain-run-"));
+  try {
+    const identityFile = path.join(dir, "identity.json");
+    execFileSync(process.execPath, ["sdk/cli.mjs", "init", identityFile]);
+    const configFile = path.join(dir, "A.keychain.json");
+    writeFileSync(
+      configFile,
+      JSON.stringify({
+        v: 2,
+        litApiUrl: "http://localhost:8000",
+        usageApiKey: Buffer.alloc(32, 9).toString("base64"),
+        secrets: {
+          A: {
+            manifest: {
+              v: 2,
+              network: "test",
+              registry: "http://localhost:8001",
+              vaultId: "0".repeat(64),
+              authorityCid: "bafkreib" + "a".repeat(51),
+              secretId: "1".repeat(64),
+              release: "stripe_balance",
+            },
+            actionCid: "bafkreic" + "b".repeat(51),
+          },
+        },
+      }),
+    );
+    const attempt = (args: string[]) => {
+      try {
+        execFileSync(process.execPath, ["sdk/cli.mjs", "run", ...args], {
+          stdio: "pipe",
+          env: { ...process.env, KEYCHAIN_SKIP_ATTESTATION: "1" },
+        });
+        return null;
+      } catch (error: any) {
+        return { status: error.status, stderr: String(error.stderr) };
+      }
+    };
+    assert.match(attempt([identityFile, configFile, "echo"])!.stderr, /`--`/);
+    assert.match(
+      attempt([configFile, identityFile, "--", "echo"])!.stderr,
+      /not an agent identity/,
+    );
+    const useOnly = attempt([identityFile, configFile, "--", "echo"])!;
+    assert.equal(useOnly.status, 1);
+    assert.match(useOnly.stderr, /no export-release secrets/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
