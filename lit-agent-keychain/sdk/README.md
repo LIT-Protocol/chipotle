@@ -55,11 +55,12 @@ transcript, or logs:
 ```sh
 keychain run ./agent-identity.json ./STRIPE_API_KEY.keychain.json -- stripe balance retrieve
 keychain run ./id.json ./db.keychain.json --only DATABASE_URL -- psql
-keychain run ./id.json ./cfg.keychain.json --env "openai-prod=OPENAI_API_KEY" -- python agent.py
+keychain run ./id.json ./cfg.keychain.json --env OPENAI_PROD=OPENAI_API_KEY -- python agent.py
 ```
 
-`--only A,B` injects a subset; `--env SECRET=ENV_VAR` renames a variable, which is
-required when a secret's name is not a valid variable name. "Use inside Lit"
+`--only A,B` injects a subset; `--env SECRET=ENV_VAR` renames a variable for tools
+that expect a specific name (secret names are always `[A-Z][A-Z0-9_]*`, so every
+one is already a valid variable name). "Use inside Lit"
 secrets have no value to inject and are skipped with a note on stderr; naming one
 under `--only` is an error. The child inherits the parent environment. Any process
 running as the same user can read another process's environment, so `run` is a
@@ -99,7 +100,12 @@ closed: any unmet check throws an `Attestation:` error and nothing is sent.
    `compose-hash` to equal SHA-256 of the served `app_compose`, and every
    container image in it to be digest-pinned.
 4. Confirms on Base that the compose hash is whitelisted in DstackApp and the OS
-   image in DstackKms, both governed by the Lit Safe multisig.
+   image in DstackKms, both governed by the Lit Safe multisig. The lookup rotates
+   through public Base RPC endpoints (`BASE_PUBLIC_RPC_URLS`), since each one
+   throttles bursts from a single IP; a definitive "not whitelisted" answer is
+   never retried elsewhere. Pin your own endpoint with `KEYCHAIN_BASE_RPC_URL`
+   (CLI and MCP) or `{ attestation: { ...CHIPOTLE_ATTESTATION_POLICY, rpcUrl } }`
+   (SDK) for guarantees stronger than a public RPC offers.
 5. In Node (CLI and MCP), binds the live TLS certificate to the enclave through
    the dstack-ingress evidence quote, so the connection terminates inside the TEE.
 
@@ -151,14 +157,38 @@ Cursor, Windsurf and similar clients take the same command in their JSON config:
 
 Tools: `list_secrets` (names, permitted operation and input shape, no values),
 `get_secret`, one tool per catalog action (`stripe_balance`, `openai_chat`,
-`github_read_file`, `slack_post_message`; each takes `name` and, where the action
-declares one, `input`), `list_actions`, and `agent_public_key` (for the owner to
+`github_read_file`, `slack_post_message`, `supabase_tables`; each takes `name` and,
+where the action declares one, `input`; `list_actions` or `keychain actions` shows
+the current catalog), `list_actions`, and `agent_public_key` (for the owner to
 approve). The server is
 intentionally local rather than hosted: decryption needs the agent's private
 identity, and a remote endpoint would hand that key and every plaintext to whoever
 runs it, which the Keychain trust boundary forbids. Nothing but JSON-RPC is written
 to stdout. Tool results enter the model context like any other tool output, so grant
 agents only the secrets they need.
+
+## When a request is refused
+
+The action's only failure answer is a bare `access_denied`, by design: nothing
+about the policy or the upstream service leaks through the enclave. Before it
+spends an execution, the SDK checks the signed policy it already fetched and names
+what it can see; every such message starts with `Access denied:` and ends with what
+to do. `explainDenial(policy, agentPublicKey, operation, version, envelopeHash)`
+is the exported check.
+
+| Message                                                       | Cause                                                                            |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `… the owner disabled this secret`                            | The owner switched the secret off.                                               |
+| `… the owner's permission expired at <time>`                  | The policy ran past its expiry (30 days by default, 90 max).                     |
+| `… agent <key> is not approved for this secret`               | The public key is not in the policy, or the wrong identity file.                 |
+| `… approved for version N … not the current version M`        | The secret was rotated; the owner must re-approve the agent.                     |
+| `… Lit ran the <action> action … did not complete`            | Policy permits it; the upstream call failed (usually a rejected credential).     |
+| `… Lit refused to release "<name>" although the policy …`     | Policy changed between fetch and execution, or the enclave rejected the request. |
+| `Secret "X" was created with the <action> action; call use()` | `get` on a connected service, or `use` on a stored secret.                       |
+| `Attestation: no Base RPC endpoint answered …`                | Public Base RPCs throttled or down; retry or set `KEYCHAIN_BASE_RPC_URL`.        |
+
+Any other `Attestation:` message means the endpoint failed a hardware or
+governance check. Do not disable attestation to get past it.
 
 ## Telling credentials apart
 

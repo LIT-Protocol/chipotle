@@ -15,6 +15,7 @@ import {
   assertAgentConfig,
   assertAgentIdentity,
   describeCredential,
+  explainDenial,
 } from "../sdk/dist/index.js";
 
 test("distributed SDK and CLI generate local identities without printing private keys", () => {
@@ -37,10 +38,20 @@ test("distributed SDK and CLI generate local identities without printing private
     });
     assert.equal(agent.publicKey, identity.publicKey);
     agent.destroy();
-    assert.throws(() =>
-      execFileSync(process.execPath, ["sdk/cli.mjs", "init", file], {
-        stdio: "pipe",
-      }),
+    assert.throws(
+      () =>
+        execFileSync(process.execPath, ["sdk/cli.mjs", "init", file], {
+          stdio: "pipe",
+        }),
+      (error: any) => {
+        // Names the file and says it was left alone, instead of a raw EEXIST.
+        assert.match(
+          String(error.stderr),
+          /already exists and was left untouched/,
+        );
+        assert.doesNotMatch(String(error.stderr), /EEXIST/);
+        return true;
+      },
     );
     assert.equal(
       JSON.parse(readFileSync(file, "utf8")).privateKey,
@@ -196,6 +207,10 @@ test("stdio MCP server speaks JSON-RPC, exposes tools, and never prints the priv
       [1, 2, 3, 4, 5, 6, 7],
     );
     assert.equal(replies[0].result.protocolVersion, "2025-03-26");
+    assert.equal(
+      replies[0].result.serverInfo.version,
+      JSON.parse(readFileSync("sdk/package.json", "utf8")).version,
+    );
     assert.deepEqual(replies[0].result.capabilities, { tools: {} });
     assert.deepEqual(
       replies[1].result.tools.map((t: any) => t.name),
@@ -580,4 +595,63 @@ test("`keychain run` via the CLI rejects bad arguments before touching the netwo
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("explainDenial names the policy problem an agent can act on", () => {
+  const agent = "a".repeat(64);
+  const envelopeHash = "b".repeat(64);
+  const now = 1_800_000_000;
+  const policy: any = {
+    v: 2,
+    kind: "policy",
+    vaultId: "0".repeat(64),
+    secretId: "1".repeat(64),
+    actionCid: "bafkreic" + "c".repeat(51),
+    epoch: 3,
+    previousHash: null,
+    disabled: false,
+    notBefore: now - 60,
+    expiresAt: now + 3600,
+    grants: [
+      {
+        agentPublicKey: agent,
+        label: "ci bot",
+        operations: ["get"],
+        versions: [{ version: 2, envelopeHash }],
+      },
+    ],
+  };
+  const explain = (p: any, op = "get", version = 2, hash = envelopeHash) =>
+    explainDenial(p, agent, op, version, hash, now);
+  assert.equal(explain(policy), undefined);
+  assert.match(explain({ ...policy, disabled: true })!, /owner disabled/);
+  assert.match(
+    explain({ ...policy, expiresAt: now - 1 })!,
+    /permission expired/,
+  );
+  assert.match(explain({ ...policy, notBefore: now + 10 })!, /not valid until/);
+  assert.match(
+    explainDenial(policy, "f".repeat(64), "get", 2, envelopeHash, now)!,
+    /agent f{64} is not approved/,
+  );
+  assert.match(
+    explain(policy, "stripe.balance")!,
+    /approved for get, not stripe\.balance/,
+  );
+  assert.match(
+    explain(policy, "get", 3, "d".repeat(64))!,
+    /version 2 of this secret, not the current version 3/,
+  );
+  // Precedence: a disabled secret is reported before a missing grant.
+  assert.match(
+    explainDenial(
+      { ...policy, disabled: true },
+      "f".repeat(64),
+      "get",
+      2,
+      envelopeHash,
+      now,
+    )!,
+    /owner disabled/,
+  );
 });

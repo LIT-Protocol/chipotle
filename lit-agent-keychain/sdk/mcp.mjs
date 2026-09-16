@@ -9,9 +9,11 @@
 //
 // Only JSON-RPC frames are written to stdout; diagnostics go to stderr.
 import { createInterface } from "node:readline";
+import { readFileSync } from "node:fs";
 import {
   Keychain,
   ACTIONS,
+  ATTESTED_ORIGINS,
   shapeToJsonSchema,
   assertAgentConfig,
   assertAgentIdentity,
@@ -19,7 +21,13 @@ import {
 import { peerCertificateSha256 } from "./tls.mjs";
 
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
-const SERVER_INFO = { name: "lit-agent-keychain", version: "2.0.0" };
+const SERVER_INFO = {
+  name: "lit-agent-keychain",
+  // Reported to MCP clients; follows the published package version.
+  version: JSON.parse(
+    readFileSync(new URL("./package.json", import.meta.url), "utf8"),
+  ).version,
+};
 const MAX_FRAME_BYTES = 64 * 1024;
 
 const nameProperty = {
@@ -306,6 +314,14 @@ export async function serve(keychain, { input, output }) {
   }
 }
 
+/** The pinned policy for `litApiUrl`, with the RPC replaced when the operator supplies one. */
+function attestationPolicy(litApiUrl, env) {
+  const policy = ATTESTED_ORIGINS[new URL(litApiUrl).origin];
+  const rpcUrl = env.KEYCHAIN_BASE_RPC_URL;
+  if (!policy || !rpcUrl) return policy;
+  return { ...policy, rpcUrl, fallbackRpcUrls: [] };
+}
+
 export async function main(argv, { readFile, stdin, stdout, stderr, env }) {
   const [identityFile, ...configFiles] = argv;
   const skipAttestation = env.KEYCHAIN_SKIP_ATTESTATION === "1";
@@ -324,6 +340,7 @@ export async function main(argv, { readFile, stdin, stdout, stderr, env }) {
     keychain = await loadKeychain(identityFile, configFiles, {
       readFile,
       usageApiKey: env.CHIPOTLE_USAGE_API_KEY,
+      attestation: attestationPolicy(keychain.config.litApiUrl, env),
       tlsCertificateSha256,
     });
     const report = await keychain.attest();

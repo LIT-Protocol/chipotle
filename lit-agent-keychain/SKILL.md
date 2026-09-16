@@ -12,7 +12,8 @@ version: 2.0.0
 3. Download the **Agent config** (public locators plus a scoped billing key) and use `@lit-protocol/keychain` with the local
    private identity. `get(name)` decrypts a recipient-encrypted result;
    `use(name, input)` runs the secret's catalog action (Stripe balance, OpenAI chat,
-   GitHub file read, Slack message, …) inside Lit without revealing its credential.
+   GitHub file read, Slack message, Supabase table query, …) inside Lit without
+   revealing its credential.
    `list()` tells you which applies to each secret and the input shape it takes.
 4. For a tool that needs the raw value in its environment, prefer
    `keychain run identity.json CONFIG.keychain.json -- <command>` over `get`. It
@@ -23,8 +24,9 @@ version: 2.0.0
    the command exits, for tools that only read credentials from a path.
 5. Or expose it to an MCP client in one line. The server runs locally, next to the
    identity file, and offers `list_secrets`, `get_secret`, one tool per catalog
-   action (`stripe_balance`, `openai_chat`, `github_read_file`, `slack_post_message`),
-   `list_actions` and `agent_public_key`:
+   action (`stripe_balance`, `openai_chat`, `github_read_file`, `slack_post_message`,
+   `supabase_tables`; `keychain actions` prints the current list), `list_actions` and
+   `agent_public_key`:
 
    ```sh
    claude mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp ./agent-identity.json ./API_KEY.keychain.json
@@ -33,8 +35,27 @@ version: 2.0.0
 Before its first request, the SDK attests the Lit endpoint: it verifies the Intel
 TDX quote to a pinned Intel root, replays the event log into the RTMRs, checks the
 measured app and compose hash against the on-chain whitelist on Base, and (in Node)
-binds the live TLS certificate to the enclave. Never set `attestation: false` or
-`KEYCHAIN_SKIP_ATTESTATION=1` outside local development.
+binds the live TLS certificate to the enclave. The on-chain check rotates through
+public Base RPC endpoints, which rate limit bursts; set `KEYCHAIN_BASE_RPC_URL` to
+pin your own. Never set `attestation: false` or `KEYCHAIN_SKIP_ATTESTATION=1`
+outside local development.
+
+## When a request is refused
+
+The enclave answers every failure with the same bare denial so that nothing about
+the policy or the upstream service leaks. The client therefore explains what it can
+see, and the message tells you who can fix it:
+
+| Message starts with                                           | Meaning                                                                                              | Who fixes it                                              |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `Access denied: the owner disabled this secret`               | The owner switched the secret off.                                                                   | Owner: Enable in Keychain.                                |
+| `Access denied: the owner's permission expired`               | The signed policy ran past its expiry (30 days by default).                                          | Owner: Renew permissions.                                 |
+| `Access denied: agent <key> is not approved`                  | Your public key is not in the policy, or you used the wrong identity file.                           | Owner approves your `publicKey`; check the identity file. |
+| `Access denied: agent … approved for version N`               | The secret was rotated since you were approved.                                                      | Owner re-approves the agent (Rotate & approve does this). |
+| `Access denied: Lit ran the <action> … did not complete`      | Your permission is fine; the upstream call failed inside the enclave, usually a rejected credential. | Owner checks or rotates the credential.                   |
+| `Secret "X" was created with the <action> action; call use()` | You called `get`/`get_secret` on a connected service.                                                | Call `use` or the action's MCP tool instead.              |
+| `Attestation: no Base RPC endpoint answered`                  | Public chain RPCs throttled or down.                                                                 | Retry, or set `KEYCHAIN_BASE_RPC_URL`.                    |
+| `Attestation: …` (anything else)                              | The endpoint failed a hardware or governance check.                                                  | Stop. Do not disable attestation; report it.              |
 
 ## Know what you are holding
 
