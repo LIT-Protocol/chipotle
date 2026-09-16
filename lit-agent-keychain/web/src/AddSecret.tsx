@@ -6,6 +6,7 @@
 // what comes back, and what it can never do. The choice is permanent: the release
 // id is part of the secret's encryption key.
 import React, { useMemo, useState } from "react";
+import { NPX_KEYCHAIN } from "./version.ts";
 import {
   availableActions,
   type ActionDefinition,
@@ -123,7 +124,7 @@ export function ActionDocs({
     (inputExample ? `, ${snippetJson(inputExample)}` : "") +
     ");";
   const cli =
-    `npx @lit-protocol/keychain@2.0.2 use ./agent-identity.json ./${name}.keychain.json ${name}` +
+    `${NPX_KEYCHAIN} use ./agent-identity.json ./${name}.keychain.json ${name}` +
     (inputExample ? ` '${JSON.stringify(inputExample)}'` : "");
   const inputs = action.input ? fieldRows(action.input) : [];
   const outputs = fieldRows(action.output);

@@ -129,3 +129,32 @@ test("documented Supabase credential passes the actual pinned parser and input s
   };
   assert.equal((await bad.h.run(bad.manifest, bad.params)).ok, false);
 });
+test("every published version pin matches sdk/package.json", async () => {
+  const { version } = JSON.parse(await read("sdk/package.json"));
+  const { SDK_VERSION, NPX_KEYCHAIN } = await import("../web/src/version.ts");
+  assert.equal(SDK_VERSION, version);
+  assert.equal(NPX_KEYCHAIN, `npx @lit-protocol/keychain@${version}`);
+  const files = [
+    "README.md",
+    "PROVIDERS.md",
+    "SKILL.md",
+    "SECURITY.md",
+    "BILLING.md",
+    "sdk/README.md",
+    "web/public/llms.txt",
+    "web/src/Landing.tsx",
+    "web/src/AddSecret.tsx",
+    "web/src/main.tsx",
+  ];
+  for (const file of files) {
+    const text = await read(file);
+    for (const [pin, found] of text.matchAll(/keychain@(\d+\.\d+\.\d+)/g))
+      assert.equal(found, version, `${file}: ${pin}`);
+    if (file.startsWith("web/src/"))
+      assert.doesNotMatch(
+        text,
+        /keychain@\d/,
+        `${file} must use NPX_KEYCHAIN from web/src/version.ts`,
+      );
+  }
+});

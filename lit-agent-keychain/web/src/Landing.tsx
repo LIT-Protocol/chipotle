@@ -1,11 +1,11 @@
 import React from "react";
+import { NPX_KEYCHAIN, SDK_PACKAGE, SDK_VERSION } from "./version.ts";
 
 export const REPO_URL =
   "https://github.com/LIT-Protocol/chipotle/tree/main/lit-agent-keychain";
 export const NPM_URL = "https://www.npmjs.com/package/@lit-protocol/keychain";
 export const DOCS_URL = "https://developer.litprotocol.com";
-const MCP_COMMAND =
-  "claude mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.0.3 mcp /absolute/path/agent-identity.json /absolute/path/API_KEY.keychain.json";
+const MCP_COMMAND = `claude mcp add lit-keychain -- npx -y ${SDK_PACKAGE}@${SDK_VERSION} mcp /absolute/path/agent-identity.json /absolute/path/API_KEY.keychain.json`;
 
 export function LandingNav() {
   return (
@@ -98,7 +98,7 @@ export function Landing() {
         </p>
         <pre className="terminal">
           <code>
-            {`npx @lit-protocol/keychain@2.0.3 init /absolute/path/agent-identity.json
+            {`${NPX_KEYCHAIN} init /absolute/path/agent-identity.json
 # share only the public key, approve it in Keychain, download the agent config
 ${MCP_COMMAND}`}
           </code>
