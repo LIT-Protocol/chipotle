@@ -12,6 +12,8 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
   page,
   context,
 }) => {
+  // Passkey onboarding, checkout, a stored secret and a connected service.
+  test.setTimeout(240000);
   const cdp = await context.newCDPSession(page);
   await cdp.send("WebAuthn.enable");
   await cdp.send("WebAuthn.addVirtualAuthenticator", {
@@ -58,6 +60,7 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
     page.getByRole("button", { name: "+ Add secret" }),
   ).toBeEnabled();
   await page.getByRole("button", { name: "+ Add secret" }).click();
+  await page.getByRole("button", { name: /^Store a secret/ }).click();
   await page.getByLabel("Name", { exact: true }).fill("BROWSER_SECRET");
   await page
     .getByLabel("Secret value", { exact: true })
@@ -89,6 +92,60 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
         !body.includes(identity.privateKey),
     ),
   ).toBeTruthy();
+  // Connected service: catalog picker, manifest-driven wizard, credential check.
+  await page.getByRole("button", { name: "+ Add secret" }).click();
+  await expect(page.getByText("The agent never sees the key.")).toBeVisible();
+  await page.screenshot({ path: "../.context/keychain-v2/add-choose.png" });
+  await page.getByRole("button", { name: /^Connect a service/ }).click();
+  await expect(
+    page.getByRole("button", { name: /Read Stripe balance/ }),
+  ).toBeVisible();
+  await page.screenshot({ path: "../.context/keychain-v2/add-catalog.png" });
+  await page.getByRole("button", { name: /Read Stripe balance/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "Read Stripe balance", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("What the agent never gets")).toBeVisible();
+  await expect(
+    page.getByText('await keychain.use("STRIPE_API_KEY")'),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "../.context/keychain-v2/add-wizard.png",
+    fullPage: true,
+  });
+  await page.getByLabel("Name", { exact: true }).fill("STRIPE_API_KEY");
+  await page.getByLabel("Credential", { exact: true }).fill("not-a-stripe-key");
+  await page.getByRole("button", { name: "Encrypt & connect" }).click();
+  await expect(
+    page.getByText(/does not look like a credential for Read Stripe balance/),
+  ).toBeVisible();
+  // A filled textarea contributes its value to the label's accessible name.
+  // The fixture is assembled at runtime so secret scanners do not flag it.
+  const stripeFixture = ["rk", "test", "browserfixture0000000000"].join("_");
+  await page.getByRole("textbox", { name: /^Credential/ }).fill(stripeFixture);
+  await page.getByRole("button", { name: "Encrypt & connect" }).click();
+  await expect(
+    page.getByRole("heading", { name: "STRIPE_API_KEY", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/CONNECTED SERVICE · READ STRIPE BALANCE/),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Export secret" })).toHaveCount(
+    0,
+  );
+  await page.getByText("How agents use this service").click();
+  await expect(page.getByText("In the MCP server it is the")).toBeVisible();
+  await expect(
+    page.getByText("STORED SECRETS", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("CONNECTED SERVICES", { exact: false }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "../.context/keychain-v2/service-detail.png",
+    fullPage: true,
+  });
+  expect(requests.every((body) => !body.includes(stripeFixture))).toBeTruthy();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await page
     .getByRole("button", { name: "Use an existing passkey", exact: true })
@@ -135,6 +192,7 @@ test("Google-only sign-in verifies a nonce-bound JWT without a wallet or passkey
     page.getByRole("button", { name: "+ Add secret" }),
   ).toBeEnabled();
   await page.getByRole("button", { name: "+ Add secret" }).click();
+  await page.getByRole("button", { name: /^Store a secret/ }).click();
   await page.getByLabel("Name", { exact: true }).fill("GOOGLE_SECRET");
   await page
     .getByLabel("Secret value", { exact: true })
