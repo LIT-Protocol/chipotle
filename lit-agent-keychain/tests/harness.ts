@@ -105,6 +105,18 @@ export const SAMPLE_CREDENTIALS: Record<string, string> = {
   openai_chat: "sk-" + "a".repeat(40),
   github_read_file: "ghp_" + "A".repeat(36),
   slack_post_message: "xoxb-1234567890-abcdefghijkl",
+  supabase_tables: JSON.stringify({
+    ref: "abcdefghijklmnopqrst",
+    key: "sb_secret_" + "k".repeat(40),
+    tables: {
+      orders: {
+        select: ["id", "status", "total_cents"],
+        filter: ["id", "status"],
+        insert: ["status"],
+        maxRows: 50,
+      },
+    },
+  }),
 };
 export const operationFor = (release: string) => {
   const definition = catalog[release];
