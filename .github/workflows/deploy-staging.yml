@@ -622,6 +622,13 @@ jobs:
             echo "::error::Could not resolve $DOMAIN; refusing to stop $OLD."
             exit 1
           fi
+          # Without OLD's gateway we can't prove the domain has moved off it; a
+          # blank OLD_GW would never equal LIVE and would let us stop the box that
+          # might still be serving. Refuse rather than risk an outage.
+          if [ -z "$OLD_GW" ]; then
+            echo "::error::Could not resolve old gateway for '$OLD' (phala cvms get failed?); refusing to stop it — cannot confirm the domain moved off it."
+            exit 1
+          fi
           if [ "$(gw_key "$LIVE_GW")" = "$(gw_key "$OLD_GW")" ]; then
             echo "::error::Public domain still points at OLD instance '$OLD' (gw=$OLD_GW). Cutover did not move the domain — NOT stopping it (would cause an outage)."
             exit 1
