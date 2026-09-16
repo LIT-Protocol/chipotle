@@ -177,6 +177,14 @@ jobs:
             echo "$out"
           }
 
+          # Reduce a gateway hostname to its cluster key by dropping the first DNS
+          # label. The domain's CNAME resolves to the wildcard app record
+          # ('_.dstack-base-prodN.phala.network') while `phala cvms get` reports the
+          # node record ('gateway.dstack-base-prodN.phala.network'); they share every
+          # label but the first, so an exact string match never lines up. Comparing on
+          # the suffix ('dstack-base-prodN.phala.network') matches the live cluster.
+          gw_key() { printf '%s' "${1#*.}"; }
+
           # --- Ping-pong target selection (STATELESS) ---
           # The LIVE instance is whichever the public domain currently points at.
           # We read the domain's CNAME (→ the live node's gateway) and match it to
@@ -191,8 +199,9 @@ jobs:
             LIVE_GW=$(resolve_cname "$DOMAIN")
             GW_A=$(phala cvms get "$CVM_A" --json 2>/dev/null | jq -r '.gateway.cname // empty' | sed 's/\.$//')
             GW_B=$(phala cvms get "$CVM_B" --json 2>/dev/null | jq -r '.gateway.cname // empty' | sed 's/\.$//')
-            if [ -n "$LIVE_GW" ] && [ "$LIVE_GW" = "$GW_A" ]; then LIVE_CVM="$CVM_A";
-            elif [ -n "$LIVE_GW" ] && [ "$LIVE_GW" = "$GW_B" ]; then LIVE_CVM="$CVM_B"; fi
+            LIVE_KEY=$(gw_key "$LIVE_GW")
+            if [ -n "$LIVE_GW" ] && [ "$LIVE_KEY" = "$(gw_key "$GW_A")" ]; then LIVE_CVM="$CVM_A";
+            elif [ -n "$LIVE_GW" ] && [ "$LIVE_KEY" = "$(gw_key "$GW_B")" ]; then LIVE_CVM="$CVM_B"; fi
             PREV="$LIVE_CVM"
             echo "Live gateway from DNS: '${LIVE_GW:-<none>}' → live CVM: '${LIVE_CVM:-<unknown>}' (A gw='$GW_A' B gw='$GW_B')"
             if [ -n "$INPUT_CVM" ]; then
@@ -602,13 +611,18 @@ jobs:
             fi
             echo "$out"
           }
+          # Match on the cluster key (drop the first DNS label): the domain CNAME
+          # resolves to '_.dstack-base-prodN...' while `phala cvms get` reports
+          # 'gateway.dstack-base-prodN...'. Comparing full hostnames would treat the
+          # still-live old box as "moved" and stop it — an outage.
+          gw_key() { printf '%s' "${1#*.}"; }
           LIVE_GW=$(resolve_cname "$DOMAIN")
           OLD_GW=$(phala cvms get "$OLD" --json 2>/dev/null | jq -r '.gateway.cname // empty' | sed 's/\.$//')
           if [ -z "$LIVE_GW" ]; then
             echo "::error::Could not resolve $DOMAIN; refusing to stop $OLD."
             exit 1
           fi
-          if [ "$LIVE_GW" = "$OLD_GW" ]; then
+          if [ "$(gw_key "$LIVE_GW")" = "$(gw_key "$OLD_GW")" ]; then
             echo "::error::Public domain still points at OLD instance '$OLD' (gw=$OLD_GW). Cutover did not move the domain — NOT stopping it (would cause an outage)."
             exit 1
           fi
