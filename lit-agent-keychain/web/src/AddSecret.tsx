@@ -6,6 +6,7 @@
 // what comes back, and what it can never do. The choice is permanent: the release
 // id is part of the secret's encryption key.
 import React, { useMemo, useState } from "react";
+import { NPX_KEYCHAIN } from "./version.ts";
 import {
   availableActions,
   type ActionDefinition,
@@ -123,7 +124,7 @@ export function ActionDocs({
     (inputExample ? `, ${snippetJson(inputExample)}` : "") +
     ");";
   const cli =
-    `keychain use ./agent-identity.json ./${name}.keychain.json ${name}` +
+    `${NPX_KEYCHAIN} use ./agent-identity.json ./${name}.keychain.json ${name}` +
     (inputExample ? ` '${JSON.stringify(inputExample)}'` : "");
   const inputs = action.input ? fieldRows(action.input) : [];
   const outputs = fieldRows(action.output);
@@ -136,6 +137,16 @@ export function ActionDocs({
           <p>{action.description}</p>
         </>
       )}
+      <p className="hint">
+        The upstream provider receives the credential over TLS; this action does
+        not return it to the agent. See{" "}
+        <a href="/PROVIDERS.md">provider setup</a>
+        for exact credential formats, including the Supabase JSON allowlist.
+        Supabase secret/service_role keys bypass RLS; the allowlist is the
+        policy. Do not blindly retry writes: Slack posts or Supabase inserts may
+        have completed even when the result was lost. Check provider state
+        first.
+      </p>
       <h3>What the agent never gets</h3>
       <ul className="limits">
         <li>

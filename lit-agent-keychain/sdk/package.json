@@ -1,12 +1,14 @@
 {
   "name": "@lit-protocol/keychain",
-  "version": "2.0.1",
+  "version": "2.0.3",
   "description": "Owner-authorized, locally encrypted credentials for agents, with a local MCP server",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/node.js",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "browser": "./dist/index.js",
+      "node": "./dist/node.js",
       "import": "./dist/index.js"
     }
   },

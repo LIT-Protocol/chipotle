@@ -28,6 +28,27 @@ The operator is trusted to serve the latest signed policy. It can replay old val
 permissions, including undoing a revocation, but cannot forge owner authorization.
 The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md).
 
+## SDK 2.0.3 release coordination
+
+This source prepares SDK 2.0.3 and pins the hosted examples to that version. The
+customer QA baseline was published 2.0.2; a source merge does **not** publish npm.
+Publish and verify the 2.0.3 package **before deploying these version-pinned docs**.
+Until publication, registry installation of that version is not an acceptance test;
+reviewers should use the locally packed tarball and isolated-consumer tests.
+
+Release checks: run `npm test` and `npm run build`, publish through the normal
+maintainer release process, verify `npm view @lit-protocol/keychain@2.0.3 version`,
+then repeat the strict external TypeScript consumer and attestation-enabled Node
+smoke test from the registry artifact. Confirm the Node report includes
+`tls-certificate-in-tee`; a browser build cannot perform this check. Only then
+deploy the owner UI/docs and retest passkey recovery against production.
+
+SDK 2.0.3 also rejects inconsistent identity metadata, gives a local error after
+`destroy()`, handles prototype-named lookups safely, rejects malformed MCP request
+IDs, and adds conventional CLI help/version flags. None of these changes upgrades
+existing installed agents automatically. See the [QA report](https://github.com/LIT-Protocol/chipotle/blob/main/lit-agent-keychain/docs/user-qa-2026-09-16.md)
+for actual production coverage and remaining provider/auth/billing tests.
+
 ## Features
 
 - RainbowKit/wagmi EOA wallet connection, native WebAuthn P-256 passkeys, Google JWT
@@ -59,9 +80,91 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
   child process as environment variables or short-lived mode-0600 files without
   printing them. No management bearer tokens, operator grant
   signer, PKP vault provisioning, chain registry, relayer, or paymaster.
-- Client-side remote attestation of the Lit endpoint before any request: TDX quote
+- Client-side remote attestation before execution requests to configured/pinned production Lit origins (unknown origins are not automatically attested): TDX quote
   chain to a pinned Intel root, event-log replay, measured app/compose identity,
   on-chain governance whitelist, and (Node) TLS certificate binding.
+
+## Owner setup and recovery
+
+For agent installation and the separate stored-secret (`get`/`run`) and connected-service
+(`use`) paths, see [SDK quickstarts](sdk/README.md). For provider credentials and
+exact inputs, see [provider recipes](PROVIDERS.md). An **export action** releases a
+raw secret to an approved agent; **Agent config** downloads public locators plus a
+billing key; **encrypted backup export** saves ciphertext/policies. These are not
+interchangeable operations.
+
+### Prepare recovery while you still have access
+
+1. Sign in at your existing Keychain origin. Open **Recovery & backups** and approve
+   an additional owner credential you control. Test it before retiring the first.
+2. Download an encrypted backup and store it privately off-device. Download a fresh
+   copy after every credential change and secret rotation. Backups contain current
+   ciphertext/policies, not private keys or historical secret versions.
+3. Retain the original provider credentials independently for connected services.
+   Strict-mode actions cannot export or migrate them; an action upgrade or loss of
+   Lit's derivation root cannot be repaired with ciphertext alone.
+
+### Restore walkthrough and credential-loss decisions
+
+- **New device, approved credential available:** choose **Recover an existing vault**
+  on the sign-in page, select your encrypted backup, then sign with an owner
+  credential approved for that vault. Use the original deployment/origin for
+  passkeys; a newly created passkey is not the old credential. Confirm the restored
+  secret list and permissions, and download fresh agent configs where necessary.
+- **Google-only owner:** sign in with the same Google account, not simply the same
+  email spelling on a different account. If inaccessible, use Google's recovery
+  or a previously approved alternate owner; Keychain cannot reset Google identity.
+- **Missing vault:** restore can initialize credential settings from the signed
+  backup. **Existing vault:** restore cannot overwrite its credential settings or a
+  different existing secret. On a conflict, stop and compare the vault/secret and
+  backup versions; do not delete current data to force an old restore.
+- **Backup lost, credential available:** sign in and make a new backup if the
+  service still has the vault. A credential alone does not recreate lost ciphertext.
+- **All approved credentials lost:** a backup alone is insufficient. Recover through
+  the credential provider (for example a synced passkey or Google recovery) or use
+  a previously approved alternate credential. There is no operator reset token.
+- **Agent key lost:** generate a new identity on a trusted machine, approve its
+  public key per secret, revoke the old key and distribute new configs. The backup
+  does not recover the agent's private key.
+
+These steps describe supported behavior, not evidence of a successful live Google,
+physical-passkey or provider recovery test. See [security limits](SECURITY.md).
+
+### Rotations and revocation
+
+| Change                                 | Owner steps                                                                                                 | Agent/config consequence                                                                                                 |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Secret value (without approval update) | Issue a replacement at the provider; rotate the secret; reapprove intended agents for the new exact version | Old version grants alone do not cover the new version                                                                    |
+| Rotate & approve                       | Use the combined dashboard action to rotate and move existing agents to the new version                     | No separate reapproval is needed; existing downloaded configs can resolve the new version immediately                    |
+| Execution/billing key                  | Replace execution key in the owner dashboard                                                                | Update every agent config or `CHIPOTLE_USAGE_API_KEY` override, then restart MCP; identity/secret approvals are separate |
+| Agent signing key                      | Generate a new identity, approve new public key, revoke old grants                                          | Never overwrite a working identity without a recovery plan; distribute new identity/config privately                     |
+| Immutable action release               | Keep old release available; reimport original credential into the new action and approve explicitly         | A config edit cannot migrate ciphertext; strict-mode backup cannot supply plaintext                                      |
+| Owner credential                       | Approve/test replacement before revoking old credential                                                     | Download a fresh encrypted backup; existing metadata sessions are invalidated                                            |
+
+For suspected exposure, revoke at the upstream provider too. With honest storage,
+revocation applies to subsequent policy lookups; in-flight calls may finish and
+plaintext already received cannot be recalled. The operator can replay older
+still-valid permissions, as documented in SECURITY.md. **Cancellation is not
+revocation.** Slack posts and Supabase inserts are not exactly-once: inspect provider
+state after uncertain completion; do not blindly retry writes.
+
+### Storage entitlements and charges
+
+| State                             | Storage                                    | Execution and recovery                                                     |
+| --------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------- |
+| Free                              | Up to 5 secrets                            | Sponsored enrolled actions under fair use; backups/revocation available    |
+| Standard                          | $10/month, up to 1,000 secrets             | Same authorization model; rotations use no additional slot                 |
+| Cancelled, still in paid period   | Paid entitlement until period end          | Cancellation does not revoke agent grants                                  |
+| Paid expired, at/below Free limit | Free entitlement                           | Sponsored execution continues on Free                                      |
+| Paid expired, above Free limit    | Storage mutations blocked while over limit | Login, revocation and encrypted backups remain; no automatic data deletion |
+
+There is no hard per-user execution or dollar cap and no automatic Keychain overage
+charge. A numerical fair-use quota is not specified here; contact Support via the
+app before high-volume usage or for custom storage limits. Report outages with
+operation/time and a sanitized error, never keys/configs. Provider API charges
+(OpenAI, Slack plan requirements, Supabase, etc.) are separate from the Keychain
+subscription. Check the owner billing page and refresh billing state after checkout;
+do not infer successful payment from a browser redirect alone.
 
 ## Local development
 

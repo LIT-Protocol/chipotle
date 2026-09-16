@@ -17,7 +17,7 @@ import {
   shapeToJsonSchema,
   assertAgentConfig,
   assertAgentIdentity,
-} from "./dist/index.js";
+} from "@lit-protocol/keychain";
 import { peerCertificateSha256 } from "./tls.mjs";
 
 export const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -137,7 +137,7 @@ export async function loadKeychain(
     v: 2,
     litApiUrl: undefined,
     usageApiKey: undefined,
-    secrets: {},
+    secrets: Object.create(null),
   };
   for (const file of configFiles) {
     const config = await parse(file);
@@ -159,7 +159,7 @@ export async function loadKeychain(
     }
     for (const [name, locator] of Object.entries(config.secrets)) {
       if (
-        merged.secrets[name] &&
+        Object.hasOwn(merged.secrets, name) &&
         merged.secrets[name].actionCid !== locator.actionCid
       )
         throw new Error(
@@ -179,7 +179,7 @@ export async function callTool(keychain, name, args = {}) {
   const secretName = () => {
     if (typeof args?.name !== "string" || args.name.length === 0)
       throw new Error("name is required");
-    if (!keychain.config.secrets[args.name])
+    if (!Object.hasOwn(keychain.config.secrets, args.name))
       throw new Error(
         `Unknown secret "${args.name}". Available: ${
           keychain
@@ -240,7 +240,13 @@ export async function handleMessage(keychain, message) {
   )
     return rpcError(null, -32600, "Invalid Request");
   const { id, method, params } = message;
-  const isRequest = id !== undefined && id !== null;
+  const isRequest = Object.hasOwn(message, "id");
+  // MCP request IDs are strings or numbers, never null or structured values.
+  if (
+    isRequest &&
+    !(typeof id === "string" || (typeof id === "number" && Number.isFinite(id)))
+  )
+    return rpcError(null, -32600, "Invalid Request");
   if (typeof method !== "string")
     return isRequest ? rpcError(id, -32600, "Invalid Request") : undefined;
   if (!isRequest) return undefined; // notifications need no reply
