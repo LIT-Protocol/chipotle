@@ -15,6 +15,12 @@
           "index",
           "quickstart",
           {
+            "group": "Confidential AI",
+            "pages": [
+              "ai/overview"
+            ]
+          },
+          {
             "group": "Management",
             "pages": [
               "management/dashboard",
