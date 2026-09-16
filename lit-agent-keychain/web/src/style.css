@@ -845,3 +845,146 @@ footer span {
     font-size: 24px;
   }
 }
+
+/* Add flow: choose a product, pick a catalog action, then the wizard. */
+.add-flow > .back {
+  padding-left: 0;
+  margin-bottom: 6px;
+}
+.choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  margin: 22px 0;
+}
+.choice-card,
+.catalog-card {
+  display: block;
+  text-align: left;
+  background: #111b14;
+  border: 1px solid #334035;
+  border-radius: 12px;
+  padding: 20px;
+  color: #dce7dc;
+  font-weight: 400;
+  font-size: 12.5px;
+  line-height: 1.6;
+  transition: border-color 0.15s;
+}
+.choice-card:hover,
+.catalog-card:hover {
+  background: #17241b;
+  border-color: #6f9a63;
+}
+.choice-card strong,
+.catalog-card strong {
+  display: block;
+  font-size: 14px;
+  color: #e9f0e7;
+  margin-bottom: 6px;
+}
+.choice-card p,
+.catalog-card p {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: #b4c3b6;
+}
+.choice-card small,
+.catalog-card small {
+  font-size: 11px;
+  color: #9cbc7e;
+}
+.choice-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 36px;
+  border: 1px solid #4a614b;
+  border-radius: 6px;
+  color: #badea5;
+  margin-bottom: 14px;
+}
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin: 20px 0;
+}
+.catalog-card .eyebrow {
+  font-size: 9px;
+  margin-bottom: 8px;
+}
+.secret-icon.service {
+  color: #f1d58a;
+  border-color: #6a5f3c;
+}
+.secret-group + .secret-group {
+  margin-top: 18px;
+}
+.secret-group > .eyebrow {
+  font-size: 9px;
+  margin: 0 0 10px 2px;
+}
+.action-docs h3 {
+  font-size: 12px;
+  margin: 22px 0 8px;
+  color: #c5d1c6;
+}
+.action-docs.compact h3 {
+  margin-top: 16px;
+}
+.action-docs p {
+  font-size: 12.5px;
+}
+.action-docs .limits {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #b4c3b6;
+}
+.action-docs .limits li + li {
+  margin-top: 4px;
+}
+.action-docs .terminal {
+  padding: 14px 16px;
+}
+.action-docs .terminal code {
+  font-size: 12px;
+}
+.action-docs .hint code {
+  overflow-wrap: anywhere;
+}
+.shape-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.shape-table td {
+  padding: 7px 10px 7px 0;
+  border-bottom: 1px solid #2e3f32;
+  vertical-align: top;
+  line-height: 1.5;
+}
+.shape-table td:first-child {
+  white-space: nowrap;
+}
+.shape-table td:first-child small {
+  color: #788e7c;
+  font-size: 10px;
+}
+.shape-table td:last-child {
+  color: #b4c3b6;
+}
+.hint.problem {
+  color: #e5ac8d;
+}
+.docs-details {
+  margin-top: 18px;
+}
+@media (max-width: 720px) {
+  .choice-grid,
+  .catalog-grid {
+    grid-template-columns: 1fr;
+  }
+}

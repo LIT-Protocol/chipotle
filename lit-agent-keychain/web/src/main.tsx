@@ -24,7 +24,6 @@ import {
   Keychain,
   digest,
   ACTIONS,
-  availableActions,
   type Authority,
   type Grant,
   type SecretBundle,
@@ -42,6 +41,7 @@ import {
   type Identity,
 } from "./identities.ts";
 import { Landing, LandingNav, LandingFooter } from "./Landing.tsx";
+import { AddSecret, ActionDocs } from "./AddSecret.tsx";
 import "@rainbow-me/rainbowkit/styles.css";
 import "./style.css";
 
@@ -80,10 +80,9 @@ const brief = (s: string) => s.slice(0, 8) + "…" + s.slice(-6);
 /** Short label for a secret's action: how agents may use it. */
 const actionLabel = (release: string) =>
   release === "export"
-    ? "Encrypted release"
-    : (ACTIONS[release]?.name ?? "Use in Lit only");
-// Owners pick from reviewed catalog actions; community-tier actions stay SDK-only until promoted.
-const CREATABLE_ACTIONS = availableActions("verified");
+    ? "Stored secret"
+    : (ACTIONS[release]?.name ?? "Connected service");
+const isStored = (release: string) => release === "export";
 function GoogleButton({
   clientId,
   network,
@@ -160,9 +159,6 @@ function App() {
   );
   const [events, setEvents] = useState<any[]>([]);
   const [creating, setCreating] = useState(false);
-  const [name, setName] = useState("");
-  const [value, setValue] = useState("");
-  const [release, setRelease] = useState<string>("export");
   const [agentKey, setAgentKey] = useState("");
   const [agentName, setAgentName] = useState("");
   const [rotation, setRotation] = useState("");
@@ -707,129 +703,101 @@ function App() {
                         </p>
                       </div>
                     )}
-                    {secrets.map((s) => (
-                      <button
-                        className={
-                          "secret-row " +
-                          (selected?.manifest.document.manifest.secretId ===
-                          s.secretId
-                            ? "selected"
-                            : "")
-                        }
-                        key={s.secretId}
-                        onClick={() => pick(s.secretId)}
-                      >
-                        <span className="secret-icon">⌘</span>
-                        <span>
-                          <strong>{s.name}</strong>
-                          <small>
-                            {actionLabel(s.release)} · v{s.version}
-                          </small>
-                        </span>
-                        <span className={"status " + (s.disabled ? "off" : "")}>
-                          {s.disabled
-                            ? "Disabled"
-                            : s.expiresAt * 1000 <= Date.now()
-                              ? "Expired"
-                              : s.agentCount + " agents"}
-                        </span>
-                      </button>
-                    ))}
+                    {[
+                      {
+                        title: "Stored secrets",
+                        note: "Agents receive an encrypted copy.",
+                        items: secrets.filter((s) => isStored(s.release)),
+                      },
+                      {
+                        title: "Connected services",
+                        note: "Agents run one reviewed action; they never see the key.",
+                        items: secrets.filter((s) => !isStored(s.release)),
+                      },
+                    ]
+                      .filter((group) => group.items.length > 0)
+                      .map((group) => (
+                        <div className="secret-group" key={group.title}>
+                          {secrets.some((s) => isStored(s.release)) &&
+                            secrets.some((s) => !isStored(s.release)) && (
+                              <p className="eyebrow">
+                                {group.title.toUpperCase()}
+                                <span className="muted"> · {group.note}</span>
+                              </p>
+                            )}
+                          {group.items.map((s) => (
+                            <button
+                              className={
+                                "secret-row " +
+                                (selected?.manifest.document.manifest
+                                  .secretId === s.secretId
+                                  ? "selected"
+                                  : "")
+                              }
+                              key={s.secretId}
+                              onClick={() => pick(s.secretId)}
+                            >
+                              <span
+                                className={
+                                  "secret-icon" +
+                                  (isStored(s.release) ? "" : " service")
+                                }
+                              >
+                                {isStored(s.release) ? "⌘" : "⚡"}
+                              </span>
+                              <span>
+                                <strong>{s.name}</strong>
+                                <small>
+                                  {actionLabel(s.release)} · v{s.version}
+                                </small>
+                              </span>
+                              <span
+                                className={
+                                  "status " + (s.disabled ? "off" : "")
+                                }
+                              >
+                                {s.disabled
+                                  ? "Disabled"
+                                  : s.expiresAt * 1000 <= Date.now()
+                                    ? "Expired"
+                                    : s.agentCount + " agents"}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      ))}
                   </section>
                   <section className="detail-card">
                     {creating ? (
-                      <form
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          void work(
-                            "Encrypting and approving secret…",
-                            async () => {
-                              const bundle = await client.create(
-                                name,
-                                value,
-                                release,
-                              );
-                              setValue("");
-                              setName("");
-                              setCreating(false);
-                              setSelected(bundle);
-                              await refresh();
-                              setNotice(
-                                "Secret saved. No agents have access yet.",
-                              );
-                            },
-                          );
-                        }}
-                      >
-                        <h2>Add a secret</h2>
-                        <label>
-                          Name
-                          <input
-                            required
-                            pattern="[A-Z][A-Z0-9_]{0,63}"
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            placeholder={
-                              ACTIONS[release]?.ui.placeholder ?? "API_KEY"
-                            }
-                            autoComplete="off"
-                          />
-                        </label>
-                        <label>
-                          Secret value
-                          <textarea
-                            required
-                            value={value}
-                            onChange={(e) => setValue(e.target.value)}
-                            autoComplete="off"
-                            spellCheck={false}
-                            placeholder="Encrypted before upload"
-                          />
-                        </label>
-                        <label>
-                          How agents may use it
-                          <select
-                            value={release}
-                            onChange={(e) => setRelease(e.target.value)}
-                          >
-                            {CREATABLE_ACTIONS.map((action) => (
-                              <option key={action.id} value={action.id}>
-                                {action.ui.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <p className="hint">
-                          {ACTIONS[release]?.ui.hint}
-                          {ACTIONS[release]?.kind === "use" && (
-                            <>
-                              {" "}
-                              Reaches only{" "}
-                              {ACTIONS[release].allowedHosts.join(", ")}.
-                            </>
-                          )}
-                        </p>
-                        <button disabled={!!busy}>Encrypt & save</button>
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={() => {
+                      <AddSecret
+                        busy={!!busy}
+                        onCancel={() => setCreating(false)}
+                        onCreate={(name, value, release) =>
+                          work("Encrypting and approving secret…", async () => {
+                            const bundle = await client.create(
+                              name,
+                              value,
+                              release,
+                            );
                             setCreating(false);
-                            setValue("");
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      </form>
+                            setSelected(bundle);
+                            await refresh();
+                            setNotice(
+                              isStored(release)
+                                ? "Secret saved. No agents have access yet."
+                                : "Service connected. No agents have access yet.",
+                            );
+                          })
+                        }
+                      />
                     ) : selected ? (
                       <>
                         <p className="eyebrow">
-                          {selected.manifest.document.manifest.release ===
-                          "export"
-                            ? "ENCRYPTED RELEASE"
-                            : `USE WITHOUT REVEAL · ${actionLabel(
+                          {isStored(selected.manifest.document.manifest.release)
+                            ? "STORED SECRET · AGENTS RECEIVE AN ENCRYPTED COPY"
+                            : `CONNECTED SERVICE · ${actionLabel(
                                 selected.manifest.document.manifest.release,
-                              ).toUpperCase()}`}
+                              ).toUpperCase()} · AGENTS NEVER SEE THE KEY`}
                         </p>
                         <h2>{selected.envelope.document.metadata.name}</h2>
                         <p className="hint">
@@ -874,6 +842,26 @@ function App() {
                             </button>
                           )}
                         </div>
+                        {!isStored(
+                          selected.manifest.document.manifest.release,
+                        ) &&
+                          ACTIONS[selected.manifest.document.manifest.release]
+                            ?.kind === "use" && (
+                            <details className="docs-details">
+                              <summary>How agents use this service</summary>
+                              <ActionDocs
+                                compact
+                                action={
+                                  ACTIONS[
+                                    selected.manifest.document.manifest.release
+                                  ] as any
+                                }
+                                secretName={
+                                  selected.envelope.document.metadata.name
+                                }
+                              />
+                            </details>
+                          )}
                         <hr />
                         <h3>Authorized agents</h3>
                         {selected.policy.document.grants.length === 0 && (
