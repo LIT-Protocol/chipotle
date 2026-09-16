@@ -14,7 +14,12 @@ version: 2.0.0
    `use(name, input)` runs the secret's catalog action (Stripe balance, OpenAI chat,
    GitHub file read, Slack message, …) inside Lit without revealing its credential.
    `list()` tells you which applies to each secret and the input shape it takes.
-4. Or expose it to an MCP client in one line. The server runs locally, next to the
+4. For a tool that needs the raw value in its environment, prefer
+   `keychain run identity.json CONFIG.keychain.json -- <command>` over `get`. It
+   injects each export-release secret as an environment variable named after the
+   secret and prints nothing, so the value never enters your context or logs.
+   `--only A,B` selects secrets; `--env SECRET=ENV_VAR` renames one.
+5. Or expose it to an MCP client in one line. The server runs locally, next to the
    identity file, and offers `list_secrets`, `get_secret`, one tool per catalog
    action (`stripe_balance`, `openai_chat`, `github_read_file`, `slack_post_message`),
    `list_actions` and `agent_public_key`:
@@ -51,7 +56,8 @@ passed as a usage key, each with a message naming the mistake.
 Never request an owner's private key or Google token, and never ask the backend to
 mint a grant. There are no setup bearer tokens or managed per-tenant PKP vaults.
 Agent identity and Lit execution billing are separate. Keep identity and config files private
-and avoid logging credentials returned by `get` or the CLI.
+and avoid logging credentials returned by `get` or the CLI. When you only need a
+credential for one command, use `keychain run` so it is never printed at all.
 
 The operator can replay older still-valid owner permissions, including undoing a
 revocation. It cannot invent new owner permissions. The frontend/SDK, Lit runtime,

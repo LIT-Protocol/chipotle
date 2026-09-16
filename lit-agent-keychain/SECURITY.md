@@ -33,6 +33,17 @@ lookup (a lying RPC can only cause false rejections or accept a hash the Safe ne
 whitelisted). The policy constants are compiled into the client, so the same
 "verified client release" caveat above applies.
 
+## Agent-side plaintext handling
+
+`get`, the `get_secret` MCP tool and `keychain run` all deliver plaintext to the
+agent host; from there the client is trusted. `run` avoids stdout and passes the
+value only through the child process's environment, which keeps it out of agent
+transcripts and shell history but not out of reach of other processes running as
+the same user (`ps eww`, `/proc/<pid>/environ`). It is not a sandbox. The CLI zeroes
+its copy of the agent key and drops its references to the fetched values once the
+child has started; JavaScript strings cannot be scrubbed, so the plaintext may linger
+in the CLI process heap briefly before it exits.
+
 ## Accepted operator trust
 
 The database holds signed policy records and chooses the current record. The action

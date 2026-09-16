@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { subscribe } from "./billing-fixture.ts";
 import { privateKeyToAccount } from "viem/accounts";
 import {
@@ -116,6 +119,79 @@ test(
             !body.includes(keys.privateKey),
         ),
       );
+      // `keychain run` injects the value into a child's environment and prints
+      // nothing itself.
+      {
+        const dir = mkdtempSync(path.join(tmpdir(), "keychain-run-"));
+        try {
+          const identityFile = path.join(dir, "identity.json");
+          const configFile = path.join(dir, "API_TEST.keychain.json");
+          writeFileSync(identityFile, JSON.stringify({ v: 2, ...keys }), {
+            mode: 0o600,
+          });
+          writeFileSync(
+            configFile,
+            JSON.stringify({
+              v: 2,
+              litApiUrl: lit,
+              usageApiKey: c.lit.usageApiKey,
+              secrets: {
+                API_TEST: {
+                  manifest: bundle.manifest.document.manifest,
+                  actionCid: bundle.manifest.document.actionCid,
+                },
+              },
+            }),
+          );
+          const stdout = execFileSync(
+            process.execPath,
+            [
+              "sdk/cli.mjs",
+              "run",
+              identityFile,
+              configFile,
+              "--env",
+              "API_TEST=INJECTED",
+              "--",
+              process.execPath,
+              "-e",
+              'process.stdout.write(JSON.stringify([process.env.INJECTED, "API_TEST" in process.env]))',
+            ],
+            {
+              encoding: "utf8",
+              stdio: ["ignore", "pipe", "pipe"],
+              env: { ...process.env, KEYCHAIN_SKIP_ATTESTATION: "1" },
+            },
+          );
+          assert.deepEqual(JSON.parse(stdout), [
+            "local-only-secret-7f9ba",
+            false,
+          ]);
+          assert.throws(
+            () =>
+              execFileSync(
+                process.execPath,
+                [
+                  "sdk/cli.mjs",
+                  "run",
+                  identityFile,
+                  configFile,
+                  "--",
+                  process.execPath,
+                  "-e",
+                  "process.exit(7)",
+                ],
+                {
+                  stdio: "pipe",
+                  env: { ...process.env, KEYCHAIN_SKIP_ATTESTATION: "1" },
+                },
+              ),
+            (error: any) => error.status === 7,
+          );
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }
       const stale = bundle;
       const earlyBackup = await c.backup();
       bundle = await c.rotate(bundle, "rotated-only-in-browser");
