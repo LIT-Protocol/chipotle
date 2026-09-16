@@ -40,21 +40,42 @@ export function walletIdentity(
     }),
   };
 }
+// NotAllowedError deliberately does not distinguish cancellation, timeout and
+// an unavailable credential. Never infer that the user's passkey was deleted.
+async function requestPasskey(
+  request: Promise<Credential | null>,
+): Promise<PublicKeyCredential> {
+  try {
+    const credential = await request;
+    if (!credential) throw new DOMException("No credential", "NotAllowedError");
+    return credential as PublicKeyCredential;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "NotAllowedError") {
+      throw new Error(
+        "Passkey request cancelled, timed out, or unavailable. Try again and choose a passkey available on this device or another device. If you lost a passkey, use an approved recovery passkey with 'Use an existing passkey', or load your vault backup under 'Recover an existing vault' and sign in with an approved credential.",
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+}
 export async function createPasskey(label: string): Promise<Identity> {
-  const credential = (await navigator.credentials.create({
-    publicKey: {
-      rp: { name: "Lit Agent Keychain", id: location.hostname },
-      user: { id: randomBytes(), name: label, displayName: label },
-      challenge: randomBytes(),
-      pubKeyCredParams: [{ type: "public-key", alg: -7 }],
-      attestation: "none",
-      authenticatorSelection: {
-        residentKey: "required",
-        userVerification: "required",
+  const credential = await requestPasskey(
+    navigator.credentials.create({
+      publicKey: {
+        rp: { name: "Lit Agent Keychain", id: location.hostname },
+        user: { id: randomBytes(), name: label, displayName: label },
+        challenge: randomBytes(),
+        pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+        attestation: "none",
+        authenticatorSelection: {
+          residentKey: "required",
+          userVerification: "required",
+        },
+        timeout: 60000,
       },
-      timeout: 60000,
-    },
-  })) as PublicKeyCredential | null;
+    }),
+  );
   if (!credential) throw new Error("Passkey creation cancelled");
   const response = credential.response as AuthenticatorAttestationResponse;
   const spki = response.getPublicKey();
@@ -83,17 +104,19 @@ export function passkeyIdentity(
   return {
     owner,
     signer: async (challenge: Challenge) => {
-      const credential = (await navigator.credentials.get({
-        publicKey: {
-          challenge: unhex(digest(challenge)),
-          rpId: owner.rpId,
-          allowCredentials: [
-            { type: "public-key", id: unb64u(owner.credentialId, 1024) },
-          ],
-          userVerification: "required",
-          timeout: 60000,
-        },
-      })) as PublicKeyCredential | null;
+      const credential = await requestPasskey(
+        navigator.credentials.get({
+          publicKey: {
+            challenge: unhex(digest(challenge)),
+            rpId: owner.rpId,
+            allowCredentials: [
+              { type: "public-key", id: unb64u(owner.credentialId, 1024) },
+            ],
+            userVerification: "required",
+            timeout: 60000,
+          },
+        }),
+      );
       if (!credential) throw new Error("Passkey approval cancelled");
       if (b64u(new Uint8Array(credential.rawId)) !== owner.credentialId)
         throw new Error("Wrong passkey");
@@ -113,19 +136,20 @@ export async function discoverPasskey(): Promise<{
   identity: Identity;
   authority?: Authority;
 }> {
-  const saved = localStorage.getItem("keychain.passkey");
-  if (saved) {
-    const owner = JSON.parse(saved);
-    return { identity: passkeyIdentity(owner) };
-  }
-  const credential = (await navigator.credentials.get({
-    publicKey: {
-      challenge: randomBytes(),
-      rpId: location.hostname,
-      userVerification: "required",
-      timeout: 60000,
-    },
-  })) as PublicKeyCredential | null;
+  // A cached descriptor is not a vault selection: adding a recovery passkey
+  // overwrites it. Always discover the selected credential and resolve its vault.
+  // The random discovery assertion is NOT login; signer still approves the
+  // actual challenge and the authority action verifies membership and possession.
+  const credential = await requestPasskey(
+    navigator.credentials.get({
+      publicKey: {
+        challenge: randomBytes(),
+        rpId: location.hostname,
+        userVerification: "required",
+        timeout: 60000,
+      },
+    }),
+  );
   if (!credential) throw new Error("Passkey sign-in cancelled");
   const id = b64u(new Uint8Array(credential.rawId));
   const result = await jsonFetch(`/api/passkeys/${id}`);
