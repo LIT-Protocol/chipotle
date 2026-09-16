@@ -398,3 +398,78 @@ test("the template archive is append-only, content-addressed and newest-first", 
   // The authority has been released more than once; both versions are retained.
   assert.ok(index.authority.length >= 2);
 });
+test("bound fetch accepts exactly one label under a wildcard host and nothing else", async () => {
+  const definition = catalog.supabase_tables as UseDefinition;
+  assert.deepEqual(definition.allowedHosts, ["*.supabase.co"]);
+  const realFetch = globalThis.fetch;
+  const seen: string[] = [];
+  globalThis.fetch = (async (input: any) => {
+    seen.push(String(input));
+    return json([]);
+  }) as any;
+  try {
+    for (const url of [
+      "https://supabase.co/rest/v1/t",
+      "https://a.b.supabase.co/rest/v1/t",
+      "https://abc.supabase.co.evil.test/rest/v1/t",
+      "https://.supabase.co/rest/v1/t",
+      "https://-.supabase.co/rest/v1/t",
+      "http://abcdefghijklmnopqrst.supabase.co/rest/v1/t",
+    ])
+      await assert.rejects(boundFetch(definition)(url), url);
+    assert.deepEqual(seen, []);
+    assert.equal(
+      await boundFetch(definition)(
+        "https://abcdefghijklmnopqrst.supabase.co/rest/v1/t?select=id",
+      ),
+      "[]",
+    );
+    assert.equal(seen.length, 1);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+test("Supabase action reaches the project's own host and returns only allowlisted columns", async () => {
+  const f = await fixture("supabase_tables", undefined, {
+    input: {
+      table: "orders",
+      operation: "select",
+      columns: ["id", "status"],
+      filters: [{ column: "status", op: "eq", value: "open" }],
+      limit: 5,
+    },
+  });
+  const key = JSON.parse(f.secret).key;
+  f.h.extraFetch = async (input, init) => {
+    const url = new URL(String(input));
+    assert.equal(url.host, "abcdefghijklmnopqrst.supabase.co");
+    assert.equal(url.pathname, "/rest/v1/orders");
+    assert.equal(url.searchParams.get("select"), "id,status");
+    assert.equal(url.searchParams.get("status"), "eq.open");
+    assert.equal(url.searchParams.get("limit"), "5");
+    assert.equal((init?.headers as any).apikey, key);
+    return json([{ id: 1, status: "open", email: "a@b.c", k: key }]);
+  };
+  const out = await f.h.run(f.manifest, f.params);
+  assert.equal(out.ok, true);
+  assert.deepEqual(await unseal(f, out), {
+    rows: ['{"id":1,"status":"open"}'],
+    count: 1,
+    truncated: false,
+  });
+  assert.ok(!JSON.stringify(out).includes(key));
+  // A table outside the owner's allowlist is denied without any upstream call.
+  const g = await fixture("supabase_tables", undefined, {
+    input: { table: "users", operation: "select" },
+  });
+  let called = false;
+  g.h.extraFetch = async () => {
+    called = true;
+    return json([]);
+  };
+  assert.deepEqual(await g.h.run(g.manifest, g.params), {
+    ok: false,
+    error: "access_denied",
+  });
+  assert.equal(called, false);
+});

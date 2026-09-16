@@ -43,7 +43,9 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 - "Use inside Lit" action catalog from the public
   [agent-keychain-library](https://github.com/LIT-Protocol/agent-keychain-library)
   repo, pinned to a commit in `package.json`: Stripe balance, OpenAI chat, GitHub
-  file reads, Slack messages. Each action's manifest pins the hosts it may reach,
+  file reads, Slack messages, Supabase table reads and inserts under an
+  owner-written allowlist. Each action's manifest pins the hosts it may reach
+  (exact, or one label under a `*.` provider domain such as `*.supabase.co`),
   the credential shape, agent input and result shapes; the harness in
   `actions/secret-common.ts` enforces them in the enclave. No credential-export,
   arbitrary URL, code, redirect, or migration path. Contributors add actions by PR

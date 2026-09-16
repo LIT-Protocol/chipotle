@@ -206,6 +206,7 @@ test("stdio MCP server speaks JSON-RPC, exposes tools, and never prints the priv
         "openai_chat",
         "slack_post_message",
         "stripe_balance",
+        "supabase_tables",
         "list_actions",
         "agent_public_key",
       ],
