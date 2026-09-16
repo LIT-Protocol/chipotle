@@ -79,11 +79,31 @@
         outline: none;
         border-color: var(--accent);
       }
+      .url-input {
+        padding: 0.5rem 0.75rem;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.8rem;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+        min-width: 260px;
+        flex: 1 1 260px;
+      }
+      .url-input::placeholder {
+        color: var(--muted);
+      }
+      .url-input:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
       .refresh-controls {
         display: flex;
         align-items: center;
         gap: 0.5rem;
         margin-left: auto;
+        flex-wrap: wrap;
+        justify-content: flex-end;
       }
       .countdown {
         font-family: 'JetBrains Mono', monospace;
@@ -485,11 +505,12 @@
         </p>
       </div>
       <div class="refresh-controls">
-        <select id="network" class="network-select" title="Network" aria-label="Network">
+        <select id="network" class="network-select" title="Preset network" aria-label="Preset network">
           <option value="http://localhost:8000/core/v1/">Local Development</option>
           <option value="https://test.chipotle.litprotocol.com/core/v1/">Next - Phala</option>
           <option value="https://api.chipotle.litprotocol.com/core/v1/">Prod - Phala</option>
         </select>
+        <input type="text" id="server-url" class="url-input" spellcheck="false" title="Server base URL — edit to point at any node" aria-label="Server base URL" placeholder="https://host/core/v1/" />
         <button type="button" id="btn-refresh-all" title="Refresh all data (R)" style="margin-top: 0; padding: 0.4rem 0.9rem; font-size: 0.85rem;">Refresh</button>
         <span id="refresh-countdown" class="countdown">30s</span>
       </div>
@@ -671,7 +692,10 @@
             <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4.47 5.47a.75.75 0 011.06 0L8 7.94l2.47-2.47a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06z"/></svg>
           </div>
           <div class="card-body">
-            <input type="hidden" id="contract-address" />
+            <div class="form-group" style="margin-top: 0.25rem">
+              <label for="contract-address">Contract address — editable, point at any contract</label>
+              <input type="text" id="contract-address" placeholder="0x…" spellcheck="false" />
+            </div>
 
             <div class="results" id="results" style="display: none">
               <h2>Contract values</h2>
