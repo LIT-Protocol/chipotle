@@ -124,15 +124,24 @@ async function downloadPublished(name, published, dest) {
     throw new Error("published tarball integrity mismatch");
   writeFileSync(dest, bytes);
 }
+/** `npm pack --json` output, tolerating any non-JSON lines printed before it. */
+function parsePackJson(out) {
+  const start = out.indexOf("[");
+  if (start < 0) throw new Error(`npm pack --json produced no JSON: ${out}`);
+  return JSON.parse(out.slice(start));
+}
 async function changedFiles(published, name) {
   const work = mkdtempSync(path.join(tmpdir(), "keychain-publish-"));
   try {
+    // The build already ran above; --ignore-scripts skips the sdk's prepack
+    // hook, whose "Built N catalog actions" log would otherwise land in the
+    // stdout we parse as JSON (npm 11 forwards lifecycle output to stdout).
     const localTar = run(
       "npm",
-      ["pack", "--pack-destination", work, "--json"],
+      ["pack", "--pack-destination", work, "--json", "--ignore-scripts"],
       { cwd: sdk },
     );
-    const localPath = path.join(work, JSON.parse(localTar)[0].filename);
+    const localPath = path.join(work, parsePackJson(localTar)[0].filename);
     const remotePath = path.join(work, "published.tgz");
     await downloadPublished(name, published, remotePath);
     const a = fingerprint(localPath, path.join(work, "local"));
