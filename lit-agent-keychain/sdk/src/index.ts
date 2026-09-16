@@ -71,6 +71,7 @@ export {
   replayEventLog,
   CHIPOTLE_ATTESTATION_POLICY,
   ATTESTED_ORIGINS,
+  BASE_PUBLIC_RPC_URLS,
 } from "../../protocol/attestation.ts";
 export type {
   AttestationPolicy,
@@ -918,6 +919,57 @@ export class OwnerClient {
     }
   }
 }
+/**
+ * Why the signed policy in a bundle would make the action refuse this agent's
+ * request, or `undefined` when it permits it. The action never says why it
+ * refused (its only failure answer is `access_denied`, so nothing about the
+ * policy or the upstream call leaks), so the client explains what it can see
+ * before spending an execution.
+ */
+export function explainDenial(
+  policy: Policy,
+  agentPublicKey: string,
+  operation: string,
+  version: number,
+  envelopeHash: string,
+  now = nowSeconds(),
+): string | undefined {
+  const when = (seconds: number) => new Date(seconds * 1000).toISOString();
+  if (policy.disabled)
+    return "the owner disabled this secret. Ask them to enable it in Keychain.";
+  if (now < policy.notBefore)
+    return `the policy is not valid until ${when(policy.notBefore)}. Check this machine's clock.`;
+  if (now >= policy.expiresAt)
+    return `the owner's permission expired at ${when(policy.expiresAt)}. Ask them to renew it in Keychain.`;
+  const grant = policy.grants.find((g) => g.agentPublicKey === agentPublicKey);
+  if (!grant)
+    return `agent ${agentPublicKey} is not approved for this secret. Give the owner this public key to approve, or check that the identity file matches the approved agent.`;
+  if (!grant.operations.includes(operation))
+    return `agent "${grant.label}" is approved for ${grant.operations.join(", ")}, not ${operation}.`;
+  if (
+    !grant.versions.some(
+      (v) => v.version === version && v.envelopeHash === envelopeHash,
+    )
+  )
+    return `agent "${grant.label}" is approved for version ${grant.versions
+      .map((v) => v.version)
+      .join(
+        ", ",
+      )} of this secret, not the current version ${version}. Ask the owner to re-approve it after the rotation.`;
+  return undefined;
+}
+/**
+ * Message for an `access_denied` answer that arrived even though the signed
+ * policy permitted the request. For "use inside Lit" actions that almost always
+ * means the upstream call failed, but the enclave does not say.
+ */
+function refusedByAction(name: string, definition: ActionDefinition) {
+  if (definition.kind === "use") {
+    const hosts = definition.allowedHosts.join(", ");
+    return `Access denied: Lit ran the ${definition.name} action for "${name}" but it did not complete. The owner's policy permits this request, so the call to ${hosts} most likely failed (a rejected or expired credential, or an input the service refused); the enclave reports no detail. Check the credential with its provider or ask the owner to rotate it.`;
+  }
+  return `Access denied: Lit refused to release "${name}" although the policy this client fetched permits it. The policy may have just changed; retry once, then ask the owner to check this agent's approval in Keychain.`;
+}
 export async function verifyBundle(
   bundle: SecretBundle,
   lit: LitConnection,
@@ -1051,9 +1103,12 @@ export class Keychain {
     // The exact release this secret was created under; fetched by hash if older
     // than this client's bundled template.
     const template = await templateStore.resolve(manifest, locator.actionCid);
+    const definition = actionDefinition(manifest.release);
     requireThat(
-      actionDefinition(manifest.release).operation === operation,
-      "Unsupported release operation",
+      definition.operation === operation,
+      definition.kind === "use"
+        ? `Secret "${name}" was created with the ${definition.name} action (${manifest.release}); call use("${name}") instead of get(). Its value never leaves the enclave.`
+        : `Secret "${name}" is a stored secret; call get("${name}") instead of use().`,
     );
     const bundle: SecretBundle = await jsonFetch(
       `${manifest.registry}/api/secrets/${manifest.secretId}/bundle`,
@@ -1066,6 +1121,17 @@ export class Keychain {
       "Manifest substitution",
     );
     const now = nowSeconds();
+    // The action answers every failure with a bare access_denied. Explain what
+    // the signed policy already shows before paying for an execution.
+    const denial = explainDenial(
+      bundle.policy.document,
+      this.publicKey,
+      operation,
+      bundle.envelope.document.metadata.version,
+      digest(bundle.envelope.document),
+      now,
+    );
+    requireThat(denial === undefined, `Access denied: ${denial}`);
     const responseKey = randomBytes();
     const request = requestSchema.parse({
       v: V,
@@ -1085,15 +1151,22 @@ export class Keychain {
       expiresAt: now + 90,
     });
     try {
-      const result = await this.lit.execute(
-        manifest,
-        {
-          operation,
-          signedRequest: { request, signature: signAgent(request, this.key) },
-          envelope: bundle.envelope,
-        },
-        template,
-      );
+      let result;
+      try {
+        result = await this.lit.execute(
+          manifest,
+          {
+            operation,
+            signedRequest: { request, signature: signAgent(request, this.key) },
+            envelope: bundle.envelope,
+          },
+          template,
+        );
+      } catch (error) {
+        if (error instanceof Error && error.message === "Access denied")
+          throw new Error(refusedByAction(name, definition));
+        throw error;
+      }
       const protectedResult = result.result as ProtectedResponse;
       requireThat(
         protectedResult?.payload?.v === V &&

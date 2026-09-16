@@ -23,19 +23,43 @@ import { p256 } from "@noble/curves/nist.js";
 import { sha256, sha384 } from "@noble/hashes/sha2.js";
 import { hex, unhex, requireThat } from "./crypto.ts";
 import { jsonFetch, textFetch } from "./http.ts";
+// The governance lookup talks to public chain RPCs, which rate limit and go
+// down independently of Lit. It uses the client fetch so a 429 or 5xx can be
+// named and the next endpoint tried; the template helper above stays untouched.
+import { jsonFetch as rpcFetch, HttpError } from "./client-http.ts";
 
 export type AttestationPolicy = {
   /** Expected dstack app id: the DstackApp contract address, hex without 0x. */
   appId: string;
   /** DstackKms contract that whitelists OS images. */
   kmsContract: string;
-  /** JSON-RPC endpoint for the chain that hosts both contracts. */
+  /** JSON-RPC endpoint for the chain that hosts both contracts; tried first. */
   rpcUrl: string;
+  /**
+   * Tried in order when `rpcUrl` is unreachable, rate limited or returns an RPC
+   * error. The first endpoint that answers decides; a "not whitelisted" answer
+   * is final and never retried elsewhere.
+   */
+  fallbackRpcUrls?: string[];
 };
+/**
+ * Public Base mainnet endpoints. Each is free and independently operated, and
+ * each throttles bursts from one IP (mainnet.base.org after roughly three CLI
+ * runs in quick succession), so the governance check rotates through them.
+ * Pin your own endpoint with `attestation.rpcUrl` or `KEYCHAIN_BASE_RPC_URL`
+ * for stronger guarantees than a public RPC offers.
+ */
+export const BASE_PUBLIC_RPC_URLS = [
+  "https://mainnet.base.org",
+  "https://base-rpc.publicnode.com",
+  "https://1rpc.io/base",
+  "https://base.drpc.org",
+];
 export const CHIPOTLE_ATTESTATION_POLICY: AttestationPolicy = {
   appId: "3f91deaf16ff7c823ee65081d6bafa1ceea05ffc",
   kmsContract: "0x2f83172a49584c017f2b256f0fb2dca14126ba9c",
-  rpcUrl: "https://mainnet.base.org",
+  rpcUrl: BASE_PUBLIC_RPC_URLS[0],
+  fallbackRpcUrls: BASE_PUBLIC_RPC_URLS.slice(1),
 };
 export const ATTESTED_ORIGINS: Record<string, AttestationPolicy> = {
   "https://api.chipotle.litprotocol.com": CHIPOTLE_ATTESTATION_POLICY,
@@ -433,30 +457,68 @@ export function pinnedImages(appCompose: string): string[] {
     );
   return images;
 }
+/** Short, human-readable reason one RPC endpoint could not answer. */
+function describeRpcFailure(error: unknown) {
+  if (error instanceof HttpError)
+    return error.status === 429
+      ? "429 rate limited"
+      : `HTTP ${error.status}${error.detail ? ` ${error.detail}` : ""}`;
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/^Request failed \((\d+)\)$/, "HTTP $1");
+}
+/**
+ * Asks the chain whether `hash32` is whitelisted in `contract`, trying each RPC
+ * endpoint in turn until one answers. Only transport, HTTP and JSON-RPC-level
+ * failures fall through; a successful `eth_call` result is authoritative.
+ */
 async function allowedOnChain(
-  rpcUrl: string,
+  rpcUrls: string[],
   contract: string,
   selector: string,
   hash32: string,
   timeoutMs: number,
 ) {
   const to = "0x" + hexBytes(contract, 20, "contract address");
-  const result = await jsonFetch(
-    rpcUrl,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "eth_call",
-        params: [{ to, data: "0x" + selector + hash32 }, "latest"],
-      }),
-    },
-    timeoutMs,
+  const body = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "eth_call",
+    params: [{ to, data: "0x" + selector + hash32 }, "latest"],
+  });
+  const failures: string[] = [];
+  for (const rpcUrl of rpcUrls) {
+    let result: any;
+    try {
+      result = await rpcFetch(
+        rpcUrl,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+        },
+        timeoutMs,
+      );
+    } catch (error) {
+      failures.push(`${new URL(rpcUrl).host}: ${describeRpcFailure(error)}`);
+      continue;
+    }
+    if (result?.error !== undefined) {
+      failures.push(
+        `${new URL(rpcUrl).host}: RPC error${
+          typeof result.error?.message === "string"
+            ? ` ${result.error.message.slice(0, 120)}`
+            : ""
+        }`,
+      );
+      continue;
+    }
+    return result?.result === TRUE_WORD;
+  }
+  throw new Error(
+    `Attestation: no Base RPC endpoint answered the on-chain governance check (${failures.join(
+      "; ",
+    )}). Retry shortly, or point the check at your own Base RPC with KEYCHAIN_BASE_RPC_URL (CLI, MCP) or the attestation.rpcUrl option (SDK).`,
   );
-  requireThat(result?.error === undefined, "Attestation: chain RPC error");
-  return result?.result === TRUE_WORD;
 }
 
 // ---- full verification -------------------------------------------------------
@@ -555,16 +617,17 @@ export async function verifyAttestation(
   checks.push("measured-identity");
   const images = pinnedImages(tcb.app_compose);
   checks.push("images-digest-pinned");
+  const rpcUrls = [policy.rpcUrl, ...(policy.fallbackRpcUrls ?? [])];
   const [composeAllowed, osAllowed] = await Promise.all([
     allowedOnChain(
-      policy.rpcUrl,
+      rpcUrls,
       appId,
       SELECTOR_ALLOWED_COMPOSE_HASHES,
       composeHash,
       timeoutMs,
     ),
     allowedOnChain(
-      policy.rpcUrl,
+      rpcUrls,
       policy.kmsContract,
       SELECTOR_ALLOWED_OS_IMAGES,
       osImageHash,

@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import {
   Keychain,
   ACTIONS,
+  ATTESTED_ORIGINS,
   assertAgentConfig,
   assertAgentIdentity,
 } from "./dist/index.js";
@@ -26,11 +27,23 @@ const usage =
   "  exits with its status; nothing is printed. --only picks secrets, --env renames a variable, --file writes\n" +
   "  a secret to a new mode-0600 file (instead of the environment) that is removed when the command exits.\n" +
   "CHIPOTLE_USAGE_API_KEY overrides the config's scoped billing key.\n" +
+  "KEYCHAIN_BASE_RPC_URL points the attestation's on-chain governance check at your own Base RPC\n" +
+  "  instead of rotating through public endpoints.\n" +
   "KEYCHAIN_SKIP_ATTESTATION=1 disables the TEE attestation check (development only).\n";
+/** The pinned policy for `litApiUrl`, with the RPC replaced when the operator supplies one. */
+const attestationPolicy = (litApiUrl) => {
+  const policy = ATTESTED_ORIGINS[new URL(litApiUrl).origin];
+  const rpcUrl = process.env.KEYCHAIN_BASE_RPC_URL;
+  if (!policy || !rpcUrl) return policy;
+  return { ...policy, rpcUrl, fallbackRpcUrls: [] };
+};
 const attestationOptions = async (litApiUrl) =>
   process.env.KEYCHAIN_SKIP_ATTESTATION === "1"
     ? { attestation: false }
-    : { tlsCertificateSha256: await peerCertificateSha256(litApiUrl) };
+    : {
+        attestation: attestationPolicy(litApiUrl),
+        tlsCertificateSha256: await peerCertificateSha256(litApiUrl),
+      };
 const readJson = async (file) => {
   try {
     return JSON.parse(await readFile(file, "utf8"));
@@ -41,11 +54,19 @@ const readJson = async (file) => {
 try {
   if (command === "init" && args.length === 1) {
     const identity = Keychain.generateKey();
-    await writeFile(
-      args[0],
-      JSON.stringify({ v: 2, ...identity }, null, 2) + "\n",
-      { mode: 0o600, flag: "wx" },
-    );
+    try {
+      await writeFile(
+        args[0],
+        JSON.stringify({ v: 2, ...identity }, null, 2) + "\n",
+        { mode: 0o600, flag: "wx" },
+      );
+    } catch (error) {
+      if (error.code === "EEXIST")
+        throw new Error(
+          `${args[0]} already exists and was left untouched. An agent identity is never overwritten; pick another path, or reuse this one and read its publicKey.`,
+        );
+      throw error;
+    }
     process.stdout.write(
       `Agent public key: ${identity.publicKey}\nPrivate identity saved to ${args[0]}\n`,
     );
@@ -118,10 +139,10 @@ try {
       client.destroy();
     }
   } else if (command === "attest" && args.length <= 1) {
-    const { verifyAttestation, ATTESTED_ORIGINS, DEFAULT_LIT_API_URL } =
+    const { verifyAttestation, DEFAULT_LIT_API_URL } =
       await import("./dist/index.js");
     const url = args[0] ?? DEFAULT_LIT_API_URL;
-    const policy = ATTESTED_ORIGINS[url];
+    const policy = attestationPolicy(url);
     if (!policy) throw new Error(`No attestation policy is pinned for ${url}`);
     const report = await verifyAttestation(url, policy, {
       tlsCertificateSha256: await peerCertificateSha256(url),
