@@ -6,6 +6,7 @@ import {
   type Template,
 } from "../../protocol/actions.ts";
 import discoverySource from "../../generated/discovery.ts";
+import { peerCertificateSha256 } from "./tls-runtime.ts";
 import catalog from "../../generated/catalog.ts";
 import {
   shapeToZod,
@@ -110,7 +111,9 @@ export const DEFAULT_LIT_API_URL = "https://api.chipotle.litprotocol.com";
  */
 export const ACTIONS: Catalog = catalog;
 export function actionDefinition(release: string): ActionDefinition {
-  const definition = ACTIONS[release];
+  const definition = Object.hasOwn(ACTIONS, release)
+    ? ACTIONS[release]
+    : undefined;
   requireThat(definition, `Unknown action release ${release}`);
   return definition;
 }
@@ -198,6 +201,21 @@ export function assertAgentIdentity(
       /^[0-9a-f]{64}$/.test(identity.privateKey),
     "Agent identity privateKey must be 64 lowercase hex characters from `keychain init`",
   );
+  requireThat(
+    !Object.hasOwn(identity, "v") || identity.v === V,
+    "Unsupported agent identity version",
+  );
+  if (Object.hasOwn(identity, "publicKey")) {
+    const key = unhex(identity.privateKey);
+    try {
+      requireThat(
+        identity.publicKey === agentPublicKey(key),
+        "Agent identity publicKey does not match privateKey",
+      );
+    } finally {
+      key.fill(0);
+    }
+  }
 }
 /** Validates the agent config downloaded from Keychain (*.keychain.json). */
 export function assertAgentConfig(
@@ -297,10 +315,15 @@ export class LitConnection {
     const maxAge = this.attestationHooks.maxAgeMs ?? 3600000;
     if (!this.attested || Date.now() - this.attestedAt > maxAge) {
       this.attestedAt = Date.now();
-      this.attested = verifyAttestation(this.url, this.attestationPolicy, {
-        timeoutMs: this.timeoutMs,
-        tlsCertificateSha256: this.attestationHooks.tlsCertificateSha256,
-      }).catch((error) => {
+      this.attested = (async () => {
+        const tlsCertificateSha256 =
+          this.attestationHooks.tlsCertificateSha256 ??
+          (await peerCertificateSha256(this.url, this.timeoutMs));
+        return verifyAttestation(this.url, this.attestationPolicy!, {
+          timeoutMs: this.timeoutMs,
+          tlsCertificateSha256,
+        });
+      })().catch((error) => {
         this.attested = undefined;
         throw error;
       });
@@ -1002,6 +1025,10 @@ export async function verifyBundle(
 }
 export class Keychain {
   private readonly key: Uint8Array<ArrayBuffer>;
+  private destroyed = false;
+  private assertActive() {
+    requireThat(!this.destroyed, "Keychain client has been destroyed");
+  }
   readonly publicKey: string;
   readonly lit: LitConnection;
   constructor(
@@ -1030,6 +1057,7 @@ export class Keychain {
   }
   /** Attests the Lit endpoint now instead of lazily on the first read. */
   attest() {
+    this.assertActive();
     return this.lit.attest();
   }
   /** Secret names with the single operation each release permits and its input shape, if any. */
@@ -1054,6 +1082,7 @@ export class Keychain {
     return { privateKey: hex(key), publicKey: agentPublicKey(key) };
   }
   destroy() {
+    this.destroyed = true;
     this.key.fill(0);
   }
   /** Decrypts an export-release secret locally and returns its value. */
@@ -1066,8 +1095,9 @@ export class Keychain {
    * and again inside the enclave. Returns the action's bounded result object.
    */
   async use(name: string, input?: Record<string, unknown>): Promise<any> {
+    this.assertActive();
+    requireThat(Object.hasOwn(this.config.secrets, name), "Unknown secret");
     const locator = this.config.secrets[name];
-    requireThat(locator, "Unknown secret");
     const definition = actionDefinition(locator.manifest.release);
     requireThat(
       definition.kind === "use",
@@ -1097,8 +1127,9 @@ export class Keychain {
     operation: string,
     input?: Record<string, unknown>,
   ): Promise<string> {
+    this.assertActive();
+    requireThat(Object.hasOwn(this.config.secrets, name), "Unknown secret");
     const locator = this.config.secrets[name];
-    requireThat(locator, "Unknown secret");
     const manifest = manifestSchema.parse(locator.manifest);
     // The exact release this secret was created under; fetched by hash if older
     // than this client's bundled template.
