@@ -1,6 +1,6 @@
 ---
 title: "Confidential AI"
-description: "Run your application or a vendor’s Docker container in confidential hardware, with verifiable software and on-chain approval of code and egress policy."
+description: "Deploy Docker workloads with measured egress policy and on-chain release approval."
 ---
 
 Run your AI workload in confidential hardware, with control over the software that runs and the services it can reach. Bring your own application or a vendor’s Docker container. Work with Lit to define the deployment, verify its runtime, and govern changes on-chain.
@@ -10,7 +10,7 @@ Run your AI workload in confidential hardware, with control over the software th
 </Card>
 
 <Note>
-AI deployments are arranged with the Lit team. This guide describes the container deployment method; it is not a self-serve Docker API or a promise of support for every model or accelerator. The crypto dashboard and Lit Actions API are separate entry points.
+Work with the Lit team to assess model and hardware compatibility and arrange your deployment. The self-serve crypto dashboard and Lit Actions API are separate entry points.
 </Note>
 
 ## How it works
@@ -18,7 +18,7 @@ AI deployments are arranged with the Lit team. This guide describes the containe
 A Docker container packages the application. A confidential virtual machine (CVM) provides the hardware-protected execution environment. Docker alone does not provide confidential computing.
 
 ```mermaid
-flowchart LR
+flowchart TB
   A[Docker image and configuration] --> B[Measured release]
   E[Egress policy] --> B
   B --> C[On-chain approval]
