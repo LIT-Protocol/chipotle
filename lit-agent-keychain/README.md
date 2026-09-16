@@ -28,6 +28,27 @@ The operator is trusted to serve the latest signed policy. It can replay old val
 permissions, including undoing a revocation, but cannot forge owner authorization.
 The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md).
 
+## SDK 2.0.3 release coordination
+
+This source prepares SDK 2.0.3 and pins the hosted examples to that version. The
+customer QA baseline was published 2.0.2; a source merge does **not** publish npm.
+Publish and verify the 2.0.3 package **before deploying these version-pinned docs**.
+Until publication, registry installation of that version is not an acceptance test;
+reviewers should use the locally packed tarball and isolated-consumer tests.
+
+Release checks: run `npm test` and `npm run build`, publish through the normal
+maintainer release process, verify `npm view @lit-protocol/keychain@2.0.3 version`,
+then repeat the strict external TypeScript consumer and attestation-enabled Node
+smoke test from the registry artifact. Confirm the Node report includes
+`tls-certificate-in-tee`; a browser build cannot perform this check. Only then
+deploy the owner UI/docs and retest passkey recovery against production.
+
+SDK 2.0.3 also rejects inconsistent identity metadata, gives a local error after
+`destroy()`, handles prototype-named lookups safely, rejects malformed MCP request
+IDs, and adds conventional CLI help/version flags. None of these changes upgrades
+existing installed agents automatically. See the [QA report](https://github.com/LIT-Protocol/chipotle/blob/main/lit-agent-keychain/docs/user-qa-2026-09-16.md)
+for actual production coverage and remaining provider/auth/billing tests.
+
 ## Features
 
 - RainbowKit/wagmi EOA wallet connection, native WebAuthn P-256 passkeys, Google JWT
