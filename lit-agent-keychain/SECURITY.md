@@ -37,8 +37,9 @@ whitelisted). The policy constants are compiled into the client, so the same
 
 `get`, the `get_secret` MCP tool and `keychain run` all deliver plaintext to the
 agent host; from there the client is trusted. `run` avoids stdout and passes the
-value only through the child process's environment, which keeps it out of agent
-transcripts and shell history but not out of reach of other processes running as
+value through the child process's environment. The Keychain CLI itself does not
+print it; the child program can still log or disclose it, including into agent
+transcripts. It is also within reach of other processes running as
 the same user (`ps eww`, `/proc/<pid>/environ`). `--file` writes plaintext to a
 mode-0600 file that is created before the child starts, never overwrites an existing
 path, and is unlinked when the child exits; a SIGKILL of the CLI leaves it behind and

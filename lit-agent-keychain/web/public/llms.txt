@@ -4,18 +4,21 @@
 
 Key facts for agents:
 
-- Install: `npm install @lit-protocol/keychain` (Node 22+). CLI binary: `keychain`.
-- Generate an identity locally: `npx @lit-protocol/keychain init ./agent-identity.json`. Share ONLY `publicKey` with the owner.
+- Install: `npm install @lit-protocol/keychain@2.0.2` (Node 22+). CLI binary: `keychain`.
+- Generate an identity locally: `npx @lit-protocol/keychain@2.0.2 init ./agent-identity.json`. Share ONLY `publicKey` with the owner.
 - The owner approves that public key in the web app and downloads an agent config (`*.keychain.json`) containing public locators plus a scoped Chipotle execution key. The execution key pays for Lit execution; it cannot read a secret by itself.
-- Read at runtime: `new Keychain(identity.privateKey, config).get("NAME")`, or `keychain get ./agent-identity.json ./NAME.keychain.json NAME`. For "use inside Lit" secrets: `.use("NAME", input)` or `keychain use ./agent-identity.json ./NAME.keychain.json NAME '{...}'`.
-- Hand a secret to one command without printing it: `keychain run ./agent-identity.json ./NAME.keychain.json -- <command>` puts each export-release secret in the command's environment under its own name, prints nothing, and exits with the command's status. `--only A,B` selects secrets, `--env SECRET=ENV_VAR` renames one, `--file SECRET=PATH` writes one to a new mode-0600 file that is removed when the command exits (for tools that read credentials from a path). Prefer `run` over `get` whenever the value is only needed by a tool, so it never enters your context, shell history, or logs.
-- MCP (local stdio, never hosted): `claude mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp ./agent-identity.json ./NAME.keychain.json`. Tools: `list_secrets`, `get_secret`, one tool per catalog action (`stripe_balance`, `openai_chat`, `github_read_file`, `slack_post_message`, `supabase_tables`), `list_actions`, `agent_public_key`. `keychain actions` prints the current catalog.
-- Actions: `export` delivers the plaintext encrypted to the agent. Every other action uses the credential only inside the enclave for one fixed upstream call and returns a bounded result (Stripe balance, OpenAI chat completion, GitHub file read, Slack post message, Supabase table reads and inserts under an owner allowlist); the value is never revealed and the action can reach only the hosts its manifest declares. The catalog lives in its own public repository and is open to contributions: https://github.com/LIT-Protocol/agent-keychain-library
-- The SDK attests the Lit endpoint (TDX quote, RTMR replay, on-chain whitelist on Base, TLS binding in Node) before the first request and fails closed. The on-chain step rotates through public Base RPCs; set `KEYCHAIN_BASE_RPC_URL` to pin your own. Never disable attestation outside local development.
-- Errors: the enclave answers every refusal with a bare access denial, so the client explains what it can see. `Access denied: the owner disabled this secret`, `... permission expired`, `... agent <key> is not approved`, and `... approved for version N, not the current version` are policy problems for the owner to fix in Keychain. For a connected service, `Access denied: Lit ran the <action> ... did not complete` means the policy is fine and the upstream call failed (usually a rejected credential); ask the owner to rotate it. `Attestation: no Base RPC endpoint answered` is a transient RPC outage or rate limit: retry, or set `KEYCHAIN_BASE_RPC_URL`.
+- Read at runtime: `new Keychain(identity.privateKey, config).get("NAME")`, or `npx @lit-protocol/keychain@2.0.2 get ./agent-identity.json ./NAME.keychain.json NAME`. For "use inside Lit" secrets: `.use("NAME", input)` or `npx @lit-protocol/keychain@2.0.2 use ./agent-identity.json ./NAME.keychain.json NAME '{...}'`.
+- Hand a secret to one command without printing it: `npx @lit-protocol/keychain@2.0.2 run ./agent-identity.json ./NAME.keychain.json -- <command>` puts each export-release secret in the command's environment under its own name, prints nothing, and exits with the command's status. `--only A,B` selects secrets, `--env SECRET=ENV_VAR` renames one, `--file SECRET=PATH` writes one to a new mode-0600 file that is removed when the command exits (for tools that read credentials from a path). Prefer `run` over `get` whenever the value is only needed by a tool, to avoid CLI printing. A child can still log or disclose plaintext; this is not a sandbox. SIGKILL can leave --file plaintext behind; unlink does not guarantee erasure.
+- MCP (local stdio, never hosted): `claude mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.0.2 mcp /absolute/path/agent-identity.json /absolute/path/NAME.keychain.json`. Tools: `list_secrets`, `get_secret`, one tool per catalog action (`stripe_balance`, `openai_chat`, `github_read_file`, `slack_post_message`, `supabase_tables`), `list_actions`, `agent_public_key`. `npx @lit-protocol/keychain@2.0.2 actions` prints the current catalog.
+- Actions: `export` delivers the plaintext encrypted to the agent. Every other action uses the credential only inside the enclave for one fixed upstream call and returns a bounded result (Stripe balance, OpenAI chat completion, GitHub file read, Slack post message, Supabase table reads and inserts under an owner allowlist); the credential is not returned to the agent (the provider receives it over TLS) and the action can reach only the hosts its manifest declares. The catalog lives in its own public repository and is open to contributions: https://github.com/LIT-Protocol/agent-keychain-library
+- The SDK attests the Lit endpoint (TDX quote, RTMR replay, on-chain whitelist on Base, TLS binding in Node) before execution requests to configured/pinned production origins and fails closed on check failure. Unknown origins are not automatically attested; independently verify config.litApiUrl and explicitly pin custom deployments. The on-chain step rotates through public Base RPCs; set `KEYCHAIN_BASE_RPC_URL` to pin your own. Never disable attestation outside local development.
+- Errors: the enclave answers every refusal with a bare access denial, so the client explains what it can see. `Access denied: the owner disabled this secret`, `... permission expired`, `... agent <key> is not approved`, and `... approved for version N, not the current version` are policy problems for the owner to fix in Keychain. For a connected service, `Access denied: Lit ran the <action> ... did not complete` is an unclassified failure after local policy checks: input/credential mismatch, provider error, timeout or size/schema limits are possible; have the owner check privately. Do not blindly retry writes. `Attestation: no Base RPC endpoint answered` is a transient RPC outage or rate limit: retry, or set `KEYCHAIN_BASE_RPC_URL`.
 - There are no setup tokens, management bearer tokens, or server-minted grants. Never ask the owner for a private key or Google token.
 
 ## Docs
+
+- [Owner recovery, rotations and deployment](/README.md)
+- [Provider setup recipes](/PROVIDERS.md)
 
 - [Agent skill / setup playbook](/SKILL.md): step-by-step instructions for agents, and how to tell the identity, config and secret value apart.
 - [SDK, CLI and MCP reference](/sdk/README.md): executable examples, attestation details, MCP client configuration.
@@ -25,8 +28,9 @@ Key facts for agents:
 
 ## Underlying platform
 
-- [Derived Actions](https://developer.litprotocol.com/lit-actions/derived-actions): per-secret immutable actions and key derivation.
-- [Signed data in untrusted storage](https://developer.litprotocol.com/lit-actions/signed-storage): how owner receipts make the operator unable to forge policy.
+The former Derived Actions and Signed data in untrusted storage platform links
+were removed because those pages are unavailable. Keychain-specific explanations
+are in the [security contract](/SECURITY.md).
 - [Lit attestation](https://developer.litprotocol.com/architecture/verification/attestation): verifying the TEE endpoint.
 - [Lit Protocol developer docs](https://developer.litprotocol.com)
 

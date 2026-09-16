@@ -5,7 +5,7 @@ export const REPO_URL =
 export const NPM_URL = "https://www.npmjs.com/package/@lit-protocol/keychain";
 export const DOCS_URL = "https://developer.litprotocol.com";
 const MCP_COMMAND =
-  "claude mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp ./agent-identity.json ./API_KEY.keychain.json";
+  "claude mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.0.2 mcp /absolute/path/agent-identity.json /absolute/path/API_KEY.keychain.json";
 
 export function LandingNav() {
   return (
@@ -98,7 +98,7 @@ export function Landing() {
         </p>
         <pre className="terminal">
           <code>
-            {`npx @lit-protocol/keychain init ./agent-identity.json
+            {`npx @lit-protocol/keychain@2.0.2 init /absolute/path/agent-identity.json
 # share only the public key, approve it in Keychain, download the agent config
 ${MCP_COMMAND}`}
           </code>
@@ -157,11 +157,11 @@ ${MCP_COMMAND}`}
             plaintext on its own machine and uses it like any other credential.
           </p>
           <p>
-            A <strong>connected service</strong> never reveals the value to
-            anyone. The action uses the credential inside the enclave to make
-            one fixed API call and returns only a bounded result. Each
-            integration is a reviewed action from the open catalog (Stripe
-            balance, OpenAI chat, GitHub file reads, Slack messages, and
+            A <strong>connected service</strong> does not return the credential
+            to the agent. The upstream provider receives it over TLS. The action
+            uses it to make one fixed API call and returns only a bounded
+            result. Each integration is a reviewed action from the open catalog
+            (Stripe balance, OpenAI chat, GitHub file reads, Slack messages, and
             growing); its manifest pins the hosts it may reach and the shape of
             what it returns, and the action cannot call any other URL, export
             the key, or run caller-supplied code.
@@ -182,7 +182,8 @@ ${MCP_COMMAND}`}
             secrets that agent was approved for until you revoke it, exactly as
             with any credential on a compromised host. Revoke from the
             dashboard, replace the execution key, and prefer “Use in Lit only”
-            for keys that should never leave the enclave.
+            for keys that should not be returned to agents (providers still
+            receive them).
           </p>
         </Faq>
 
@@ -212,13 +213,13 @@ ${MCP_COMMAND}`}
         </Faq>
         <Faq q="Google versus wallet or passkey: what is the tradeoff?">
           <p>
-            <strong>Google</strong> is the easiest path: nothing to back up, no
-            device dependency, and account recovery through Google. The cost is
-            that your Google account becomes the root of trust for your vault.
-            Anyone who takes over that account, and Google itself, can obtain a
-            token for your subject and authorize new agents. That is the same
-            trust every “Sign in with Google” button implies, but here it gates
-            your secrets.
+            <strong>Google</strong> avoids managing a signing key yourself, with
+            no device dependency, and account recovery through Google. The cost
+            is that your Google account becomes the root of trust for your
+            vault. Anyone who takes over that account, and Google itself, can
+            obtain a token for your subject and authorize new agents. That is
+            the same trust every “Sign in with Google” button implies, but here
+            it gates your secrets.
           </p>
           <p>
             <strong>Wallet and passkey</strong> are self-custody. Every approval
@@ -259,9 +260,15 @@ ${MCP_COMMAND}`}
             approved credential.
           </p>
           <p>
-            If your only credential is gone and you have no backup, nobody can
-            recover the vault, including us. That is the point of self-custody,
-            so add a second credential early.
+            If every approved credential is lost, a backup alone cannot recover
+            the vault. Use provider recovery or an already-approved alternate
+            credential; we cannot issue a reset token. Add a second credential
+            early and download a fresh backup after credential changes. See the
+            <a href="/README.md#owner-setup-and-recovery">
+              {" "}
+              owner recovery guide
+            </a>
+            .
           </p>
         </Faq>
 
@@ -286,10 +293,11 @@ ${MCP_COMMAND}`}
             those checks because no one else holds the key. Neither Keychain nor
             Lit’s operators can decrypt outside the action. The pattern is
             documented in the{" "}
-            <a href={`${DOCS_URL}/lit-actions/derived-actions`}>
-              Derived Actions
-            </a>{" "}
-            docs.
+            <a href="/SECURITY.md#encryption-protocol">
+              Keychain security contract
+            </a>
+            . The former platform Derived Actions link was removed because its
+            page is unavailable.
           </p>
         </Faq>
         <Faq q="What can Keychain, the operator, see or do?">
@@ -313,13 +321,17 @@ ${MCP_COMMAND}`}
         </Faq>
         <Faq q="How does the agent know it is talking to real Lit hardware?">
           <p>
-            Before its first request, the SDK, CLI and MCP server verify a
-            remote attestation from the Lit endpoint: an Intel TDX quote chained
-            to Intel’s pinned root certificate, a replay of the boot event log,
-            a check that the measured application matches the release
-            whitelisted on-chain by Lit’s governance, and in Node, a binding of
-            the live TLS certificate to the enclave. Any failure blocks the
-            request.{" "}
+            Before execution requests to configured/pinned production origins,
+            the SDK, CLI and MCP server verify remote attestation: an Intel TDX
+            quote chained to Intel’s pinned root certificate, a replay of the
+            boot event log, a check that the measured application matches the
+            release whitelisted on-chain by Lit’s governance, and in Node, a
+            binding of the live TLS certificate to the enclave. Any failure
+            blocks the request. Unknown origins are not automatically attested;
+            that is not equivalent to passing attestation. Verify the config’s
+            litApiUrl independently. Browsers cannot bind TLS certificates;
+            Intel collateral and RPC-trust limits are in{" "}
+            <a href="/SECURITY.md">SECURITY.md</a>.{" "}
             <a href={`${DOCS_URL}/architecture/verification/attestation`}>
               How Lit attestation works
             </a>
@@ -357,7 +369,12 @@ ${MCP_COMMAND}`}
             secrets. Execution is included under fair use with no automatic
             overage charges, and rotating a secret does not use another slot.
             Cancelling never deletes your secrets or encrypted backups. For more
-            secrets or high-volume usage, contact us.
+            secrets or high-volume usage, contact us. Cancellation is not
+            revocation; enrolled actions continue on Free. Above the Free limit
+            after paid expiry, storage mutations stop, but login, revocation and
+            backups remain. There is no hard per-user execution/dollar cap.
+            Third-party API charges are separate. See{" "}
+            <a href="/README.md">owner guidance</a>.
           </p>
         </Faq>
       </section>
