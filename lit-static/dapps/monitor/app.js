@@ -413,7 +413,7 @@ function getServerUrl() {
   // just populates it. Fall back to the dropdown before the field is wired up.
   const custom = (el('server-url')?.value || '').trim();
   const base = custom || (el('network')?.value || '');
-  return base.replace(/\/$/, '');
+  return base.replace(/\/+$/, '');
 }
 
 /* ═══ Network health badges ══════════════════════════════════════════════════ */
