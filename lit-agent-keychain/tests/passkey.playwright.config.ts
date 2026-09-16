@@ -9,8 +9,14 @@ export default defineConfig({
   timeout: 30000,
   use: { baseURL: "http://localhost:55449", headless: true },
   webServer: {
-    command: "npm run dev -- --port 55449 --strictPort",
-    url: "http://localhost:55449",
+    command: "node --import tsx passkey-server.ts",
+    cwd: import.meta.dirname,
+    // This endpoint exists only after the entire UI + identity build succeeds.
+    url: "http://localhost:55449/identities.js",
+    timeout: 120000,
     reuseExistingServer: false,
+    gracefulShutdown: { signal: "SIGTERM", timeout: 5000 },
+    stdout: "pipe",
+    stderr: "pipe",
   },
 });

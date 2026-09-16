@@ -13,6 +13,18 @@ import type { Challenge } from "../protocol/schema.ts";
 
 // Isolated browser context, no production credentials or services.
 test.beforeEach(async ({ page }) => {
+  // Surface the actual script URL/status instead of only Chromium's generic
+  // "Failed to fetch dynamically imported module". Never log response bodies.
+  page.on("response", (response) => {
+    if (response.request().resourceType() === "script" && !response.ok())
+      console.error(`Script HTTP ${response.status()}: ${response.url()}`);
+  });
+  page.on("requestfailed", (request) => {
+    if (request.resourceType() === "script")
+      console.error(
+        `Script request failed: ${request.url()} (${request.failure()?.errorText})`,
+      );
+  });
   await page.route("**/identity-test", (route) =>
     route.fulfill({
       contentType: "text/html",
@@ -48,7 +60,7 @@ for (const scenario of [
     );
     const owners = await page.evaluate(async (hint) => {
       const { createPasskey } = await import(
-        /* @vite-ignore */ String("/src/identities.ts")
+        /* @vite-ignore */ String("/identities.js")
       );
       const original = (await createPasskey("Original")).owner;
       const recovery = (await createPasskey("Recovery")).owner;
@@ -86,7 +98,7 @@ for (const scenario of [
     });
     const found = await page.evaluate(async () => {
       const { discoverPasskey, ownerClient } = await import(
-        /* @vite-ignore */ String("/src/identities.ts")
+        /* @vite-ignore */ String("/identities.js")
       );
       const found = await discoverPasskey();
       (window as any).recoveryIdentity = found.identity;
@@ -155,7 +167,7 @@ for (const scenario of [
     );
     const owners = await page.evaluate(async () => {
       const { createPasskey } = await import(
-        /* @vite-ignore */ String("/src/identities.ts")
+        /* @vite-ignore */ String("/identities.js")
       );
       return {
         original: (await createPasskey("Original")).owner,
@@ -231,7 +243,7 @@ for (const operation of ["discover", "create", "approve"] as const) {
   }) => {
     const result = await page.evaluate(async (operation) => {
       const identities = await import(
-        /* @vite-ignore */ String("/src/identities.ts")
+        /* @vite-ignore */ String("/identities.js")
       );
       let calls = 0;
       const cancel = async () => {
@@ -275,7 +287,7 @@ test("discovery ignores malformed local hints and preserves non-cancellation err
     };
     try {
       await (
-        await import(/* @vite-ignore */ String("/src/identities.ts"))
+        await import(/* @vite-ignore */ String("/identities.js"))
       ).discoverPasskey();
     } catch (error) {
       return (error as Error).message;
