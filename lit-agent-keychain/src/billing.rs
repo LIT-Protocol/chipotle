@@ -44,7 +44,13 @@ pub async fn reserve(pool: &PgPool, bucket: &str, period: i64, limit: i64) -> Re
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
 pub enum Execution {
-    Authority { manifest: Authority, params: Value },
+    Authority {
+        manifest: Authority,
+        params: Value,
+        /// Content hash of an archived authority release; defaults to the current one.
+        #[serde(default)]
+        template: Option<String>,
+    },
 }
 #[post("/api/execute", format = "json", data = "<body>")]
 pub async fn execute(
@@ -56,14 +62,19 @@ pub async fn execute(
     lit: &State<Chipotle>,
 ) -> ApiResult<Value> {
     let (code, params, vault) = match body.into_inner() {
-        Execution::Authority { manifest, params } => {
+        Execution::Authority {
+            manifest,
+            params,
+            template,
+        } => {
             manifest.validate(cfg).map_err(api::invalid)?;
             let vault = manifest.vault_id().map_err(api::invalid)?;
-            (
-                actions::authority_source(&manifest).map_err(api::invalid)?,
-                params,
-                vault,
-            )
+            let code = match template {
+                Some(hash) => actions::authority_source_for(&manifest, &hash),
+                None => actions::authority_source(&manifest),
+            }
+            .map_err(api::invalid)?;
+            (code, params, vault)
         }
     };
     if params["document"]["kind"] != "login" || params["document"]["vaultId"] != vault {

@@ -33,6 +33,20 @@ lookup (a lying RPC can only cause false rejections or accept a hash the Safe ne
 whitelisted). The policy constants are compiled into the client, so the same
 "verified client release" caveat above applies.
 
+## Agent-side plaintext handling
+
+`get`, the `get_secret` MCP tool and `keychain run` all deliver plaintext to the
+agent host; from there the client is trusted. `run` avoids stdout and passes the
+value only through the child process's environment, which keeps it out of agent
+transcripts and shell history but not out of reach of other processes running as
+the same user (`ps eww`, `/proc/<pid>/environ`). `--file` writes plaintext to a
+mode-0600 file that is created before the child starts, never overwrites an existing
+path, and is unlinked when the child exits; a SIGKILL of the CLI leaves it behind and
+the bytes may survive on disk after unlink. Neither mode is a sandbox. The CLI zeroes
+its copy of the agent key and drops its references to the fetched values once the
+child has started; JavaScript strings cannot be scrubbed, so the plaintext may linger
+in the CLI process heap briefly before it exits.
+
 ## Accepted operator trust
 
 The database holds signed policy records and chooses the current record. The action
@@ -107,6 +121,38 @@ collection and provider/browser internals do not offer guaranteed memory erasure
 No secrets, owner private keys or agent private keys are persisted by the API.
 Names, public identities, permissions and traffic metadata are not encrypted.
 
+## Authority releases
+
+The immutable authorization action is released in versions, and every released
+version is kept forever in `actions/archive/` (content-addressed, append-only; the
+build refuses to run if an archived file is missing or altered). A vault's identity is
+the hash of its owner document, not of any code, so a vault keeps working across
+releases:
+
+- The API accepts a sign-in receipt from any released authority version bound to the
+  vault's owner document. The version that verifies is recorded for the vault
+  (`kc_vault_authorities`) and granted to its execution group the first time it is
+  used. The vault's current authority only ever moves to a newer release.
+- Each secret pins the authority release that approved it. Policy updates, rotations
+  and restores for that secret are verified, by the API and by the secret action
+  itself, under exactly that release. Clients run the pinned release's bytes,
+  fetched by hash from `/api/templates/<sha256>` and checked against the hash list
+  compiled into the client, so the registry cannot introduce a release the client was
+  not built to trust.
+- New secrets pin the newest release the client knows. Sign-in tries the newest
+  release first and falls back to the vault's recorded release if the newest denies
+  the owner.
+
+Credentials (the vault's owner set) are receipted by whichever release approved
+them, and a release can only verify its own receipts. A release that cannot verify
+the current credentials receipt treats the vault as having no credentials policy:
+the root owner from the vault document is accepted and nothing else is. This grants
+no capability beyond the documented operator trust, since the operator can already
+serve a null credentials state for any vault, and it never accepts an unverifiable
+owner set. Consequence: a vault whose root owner was replaced under release A keeps
+operating under A (its recorded release) until the root owner, or an owner approved
+under a newer release, re-approves the owner set there.
+
 ## "Use inside Lit" actions
 
 Every non-export action comes from the reviewed public catalog
@@ -178,8 +224,8 @@ the root authority descriptor, and signed recovery credential settings. They con
 neither private keys nor historical ciphertext versions. Credential restoration only
 initializes a missing vault and cannot overwrite existing credential settings. Restoring does not overwrite a different existing secret. Google-only users
 recover by signing in to the same Google account. Alternative recovery credentials
-must be approved while an existing owner is available; retain the root vault descriptor
-when changing credentials. Lost owner credentials without an approved recovery path
+must be approved while an existing owner is available; download a fresh encrypted
+export when changing credentials, since it carries the root authority descriptor. Lost owner credentials without an approved recovery path
 cannot be replaced by an operator-issued reset token.
 
 ## Release validation boundaries

@@ -18,6 +18,8 @@
     "cli.mjs",
     "mcp.mjs",
     "mcp.d.mts",
+    "run.mjs",
+    "run.d.mts",
     "tls.mjs",
     "README.md"
   ],

@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod api;
 pub mod auth;
+pub mod authority;
 pub mod billing;
 pub mod chipotle;
 pub mod config;
@@ -12,3 +13,4 @@ pub mod server;
 pub mod sponsorship;
 pub mod stripe;
 pub mod subscriptions;
+pub mod templates;

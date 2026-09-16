@@ -46,6 +46,41 @@ CLI reads write the requested result to stdout. Avoid sending credential output 
 keychain get ./agent-identity.json ./API_KEY.keychain.json API_KEY
 ```
 
+For tools that need the raw credential in their environment, `run` skips stdout
+entirely. It decrypts the export-release secrets in the config, places each in the
+child's environment under the secret's name, hands the child your terminal, and exits
+with the child's status. The value never appears in your shell history, agent
+transcript, or logs:
+
+```sh
+keychain run ./agent-identity.json ./STRIPE_API_KEY.keychain.json -- stripe balance retrieve
+keychain run ./id.json ./db.keychain.json --only DATABASE_URL -- psql
+keychain run ./id.json ./cfg.keychain.json --env "openai-prod=OPENAI_API_KEY" -- python agent.py
+```
+
+`--only A,B` injects a subset; `--env SECRET=ENV_VAR` renames a variable, which is
+required when a secret's name is not a valid variable name. "Use inside Lit"
+secrets have no value to inject and are skipped with a note on stderr; naming one
+under `--only` is an error. The child inherits the parent environment. Any process
+running as the same user can read another process's environment, so `run` is a
+handoff to a tool you trust, not a sandbox.
+
+Tools that read credentials from a path (service-account JSON, kubeconfig, SSH and
+TLS keys, `.npmrc`) take `--file SECRET=PATH`. The file is created with mode 0600
+before the command starts, is never overwritten if it already exists, and is removed
+when the command exits. A `--file` secret stays out of the environment unless `--env`
+names it too. Multi-line values such as PEM keys are written byte for byte.
+
+```sh
+keychain run ./id.json ./gcp.keychain.json --file GCP_SA=/tmp/sa.json -- \
+  env GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json gcloud storage ls
+keychain run ./id.json ./k8s.keychain.json --file KUBECONFIG_PROD=./kubeconfig -- \
+  kubectl --kubeconfig ./kubeconfig get pods
+```
+
+If the CLI itself is killed with SIGKILL the file cannot be cleaned up; prefer a
+tmpfs path such as `/dev/shm` on Linux for anything long-lived.
+
 Set `CHIPOTLE_USAGE_API_KEY` for a CLI billing-key override, or pass
 `{ usageApiKey }` as the SDK constructor's third argument. After the owner replaces
 the execution key, update every agent using the old key.

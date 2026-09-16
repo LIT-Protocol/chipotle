@@ -149,22 +149,22 @@ ${MCP_COMMAND}`}
             such as Claude Code, Codex or Cursor.
           </p>
         </Faq>
-        <Faq q="What is the difference between “Encrypted release” and “Use in Lit only”?">
+        <Faq q="What is the difference between a stored secret and a connected service?">
           <p>
-            <strong>Encrypted release</strong> is the default. The action
-            decrypts the value inside the enclave and re-encrypts it to the
-            requesting agent’s key, so the agent gets the plaintext on its own
-            machine and uses it like any other credential.
+            A <strong>stored secret</strong> is for anything an agent needs to
+            hold itself. The action decrypts the value inside the enclave and
+            re-encrypts it to the requesting agent’s key, so the agent gets the
+            plaintext on its own machine and uses it like any other credential.
           </p>
           <p>
-            <strong>Use in Lit only</strong> never reveals the value to anyone.
-            The action uses the credential inside the enclave to make one fixed
-            API call and returns only a bounded result. Each integration is a
-            reviewed action from the open catalog (Stripe balance, OpenAI chat,
-            GitHub file reads, Slack messages, and growing); its manifest pins
-            the hosts it may reach and the shape of what it returns, and the
-            action cannot call any other URL, export the key, or run
-            caller-supplied code.
+            A <strong>connected service</strong> never reveals the value to
+            anyone. The action uses the credential inside the enclave to make
+            one fixed API call and returns only a bounded result. Each
+            integration is a reviewed action from the open catalog (Stripe
+            balance, OpenAI chat, GitHub file reads, Slack messages, and
+            growing); its manifest pins the hosts it may reach and the shape of
+            what it returns, and the action cannot call any other URL, export
+            the key, or run caller-supplied code.
           </p>
         </Faq>
         <Faq q="What does the agent actually hold?">
@@ -254,14 +254,14 @@ ${MCP_COMMAND}`}
         <Faq q="What if I lose my passkey or wallet?">
           <p>
             Under Recovery &amp; backups you can approve additional owner
-            credentials and download an encrypted backup and recovery
-            descriptor. On a new device, choose “Recover an existing vault”,
-            load the descriptor and sign in with any approved credential.
+            credentials and download a backup file. On a new device, choose
+            “Recover an existing vault”, load the backup and sign in with any
+            approved credential.
           </p>
           <p>
-            If your only credential is gone and you have no descriptor, nobody
-            can recover the vault, including us. That is the point of
-            self-custody, so add a second credential early.
+            If your only credential is gone and you have no backup, nobody can
+            recover the vault, including us. That is the point of self-custody,
+            so add a second credential early.
           </p>
         </Faq>
 

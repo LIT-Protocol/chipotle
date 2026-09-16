@@ -1,12 +1,13 @@
 {
   "v": 1,
   "templates": {
-    "authority": "1c042eed5e526f747a7533cedb0f3b02dff8ad05143d07299717193b4f6e8e2b",
-    "export": "6d0e0adbb593c441d5728a774ec5b79b7014c42d8615a659e6aaf2f159ce9c8c",
-    "github_read_file": "90a64801adf34ef711fe0a209531184e4609ab63ad349464f02d1ce32d7c3fc3",
-    "openai_chat": "7b223a816747fd89a6422b8054f76cd6afa9ec5a3e5e8c28db50321225d40cbc",
-    "slack_post_message": "be81264e7f560056d31508a6f7dac6e8f2176334d5cf6f04d0358f3a6bcf4889",
-    "stripe_balance": "59aecd2b73ece306a37c70e468bbcfafb5381f44eec322632909693852ba0a7c",
+    "authority": "29314b8876a199afde0396711530c4de9de25eca7f99202a09a4d68f32cd0a66",
+    "export": "372485c4bd8a00e01f6c67869665bde9818327d9239a090d5b26f9ceb51f3bfd",
+    "github_read_file": "15a1f3314c95ec4299179b39c4bec6b2e3be90d50753c70ce6135adec786e657",
+    "openai_chat": "3846d5259445bd712a5fddaf85513a62a56c795e1311b4d56d7866a3cbabc2f9",
+    "slack_post_message": "edaf121597cf10980cbcdddeaaec07232f255868ad6eb4e1d979094e7ab5cb67",
+    "stripe_balance": "65e342a6bc70afeec6edbd8b8f63c978ea424459fce00b21e52b34c2b47e9753",
+    "supabase_tables": "9a9f68ede6d852e93da9eadb566800d6aff01f8d7906cce3dedf3f571c106b7f",
     "discovery": "b2a9e5871070e5287ce1f416138dde57167ff09d2def77c93b89a2b0313d55a5"
   }
 }

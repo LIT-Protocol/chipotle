@@ -45,20 +45,35 @@ import type { LitRuntime } from "./types.ts";
 declare const Lit: LitRuntime;
 
 const METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
+const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+/**
+ * Mirrors hostAllowed() in the library's schema.ts (build-only, so not imported
+ * here): an exact hostname, or exactly one label under a `*.` entry.
+ */
+export function hostAllowed(hosts: readonly string[], hostname: string) {
+  return hosts.some((h) => {
+    if (!h.startsWith("*.")) return h === hostname;
+    const suffix = h.slice(1);
+    return (
+      hostname.endsWith(suffix) &&
+      LABEL.test(hostname.slice(0, hostname.length - suffix.length))
+    );
+  });
+}
 /**
  * The HTTP client handed to a catalog action. It is the only way an action can
- * reach the network: HTTPS only, exact hostname allowlist from the manifest, no
- * credentials or ports in the URL, bounded request count, no redirects, and the
- * manifest's timeout and response-size limits. Upstream failures throw.
+ * reach the network: HTTPS only, hostname allowlist from the manifest (exact, or
+ * one label under a `*.` entry), no credentials or ports in the URL, bounded
+ * request count, no redirects, and the manifest's timeout and response-size
+ * limits. Upstream failures throw.
  */
 export function boundFetch(definition: UseDefinition) {
-  const allowed = new Set(definition.allowedHosts);
   let requests = 0;
   return async (url: string, init: ActionRequestInit = {}) => {
     const target = new URL(String(url));
     requireThat(
       target.protocol === "https:" &&
-        allowed.has(target.hostname) &&
+        hostAllowed(definition.allowedHosts, target.hostname) &&
         target.username === "" &&
         target.password === "" &&
         target.port === "",

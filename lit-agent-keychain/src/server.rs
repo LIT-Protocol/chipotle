@@ -1,6 +1,6 @@
 use crate::{
     api, auth, billing, chipotle::Chipotle, config::Config, registry, sponsorship, stripe::Stripe,
-    subscriptions,
+    subscriptions, templates,
 };
 use rocket::{
     catch, catchers,
@@ -37,6 +37,8 @@ pub fn build(cfg: Config, pool: PgPool, lit: Chipotle, stripe: Stripe) -> Rocket
                 auth::login,
                 auth::logout,
                 auth::me,
+                templates::index,
+                templates::template,
                 billing::execute,
                 subscriptions::status,
                 subscriptions::refresh_route,
