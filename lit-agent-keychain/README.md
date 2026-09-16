@@ -55,7 +55,9 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 - Stripe Checkout and customer portal, period-end cancellation, retained encrypted backups.
 - Transactional mutation audit, paginated secrets/activity, scoped user execution keys.
 - Agent SDK, CLI and a local stdio MCP server (`npx @lit-protocol/keychain mcp`);
-  agent keys are generated locally. No management bearer tokens, operator grant
+  agent keys are generated locally. `keychain run -- <command>` hands secrets to a
+  child process as environment variables or short-lived mode-0600 files without
+  printing them. No management bearer tokens, operator grant
   signer, PKP vault provisioning, chain registry, relayer, or paymaster.
 - Client-side remote attestation of the Lit endpoint before any request: TDX quote
   chain to a pinned Intel root, event-log replay, measured app/compose identity,
