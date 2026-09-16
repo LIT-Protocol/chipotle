@@ -270,8 +270,35 @@ test("`keychain run` parses its arguments and refuses anything it cannot inject"
       configFile: "cfg.json",
       only: ["A", "B"],
       rename: { A: "STRIPE_KEY" },
+      files: {},
       command: ["stripe", "balance", "--live"],
     },
+  );
+  assert.deepEqual(
+    parseRunArgs(["id", "cfg", "--file", "SA=./sa.json", "--", "gcloud"]).files,
+    { SA: "./sa.json" },
+  );
+  assert.throws(
+    () => parseRunArgs(["id", "cfg", "--file", "SA=/tmp/", "--", "x"]),
+    /must name a file/,
+  );
+  assert.throws(
+    () =>
+      parseRunArgs([
+        "id",
+        "cfg",
+        "--file",
+        "SA=a",
+        "--file",
+        "SA=b",
+        "--",
+        "x",
+      ]),
+    /given twice/,
+  );
+  assert.throws(
+    () => parseRunArgs(["id", "cfg", "--file", "SA", "--", "x"]),
+    /SECRET_NAME=PATH/,
   );
   assert.throws(() => parseRunArgs(["id", "cfg", "echo"]), /`--`/);
   assert.throws(() => parseRunArgs(["id", "cfg", "--"]), /command after/);
@@ -303,6 +330,45 @@ test("`keychain run` parses its arguments and refuses anything it cannot inject"
       ],
       skipped: ["STRIPE"],
     },
+  );
+  // A --file secret stays out of the environment unless --env names it too,
+  // and an awkward name is fine when it only goes to a file.
+  assert.deepEqual(
+    planInjection(list, {
+      only: null,
+      rename: {},
+      files: { "my-token": "/tmp/x/token" },
+    }).plan,
+    [
+      { name: "API_KEY", envVar: "API_KEY" },
+      { name: "my-token", file: "/tmp/x/token" },
+    ],
+  );
+  assert.deepEqual(
+    planInjection(list, {
+      only: ["API_KEY"],
+      rename: { API_KEY: "KEY" },
+      files: { API_KEY: "key.txt" },
+    }).plan,
+    [{ name: "API_KEY", envVar: "KEY", file: path.resolve("key.txt") }],
+  );
+  assert.throws(
+    () =>
+      planInjection(list, {
+        only: null,
+        rename: {},
+        files: { API_KEY: "/tmp/same", "my-token": "/tmp/same" },
+      }),
+    /both map to \/tmp\/same/,
+  );
+  assert.throws(
+    () =>
+      planInjection(list, {
+        only: ["API_KEY"],
+        rename: {},
+        files: { "my-token": "/tmp/t" },
+      }),
+    /mapped but not listed under --only/,
   );
   assert.throws(
     () => planInjection(list, { only: null, rename: {} }),
@@ -346,7 +412,12 @@ test("`keychain run` parses its arguments and refuses anything it cannot inject"
   const parentEnv = { PATH: "/bin" };
   const stderr: string[] = [];
   const spawned: any[] = [];
+  const dir = mkdtempSync(path.join(tmpdir(), "keychain-run-file-"));
+  const tokenFile = path.join(dir, "token");
   const spawn = (file: string, args: string[], options: any) => {
+    // The file exists, holds the exact value, and is private while the child runs.
+    assert.equal(readFileSync(tokenFile, "utf8"), "value-of-my-token");
+    assert.equal(statSync(tokenFile).mode & 0o777, 0o600);
     spawned.push({ file, args, env: { ...options.env }, stdio: options.stdio });
     const handlers: Record<string, Function> = {};
     return {
@@ -358,39 +429,90 @@ test("`keychain run` parses its arguments and refuses anything it cannot inject"
     };
   };
   const fakeProcess = { on() {}, off() {} };
-  const code = await runWithSecrets(
-    client,
-    { only: null, rename: { "my-token": "MY_TOKEN" }, command: ["env"] },
-    {
-      spawn,
-      env: parentEnv,
-      stderr: { write: (s: string) => stderr.push(s) },
-      process: fakeProcess,
-    },
-  );
-  assert.equal(code, 3);
-  assert.equal(destroyed, true);
-  assert.deepEqual(parentEnv, { PATH: "/bin" });
-  assert.deepEqual(spawned, [
-    {
-      file: "env",
-      args: [],
-      env: {
-        PATH: "/bin",
-        API_KEY: "value-of-API_KEY",
-        MY_TOKEN: "value-of-my-token",
+  try {
+    const code = await runWithSecrets(
+      client,
+      {
+        only: null,
+        rename: {},
+        files: { "my-token": tokenFile },
+        command: ["env"],
       },
-      stdio: "inherit",
-    },
-  ]);
-  assert.match(stderr.join(""), /skipping "STRIPE"/);
-  assert.ok(!stderr.join("").includes("value-of"));
+      {
+        spawn,
+        env: parentEnv,
+        stderr: { write: (s: string) => stderr.push(s) },
+        process: fakeProcess,
+      },
+    );
+    assert.equal(code, 3);
+    assert.equal(destroyed, true);
+    assert.deepEqual(parentEnv, { PATH: "/bin" });
+    assert.deepEqual(spawned, [
+      {
+        file: "env",
+        args: [],
+        env: { PATH: "/bin", API_KEY: "value-of-API_KEY" },
+        stdio: "inherit",
+      },
+    ]);
+    assert.match(stderr.join(""), /skipping "STRIPE"/);
+    assert.ok(!stderr.join("").includes("value-of"));
+    // Removed once the child exits.
+    assert.throws(() => statSync(tokenFile), /ENOENT/);
+    // Never overwrites, and nothing is spawned when a file cannot be created.
+    writeFileSync(tokenFile, "precious");
+    await assert.rejects(
+      runWithSecrets(
+        client,
+        {
+          only: ["my-token"],
+          rename: {},
+          files: { "my-token": tokenFile },
+          command: ["env"],
+        },
+        {
+          spawn: () => assert.fail("spawned despite file error"),
+          env: {},
+          stderr: { write() {} },
+          process: fakeProcess,
+        },
+      ),
+      /already exists; run will not overwrite/,
+    );
+    assert.equal(readFileSync(tokenFile, "utf8"), "precious");
+    await assert.rejects(
+      runWithSecrets(
+        client,
+        {
+          only: ["API_KEY"],
+          rename: {},
+          files: { API_KEY: path.join(dir, "missing-dir", "key") },
+          command: ["env"],
+        },
+        {
+          spawn: () => assert.fail("spawned despite file error"),
+          env: {},
+          stderr: { write() {} },
+          process: fakeProcess,
+        },
+      ),
+      /Cannot create .*missing-dir/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 
   // A missing executable is reported without leaking anything.
   await assert.rejects(
     runWithSecrets(
       client,
-      { only: ["API_KEY"], rename: {}, command: ["/nonexistent/bin"] },
+      {
+        only: ["API_KEY"],
+        rename: {},
+        files: {},
+        command: ["/nonexistent/bin"],
+      },
       {
         spawn: () => ({
           once(event: string, handler: Function) {

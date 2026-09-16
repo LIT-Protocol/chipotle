@@ -13,12 +13,14 @@ export interface RunOptions {
   only: string[] | null;
   /** Secret name to environment variable name. */
   rename: Record<string, string>;
+  /** Secret name to file path; such secrets stay out of the environment unless also renamed. */
+  files: Record<string, string>;
   /** Command and arguments after `--`. */
   command: string[];
 }
 
 export interface InjectionPlan {
-  plan: { name: string; envVar: string }[];
+  plan: { name: string; envVar?: string; file?: string }[];
   skipped: string[];
 }
 
@@ -26,7 +28,8 @@ export function parseRunArgs(args: string[]): RunOptions;
 
 export function planInjection(
   list: { name: string; operation: string }[],
-  options: Pick<RunOptions, "only" | "rename">,
+  options: Pick<RunOptions, "only" | "rename"> &
+    Partial<Pick<RunOptions, "files">>,
 ): InjectionPlan;
 
 export function runWithSecrets(
@@ -35,7 +38,7 @@ export function runWithSecrets(
     get(name: string): Promise<string>;
     destroy(): void;
   },
-  options: Pick<RunOptions, "only" | "rename" | "command">,
+  options: Pick<RunOptions, "only" | "rename" | "files" | "command">,
   io: {
     spawn: (file: string, args: string[], options: SpawnOptions) => ChildLike;
     env: NodeJS.ProcessEnv | Record<string, string>;

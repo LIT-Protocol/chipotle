@@ -18,7 +18,9 @@ version: 2.0.0
    `keychain run identity.json CONFIG.keychain.json -- <command>` over `get`. It
    injects each export-release secret as an environment variable named after the
    secret and prints nothing, so the value never enters your context or logs.
-   `--only A,B` selects secrets; `--env SECRET=ENV_VAR` renames one.
+   `--only A,B` selects secrets; `--env SECRET=ENV_VAR` renames one;
+   `--file SECRET=PATH` writes one to a new mode-0600 file that is removed when
+   the command exits, for tools that only read credentials from a path.
 5. Or expose it to an MCP client in one line. The server runs locally, next to the
    identity file, and offers `list_secrets`, `get_secret`, one tool per catalog
    action (`stripe_balance`, `openai_chat`, `github_read_file`, `slack_post_message`),

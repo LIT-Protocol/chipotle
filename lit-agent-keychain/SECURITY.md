@@ -39,7 +39,10 @@ whitelisted). The policy constants are compiled into the client, so the same
 agent host; from there the client is trusted. `run` avoids stdout and passes the
 value only through the child process's environment, which keeps it out of agent
 transcripts and shell history but not out of reach of other processes running as
-the same user (`ps eww`, `/proc/<pid>/environ`). It is not a sandbox. The CLI zeroes
+the same user (`ps eww`, `/proc/<pid>/environ`). `--file` writes plaintext to a
+mode-0600 file that is created before the child starts, never overwrites an existing
+path, and is unlinked when the child exits; a SIGKILL of the CLI leaves it behind and
+the bytes may survive on disk after unlink. Neither mode is a sandbox. The CLI zeroes
 its copy of the agent key and drops its references to the fetched values once the
 child has started; JavaScript strings cannot be scrubbed, so the plaintext may linger
 in the CLI process heap briefly before it exits.

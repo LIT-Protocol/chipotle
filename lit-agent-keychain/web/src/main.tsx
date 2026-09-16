@@ -862,6 +862,16 @@ function App() {
                               </code>
                             </pre>
                             <p>
+                              For tools that read credentials from a path, add{" "}
+                              <code>
+                                --file{" "}
+                                {selected.envelope.document.metadata.name}
+                                =PATH
+                              </code>{" "}
+                              to write a private file that is removed when the
+                              command exits.
+                            </p>
+                            <p>
                               In code, <code>keychain.get(name)</code> returns
                               the value; the <code>get_secret</code> MCP tool
                               does the same for MCP clients.

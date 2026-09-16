@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { subscribe } from "./billing-fixture.ts";
@@ -167,6 +167,34 @@ test(
             "local-only-secret-7f9ba",
             false,
           ]);
+          // --file: private file for the child's lifetime, gone afterwards.
+          const secretFile = path.join(dir, "api-test.txt");
+          const fromFile = execFileSync(
+            process.execPath,
+            [
+              "sdk/cli.mjs",
+              "run",
+              identityFile,
+              configFile,
+              "--file",
+              `API_TEST=${secretFile}`,
+              "--",
+              process.execPath,
+              "-e",
+              `const fs=require("node:fs");process.stdout.write(JSON.stringify([fs.readFileSync(${JSON.stringify(secretFile)},"utf8"),(fs.statSync(${JSON.stringify(secretFile)}).mode&0o777).toString(8),"API_TEST" in process.env]))`,
+            ],
+            {
+              encoding: "utf8",
+              stdio: ["ignore", "pipe", "pipe"],
+              env: { ...process.env, KEYCHAIN_SKIP_ATTESTATION: "1" },
+            },
+          );
+          assert.deepEqual(JSON.parse(fromFile), [
+            "local-only-secret-7f9ba",
+            "600",
+            false,
+          ]);
+          assert.equal(existsSync(secretFile), false);
           assert.throws(
             () =>
               execFileSync(

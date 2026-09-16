@@ -14,7 +14,7 @@ const usage =
   "  keychain init <identity-file>\n" +
   "  keychain get <identity-file> <config-file> <secret-name>\n" +
   "  keychain use <identity-file> <config-file> <secret-name> [json-input]\n" +
-  "  keychain run <identity-file> <config-file> [--only A,B] [--env SECRET=ENV_VAR]... -- <command> [args...]\n" +
+  "  keychain run <identity-file> <config-file> [--only A,B] [--env SECRET=ENV_VAR]... [--file SECRET=PATH]... -- <command> [args...]\n" +
   "  keychain actions\n" +
   "  keychain mcp <identity-file> <config-file> [more-config-files]\n" +
   "  keychain attest [lit-api-url]\n" +
@@ -23,7 +23,8 @@ const usage =
   "config-file:   *.keychain.json downloaded from Keychain ({ v, litApiUrl, usageApiKey, secrets }).\n" +
   "use runs the secret's catalog action inside Lit (never revealing the value); actions lists the catalog.\n" +
   "run decrypts export-release secrets into the command's environment (named after each secret) and\n" +
-  "  exits with its status; nothing is printed. --only picks secrets, --env renames a variable.\n" +
+  "  exits with its status; nothing is printed. --only picks secrets, --env renames a variable, --file writes\n" +
+  "  a secret to a new mode-0600 file (instead of the environment) that is removed when the command exits.\n" +
   "CHIPOTLE_USAGE_API_KEY overrides the config's scoped billing key.\n" +
   "KEYCHAIN_SKIP_ATTESTATION=1 disables the TEE attestation check (development only).\n";
 const attestationOptions = async (litApiUrl) =>

@@ -65,6 +65,22 @@ under `--only` is an error. The child inherits the parent environment. Any proce
 running as the same user can read another process's environment, so `run` is a
 handoff to a tool you trust, not a sandbox.
 
+Tools that read credentials from a path (service-account JSON, kubeconfig, SSH and
+TLS keys, `.npmrc`) take `--file SECRET=PATH`. The file is created with mode 0600
+before the command starts, is never overwritten if it already exists, and is removed
+when the command exits. A `--file` secret stays out of the environment unless `--env`
+names it too. Multi-line values such as PEM keys are written byte for byte.
+
+```sh
+keychain run ./id.json ./gcp.keychain.json --file GCP_SA=/tmp/sa.json -- \
+  env GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json gcloud storage ls
+keychain run ./id.json ./k8s.keychain.json --file KUBECONFIG_PROD=./kubeconfig -- \
+  kubectl --kubeconfig ./kubeconfig get pods
+```
+
+If the CLI itself is killed with SIGKILL the file cannot be cleaned up; prefer a
+tmpfs path such as `/dev/shm` on Linux for anything long-lived.
+
 Set `CHIPOTLE_USAGE_API_KEY` for a CLI billing-key override, or pass
 `{ usageApiKey }` as the SDK constructor's third argument. After the owner replaces
 the execution key, update every agent using the old key.
