@@ -142,6 +142,18 @@ function escapeHtml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// Assign innerHTML only when it actually changed. On the 30s refresh most cards
+// re-render byte-for-byte identical markup; blindly reassigning innerHTML blanks
+// and repaints the node (flicker) and can shift layout. Skipping the no-op write
+// keeps the screen still. All writes to a given node must go through this helper
+// (or the __lastHtml cache goes stale) — see setCardError and the system cards.
+function setHtml(node, html) {
+  if (!node) return;
+  if (node.__lastHtml === html) return;
+  node.__lastHtml = html;
+  node.innerHTML = html;
+}
+
 function setValue(id, text, isEmpty) {
   const node = el(id);
   if (!node) return;
@@ -299,6 +311,39 @@ function renderPayerHealthTable() {
 
   const token = getTokenLabel();
 
+  // Fast path: when the same payers appear in the same order (the common case on
+  // a 30s refresh), patch the health dot and balance in place instead of rebuilding
+  // the table. This keeps the copy handlers alive and never blanks/reflows the card,
+  // so the screen updates the changed cells rather than jumping.
+  const tbody = listEl.querySelector('tbody');
+  const sameLayout = tbody
+    && listEl.dataset.token === token
+    && tbody.children.length === sorted.length
+    && sorted.every((p, i) => tbody.children[i].dataset.addr === p.address);
+
+  if (sameLayout) {
+    sorted.forEach((p, i) => {
+      const tr = tbody.children[i];
+      const rowCls = `payer-row ${p.health}`;
+      if (tr.className !== rowCls) tr.className = rowCls;
+      const dot = tr.querySelector('.health-dot');
+      const dotCls = `health-dot ${p.health}`;
+      if (dot && dot.className !== dotCls) dot.className = dotCls;
+      const balCell = tr.querySelector('.bal-cell');
+      if (balCell) {
+        const balText = p.balance != null ? p.balance.toFixed(6) : '…';
+        const balDisplay = p.balance != null ? balText + ' ' + token : balText;
+        if (balCell.textContent !== balDisplay) balCell.textContent = balDisplay;
+        balCell.dataset.copy = balText;
+        const color = p.balance == null ? 'var(--muted)' : '';
+        if (balCell.style.color !== color) balCell.style.color = color;
+      }
+    });
+    updateHealthSummary();
+    return;
+  }
+
+  listEl.dataset.token = token;
   listEl.innerHTML =
     `<table><thead><tr>` +
       `<th style="width:12px"></th><th>Payer</th><th>Address</th><th class="eth">${escapeHtml(token)}</th>` +
@@ -306,11 +351,11 @@ function renderPayerHealthTable() {
     sorted.map(p => {
       const balText = p.balance != null ? p.balance.toFixed(6) : '…';
       const balStyle = p.balance == null ? ' style="color:var(--muted)"' : '';
-      return `<tr class="payer-row ${p.health}">` +
+      return `<tr class="payer-row ${p.health}" data-addr="${escapeHtml(p.address)}">` +
         `<td><span class="health-dot ${p.health}"></span></td>` +
         `<td style="white-space:nowrap">Payer ${p.index}</td>` +
         `<td class="copyable" data-copy="${escapeHtml(p.address)}">${escapeHtml(p.address)}</td>` +
-        `<td class="eth copyable" data-copy="${balText}"${balStyle}>${balText}${p.balance != null ? ' ' + escapeHtml(token) : ''}</td>` +
+        `<td class="eth copyable bal-cell" data-copy="${balText}"${balStyle}>${balText}${p.balance != null ? ' ' + escapeHtml(token) : ''}</td>` +
       `</tr>`;
     }).join('') +
     `</tbody></table>`;
@@ -364,7 +409,11 @@ function updateHealthSummary() {
 /* ═══ Network selector ═══════════════════════════════════════════════════════ */
 
 function getServerUrl() {
-  return (el('network')?.value || '').replace(/\/$/, '');
+  // The editable server-url field is the source of truth; the preset dropdown
+  // just populates it. Fall back to the dropdown before the field is wired up.
+  const custom = (el('server-url')?.value || '').trim();
+  const base = custom || (el('network')?.value || '');
+  return base.replace(/\/$/, '');
 }
 
 /* ═══ Network health badges ══════════════════════════════════════════════════ */
@@ -422,6 +471,9 @@ function updateActiveNetworkBadge() {
   if (!select) return;
   const opt = select.selectedOptions?.[0] || select.options[select.selectedIndex];
   if (!opt) return;
+  // Only badge the preset when it actually matches the active server URL — a
+  // custom URL typed into the server-url field has no preset to badge.
+  if (opt.value.replace(/\/$/, '') !== getServerUrl()) return;
   const health = payerData.length === 0
     ? 'unknown'
     : aggregateHealth(payerData.map(p => p.balance), getThresholds());
@@ -520,13 +572,18 @@ async function getNodeChainConfig(serverUrl) {
   }
 }
 
-async function getApiPayers(serverUrl) {
+async function getApiPayers(serverUrl, { silent = false } = {}) {
   const resultsEl = el('api-payers-results');
   const listEl = el('api-payers-list');
   const errEl = el('api-payers-error');
 
   if (errEl) errEl.style.display = 'none';
-  if (listEl) listEl.innerHTML = '<span style="color:var(--muted);font-family:\'JetBrains Mono\',monospace;font-size:0.85rem">Loading…</span>';
+  // On a silent refresh, leave the current table in place until fresh data lands
+  // — swapping in a "Loading…" line would collapse the card and jump the page.
+  if (!silent && listEl) {
+    listEl.dataset.token = '';
+    listEl.innerHTML = '<span style="color:var(--muted);font-family:\'JetBrains Mono\',monospace;font-size:0.85rem">Loading…</span>';
+  }
   if (resultsEl) resultsEl.style.display = 'block';
 
   try {
@@ -544,21 +601,34 @@ async function getApiPayers(serverUrl) {
           if (typeof fpData === 'string' && fpData) firstPayer = fpData;
         }
       } catch {}
-      listEl.innerHTML =
-        `<p style="color:var(--muted);font-size:0.85rem;margin:0">No payers configured.</p>` +
-        (firstPayer
-          ? `<p style="font-size:0.85rem;margin:0.5rem 0 0;color:#f87171">` +
-              `Please set the default API payer address: <br> ` +
-              `<span style="font-family:'JetBrains Mono',monospace;word-break:break-all">${escapeHtml(firstPayer)}</span>` +
-              `<br>Once this account is set, please fund with native tokens.` +
-            `</p>`
-          : '');
+      if (listEl) {
+        // Guard against the table-rebuild path (which writes innerHTML directly),
+        // so compare the live innerHTML rather than trusting setHtml's cache.
+        const emptyHtml =
+          `<p style="color:var(--muted);font-size:0.85rem;margin:0">No payers configured.</p>` +
+          (firstPayer
+            ? `<p style="font-size:0.85rem;margin:0.5rem 0 0;color:#f87171">` +
+                `Please set the default API payer address: <br> ` +
+                `<span style="font-family:'JetBrains Mono',monospace;word-break:break-all">${escapeHtml(firstPayer)}</span>` +
+                `<br>Once this account is set, please fund with native tokens.` +
+              `</p>`
+            : '');
+        if (listEl.innerHTML !== emptyHtml) listEl.innerHTML = emptyHtml;
+        listEl.dataset.token = '';
+      }
       updateHealthSummary();
       return;
     }
 
-    // Initialize payer data with loading state
-    payerData = payers.map((addr, i) => ({ address: addr, balance: null, health: 'unknown', index: i + 1 }));
+    // Carry prior balances over by address so a silent refresh keeps showing the
+    // last known value instead of flashing "…" while balances re-fetch.
+    const prevByAddr = new Map(payerData.map(p => [p.address, p.balance]));
+    payerData = payers.map((addr, i) => ({
+      address: addr,
+      balance: silent && prevByAddr.has(addr) ? prevByAddr.get(addr) : null,
+      health: 'unknown',
+      index: i + 1,
+    }));
     renderPayerHealthTable();
 
     // Fetch all balances in parallel
@@ -576,10 +646,14 @@ async function getApiPayers(serverUrl) {
       renderPayerHealthTable();
     }
   } catch (e) {
-    payerData = [];
-    if (resultsEl) resultsEl.style.display = 'none';
+    // On a silent refresh keep the last good table visible and just surface the
+    // error, rather than tearing the card down for a transient blip.
+    if (!silent) {
+      payerData = [];
+      if (resultsEl) resultsEl.style.display = 'none';
+      updateHealthSummary();
+    }
     if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
-    updateHealthSummary();
   }
 }
 
@@ -629,7 +703,7 @@ function hideError() {
   if (err) err.style.display = 'none';
 }
 
-async function fetchContractValues() {
+async function fetchContractValues({ silent = false } = {}) {
   const rpcUrl = (el('cc-rpc-url')?.value || '').trim();
   const contractAddress = (el('contract-address')?.value || '').trim();
   const results = el('results');
@@ -640,17 +714,22 @@ async function fetchContractValues() {
   }
 
   hideError();
-  setValue('val-contract-owner', '…', false);
-  setValue('val-pricing-operator', '…', false);
-  setValue('val-pricing-operator-balance', '', false);
-  setValue('val-config-operator', '…', false);
-  setValue('val-config-operator-balance', '', false);
-  setValue('val-admin-api-payer', '…', false);
-  setValue('val-admin-api-payer-balance', '', false);
-  setValue('val-payer-count', '…', false);
-  setValue('val-requested-api-payer-count', '…', false);
-  setValue('val-rebalance-amount', '…', false);
-  setValue('val-pkp-count', '…', false);
+  // On a silent refresh keep the current values on screen and let each setValue
+  // below overwrite them in place — resetting to "…" first makes every field
+  // flicker even when the value is unchanged.
+  if (!silent) {
+    setValue('val-contract-owner', '…', false);
+    setValue('val-pricing-operator', '…', false);
+    setValue('val-pricing-operator-balance', '', false);
+    setValue('val-config-operator', '…', false);
+    setValue('val-config-operator-balance', '', false);
+    setValue('val-admin-api-payer', '…', false);
+    setValue('val-admin-api-payer-balance', '', false);
+    setValue('val-payer-count', '…', false);
+    setValue('val-requested-api-payer-count', '…', false);
+    setValue('val-rebalance-amount', '…', false);
+    setValue('val-pkp-count', '…', false);
+  }
   if (results) results.style.display = 'block';
 
   try {
@@ -904,7 +983,7 @@ async function fetchLitActionClientConfig(serverUrl) {
 
 // ── nodeConfigurationValues ───────────────────────────────────────────────
 
-async function fetchNodeConfigValues() {
+async function fetchNodeConfigValues({ silent = false } = {}) {
   const rpcUrl = (el('cc-rpc-url')?.value || '').trim();
   const contractAddress = (el('contract-address')?.value || '').trim();
   const tableEl = el('node-config-table');
@@ -913,7 +992,9 @@ async function fetchNodeConfigValues() {
   if (errEl) errEl.style.display = 'none';
   if (!rpcUrl || !contractAddress) return;
 
-  if (tableEl) tableEl.innerHTML = '<tr><td colspan="2" style="color:var(--muted)">Loading…</td></tr>';
+  // Skip the "Loading…" placeholder on silent refresh — it collapses the table
+  // to one row and jumps the page. setHtml keeps unchanged rows untouched.
+  if (!silent) setHtml(tableEl, '<tr><td colspan="2" style="color:var(--muted)">Loading…</td></tr>');
 
   try {
     const provider = new ethers.JsonRpcProvider(rpcUrl);
@@ -922,14 +1003,14 @@ async function fetchNodeConfigValues() {
 
     if (!tableEl) return;
     if (!pairs || pairs.length === 0) {
-      tableEl.innerHTML = '<tr><td colspan="2" style="color:var(--muted)">No configuration values set.</td></tr>';
+      setHtml(tableEl, '<tr><td colspan="2" style="color:var(--muted)">No configuration values set.</td></tr>');
       return;
     }
-    tableEl.innerHTML = pairs.map(([key, value]) =>
+    setHtml(tableEl, pairs.map(([key, value]) =>
       `<tr><td>${escapeHtml(key)}</td><td>${escapeHtml(value)}</td></tr>`
-    ).join('');
+    ).join(''));
   } catch (e) {
-    if (tableEl) tableEl.innerHTML = '';
+    if (!silent) setHtml(tableEl, '');
     if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
   }
 }
@@ -968,11 +1049,11 @@ function setCardError(bodyId, errId, e) {
   const body = el(bodyId);
   const errEl = el(errId);
   if (e?.status === 404) {
-    if (body) body.innerHTML = '<span class="sys-empty">Not supported by this node version yet.</span>';
+    setHtml(body, '<span class="sys-empty">Not supported by this node version yet.</span>');
     if (errEl) errEl.style.display = 'none';
     return;
   }
-  if (body) body.innerHTML = '';
+  setHtml(body, '');
   if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
 }
 
@@ -1029,7 +1110,7 @@ function renderRuntimes(health, stats) {
       null,
     ));
   }
-  body.innerHTML = rows.join('');
+  setHtml(body, rows.join(''));
 }
 
 function renderMemory(mem) {
@@ -1038,7 +1119,7 @@ function renderMemory(mem) {
   // Fields are independently nullable — render whatever procfs provided
   // rather than blanking the card when only /proc/meminfo is missing.
   if (!mem || (mem.total_kb == null && mem.process_rss_kb == null)) {
-    body.innerHTML = '<span class="sys-empty">Memory figures unavailable (no procfs on this node).</span>';
+    setHtml(body, '<span class="sys-empty">Memory figures unavailable (no procfs on this node).</span>');
     return;
   }
   const parts = [];
@@ -1059,19 +1140,19 @@ function renderMemory(mem) {
   if (mem.process_rss_kb != null) {
     parts.push(`<div class="sys-row"><span class="sys-label">API server RSS</span><span class="sys-value">${fmtKb(mem.process_rss_kb)}</span></div>`);
   }
-  body.innerHTML = parts.join('');
+  setHtml(body, parts.join(''));
 }
 
 function renderCaches(caches) {
   const body = el('caches-body');
   if (!body) return;
   if (!Array.isArray(caches) || caches.length === 0) {
-    body.innerHTML = '<span class="sys-empty">No cache statistics reported.</span>';
+    setHtml(body, '<span class="sys-empty">No cache statistics reported.</span>');
     return;
   }
   const totalEntries = caches.reduce((s, c) => s + (c.entry_count ?? 0), 0);
   const totalBytes = caches.reduce((s, c) => s + (c.approx_bytes ?? 0), 0);
-  body.innerHTML =
+  setHtml(body,
     `<table><thead><tr><th>Cache</th><th class="eth">Entries</th><th class="eth">Size</th></tr></thead><tbody>` +
     caches.map(c =>
       `<tr title="${escapeHtml(c.description ?? '')}">` +
@@ -1084,17 +1165,17 @@ function renderCaches(caches) {
     `<div class="sys-row" style="border-bottom:none;margin-top:0.5rem">` +
       `<span class="sys-label">Total</span>` +
       `<span class="sys-value">${fmtCount(totalEntries)} entries &middot; ${fmtBytes(totalBytes)} tracked</span>` +
-    `</div>`;
+    `</div>`);
 }
 
 function renderLanguages(languages) {
   const body = el('languages-body');
   if (!body) return;
   if (!Array.isArray(languages) || languages.length === 0) {
-    body.innerHTML = '<span class="sys-empty">No languages advertised.</span>';
+    setHtml(body, '<span class="sys-empty">No languages advertised.</span>');
     return;
   }
-  body.innerHTML = languages.map(lang => {
+  setHtml(body, languages.map(lang => {
     const isGvisor = lang.execution_model === 'gvisor';
     const runtimes = (lang.runtimes ?? []).map(rt =>
       `<span class="badge${rt.is_default ? ' accent' : ''}" title="${escapeHtml(rt.version ?? '')}${rt.prewarmed ? ' · prewarmed' : ''}">${escapeHtml(rt.id)}${rt.is_default ? ' ★' : ''}</span>`
@@ -1105,7 +1186,7 @@ function renderLanguages(languages) {
       `<span class="badge${isGvisor ? ' accent' : ''}">${isGvisor ? 'gVisor sandbox' : 'Deno / V8'}</span>` +
       `<span class="sys-value" style="display:flex;gap:0.35rem;flex-wrap:wrap;justify-content:flex-end">${runtimes} ${methods}</span>` +
     `</div>`;
-  }).join('');
+  }).join(''));
 }
 
 // /health intentionally answers 503 with a JSON body when unhealthy, so parse
@@ -1248,10 +1329,12 @@ async function refreshBalances() {
   isRefreshing = true;
   try {
     const serverUrl = getServerUrl();
+    // silent: update values in place without tearing cards down to placeholders,
+    // so a periodic refresh doesn't blank-and-repaint (and jump) the page.
     await Promise.all([
-      getApiPayers(serverUrl),
-      fetchContractValues(),
-      fetchNodeConfigValues(),
+      getApiPayers(serverUrl, { silent: true }),
+      fetchContractValues({ silent: true }),
+      fetchNodeConfigValues({ silent: true }),
       refreshSystemDashboard(serverUrl),
       fetchSupportedLanguages(serverUrl),
     ]);
@@ -1495,6 +1578,9 @@ el('btn-refresh-node-config')?.addEventListener('click', async () => {
 
 el('cc-rpc-url')?.addEventListener('change', () => refreshBalances());
 
+// Editing the contract address re-queries that contract's values in place.
+el('contract-address')?.addEventListener('change', () => refreshBalances());
+
 el('btn-refresh-contract')?.addEventListener('click', async () => {
   const btn = el('btn-refresh-contract');
   btn.disabled = true;
@@ -1584,7 +1670,30 @@ el('ver-contract-address')?.addEventListener('click', () => {
     } catch {}
   }
 
-  select.addEventListener('change', loadNetwork);
+  // Seed the editable server-url field from the selected preset.
+  const urlInput = el('server-url');
+  if (urlInput) urlInput.value = select.value;
+
+  // Picking a preset fills the editable field; editing the field points at any
+  // node (and re-selects the matching preset when the URL is a known one).
+  select.addEventListener('change', () => {
+    if (urlInput) urlInput.value = select.value;
+    loadNetwork();
+  });
+  if (urlInput) {
+    const applyUrl = () => {
+      const v = urlInput.value.trim().replace(/\/$/, '');
+      for (const opt of select.options) {
+        if (opt.value.replace(/\/$/, '') === v) { opt.selected = true; break; }
+      }
+      loadNetwork();
+    };
+    urlInput.addEventListener('change', applyUrl);
+    urlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); applyUrl(); }
+    });
+  }
+
   loadNetwork();
   if (!document.hidden) startNetworkHealthPolling();
 })();
