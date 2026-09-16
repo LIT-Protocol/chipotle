@@ -52,7 +52,7 @@ The same method applies to first-party applications and vendor workloads. The de
 The container method uses several controls together:
 
 - **Network isolation.** The application sits on an internal network, without a direct route to external services.
-- **A controlled exit.** Permitted outbound traffic passes through an egress proxy. The reviewed container implementation uses exact hostnames over TLS on port 443, rather than wildcard destinations or arbitrary IP addresses.
+- **A controlled exit.** Permitted outbound traffic passes through an egress proxy. The container deployment permits exact hostnames over TLS on port 443. Wildcard destinations and arbitrary IP addresses are not allowed.
 - **Destination and address checks.** The proxy checks the requested server name, resolves the destination, and blocks private or reserved address ranges.
 - **Measured policy.** The egress rules are included in the measured deployment configuration. Broadening them is a release change requiring approval, not just a console setting.
 
