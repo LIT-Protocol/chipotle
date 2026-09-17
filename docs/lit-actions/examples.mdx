@@ -848,7 +848,7 @@ async function signRound({ pkpId, encActionKeyshare, message, peerCommitments })
 
 ## 19. Agent Secrets Keychain (Derived Actions + Signed Storage)
 
-Every example above is one action. This one shows what a whole product looks like when it is built from the two structural patterns: [Derived Actions](./derived-actions) and [Signed Data in Untrusted Storage](./signed-storage). The [Lit Agent Keychain](https://github.com/LIT-Protocol/chipotle/tree/main/lit-agent-keychain) lets a human give an AI agent scoped access to credentials (API keys, tokens) that the human can revoke, with no operator able to read or forge anything.
+Every example above is one action. This one shows what a whole product looks like when it is built from the two structural patterns: [Derived Actions](./derived-actions) and [Signed Data in Untrusted Storage](./signed-storage). The [Lit Agent Keychain](/keychain) lets a human give an AI agent scoped access to credentials (API keys, tokens) that the human can revoke, with no operator able to read or forge anything.
 
 There are **no PKPs** and **no trusted backend**. A vault is *N+1* immutable actions derived from three templates:
 

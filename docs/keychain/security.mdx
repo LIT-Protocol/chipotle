@@ -1,0 +1,68 @@
+---
+title: "Security model"
+description: "What Lit Agent Keychain's cryptography enforces, what the operator can see and do, how the derived action key model works, how the Lit endpoint is attested, and the honest limits of revocation."
+---
+
+Keychain is built so that nothing on the operator's side can grant access to a secret. This page explains the mechanism and states the trust boundary plainly. The normative version is the [security contract](https://keychain.litprotocol.com/SECURITY.md) published with each release.
+
+## The derived action key model
+
+Each secret gets its own immutable Lit Action: a fixed code template plus a small manifest naming your vault, the secret and its release mode. Your browser computes the content hash of that code, its IPFS CID, locally. Inside the enclave, Lit derives a signing key that is unique to that exact CID; change one byte of code and you get a different key. The action derives its X25519 encryption key from that root.
+
+Your browser asks Lit directly for the action's public key, checks Lit's signature on it, and encrypts the secret to that key with HPKE (X25519, HKDF-SHA256, AES-256-GCM). The only thing that can decrypt it is that exact program, running in an attested enclave. And that program's code says: verify the owner's receipt, verify the agent's signature, check scope and expiry, then encrypt the result to the agent's key. There is no admin path around those checks because no one else holds the key. Neither Keychain nor Lit's operators can decrypt outside the action.
+
+This is the [Derived Actions](/lit-actions/derived-actions) pattern. The receipts are the [Signed Data in Untrusted Storage](/lit-actions/signed-storage) pattern: an immutable **authority action** verifies your wallet, passkey or Google proof and signs a receipt over the exact canonical object you approved. Keychain stores the receipt; the secret's action checks it.
+
+## What the cryptography enforces
+
+Assuming the frontend and SDK, your chosen identity provider, the Lit TLS endpoint, the Lit runtime and its derivation root remain trustworthy, compromising the Keychain API, database and billing key cannot fabricate owner authorization or extend its signed scope.
+
+- Ciphertext, metadata, version and release mode are bound together.
+- An agent must prove possession of its own signing key. Each request binds the exact envelope, operation, policy hash, deadline and response encryption key.
+- Results carry an action signature, so a proxy cannot fabricate an encrypted result.
+- New secrets grant no agent access. Agent policies always have a finite signed expiry, 30 days by default and 90 at most.
+
+## What the operator can see and do
+
+**Keychain can see** secret names, agent public keys, policies and request metadata. It never sees plaintext values, your owner keys, or agent private keys.
+
+**Keychain can** deny service, delete or withhold ciphertext, or serve an older still-valid policy. That last one matters: within a policy's lifetime, a malicious operator could undo a revocation by replaying the previous signed policy, restoring access for an agent that was approved under it. Revision counters give honest concurrency checks, not rollback protection. This is why policies are capped at 90 days.
+
+**Keychain cannot** forge an approval, add an agent, extend an expiry, or read a secret. If the entire database is dumped, the attacker gets ciphertext and signed policies they cannot extend.
+
+<Note>
+The hosted web client is part of the trust boundary. Open source does not prove that a server
+served an audited build. A compromise that also changes the delivered JavaScript could steal new
+plaintext or owner approvals. For a stronger separation from the operator, run a verified client
+release yourself.
+</Note>
+
+## Attested Lit endpoint
+
+Before execution requests to the configured production origin, the SDK, CLI and MCP server verify remote attestation and fail closed:
+
+1. Parse the Intel TDX quote from the endpoint and verify its ECDSA-P256 chain up to a pinned Intel SGX Root CA key.
+2. Replay the dstack event log and require RTMR0-3 to match the quote.
+3. Require the measured app id to be the pinned Lit application and the measured compose hash to equal the served compose file, with every container image digest-pinned.
+4. Confirm on Base that the compose hash and OS image are whitelisted in the governance contracts controlled by the Lit Safe multisig.
+5. In Node, bind the live TLS certificate to the enclave through the ingress evidence quote.
+
+Any failure throws an `Attestation:` error and no request is sent. Unknown origins, such as a local test adapter, are not attested, which is not the same as passing attestation: verify `config.litApiUrl` independently and pin custom deployments explicitly. Browsers run steps 1 to 4 only. The general mechanism is described in [Attestation](/architecture/verification/attestation).
+
+## Revocation and its limits
+
+Revoking writes a new signed policy, and the action fetches the current policy on every request, so the next request from that agent is denied. Three limits apply:
+
+- A request already in flight may finish.
+- Plaintext an agent already received cannot be recalled.
+- The operator could replay the old policy until it expires.
+
+Keep policies short, and rotate the underlying credential at the provider if you suspect it leaked. Cancelling a subscription is not revocation.
+
+## Agent-side plaintext
+
+A stored secret's plaintext ends up on the agent's machine, by design. A compromised agent host can disclose any credential it is approved for until revoked, exactly as with any credential on a compromised host. `keychain run` hands a value to one child process without printing it, but the child can still log it; `get_secret` in MCP places it in model context. For keys that should never be returned to an agent, use a [connected service](/keychain/connected-services): the provider receives the key over TLS, the agent receives only the bounded result.
+
+## Release integrity
+
+Every action template is pinned by SHA-256 in the repository's catalog lock, and the build fails on drift. Released templates are archived byte for byte and compiled into the server, so vaults and secrets created under an earlier release keep working after an upgrade; the authority action carries a root-owner fallback for the transition. Because the action's bytes are its key, a template change is an explicit release, never a silent rebuild. You can read the exact code allowed to touch your vault: the client, API, SDK and every action are Apache-2.0 in the [chipotle repository](https://github.com/LIT-Protocol/chipotle/tree/main/lit-agent-keychain), and the review findings are in [ADVERSARIAL_REVIEW.md](https://keychain.litprotocol.com/ADVERSARIAL_REVIEW.md).

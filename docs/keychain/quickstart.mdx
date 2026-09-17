@@ -1,0 +1,114 @@
+---
+title: "Quickstart"
+description: "Store a secret in Lit Agent Keychain, approve an agent's public key, and read it from Node, the CLI or an MCP client such as Claude Code."
+---
+
+You need a browser for the owner steps and Node 22+ on the agent's machine. Nothing is installed globally; every command runs through `npx`.
+
+<Note>
+The examples below use the latest published `@lit-protocol/keychain`. Pin an exact version
+(`@lit-protocol/keychain@2.0.4`, for example) in anything you deploy, and check the
+[npm page](https://www.npmjs.com/package/@lit-protocol/keychain) for release notes before upgrading.
+</Note>
+
+## 1. Generate an agent identity
+
+On the machine that will run the agent:
+
+```sh
+npx @lit-protocol/keychain init ./agent-identity.json
+```
+
+This writes a mode-0600 file containing an Ed25519 key pair and prints its `publicKey`. Share **only the public key** with the owner. The file is never overwritten if it already exists.
+
+## 2. Sign in and store a secret
+
+<Steps>
+  <Step title="Sign in">
+    Open [keychain.litprotocol.com](https://keychain.litprotocol.com) and sign in with Google, a wallet or a passkey. Each method can own a vault; Google needs neither a wallet nor a passkey. See [Sign-in and recovery](/keychain/sign-in-and-recovery) for the custody tradeoffs.
+  </Step>
+  <Step title="Add a secret">
+    Choose **Add secret**, then either **Store a secret** (the agent receives the value) or **Connect a service** (the agent runs one reviewed action and never sees the key). Name it in `UPPER_SNAKE_CASE`, for example `OPENAI_API_KEY`, and paste the value. It is encrypted in your browser before upload.
+  </Step>
+  <Step title="Approve the agent">
+    Open the secret, paste the agent's public key under **Authorized agents**, give it a name and click **Approve agent**. One wallet prompt or passkey touch signs the policy. Permissions default to 30 days and cap at 90.
+  </Step>
+  <Step title="Download the agent config">
+    Click **Agent config** to download `OPENAI_API_KEY.keychain.json`. It contains public locators plus a scoped execution key that pays for Lit execution. It is not a backup and holds no secret value, but keep it private.
+  </Step>
+</Steps>
+
+Give the config file to the agent alongside its identity. Keep both files out of version control.
+
+## 3. Read the secret
+
+<Tabs>
+  <Tab title="Node SDK">
+    ```sh
+    npm install @lit-protocol/keychain
+    ```
+
+    ```js
+    import { readFile } from "node:fs/promises";
+    import { Keychain } from "@lit-protocol/keychain";
+
+    const identity = JSON.parse(await readFile("./agent-identity.json", "utf8"));
+    const config = JSON.parse(await readFile("./OPENAI_API_KEY.keychain.json", "utf8"));
+    const keychain = new Keychain(identity.privateKey, config);
+    try {
+      const secret = await keychain.get("OPENAI_API_KEY");
+      // Use it in your trusted application here. Never log it.
+    } finally {
+      keychain.destroy();
+    }
+    ```
+  </Tab>
+  <Tab title="CLI: hand it to one command">
+    `run` decrypts the secret and places it in a child process's environment under its own name. The CLI itself prints nothing.
+
+    ```sh
+    npx @lit-protocol/keychain run ./agent-identity.json ./OPENAI_API_KEY.keychain.json -- python agent.py
+    ```
+
+    Prefer `run` over `get` whenever a tool, not your code, needs the value. `--env SECRET=VAR` renames a variable, `--only A,B` selects secrets, and `--file SECRET=PATH` writes a mode-0600 file that is removed when the command exits, for tools that only read credentials from a path.
+  </Tab>
+  <Tab title="MCP: Claude Code, Codex, Cursor">
+    The package ships a local stdio MCP server. Register it with absolute paths:
+
+    ```sh
+    claude mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp /absolute/path/agent-identity.json /absolute/path/OPENAI_API_KEY.keychain.json
+    ```
+
+    Codex takes the same command after `codex mcp add lit-keychain --`. JSON clients (Cursor, Windsurf) take it as `command: "npx"` with the same arguments. Start with the `agent_public_key`, `list_actions` and `list_secrets` tools; `get_secret` puts plaintext into model context, so call it only when you mean to.
+  </Tab>
+</Tabs>
+
+Before the first execution request, the SDK attests the Lit endpoint: an Intel TDX quote chained to Intel's root, the boot event log replayed into the RTMRs, the measured release checked against the on-chain whitelist on Base, and in Node the live TLS certificate bound to the enclave. Any failure blocks the request. See [Security model](/keychain/security#attested-lit-endpoint).
+
+## 4. Revoke, rotate, renew
+
+Everything is on the secret's page in the dashboard:
+
+- **Revoke** removes one agent. The action fetches the current policy on every request, so the agent's next request is denied.
+- **Disable** switches the secret off for every agent without deleting it.
+- **Rotate & approve** encrypts a new value and moves the existing agents to it in one signature. Downloaded configs keep working.
+- **Renew permissions** extends the expiry, up to 90 days from now.
+
+If you suspect a credential leaked, also revoke it at the provider. Revocation cannot recall plaintext an agent already received.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="SDK, CLI and MCP reference" icon="terminal" href="/keychain/agents">
+    Every command and tool, the three credential files, and what each `Access denied:` message means.
+  </Card>
+  <Card title="Connected services" icon="plug" href="/keychain/connected-services">
+    Let an agent read a Stripe balance or post to Slack without ever holding the key.
+  </Card>
+  <Card title="Sign-in and recovery" icon="key" href="/keychain/sign-in-and-recovery">
+    Add a second owner credential and download a backup before storing anything valuable.
+  </Card>
+  <Card title="Security model" icon="shield-check" href="/keychain/security">
+    What the operator can see, what it can never do, and the limits of revocation.
+  </Card>
+</CardGroup>

@@ -93,7 +93,8 @@ in SECURITY.md. "Use inside Lit" actions cannot export or arbitrarily migrate se
 keep the original credential for reimporting into a future action release.
 
 See [sdk/README.md](sdk/README.md) for executable examples, [README.md](README.md)
-for deployment and recovery, and [PROVIDERS.md](PROVIDERS.md) for provider setup.
+for deployment and recovery, [PROVIDERS.md](PROVIDERS.md) for provider setup, and
+https://developer.litprotocol.com/keychain for the human-facing documentation.
 Select stored secret/export before using `get` or `run`; connected services use
 `use` or their action MCP tool. Replace example absolute paths with local paths
 and start with `agent_public_key`, `list_actions`, then `list_secrets`.

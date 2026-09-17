@@ -92,12 +92,44 @@ test("owner action guidance links provider setup and explains exposure", async (
 });
 
 test("public docs do not advertise known missing platform pages", async () => {
-  for (const file of ["web/public/llms.txt", "web/src/Landing.tsx"]) {
+  for (const file of [
+    "web/public/llms.txt",
+    "web/src/Landing.tsx",
+    "web/src/main.tsx",
+  ]) {
     assert.doesNotMatch(
       await read(file),
       /lit-actions\/(derived-actions|signed-storage)/,
     );
   }
+});
+test("the home page points at the developer docs, not an in-page FAQ", async () => {
+  const landing = await read("web/src/Landing.tsx");
+  assert.match(landing, /developer\.litprotocol\.com/);
+  assert.doesNotMatch(landing, /faq-item|landing-section|pricing-card/);
+  const docs = JSON.parse(await read("../docs/docs.json"));
+  const tab = docs.navigation.tabs.find(
+    (t: { tab: string }) => t.tab === "Lit Agent Keychain",
+  );
+  assert.ok(tab, "docs.json must have a Lit Agent Keychain tab");
+  const pages: string[] = [];
+  const walk = (items: unknown[]) => {
+    for (const item of items)
+      typeof item === "string"
+        ? pages.push(item)
+        : walk((item as { pages: unknown[] }).pages);
+  };
+  walk(tab.pages);
+  for (const page of pages) await read(`../docs/${page}.mdx`);
+  for (const path of ["", "/quickstart", "/security"])
+    assert.ok(
+      landing.includes(
+        path ? `\`\${KEYCHAIN_DOCS_URL}${path}\`` : "KEYCHAIN_DOCS_URL",
+      ),
+      `home page links ${path || "/keychain"}`,
+    );
+  for (const path of ["quickstart", "security"])
+    assert.ok(pages.includes(`keychain/${path}`), `docs tab lists ${path}`);
 });
 test("documented Supabase credential passes the actual pinned parser and input schema", async () => {
   const docs = await read("PROVIDERS.md");

@@ -1,0 +1,64 @@
+---
+title: "Sign-in and recovery"
+description: "How Google, wallet and passkey sign-in work in Lit Agent Keychain, the custody tradeoff each one makes, and how to add a second owner credential and back up a vault before you need to."
+---
+
+Everything in Keychain hinges on who can authorize an agent. The Lit action releases a secret only when it sees a receipt that traces back to **your** credential, and Keychain's servers never hold a key that can produce one. That is why sign-in is a wallet, a passkey or a Google account verified inside the enclave rather than a password the server checks.
+
+## The three methods
+
+<Tabs>
+  <Tab title="Google">
+    Your browser first generates a fresh Ed25519 session key that lives only in memory and expires after ten minutes. A hash of that public key and a random value is passed to Google as the OpenID nonce, so the ID token Google returns is bound to this specific session key.
+
+    When you approve something, your browser signs that exact object with the session key and sends the signature together with the Google ID token to an immutable Lit Action running inside a hardware enclave. The action fetches Google's public keys, verifies the token's signature, issuer, audience, subject, expiry and nonce, and only then signs a durable receipt for that object. Keychain stores the receipt. It never stores your Google token, and the token cannot mint new receipts after it expires.
+
+    Your identity is Google's stable subject ID for your account, not your email address. Sign in with the same Google account, not merely the same email spelling on a different account.
+  </Tab>
+  <Tab title="Wallet">
+    Any EOA wallet through RainbowKit. Approvals are EIP-712 typed-data signatures over the exact object being approved, verified inside the authority action. ERC-1271 and ERC-6492 contract wallets are not supported in this release.
+  </Tab>
+  <Tab title="Passkey">
+    A native WebAuthn P-256 credential registered to the Keychain origin. Approvals are WebAuthn assertions over the object hash, verified inside the authority action. Passkeys are tied to the origin they were registered on, so a passkey created elsewhere is a different credential.
+  </Tab>
+</Tabs>
+
+## The tradeoff
+
+**Google** avoids managing a signing key yourself, has no device dependency, and offers account recovery through Google. The cost is that your Google account becomes the root of trust for your vault. Anyone who takes over that account, and Google itself, can obtain a token for your subject and authorize new agents. That is the same trust every "Sign in with Google" button implies, but here it gates your secrets.
+
+**Wallet and passkey** are self-custody. Every approval needs a signature from hardware or a device only you hold. Keychain, Google and Lit cannot produce one. The cost is that losing the key means losing access unless you have approved a second owner credential.
+
+<Tip>
+Start with whichever is convenient, then open **Recovery & backups** and add a passkey or wallet
+as a second approved owner credential before storing anything valuable.
+</Tip>
+
+## Prepare recovery while you still have access
+
+1. Sign in and open **Recovery & backups**. Approve an additional owner credential you control and test it before relying on it.
+2. Download an encrypted backup and store it privately off-device. It contains current ciphertext and signed policies, not private keys or historical versions. Download a fresh copy after every credential change and secret rotation.
+3. For connected services, retain the original provider credentials independently. Those actions cannot export or migrate a key.
+
+## Restoring
+
+| Situation | What to do |
+|---|---|
+| New device, approved credential available | Choose **Recover an existing vault** on the sign-in page, select your backup, then sign in with any approved credential. Confirm the restored secret list and download fresh agent configs where needed. |
+| Google-only owner | Sign in with the same Google account. If it is inaccessible, use Google's recovery or a previously approved alternate owner. Keychain cannot reset a Google identity. |
+| Backup lost, credential available | Sign in and make a new backup. A credential alone does not recreate lost ciphertext. |
+| All approved credentials lost | A backup alone is insufficient. Recover through the credential provider (a synced passkey, Google recovery) or an already-approved alternate credential. There is no operator reset token. |
+| Agent key lost | Generate a new identity on a trusted machine, approve its public key per secret, revoke the old key and distribute new configs. |
+
+Restore never overwrites an existing secret or an existing vault's credential settings. On a conflict, compare versions rather than deleting current data to force an old restore.
+
+## Rotations and what they affect
+
+| Change | Owner steps | Effect on agents |
+|---|---|---|
+| Rotate & approve | Enter the new value on the secret's page | Existing agents move to the new version with their current expiry; downloaded configs keep working |
+| Execution (billing) key | **Replace execution key** in the subscription panel | Every agent config must be re-downloaded or its `CHIPOTLE_USAGE_API_KEY` override updated; approvals are unaffected |
+| Agent signing key | Approve the new public key, revoke the old | Distribute the new identity and config privately |
+| Owner credential | Approve and test the replacement before removing the old one | Existing browser sessions end; download a fresh backup |
+
+Cancelling a subscription is not revocation. For suspected exposure, revoke at the upstream provider too.
