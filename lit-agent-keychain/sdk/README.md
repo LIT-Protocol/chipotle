@@ -1,4 +1,4 @@
-# @lit-protocol/keychain v2
+# @lit-protocol/keychain
 
 The agent generates and holds an Ed25519 signing key. An owner authorizes its
 public key for exact secret versions. The SDK checks signed metadata, submits a
@@ -291,7 +291,7 @@ The constructor and CLI apply them, so swapping the identity and config argument
 or pasting a private key as the usage key fails before any request is sent.
 
 The config pins each action manifest/CID and an independently trusted Lit endpoint.
-Never replace that endpoint using a URL supplied by the Keychain API. V2 clients
+Never replace that endpoint using a URL supplied by the Keychain API. Clients
 must use the action templates from the same immutable release as the vault.
 
 Owner management requests allow two minutes for initial Chipotle group/key

@@ -1,4 +1,4 @@
-# Agent Context: lit-agent-keychain v2
+# Agent Context: lit-agent-keychain
 
 Rust storage/sponsorship API plus a React client, agent SDK and bundled Lit Actions.
 See README.md and SECURITY.md for the protocol and its explicit trust boundary.
