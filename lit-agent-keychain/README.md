@@ -28,12 +28,43 @@ The operator is trusted to serve the latest signed policy. It can replay old val
 permissions, including undoing a revocation, but cannot forge owner authorization.
 The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md).
 
+## SDK 2.0.4 release coordination
+
+This source prepares SDK 2.0.4 and pins the hosted examples to that version. Merging
+to `main` publishes the SDK (see Publishing below), before the owner UI/API deploy.
+Until the package is on the registry, registry installation of that version is not
+an acceptance test and reviewers should use the locally packed tarball.
+
+2.0.4 is also a **template release**: batched owner approval changed the shared
+protocol schema, so every template in `actions/catalog.lock.json` (authority and
+catalog) has new bytes, archived under `actions/archive/`. Consequences, all handled by
+the release mechanism described in [SECURITY.md](SECURITY.md#authority-releases):
+
+- Existing vaults keep signing in; their recorded authority release moves forward on
+  the first sign-in with the new web app. Existing secrets keep their pinned releases
+  and are read, rotated and restored under them.
+- Secrets created after the deploy pin the new catalog release. An agent still running
+  SDK 2.0.3 does not know those template hashes and cannot read them until it upgrades,
+  so publish 2.0.4 first and tell agent operators to update.
+- Rotating a secret pinned to a pre-batch authority release still takes one signature
+  per document (`PRE_BATCH_AUTHORITY_HASHES` in the SDK).
+
+Release checks: run `npm test` and `npm run build`, publish through the normal
+maintainer release process, verify `npm view @lit-protocol/keychain@2.0.4 version`,
+then repeat the strict external TypeScript consumer and attestation-enabled Node
+smoke test from the registry artifact. Only then deploy the owner UI/API and create,
+rotate and read a secret against production. See the QA reports under `docs/` for
+actual production coverage and remaining provider/auth/billing tests.
+
 ## Features
 
 - RainbowKit/wagmi EOA wallet connection, native WebAuthn P-256 passkeys, Google JWT
   verification inside Lit with a nonce-bound, locally held session key.
 - One immutable encryption action per secret; an immutable owner authorization action
-  produces durable receipts without retaining Google tokens in the database.
+  produces durable receipts without retaining Google tokens in the database. Creating
+  or rotating a secret approves its manifest, ciphertext and policy with **one** owner
+  signature (one wallet prompt, one passkey touch); each object still gets its own
+  exact-object receipt.
 - X25519/HKDF-SHA256/AES-256-GCM HPKE key wrapping and response encryption; local
   AES-256-GCM payload encryption. Action signatures authenticate results as well as keys.
 - Explicit agent public-key enrollment, exact ciphertext/version scopes, disable/revoke,
@@ -59,9 +90,91 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
   child process as environment variables or short-lived mode-0600 files without
   printing them. No management bearer tokens, operator grant
   signer, PKP vault provisioning, chain registry, relayer, or paymaster.
-- Client-side remote attestation of the Lit endpoint before any request: TDX quote
+- Client-side remote attestation before execution requests to configured/pinned production Lit origins (unknown origins are not automatically attested): TDX quote
   chain to a pinned Intel root, event-log replay, measured app/compose identity,
   on-chain governance whitelist, and (Node) TLS certificate binding.
+
+## Owner setup and recovery
+
+For agent installation and the separate stored-secret (`get`/`run`) and connected-service
+(`use`) paths, see [SDK quickstarts](sdk/README.md). For provider credentials and
+exact inputs, see [provider recipes](PROVIDERS.md). An **export action** releases a
+raw secret to an approved agent; **Agent config** downloads public locators plus a
+billing key; **encrypted backup export** saves ciphertext/policies. These are not
+interchangeable operations.
+
+### Prepare recovery while you still have access
+
+1. Sign in at your existing Keychain origin. Open **Recovery & backups** and approve
+   an additional owner credential you control. Test it before retiring the first.
+2. Download an encrypted backup and store it privately off-device. Download a fresh
+   copy after every credential change and secret rotation. Backups contain current
+   ciphertext/policies, not private keys or historical secret versions.
+3. Retain the original provider credentials independently for connected services.
+   Strict-mode actions cannot export or migrate them; an action upgrade or loss of
+   Lit's derivation root cannot be repaired with ciphertext alone.
+
+### Restore walkthrough and credential-loss decisions
+
+- **New device, approved credential available:** choose **Recover an existing vault**
+  on the sign-in page, select your encrypted backup, then sign with an owner
+  credential approved for that vault. Use the original deployment/origin for
+  passkeys; a newly created passkey is not the old credential. Confirm the restored
+  secret list and permissions, and download fresh agent configs where necessary.
+- **Google-only owner:** sign in with the same Google account, not simply the same
+  email spelling on a different account. If inaccessible, use Google's recovery
+  or a previously approved alternate owner; Keychain cannot reset Google identity.
+- **Missing vault:** restore can initialize credential settings from the signed
+  backup. **Existing vault:** restore cannot overwrite its credential settings or a
+  different existing secret. On a conflict, stop and compare the vault/secret and
+  backup versions; do not delete current data to force an old restore.
+- **Backup lost, credential available:** sign in and make a new backup if the
+  service still has the vault. A credential alone does not recreate lost ciphertext.
+- **All approved credentials lost:** a backup alone is insufficient. Recover through
+  the credential provider (for example a synced passkey or Google recovery) or use
+  a previously approved alternate credential. There is no operator reset token.
+- **Agent key lost:** generate a new identity on a trusted machine, approve its
+  public key per secret, revoke the old key and distribute new configs. The backup
+  does not recover the agent's private key.
+
+These steps describe supported behavior, not evidence of a successful live Google,
+physical-passkey or provider recovery test. See [security limits](SECURITY.md).
+
+### Rotations and revocation
+
+| Change                                 | Owner steps                                                                                                 | Agent/config consequence                                                                                                 |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Secret value (without approval update) | Issue a replacement at the provider; rotate the secret; reapprove intended agents for the new exact version | Old version grants alone do not cover the new version                                                                    |
+| Rotate & approve                       | Use the combined dashboard action to rotate and move existing agents to the new version                     | No separate reapproval is needed; existing downloaded configs can resolve the new version immediately                    |
+| Execution/billing key                  | Replace execution key in the owner dashboard                                                                | Update every agent config or `CHIPOTLE_USAGE_API_KEY` override, then restart MCP; identity/secret approvals are separate |
+| Agent signing key                      | Generate a new identity, approve new public key, revoke old grants                                          | Never overwrite a working identity without a recovery plan; distribute new identity/config privately                     |
+| Immutable action release               | Keep old release available; reimport original credential into the new action and approve explicitly         | A config edit cannot migrate ciphertext; strict-mode backup cannot supply plaintext                                      |
+| Owner credential                       | Approve/test replacement before revoking old credential                                                     | Download a fresh encrypted backup; existing metadata sessions are invalidated                                            |
+
+For suspected exposure, revoke at the upstream provider too. With honest storage,
+revocation applies to subsequent policy lookups; in-flight calls may finish and
+plaintext already received cannot be recalled. The operator can replay older
+still-valid permissions, as documented in SECURITY.md. **Cancellation is not
+revocation.** Slack posts and Supabase inserts are not exactly-once: inspect provider
+state after uncertain completion; do not blindly retry writes.
+
+### Storage entitlements and charges
+
+| State                             | Storage                                    | Execution and recovery                                                     |
+| --------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------- |
+| Free                              | Up to 5 secrets                            | Sponsored enrolled actions under fair use; backups/revocation available    |
+| Standard                          | $10/month, up to 1,000 secrets             | Same authorization model; rotations use no additional slot                 |
+| Cancelled, still in paid period   | Paid entitlement until period end          | Cancellation does not revoke agent grants                                  |
+| Paid expired, at/below Free limit | Free entitlement                           | Sponsored execution continues on Free                                      |
+| Paid expired, above Free limit    | Storage mutations blocked while over limit | Login, revocation and encrypted backups remain; no automatic data deletion |
+
+There is no hard per-user execution or dollar cap and no automatic Keychain overage
+charge. A numerical fair-use quota is not specified here; contact Support via the
+app before high-volume usage or for custom storage limits. Report outages with
+operation/time and a sanitized error, never keys/configs. Provider API charges
+(OpenAI, Slack plan requirements, Supabase, etc.) are separate from the Keychain
+subscription. Check the owner billing page and refresh billing state after checkout;
+do not infer successful payment from a browser redirect alone.
 
 ## Local development
 
@@ -130,12 +243,19 @@ The image runs as an unprivileged user. For Railway, use repository root as the 
 context and `lit-agent-keychain/railway.json` as the config path; the Dockerfile path
 is relative to the repository root.
 
-Publish the agent SDK with `./publish.sh`. It builds, compares the packed contents
-with what npm serves for the current version, bumps the patch version only when
-they differ (`--bump minor|major` to choose), commits and tags
-`keychain-sdk-v<version>`, then publishes. `--dry-run` shows the decision without
-committing or publishing. A local `before=` cooldown in `~/.npmrc` does not affect
-it; the published tarball is fetched directly and integrity-checked.
+The agent SDK publishes on merge. `.github/workflows/keychain-publish.yml` runs on
+every push to `main` touching this directory, builds, and publishes
+`@lit-protocol/keychain` with provenance when `sdk/package.json` is ahead of the
+registry, then tags `keychain-sdk-v<version>`. The version bump belongs in the PR:
+PR CI runs `node scripts/publish-sdk.mjs --check`, which fails when the packed
+contents differ from the published version without a bump (`./publish.sh --dry-run`
+locally shows the same decision and bumps for you; `--bump minor|major` to choose).
+Unchanged contents are a no-op, so server-only merges publish nothing. The workflow
+authenticates through npm trusted publishing (this repo and workflow file registered
+on the package) or, failing that, an `NPM_TOKEN` repository secret. Manual
+`./publish.sh` still works and bumps, commits and publishes in one go. A local
+`before=` cooldown in `~/.npmrc` does not affect change detection; the published
+tarball is fetched directly and integrity-checked.
 
 This is a prelaunch, incompatible replacement. Migration `20260911000001` drops the
 legacy Keychain tables and their contents. Stop the old service before applying it.

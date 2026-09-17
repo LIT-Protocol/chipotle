@@ -2,25 +2,32 @@
    https://demo.tailadmin.com/ */
 
 :root {
+  /* Chalk + charcoal + restrained burnt orange (issue #673). Paper surfaces,
+     charcoal ink, orange reserved as an accent; solid CTAs use ink, not orange. */
   --sidebar-bg: #ffffff;
-  --sidebar-text: #64748b;
-  --sidebar-text-hover: #1e293b;
-  --sidebar-border: #e2e8f0;
-  --sidebar-brand-text: #1e293b;
-  --sidebar-link-hover-bg: rgba(0, 0, 0, 0.05);
-  --body-bg: #f1f5f9;
+  --sidebar-text: #696963;
+  --sidebar-text-hover: #181818;
+  --sidebar-border: #ddddd5;
+  --sidebar-brand-text: #181818;
+  --sidebar-link-hover-bg: rgba(24, 24, 24, 0.05);
+  --body-bg: #fafaf7;
   --card-bg: #ffffff;
-  --text: #1e293b;
-  --text-muted: #64748b;
-  --border: #e2e8f0;
-  --primary: #3c50e0;
-  --primary-hover: #5a67d8;
+  --text: #181818;
+  --text-muted: #696963;
+  --border: #ddddd5;
+  --primary: #bc3b12;
+  --primary-hover: #9e3210;
+  /* RGB channels of --primary, for rgba() tints. Overridden in dark. */
+  --primary-rgb: 188, 59, 18;
+  /* Solid primary CTA fill. Ink in light, brand in dark (see below). */
+  --btn-primary-bg: #181818;
+  --btn-primary-bg-hover: #30302c;
   --danger: #dc2626;
   --success: #16a34a;
-  --bg-muted: #f3f4f6;
-  --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
-  --radius: 8px;
-  --radius-lg: 12px;
+  --bg-muted: #f0f0eb;
+  --shadow: 0 1px 2px 0 rgba(24, 24, 24, 0.04);
+  --radius: 7px;
+  --radius-lg: 10px;
 }
 
 [data-theme="dark"] {
@@ -37,6 +44,9 @@
   --border: #334155;
   --primary: #6366f1;
   --primary-hover: #818cf8;
+  --primary-rgb: 99, 102, 241;
+  --btn-primary-bg: #6366f1;
+  --btn-primary-bg-hover: #818cf8;
   --danger: #f87171;
   --success: #4ade80;
   --bg-muted: #1e293b;
@@ -99,7 +109,7 @@ select:focus-visible {
   align-items: center;
   justify-content: center;
   padding: 2rem;
-  background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+  background: linear-gradient(180deg, #fafaf7 0%, #f0f0eb 100%);
 }
 
 [data-theme="dark"] .login-page {
@@ -119,11 +129,13 @@ select:focus-visible {
   margin: 0 auto;
 }
 
+/* One clear sign-in surface (issue #673): the card panel sits directly inside
+   the shell with no nested border or shadow — the shell is the only container. */
 .login-cards > .login-card {
-  background: var(--card-bg, transparent);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1.25rem;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
   margin-bottom: 0;
   box-shadow: none;
   display: flex;
@@ -139,8 +151,9 @@ body.login-mode-chainsecured .login-card-api {
 }
 
 .login-title {
-  font-size: 1.75rem;
-  font-weight: 700;
+  font-size: 2rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
   margin: 0 0 0.5rem;
   color: var(--text);
   text-align: center;
@@ -254,46 +267,13 @@ body.login-mode-chainsecured .login-card-api {
 }
 
 .login-cards > .login-card {
-  padding: 1.5rem 1.25rem 1.25rem;
+  padding: 0;
 }
 
-/* Both cards start neutral (grey 1px border via .login-cards > .login-card).
-   The "Wallet required" badge on ChainSecured carries the only differentiation.
-   Hover or focus-within → primary blue ring on that card; the sibling stays
-   neutral. Only one card is ever highlighted at a time. */
-.login-cards > .login-card {
-  transition: box-shadow 0.15s ease;
-}
-
-.login-cards > .login-card:hover,
-.login-cards > .login-card:focus-within {
-  box-shadow: 0 0 0 1px var(--primary), var(--shadow);
-  border-color: var(--primary);
-}
-
-/* Login card CTAs (Log in / Create account / Connect wallet) all share the
-   same shape; the color follows the card's selected state. At rest both
-   sides look like a neutral outlined button; the active card's button
-   turns primary blue, matching the box-shadow ring. */
-.login-cards > .login-card .btn-primary,
-.login-cards > .login-card .btn-outline {
-  background: transparent;
-  color: var(--text);
-  border: 1px solid var(--border);
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-
-.login-cards > .login-card:hover .btn-primary,
-.login-cards > .login-card:hover .btn-outline,
-.login-cards > .login-card:focus-within .btn-primary,
-.login-cards > .login-card:focus-within .btn-outline {
-  background: var(--primary);
-  color: #fff;
-  border-color: var(--primary);
-}
-
-/* Push the CTA to the bottom so all four login-page buttons line up
-   horizontally, regardless of how much body copy each card carries. */
+/* Push the CTA to the bottom so the button lines up at the base of the
+   surface regardless of how much body copy the card carries. The primary
+   CTA keeps its solid-ink fill (.btn-primary); Connect wallet stays outline
+   (.btn-outline) — one clear primary action per surface. */
 .login-cards > .login-card .btn-block {
   margin-top: auto;
 }
@@ -321,7 +301,7 @@ body.login-mode-chainsecured .login-card-api {
   width: 44px;
   height: 44px;
   border-radius: 10px;
-  background: rgba(60, 80, 224, 0.1);
+  background: rgba(var(--primary-rgb), 0.1);
   color: var(--primary);
   margin-bottom: 0.75rem;
 }
@@ -448,7 +428,7 @@ body.has-api-key .dashboard-wrap {
 }
 
 .sidebar-brand-text {
-  font-weight: 700;
+  font-weight: 600;
   font-size: 1.25rem;
   color: var(--sidebar-brand-text);
   letter-spacing: -0.02em;
@@ -629,8 +609,8 @@ body.has-api-key .dashboard-wrap {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  border: 1px solid rgba(60, 80, 224, 0.25);
-  background: rgba(60, 80, 224, 0.06);
+  border: 1px solid rgba(var(--primary-rgb), 0.25);
+  background: rgba(var(--primary-rgb), 0.06);
   border-radius: var(--radius);
   padding: 0.875rem 1rem;
   margin-bottom: 1rem;
@@ -782,7 +762,7 @@ body.has-api-key .dashboard-wrap {
 
 .account-dropdown-copy:hover {
   color: var(--primary-hover);
-  background: rgba(60, 80, 224, 0.08);
+  background: rgba(var(--primary-rgb), 0.08);
 }
 
 [data-theme="dark"] .account-dropdown-copy:hover {
@@ -816,7 +796,8 @@ body:not(.is-chainsecured) .is-chainsecured-only {
 
 .topbar-title {
   font-size: 1.25rem;
-  font-weight: 700;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   margin: 0;
   color: var(--text);
   display: flex;
@@ -837,16 +818,16 @@ body:not(.is-chainsecured) .is-chainsecured-only {
   font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.01em;
-  background: rgba(60, 80, 224, 0.12);
-  color: var(--primary, #3c50e0);
-  border: 1px solid rgba(60, 80, 224, 0.25);
+  background: rgba(var(--primary-rgb), 0.12);
+  color: var(--primary);
+  border: 1px solid rgba(var(--primary-rgb), 0.25);
   cursor: pointer;
   font-family: inherit;
   transition: background 0.15s;
 }
 
 .topbar-mode-badge:hover {
-  background: rgba(60, 80, 224, 0.2);
+  background: rgba(var(--primary-rgb), 0.2);
 }
 
 .topbar-mode-popover {
@@ -1069,7 +1050,7 @@ body:not(.is-chainsecured) .is-chainsecured-only {
   width: 64px;
   height: 64px;
   border-radius: 16px;
-  background: rgba(60, 80, 224, 0.1);
+  background: rgba(var(--primary-rgb), 0.1);
   color: var(--primary);
   margin-bottom: 1rem;
 }
@@ -1080,7 +1061,8 @@ body:not(.is-chainsecured) .is-chainsecured-only {
 
 .overview-empty-title {
   font-size: 1.25rem;
-  font-weight: 700;
+  font-weight: 600;
+  letter-spacing: -0.02em;
   margin: 0 0 0.5rem;
   color: var(--text);
 }
@@ -1134,7 +1116,7 @@ body:not(.is-chainsecured) .is-chainsecured-only {
   width: 40px;
   height: 40px;
   border-radius: 10px;
-  background: rgba(60, 80, 224, 0.1);
+  background: rgba(var(--primary-rgb), 0.1);
   color: var(--primary);
   flex-shrink: 0;
 }
@@ -1152,7 +1134,8 @@ body:not(.is-chainsecured) .is-chainsecured-only {
 .stat-value {
   display: block;
   font-size: 1.5rem;
-  font-weight: 700;
+  font-weight: 600;
+  letter-spacing: -0.02em;
   color: var(--text);
   margin-bottom: 0.25rem;
 }
@@ -1176,7 +1159,8 @@ body:not(.is-chainsecured) .is-chainsecured-only {
 
 .section-title {
   font-size: 1.125rem;
-  font-weight: 700;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   margin: 0 0 0.25rem;
   color: var(--text);
 }
@@ -1409,7 +1393,7 @@ body:not(.is-chainsecured) .is-chainsecured-only {
 .input:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(60, 80, 224, 0.15);
+  box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.15);
 }
 
 .input::placeholder {
@@ -1448,7 +1432,7 @@ textarea.input {
 .ms-trigger:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(60, 80, 224, 0.15);
+  box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.15);
 }
 
 .ms-trigger[disabled] {
@@ -1685,12 +1669,12 @@ textarea.input.textarea-sm {
 }
 
 .btn-primary {
-  background: var(--primary);
+  background: var(--btn-primary-bg);
   color: #fff;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--primary-hover);
+  background: var(--btn-primary-bg-hover);
 }
 
 .btn-outline {
@@ -1743,9 +1727,9 @@ textarea.input.textarea-sm {
 }
 
 .status.info {
-  background: rgba(60, 80, 224, 0.1);
+  background: rgba(var(--primary-rgb), 0.1);
   color: var(--primary);
-  border: 1px solid rgba(60, 80, 224, 0.25);
+  border: 1px solid rgba(var(--primary-rgb), 0.25);
 }
 
 .status.error {
@@ -2067,7 +2051,7 @@ textarea.input.textarea-sm {
   width: 48px;
   height: 48px;
   border-radius: 12px;
-  background: rgba(60, 80, 224, 0.08);
+  background: rgba(var(--primary-rgb), 0.08);
   color: var(--primary);
   margin-bottom: 0.75rem;
 }
@@ -2256,7 +2240,7 @@ textarea.input.textarea-sm {
   border-left: 3px solid var(--danger, #dc2626);
 }
 .auto-recharge-banner-info {
-  border-left: 3px solid var(--primary, #3c50e0);
+  border-left: 3px solid var(--primary);
 }
 
 .auto-recharge-header-toggle {
@@ -2292,7 +2276,7 @@ textarea.input.textarea-sm {
   border-radius: 50%;
 }
 .auto-recharge-header-toggle input:checked + .slider {
-  background: var(--primary, #3c50e0);
+  background: var(--primary);
 }
 .auto-recharge-header-toggle input:checked + .slider::before {
   transform: translateX(16px);
@@ -2333,7 +2317,7 @@ textarea.input.textarea-sm {
 .form-row-toggle-label input[type="checkbox"] {
   width: 18px;
   height: 18px;
-  accent-color: #4338ca;
+  accent-color: var(--primary);
   cursor: pointer;
 }
 /* Visually mute a whole form row when its toggle is off. */
@@ -2386,10 +2370,10 @@ textarea.input.textarea-sm {
   margin-top: 0.2rem;
 }
 
-#auto-recharge-modal-status.info { color: var(--primary, #3c50e0); }
+#auto-recharge-modal-status.info { color: var(--primary); }
 #auto-recharge-modal-status.error { color: var(--danger, #dc2626); }
 #auto-recharge-modal-status.success { color: var(--success, #16a34a); }
-#add-card-modal-status.info { color: var(--primary, #3c50e0); }
+#add-card-modal-status.info { color: var(--primary); }
 #add-card-modal-status.error { color: var(--danger, #dc2626); }
 #add-card-modal-status.success { color: var(--success, #16a34a); }
 

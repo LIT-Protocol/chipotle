@@ -41,6 +41,7 @@ import {
   type Identity,
 } from "./identities.ts";
 import { Landing, LandingNav, LandingFooter } from "./Landing.tsx";
+import { NPX_KEYCHAIN } from "./version.ts";
 import { AddSecret, ActionDocs } from "./AddSecret.tsx";
 import "@rainbow-me/rainbowkit/styles.css";
 import "./style.css";
@@ -239,9 +240,16 @@ function App() {
     };
     download(`${bundle.envelope.document.metadata.name}.keychain.json`, config);
   };
-  const reveal = () =>
-    work("Authorizing a temporary reader…", async () => {
-      if (!selected) return;
+  const reveal = () => {
+    if (!selected) return;
+    const secretName = selected.envelope.document.metadata.name;
+    if (
+      !window.confirm(
+        `Export "${secretName}" in plaintext?\n\nThis decrypts the current value and saves it unencrypted as ${secretName}.json in your downloads folder. Delete that file once you have used it. For agents, use "Agent config" instead: it contains no secret value.`,
+      )
+    )
+      return;
+    void work("Authorizing a temporary reader…", async () => {
       const key = Keychain.generateKey();
       const original = selected.policy.document.grants;
       let delegated: SecretBundle | undefined;
@@ -271,6 +279,9 @@ function App() {
             name: secretName,
             value: plaintext,
           });
+          setNotice(
+            `Saved the plaintext of ${secretName} as ${secretName}.json in your downloads folder. Delete it when you are done.`,
+          );
         } finally {
           agent.destroy();
         }
@@ -284,6 +295,7 @@ function App() {
         }
       }
     });
+  };
   return (
     <>
       <header>
@@ -465,11 +477,13 @@ function App() {
                 disabled={!!busy || !settings}
                 onClick={() =>
                   work("Finding your passkey…", async () => {
-                    const found = await discoverPasskey();
+                    const found = await discoverPasskey(recovery);
                     const c = ownerClient(
                       found.identity,
                       settings.network,
-                      found.authority || recovery,
+                      // An explicitly loaded backup selects the vault, even if lookup
+                      // finds an empty duplicate rooted at the recovery credential.
+                      recovery || found.authority,
                     );
                     c.progress = setBusy;
                     await c.login();
@@ -760,7 +774,9 @@ function App() {
                                   ? "Disabled"
                                   : s.expiresAt * 1000 <= Date.now()
                                     ? "Expired"
-                                    : s.agentCount + " agents"}
+                                    : s.agentCount === 1
+                                      ? "1 agent"
+                                      : s.agentCount + " agents"}
                               </span>
                             </button>
                           ))}
@@ -858,7 +874,7 @@ function App() {
                             </p>
                             <pre className="terminal">
                               <code>
-                                {`keychain run ./agent-identity.json ./${selected.envelope.document.metadata.name}.keychain.json -- <command>`}
+                                {`${NPX_KEYCHAIN} run ./agent-identity.json ./${selected.envelope.document.metadata.name}.keychain.json -- <command>`}
                               </code>
                             </pre>
                             <p>
@@ -962,6 +978,7 @@ function App() {
                               onChange={(e) => setAgentKey(e.target.value)}
                               required
                               pattern="[0-9a-f]{64}"
+                              title="64 lowercase hex characters: the publicKey printed by keychain init"
                               placeholder="Generate on the agent with keychain init"
                               autoComplete="off"
                             />
@@ -1000,8 +1017,9 @@ function App() {
                               />
                             </label>
                             <p className="hint">
-                              Existing agents move to the new version. The new
-                              policy retires older versions.
+                              Existing agents move to the new version and keep
+                              their current expiry. The new policy retires older
+                              versions.
                             </p>
                             <button disabled={!!busy}>Rotate & approve</button>
                           </form>

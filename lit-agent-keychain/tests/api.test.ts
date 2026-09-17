@@ -53,16 +53,20 @@ test(
         registry: api!,
         owner,
       };
+      const signedOperations: string[] = [];
       const c = new OwnerClient(
         authority,
-        async (challenge) => ({
-          kind: "wallet",
-          owner,
-          challenge,
-          signature: await account.signTypedData(
-            authorizationTypedData(challenge),
-          ),
-        }),
+        async (challenge) => {
+          signedOperations.push(challenge.operation);
+          return {
+            kind: "wallet",
+            owner,
+            challenge,
+            signature: await account.signTypedData(
+              authorizationTypedData(challenge),
+            ),
+          };
+        },
         new LitConnection(lit),
       );
       await c.login();
@@ -73,7 +77,10 @@ test(
         { env: process.env },
       );
       assert.equal((await c.api("/api/me")).vaultId, c.vaultId);
+      signedOperations.length = 0;
       let bundle = await c.create("API_TEST", "local-only-secret-7f9ba");
+      // Manifest, ciphertext and policy are approved with one owner signature.
+      assert.deepEqual(signedOperations, ["batch"]);
       const keys = Keychain.generateKey();
       const agent = new Keychain(keys.privateKey, {
         v: 2,
@@ -222,7 +229,9 @@ test(
       }
       const stale = bundle;
       const earlyBackup = await c.backup();
+      signedOperations.length = 0;
       bundle = await c.rotate(bundle, "rotated-only-in-browser");
+      assert.deepEqual(signedOperations, ["batch"]);
       assert.equal(await agent.get("API_TEST"), "rotated-only-in-browser");
       await c.restore(earlyBackup);
       assert.equal(await agent.get("API_TEST"), "rotated-only-in-browser");

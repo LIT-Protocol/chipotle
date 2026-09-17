@@ -42,9 +42,13 @@ jobs:
       - run: npm audit --audit-level=low
       - run: npm run format:check
       - run: npm test
+      - name: SDK version bumped if packed contents changed (merge publishes)
+        run: node scripts/publish-sdk.mjs --check
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: npx playwright install --with-deps chromium
+      - name: Passkey discovery and recovery regression tests
+        run: npx playwright test --config tests/passkey.playwright.config.ts
       - run: node scripts/test-local.mjs
         env:
           KEYCHAIN_TEST_DATABASE_URL: postgres://keychain_test:local-test-only@127.0.0.1:5432/keychain_test

@@ -14,8 +14,10 @@ import {
   makeReceipt,
   encryptEnvelope,
   encryptionKey,
+  verifyReceipt,
 } from "../protocol/crypto.ts";
 import { actionCid } from "../protocol/actions.ts";
+import { V, DOMAIN } from "../protocol/schema.ts";
 
 test("owner EIP-712 authorization issues a verifiable exact-object receipt", async () => {
   const f = await fixture();
@@ -41,6 +43,87 @@ test("owner EIP-712 authorization issues a verifiable exact-object receipt", asy
       false,
     );
   }
+});
+test("one owner signature approves a batch and yields one exact-object receipt per document", async () => {
+  const f = await fixture();
+  const manifestDocument = {
+    v: V,
+    domain: DOMAIN,
+    kind: "manifest" as const,
+    vaultId: f.manifest.vaultId,
+    manifest: f.manifest,
+    actionCid: f.cid,
+  };
+  const documents = [manifestDocument, f.envelope, f.policy];
+  const batch = { kind: "batch", vaultId: f.manifest.vaultId, documents };
+  const proof = await f.ownerProof(batch as any);
+  const out = await f.h.run(f.authority, { documents, proof });
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(out.receipts.length, 3);
+  assert.equal(out.receipt, undefined);
+  documents.forEach((document, i) => {
+    verifyAction(
+      out.receipts[i].payload,
+      out.receipts[i].signature,
+      pubFor(f.authorityCid),
+    );
+    assert.equal(out.receipts[i].payload.objectHash, digest(document));
+    // Receipts are indistinguishable from single-document ones.
+    verifyReceipt(
+      { document, receipt: out.receipts[i] },
+      pubFor(f.authorityCid),
+      f.manifest.vaultId,
+    );
+  });
+  // Only the exact batch is approved: reordering, dropping, adding or altering a
+  // document, or presenting the batch proof for a single document, is refused.
+  const denied = async (params: unknown) =>
+    assert.equal((await f.h.run(f.authority, params as any)).ok, false);
+  await denied({ documents: [f.envelope, manifestDocument, f.policy], proof });
+  await denied({ documents: [manifestDocument, f.envelope], proof });
+  await denied({ documents: [...documents, f.policy], proof });
+  await denied({
+    documents: [
+      manifestDocument,
+      f.envelope,
+      { ...f.policy, expiresAt: f.policy.expiresAt + 1 },
+    ],
+    proof,
+  });
+  await denied({ document: f.policy, proof });
+  await denied({ document: f.policy, documents, proof });
+  // A single-document proof cannot be replayed as a batch of one.
+  const single = await f.ownerProof(f.policy);
+  await denied({ documents: [f.policy], proof: single });
+  // Sign-in and owner-credential documents are never batched.
+  const login = {
+    v: V,
+    domain: DOMAIN,
+    kind: "login" as const,
+    vaultId: f.manifest.vaultId,
+    challenge: digest({ any: 1 }),
+    expiresAt: f.now + 60,
+  };
+  const withLogin = [manifestDocument, login];
+  await denied({
+    documents: withLogin,
+    proof: await f.ownerProof({
+      kind: "batch",
+      vaultId: f.manifest.vaultId,
+      documents: withLogin,
+    } as any),
+  });
+  // Per-document invariants still apply inside a batch.
+  const badPolicy = { ...f.policy, expiresAt: f.now + 400 * 86400 };
+  const bad = [manifestDocument, badPolicy];
+  await denied({
+    documents: bad,
+    proof: await f.ownerProof({
+      kind: "batch",
+      vaultId: f.manifest.vaultId,
+      documents: bad,
+    } as any),
+  });
 });
 test("local HPKE import and signed recipient-encrypted release round trip", async () => {
   const f = await fixture();

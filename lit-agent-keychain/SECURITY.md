@@ -37,8 +37,9 @@ whitelisted). The policy constants are compiled into the client, so the same
 
 `get`, the `get_secret` MCP tool and `keychain run` all deliver plaintext to the
 agent host; from there the client is trusted. `run` avoids stdout and passes the
-value only through the child process's environment, which keeps it out of agent
-transcripts and shell history but not out of reach of other processes running as
+value through the child process's environment. The Keychain CLI itself does not
+print it; the child program can still log or disclose it, including into agent
+transcripts. It is also within reach of other processes running as
 the same user (`ps eww`, `/proc/<pid>/environ`). `--file` writes plaintext to a
 mode-0600 file that is created before the child starts, never overwrites an existing
 path, and is unlinked when the child exits; a SIGKILL of the CLI leaves it behind and
@@ -88,7 +89,18 @@ complete after its authorization window if already started.
   Google account issuance/recovery is accepted custody. Email is not the identity.
 
 The immutable authorization action signs a domain-separated receipt for an exact
-object while the owner proof is valid. An old ID token cannot mint new receipts after
+object while the owner proof is valid. An owner proof covers either one document or a
+**batch** (`operation: "batch"`, object hash = digest of `{ kind: "batch", vaultId,
+documents[] }`, at most eight manifest/envelope/policy documents, never sign-in or
+owner-credential documents). The action verifies the proof once, applies every
+per-document invariant, and issues one ordinary receipt per document, so verifiers of
+receipts cannot tell (and need not care) how many prompts the owner saw. Reordering,
+dropping, adding or altering any document, or replaying a single-document proof as a
+batch (or vice versa), changes the signed digest and is refused. To fetch a new
+secret's encryption key before its manifest is approved, the API lets the signed-in
+owner enrol the derived action unsigned (`/api/actions/prepare`); enrolment only
+permits the vault's own billing key to run the vault's own action and is bounded by
+the same plan headroom as signed enrolment. An old ID token cannot mint new receipts after
 expiry. Durable ciphertext/permission receipts survive token expiration; they are not
 reusable management sessions. Keychain sessions only authorize storage/UI operations
 and never replace a receipt. They are HttpOnly, SameSite=Strict, Secure on HTTPS and

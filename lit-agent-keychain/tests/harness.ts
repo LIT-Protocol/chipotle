@@ -219,13 +219,13 @@ export async function fixture(
     signedRequest: { request, signature: signAgent(request, agentKey) },
     envelope: sign(envelope),
   };
-  async function ownerProof(document: Document): Promise<any> {
+  async function ownerProof(document: { kind: string }): Promise<any> {
     const challenge: Challenge = {
       v: V,
       domain: "lit-keychain/authorize/v2",
       vaultId,
       objectHash: digest(document),
-      operation: document.kind,
+      operation: document.kind as Challenge["operation"],
       nonce: randomId(),
       issuedAt: now,
       expiresAt: now + 120,

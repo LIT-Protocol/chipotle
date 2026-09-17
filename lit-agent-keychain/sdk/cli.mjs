@@ -7,7 +7,7 @@ import {
   ATTESTED_ORIGINS,
   assertAgentConfig,
   assertAgentIdentity,
-} from "./dist/index.js";
+} from "@lit-protocol/keychain";
 import { peerCertificateSha256 } from "./tls.mjs";
 const [command, ...args] = process.argv.slice(2);
 const usage =
@@ -52,7 +52,14 @@ const readJson = async (file) => {
   }
 };
 try {
-  if (command === "init" && args.length === 1) {
+  if (["--help", "-h"].includes(command) && args.length === 0) {
+    process.stdout.write(usage);
+  } else if (["--version", "-v"].includes(command) && args.length === 0) {
+    const { version } = await readJson(
+      new URL("./package.json", import.meta.url),
+    );
+    process.stdout.write(version + "\n");
+  } else if (command === "init" && args.length === 1) {
     const identity = Keychain.generateKey();
     try {
       await writeFile(
@@ -140,7 +147,7 @@ try {
     }
   } else if (command === "attest" && args.length <= 1) {
     const { verifyAttestation, DEFAULT_LIT_API_URL } =
-      await import("./dist/index.js");
+      await import("@lit-protocol/keychain");
     const url = args[0] ?? DEFAULT_LIT_API_URL;
     const policy = attestationPolicy(url);
     if (!policy) throw new Error(`No attestation policy is pinned for ${url}`);

@@ -1,6 +1,7 @@
 import { build } from "esbuild";
 import { mkdir, readdir, readFile, writeFile, rm } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
+import path from "node:path";
 await mkdir("sdk/dist", { recursive: true });
 await build({
   entryPoints: ["sdk/src/index.ts"],
@@ -11,6 +12,28 @@ await build({
   target: "es2022",
   minify: true,
   sourcemap: true,
+});
+
+// A separate conditional Node entry keeps builtins out of browser bundles.
+await build({
+  entryPoints: ["sdk/src/index.ts"],
+  outfile: "sdk/dist/node.js",
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node22",
+  minify: true,
+  sourcemap: true,
+  plugins: [
+    {
+      name: "node-tls",
+      setup(build) {
+        build.onResolve({ filter: /\/tls-runtime\.ts$/ }, () => ({
+          path: path.resolve("sdk/tls.mjs"),
+        }));
+      },
+    },
+  ],
 });
 
 execFileSync(
@@ -37,15 +60,33 @@ execFileSync(
   ],
   { stdio: "inherit" },
 );
+// Runtime library code is bundled above. Ship the corresponding declaration
+// closure too, rather than exposing an undeclared build-only dependency.
+const library = "node_modules/@lit-protocol/agent-keychain-library";
+const vendored = "sdk/dist/types/library";
+await mkdir(vendored, { recursive: true });
+for (const file of ["schema.d.ts", "shape.d.ts"]) {
+  await writeFile(
+    `${vendored}/${file}`,
+    await readFile(`${library}/dist/${file}`),
+  );
+}
+await writeFile(`${vendored}/LICENSE`, await readFile(`${library}/LICENSE`));
 for (const file of await readdir("sdk/dist/types", { recursive: true })) {
   if (!file.endsWith(".d.ts")) continue;
-  const path = "sdk/dist/types/" + file;
+  const filePath = "sdk/dist/types/" + file;
   await writeFile(
-    path,
-    (await readFile(path, "utf8")).replace(
-      /(from\s+["'][^"']+)\.ts(["'])/g,
-      "$1.js$2",
-    ),
+    filePath,
+    (await readFile(filePath, "utf8"))
+      .replaceAll(
+        "@lit-protocol/agent-keychain-library/schema",
+        "./" +
+          path
+            .relative(path.dirname(filePath), `${vendored}/schema.js`)
+            .split(path.sep)
+            .join("/"),
+      )
+      .replace(/(from\s+["'][^"']+)\.ts(["'])/g, "$1.js$2"),
   );
 }
 await rm("sdk/dist/types/generated", { recursive: true, force: true });
