@@ -5,7 +5,6 @@ import {
   credentialsSchema,
   documentSchema,
   signedSchema,
-  MAX_POLICY_SECONDS,
   type Authority,
   type Document,
   type OwnerProof,
@@ -107,7 +106,8 @@ export async function run(
         (credentialExpiresAt === null || issuedAt < credentialExpiresAt),
     );
     for (const document of documents)
-      if (document.kind === "policy" || document.kind === "login")
+      if (document.kind === "login") requireThat(issuedAt < document.expiresAt);
+      else if (document.kind === "policy" && document.expiresAt !== null)
         requireThat(issuedAt < document.expiresAt);
     if (params.proof.kind === "google")
       requireThat(issuedAt < params.proof.session.expiresAt);
@@ -144,11 +144,12 @@ function checkDocument(
   now: number,
 ) {
   if (document.kind === "policy") {
-    verifyWindow(
-      document.notBefore,
-      document.expiresAt,
-      now,
-      MAX_POLICY_SECONDS,
+    // Lifetime is the owner's choice: any future expiry, or none (null).
+    requireThat(
+      document.notBefore <= now + 30 &&
+        (document.expiresAt === null ||
+          (document.expiresAt > now &&
+            document.expiresAt > document.notBefore)),
     );
     requireThat(
       document.grants.every(

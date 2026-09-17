@@ -20,13 +20,13 @@ Assuming the frontend and SDK, your chosen identity provider, the Lit TLS endpoi
 - Ciphertext, metadata, version and release mode are bound together.
 - An agent must prove possession of its own signing key. Each request binds the exact envelope, operation, policy hash, deadline and response encryption key.
 - Results carry an action signature, so a proxy cannot fabricate an encrypted result.
-- New secrets grant no agent access. Agent policies always have a finite signed expiry, 30 days by default and 90 at most.
+- New secrets grant no agent access. Agent policies carry a signed expiry chosen by the owner: 30 days by default, any length, or none.
 
 ## What the operator can see and do
 
 **Keychain can see** secret names, agent public keys, policies and request metadata. It never sees plaintext values, your owner keys, or agent private keys.
 
-**Keychain can** deny service, delete or withhold ciphertext, or serve an older still-valid policy. That last one matters: within a policy's lifetime, a malicious operator could undo a revocation by replaying the previous signed policy, restoring access for an agent that was approved under it. Revision counters give honest concurrency checks, not rollback protection. This is why policies are capped at 90 days.
+**Keychain can** deny service, delete or withhold ciphertext, or serve an older still-valid policy. That last one matters: within a policy's lifetime, a malicious operator could undo a revocation by replaying the previous signed policy, restoring access for an agent that was approved under it. Revision counters give honest concurrency checks, not rollback protection. The expiry you choose is the bound on that window: a never-expiring policy stays replayable until you rotate the underlying credential, so prefer a finite lifetime for agents you may need to revoke.
 
 **Keychain cannot** forge an approval, add an agent, extend an expiry, or read a secret. If the entire database is dumped, the attacker gets ciphertext and signed policies they cannot extend.
 
@@ -55,7 +55,7 @@ Revoking writes a new signed policy, and the action fetches the current policy o
 
 - A request already in flight may finish.
 - Plaintext an agent already received cannot be recalled.
-- The operator could replay the old policy until it expires.
+- The operator could replay the old policy until it expires, or indefinitely if you removed the expiry.
 
 Keep policies short, and rotate the underlying credential at the provider if you suspect it leaked. Cancelling a subscription is not revocation.
 

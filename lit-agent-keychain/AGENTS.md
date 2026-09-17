@@ -42,7 +42,9 @@ See README.md and SECURITY.md for the protocol and its explicit trust boundary.
 - No operator grants, setup bearer authority, managed PKP vaults, or permissive
   default agents. New secrets start with an empty allowlist.
 - Owner sign-in proofs expire; owner credential membership is independent and can
-  be indefinite. Agent access policies always have finite signed expiry.
+  be indefinite. Agent access policies carry a signed expiry the owner chooses (30
+  days by default, any length, or `expiresAt: null` for none); never reintroduce a
+  server- or action-side maximum.
 - Every successful mutation commits its audit entry in the same transaction.
   Bootstrap execution counters are atomic and enforced before sponsored login calls.
 - Preserve deployed action releases byte for byte: `actions/archive/` is append-only

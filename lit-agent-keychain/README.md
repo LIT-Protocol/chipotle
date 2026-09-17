@@ -31,29 +31,34 @@ The operator is trusted to serve the latest signed policy. It can replay old val
 permissions, including undoing a revocation, but cannot forge owner authorization.
 The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md).
 
-## SDK 2.0.4 release coordination
+## SDK 2.0.5 release coordination
 
-This source prepares SDK 2.0.4 and pins the hosted examples to that version. Merging
+This source prepares SDK 2.0.5 and pins the hosted examples to that version. Merging
 to `main` publishes the SDK (see Publishing below), before the owner UI/API deploy.
 Until the package is on the registry, registry installation of that version is not
 an acceptance test and reviewers should use the locally packed tarball.
 
-2.0.4 is also a **template release**: batched owner approval changed the shared
-protocol schema, so every template in `actions/catalog.lock.json` (authority and
-catalog) has new bytes, archived under `actions/archive/`. Consequences, all handled by
-the release mechanism described in [SECURITY.md](SECURITY.md#authority-releases):
+2.0.5 is a **template release**: it removes the 90-day maximum on agent permission
+lifetimes (the owner now chooses any expiry, or none: `expiresAt: null`), which
+changed the shared protocol schema, so every template in `actions/catalog.lock.json`
+(authority and catalog) has new bytes, archived under `actions/archive/`.
+Consequences, all handled by the release mechanism described in
+[SECURITY.md](SECURITY.md#authority-releases):
 
 - Existing vaults keep signing in; their recorded authority release moves forward on
   the first sign-in with the new web app. Existing secrets keep their pinned releases
   and are read, rotated and restored under them.
 - Secrets created after the deploy pin the new catalog release. An agent still running
-  SDK 2.0.3 does not know those template hashes and cannot read them until it upgrades,
-  so publish 2.0.4 first and tell agent operators to update.
-- Rotating a secret pinned to a pre-batch authority release still takes one signature
-  per document (`PRE_BATCH_AUTHORITY_HASHES` in the SDK).
+  SDK 2.0.4 or older does not know those template hashes and cannot read them until it
+  upgrades, so publish 2.0.5 first and tell agent operators to update.
+- Secrets pinned to any earlier release still enforce the old 90-day cap inside the
+  enclave. The SDK (`CAPPED_POLICY_AUTHORITY_HASHES`, `policyLifetimeCapDays`) and the
+  web app refuse longer or unlimited lifetimes for them with a message telling the
+  owner to recreate the secret. Rotating a secret pinned to a pre-batch authority
+  release still takes one signature per document (`PRE_BATCH_AUTHORITY_HASHES`).
 
 Release checks: run `npm test` and `npm run build`, publish through the normal
-maintainer release process, verify `npm view @lit-protocol/keychain@2.0.4 version`,
+maintainer release process, verify `npm view @lit-protocol/keychain@2.0.5 version`,
 then repeat the strict external TypeScript consumer and attestation-enabled Node
 smoke test from the registry artifact. Only then deploy the owner UI/API and create,
 rotate and read a secret against production. See the QA reports under `docs/` for
@@ -72,8 +77,9 @@ actual production coverage and remaining provider/auth/billing tests.
   AES-256-GCM payload encryption. Action signatures authenticate results as well as keys.
 - Explicit agent public-key enrollment, exact ciphertext/version scopes, disable/revoke,
   owner-approved renewal, atomic rotation, and credential replacement/recovery.
-- New secrets grant no agent access. Permissions default to 30 days, with a 90-day maximum.
-  Owner credential membership is independent and normally lasts until revoked.
+- New secrets grant no agent access. Permissions default to 30 days; the owner may
+  choose any lifetime, including no expiry. Owner credential membership is independent
+  and normally lasts until revoked.
 - "Use inside Lit" action catalog from the public
   [agent-keychain-library](https://github.com/LIT-Protocol/agent-keychain-library)
   repo, pinned to a commit in `package.json`: Stripe balance, OpenAI chat, GitHub

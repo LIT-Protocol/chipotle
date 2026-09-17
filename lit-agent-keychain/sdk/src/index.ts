@@ -294,6 +294,16 @@ export const PRE_BATCH_AUTHORITY_HASHES: ReadonlySet<string> = new Set([
   "29314b8876a199afde0396711530c4de9de25eca7f99202a09a4d68f32cd0a66",
   "1c042eed5e526f747a7533cedb0f3b02dff8ad05143d07299717193b4f6e8e2b",
 ]);
+/**
+ * Authority releases whose bytes still enforce a 90-day policy lifetime. Secrets
+ * pinned to one of them keep that cap until they are recreated under a newer
+ * release; later releases leave the lifetime to the owner. Append-only.
+ */
+export const CAPPED_POLICY_AUTHORITY_HASHES: ReadonlySet<string> = new Set([
+  ...PRE_BATCH_AUTHORITY_HASHES,
+  "4ca83f7cd984356d56c8bdd455f8ee358cb3dfaa423d7693b34212a0c1b0f3e6",
+]);
+const LEGACY_POLICY_CAP_DAYS = 90;
 export class LitConnection {
   readonly url: string;
   private readonly keys = new Map<string, string>();
@@ -794,20 +804,48 @@ export class OwnerClient {
     );
     return bundle;
   }
+  /**
+   * Longest policy lifetime this secret's pinned release accepts, in days, or
+   * null when the owner may choose any lifetime including none.
+   */
+  async policyLifetimeCapDays(bundle: SecretBundle): Promise<number | null> {
+    const template = await this.authorityTemplate(
+      bundle.manifest.document.manifest.authorityCid,
+    );
+    return CAPPED_POLICY_AUTHORITY_HASHES.has(template.hash)
+      ? LEGACY_POLICY_CAP_DAYS
+      : null;
+  }
+  /**
+   * Re-signs the policy. `days` sets a new expiry that many days from now
+   * (default 30); `null` removes the expiry so the policy lasts until the owner
+   * revokes or disables it. Secrets pinned to an older release still cap
+   * lifetimes at 90 days (see `policyLifetimeCapDays`).
+   */
   async setPolicy(
     bundle: SecretBundle,
-    changes: { grants?: Grant[]; disabled?: boolean; days?: number },
+    changes: { grants?: Grant[]; disabled?: boolean; days?: number | null },
   ) {
     const old = bundle.policy.document;
     const now = nowSeconds();
-    const days = changes.days ?? 30;
-    requireThat(Number.isInteger(days) && days >= 1 && days <= 90);
+    const days = changes.days === undefined ? 30 : changes.days;
+    requireThat(
+      days === null ||
+        (Number.isInteger(days) &&
+          days >= 1 &&
+          Number.isSafeInteger(now + days * 86400)),
+    );
+    const cap = await this.policyLifetimeCapDays(bundle);
+    if (cap !== null && (days === null || days > cap))
+      throw new Error(
+        `This secret was created under an earlier Keychain release that limits permissions to ${cap} days. Recreate the secret to choose a longer or unlimited lifetime.`,
+      );
     const policy = policySchema.parse({
       ...old,
       epoch: old.epoch + 1,
       previousHash: digest(old),
       notBefore: now,
-      expiresAt: now + days * 86400,
+      expiresAt: days === null ? null : now + days * 86400,
       grants: changes.grants ?? old.grants,
       disabled: changes.disabled ?? old.disabled,
     });
@@ -863,10 +901,11 @@ export class OwnerClient {
           epoch: bundle.policy.document.epoch + 1,
           previousHash: digest(bundle.policy.document),
           notBefore: now,
-          // Rotating the value must not shorten (or silently extend) a renewal
-          // the owner already approved; an expired policy restarts at the default.
+          // Rotating the value must not shorten (or silently extend) a lifetime
+          // the owner already approved, including "never"; an expired policy
+          // restarts at the default.
           expiresAt:
-            bundle.policy.document.expiresAt !== null &&
+            bundle.policy.document.expiresAt === null ||
             bundle.policy.document.expiresAt > now
               ? bundle.policy.document.expiresAt
               : now + 30 * 86400,
@@ -1053,7 +1092,7 @@ export function explainDenial(
     return "the owner disabled this secret. Ask them to enable it in Keychain.";
   if (now < policy.notBefore)
     return `the policy is not valid until ${when(policy.notBefore)}. Check this machine's clock.`;
-  if (now >= policy.expiresAt)
+  if (policy.expiresAt !== null && now >= policy.expiresAt)
     return `the owner's permission expired at ${when(policy.expiresAt)}. Ask them to renew it in Keychain.`;
   const grant = policy.grants.find((g) => g.agentPublicKey === agentPublicKey);
   if (!grant)

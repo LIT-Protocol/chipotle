@@ -15,6 +15,7 @@ import {
   encryptEnvelope,
   encryptionKey,
   verifyReceipt,
+  nowSeconds,
 } from "../protocol/crypto.ts";
 import { actionCid } from "../protocol/actions.ts";
 import { V, DOMAIN } from "../protocol/schema.ts";
@@ -86,7 +87,7 @@ test("one owner signature approves a batch and yields one exact-object receipt p
     documents: [
       manifestDocument,
       f.envelope,
-      { ...f.policy, expiresAt: f.policy.expiresAt + 1 },
+      { ...f.policy, expiresAt: f.policy.expiresAt! + 1 },
     ],
     proof,
   });
@@ -114,7 +115,7 @@ test("one owner signature approves a batch and yields one exact-object receipt p
     } as any),
   });
   // Per-document invariants still apply inside a batch.
-  const badPolicy = { ...f.policy, expiresAt: f.now + 400 * 86400 };
+  const badPolicy = { ...f.policy, expiresAt: f.policy.notBefore };
   const bad = [manifestDocument, badPolicy];
   await denied({
     documents: bad,
@@ -124,6 +125,31 @@ test("one owner signature approves a batch and yields one exact-object receipt p
       documents: bad,
     } as any),
   });
+});
+test("policy lifetime is the owner's choice: multi-year and never-expiring policies are approved and honored", async () => {
+  for (const expiresAt of [null, nowSeconds() + 10 * 366 * 86400]) {
+    const f = await fixture();
+    f.policy.expiresAt = expiresAt;
+    const proof = await f.ownerProof(f.policy);
+    const approved = await f.h.run(f.authority, { document: f.policy, proof });
+    assert.equal(
+      approved.ok,
+      true,
+      `authority approves expiresAt=${expiresAt}`,
+    );
+    f.request.policyHash = digest(f.policy);
+    f.params.signedRequest = {
+      request: f.request,
+      signature: signAgent(f.request, f.agentKey),
+    };
+    f.h.registry.set(f.registryUrl, f.sign(f.policy));
+    const out = await f.h.run(f.manifest, f.params);
+    assert.equal(out.ok, true, `secret action honors expiresAt=${expiresAt}`);
+    // A never-expiring policy still fails closed on every other check.
+    f.policy.disabled = true;
+    f.h.registry.set(f.registryUrl, f.sign(f.policy));
+    assert.equal((await f.h.run(f.manifest, f.params)).ok, false);
+  }
 });
 test("local HPKE import and signed recipient-encrypted release round trip", async () => {
   const f = await fixture();

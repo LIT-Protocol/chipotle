@@ -71,6 +71,8 @@ fn validate_policy(
 ) -> Result<()> {
     crypto::verify_signed(signed, key, vault)?;
     let p = &signed.document;
+    // Access policies have no maximum lifetime: the owner chooses the expiry, or
+    // none at all (`expiresAt: null`). Owner credentials keep the one-year bound.
     let max = if let Some((id, cid)) = secret {
         if field(p, "kind")? != "policy"
             || field(p, "secretId")? != id
@@ -78,26 +80,26 @@ fn validate_policy(
         {
             bail!("policy mismatch");
         }
-        90 * 86400
+        None
     } else {
         if field(p, "kind")? != "credentials" {
             bail!("credentials required");
         }
-        366 * 86400
+        Some(366 * 86400)
     };
     let start = number(p, "notBefore")?;
-    if secret.is_none() && p.get("expiresAt") == Some(&Value::Null) {
-        if number(p, "epoch")? < 1 || start > time::OffsetDateTime::now_utc().unix_timestamp() {
-            bail!("invalid credentials window");
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    if p.get("expiresAt") == Some(&Value::Null) {
+        if number(p, "epoch")? < 1 || start > now + 30 {
+            bail!("invalid policy window");
         }
         return Ok(());
     }
     let end = number(p, "expiresAt")?;
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
     if number(p, "epoch")? < 1
         || start > now + 30
         || end <= start
-        || end - start > max
+        || max.is_some_and(|max| end - start > max)
         || (!allow_expired && end <= now)
     {
         bail!("invalid policy window");
