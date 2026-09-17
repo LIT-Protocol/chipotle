@@ -1,0 +1,63 @@
+name: Keychain publish
+# Publishes @lit-protocol/keychain to npm when a merge to main carries a version
+# bump in lit-agent-keychain/sdk/package.json. The PR-side check in
+# keychain-ci.yml fails a PR that changes the packed SDK without bumping, so the
+# merge is the release. Unchanged contents or an already-published version are a
+# no-op. See lit-agent-keychain/scripts/publish-sdk.mjs for the decision table.
+#
+# Registry auth, in order of preference:
+#   1. npm trusted publishing (OIDC): configure this repo + workflow file as a
+#      trusted publisher on the npm package; no secret needed.
+#   2. NPM_TOKEN repository secret: a granular access token with read/write on
+#      @lit-protocol/keychain and 2FA bypass enabled.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'lit-agent-keychain/**'
+      - '.github/workflows/keychain-publish.yml'
+  workflow_dispatch:
+permissions:
+  contents: write # push the keychain-sdk-v<version> tag
+  id-token: write # npm provenance and trusted publishing
+concurrency:
+  group: keychain-publish
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lit-agent-keychain
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      NPM_CONFIG_PROVENANCE: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: lit-agent-keychain/package-lock.json
+      - name: npm 11 (trusted publishing needs >= 11.5.1)
+        run: npm install -g npm@11 && npm -v
+      - name: Registry token auth
+        if: env.NPM_TOKEN != ''
+        run: |
+          echo "//registry.npmjs.org/:_authToken=\${NPM_TOKEN}" > ~/.npmrc
+          npm whoami --registry https://registry.npmjs.org/
+      - run: npm ci
+      - name: Publish if sdk/package.json is ahead of the registry
+        run: node scripts/publish-sdk.mjs --no-bump
+      - name: Tag the published version
+        run: |
+          version=$(node -p "require('./sdk/package.json').version")
+          tag="keychain-sdk-v$version"
+          if ! npm view "@lit-protocol/keychain@$version" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then
+            echo "$version is not on the registry; no tag"; exit 0
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "$tag already exists"; exit 0
+          fi
+          git tag "$tag" "$GITHUB_SHA"
+          git push origin "refs/tags/$tag"
