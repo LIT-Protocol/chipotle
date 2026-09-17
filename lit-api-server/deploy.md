@@ -188,8 +188,7 @@ Send from the diamond **owner** (Safe or owner EOA). Using `cast` against Base:
 
 ```bash
 cast send "$NEW_CONTRACT" 'setAdminApiPayerAccount(address)' "$ADMIN_API_PAYER" \
-  --rpc-url "$BASE_RPC" --private-key "$OWNER_KEY"
-```
+  --rpc-url "$BASE_CHAIN_RPC" --private-key "$OWNER_KEY"
 
 For a Safe‑owned diamond, route this through the Safe UI / a proposal instead of a
 raw key. The monitor dApp also exposes this flow
