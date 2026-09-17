@@ -1,10 +1,10 @@
 ---
 name: lit-agent-keychain
-description: Use Lit Agent Keychain v2 for owner-approved agent access to encrypted credentials.
+description: Use Lit Agent Keychain for owner-approved agent access to encrypted credentials.
 version: 2.0.5
 ---
 
-# Lit Agent Keychain v2
+# Lit Agent Keychain
 
 1. Generate an agent identity on the agent device with `npx @lit-protocol/keychain@2.0.5 init identity.json`.
 2. Give only its public key to the owner. The owner signs in with a wallet, passkey,
@@ -73,7 +73,7 @@ secret value itself is a bare string. Never store one in the other's place.
 `usageApiKey` is an opaque string minted by Chipotle (currently base64 of 32 random
 bytes, 44 characters ending in `=`). It pays for execution and cannot read a secret
 without the agent identity and an owner grant. There are no setup or management
-bearer tokens in v2. If you are handed a bare string and are unsure what it is,
+bearer tokens. If you are handed a bare string and are unsure what it is,
 `describeCredential(value)` from the SDK classifies it; the SDK and CLI reject an
 identity passed as a config, a config passed as an identity, and a private key
 passed as a usage key, each with a message naming the mistake.

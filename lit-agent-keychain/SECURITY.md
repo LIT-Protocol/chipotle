@@ -1,4 +1,4 @@
-# Keychain v2 security contract
+# Keychain security contract
 
 ## What the cryptography enforces
 
@@ -78,7 +78,7 @@ complete after its authorization window if already started.
 
 - Wallet: EOA EIP-712 authorization, fixed domain/version and vault salt, exact object
   digest/operation, nonce and short validity. Wallet picker availability is not proof
-  of ERC-1271/6492 support; those wallet types are deliberately outside v2.
+  of ERC-1271/6492 support; those wallet types are deliberately unsupported.
 - Passkey: P-256 WebAuthn signature over authenticator data and client-data hash;
   exact origin, RP-ID hash, operation challenge, user presence and user verification.
   Cross-origin assertions are rejected. Registration uses discoverable credentials;
