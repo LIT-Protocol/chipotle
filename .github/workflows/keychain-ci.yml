@@ -42,6 +42,8 @@ jobs:
       - run: npm audit --audit-level=low
       - run: npm run format:check
       - run: npm test
+      - name: SDK version bumped if packed contents changed (merge publishes)
+        run: node scripts/publish-sdk.mjs --check
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: npx playwright install --with-deps chromium

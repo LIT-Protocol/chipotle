@@ -2,12 +2,18 @@
 // contents actually changed relative to what the registry already serves.
 //
 //   node scripts/publish-sdk.mjs [--bump patch|minor|major] [--dry-run] [--no-commit]
+//   node scripts/publish-sdk.mjs --no-bump   # CI: publish only an already-bumped version
+//   node scripts/publish-sdk.mjs --check     # PR CI: fail if a bump is needed, publish nothing
 //
 // Decision table (local = sdk/package.json version, published = npm dist-tag latest):
 //   local > published            → publish local as-is (someone already bumped)
 //   local == published, changed  → bump (default patch), commit + tag, publish
+//                                  (--no-bump/--check: error; the bump belongs in the PR)
 //   local == published, same     → nothing to do
 //   local < published            → error; fix the version by hand
+//
+// In CI (env CI set) the registry credential comes from .npmrc or npm trusted
+// publishing, so the interactive `npm login` fallback is skipped.
 // Change detection unpacks the published tarball and a fresh `npm pack` of the
 // build and compares every file byte for byte (package.json with the version
 // field normalized), so docs-only or metadata-only edits still count as changes.
@@ -38,8 +44,11 @@ const bumpLevel = args.includes("--bump")
   : "patch";
 if (!["patch", "minor", "major"].includes(bumpLevel))
   throw new Error("--bump must be patch, minor or major");
+const check = flag("--check");
 const dryRun = flag("--dry-run");
-const commit = !flag("--no-commit") && !dryRun;
+const noBump = flag("--no-bump") || check;
+const commit = !flag("--no-commit") && !dryRun && !check;
+const ci = Boolean(process.env.CI);
 const registry = "https://registry.npmjs.org/";
 const log = (message) => process.stderr.write(`publish-sdk: ${message}\n`);
 
@@ -176,6 +185,12 @@ if (published !== null) {
     log(
       `${changed.length} file(s) differ from ${published}: ${changed.join(", ")}`,
     );
+    if (noBump)
+      throw new Error(
+        `sdk/package.json is still ${published} but the package contents changed; ` +
+          `bump the version (e.g. \`npm version patch --no-git-tag-version\` in sdk/) ` +
+          `so the merge to main publishes it`,
+      );
     versionToPublish = run(
       "npm",
       ["version", bumpLevel, "--no-git-tag-version"],
@@ -201,8 +216,13 @@ if (published !== null) {
     } else log("version bump left uncommitted (--dry-run/--no-commit)");
   }
 }
+if (check) {
+  log(`check passed: merging will publish ${name}@${versionToPublish}`);
+  process.exit(0);
+}
 if (
   !dryRun &&
+  !ci &&
   spawnSync("npm", ["whoami", "--registry", registry], { encoding: "utf8" })
     .status !== 0
 )

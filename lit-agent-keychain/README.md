@@ -33,9 +33,9 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 
 ## SDK 2.0.4 release coordination
 
-This source prepares SDK 2.0.4 and pins the hosted examples to that version. A source
-merge does **not** publish npm. Publish and verify the 2.0.4 package **before deploying
-these version-pinned docs**; until then, registry installation of that version is not
+This source prepares SDK 2.0.4 and pins the hosted examples to that version. Merging
+to `main` publishes the SDK (see Publishing below), before the owner UI/API deploy.
+Until the package is on the registry, registry installation of that version is not
 an acceptance test and reviewers should use the locally packed tarball.
 
 2.0.4 is also a **template release**: batched owner approval changed the shared
@@ -246,12 +246,19 @@ The image runs as an unprivileged user. For Railway, use repository root as the 
 context and `lit-agent-keychain/railway.json` as the config path; the Dockerfile path
 is relative to the repository root.
 
-Publish the agent SDK with `./publish.sh`. It builds, compares the packed contents
-with what npm serves for the current version, bumps the patch version only when
-they differ (`--bump minor|major` to choose), commits and tags
-`keychain-sdk-v<version>`, then publishes. `--dry-run` shows the decision without
-committing or publishing. A local `before=` cooldown in `~/.npmrc` does not affect
-it; the published tarball is fetched directly and integrity-checked.
+The agent SDK publishes on merge. `.github/workflows/keychain-publish.yml` runs on
+every push to `main` touching this directory, builds, and publishes
+`@lit-protocol/keychain` with provenance when `sdk/package.json` is ahead of the
+registry, then tags `keychain-sdk-v<version>`. The version bump belongs in the PR:
+PR CI runs `node scripts/publish-sdk.mjs --check`, which fails when the packed
+contents differ from the published version without a bump (`./publish.sh --dry-run`
+locally shows the same decision and bumps for you; `--bump minor|major` to choose).
+Unchanged contents are a no-op, so server-only merges publish nothing. The workflow
+authenticates through npm trusted publishing (this repo and workflow file registered
+on the package) or, failing that, an `NPM_TOKEN` repository secret. Manual
+`./publish.sh` still works and bumps, commits and publishes in one go. A local
+`before=` cooldown in `~/.npmrc` does not affect change detection; the published
+tarball is fetched directly and integrity-checked.
 
 This is a prelaunch, incompatible replacement. Migration `20260911000001` drops the
 legacy Keychain tables and their contents. Stop the old service before applying it.
