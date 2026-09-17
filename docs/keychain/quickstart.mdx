@@ -7,7 +7,7 @@ You need a browser for the owner steps and Node 22+ on the agent's machine. Noth
 
 <Note>
 The examples below use the latest published `@lit-protocol/keychain`. Pin an exact version
-(`@lit-protocol/keychain@2.0.5`, for example) in anything you deploy, and check the
+(`@lit-protocol/keychain@2.0.6`, for example) in anything you deploy, and check the
 [npm page](https://www.npmjs.com/package/@lit-protocol/keychain) for release notes before upgrading.
 </Note>
 
@@ -35,6 +35,8 @@ This writes a mode-0600 file containing an Ed25519 key pair and prints its `publ
   </Step>
   <Step title="Download the agent config">
     Click **Agent config** to download `OPENAI_API_KEY.keychain.json`. It contains public locators plus a scoped execution key that pays for Lit execution. It is not a backup and holds no secret value, but keep it private.
+
+    An agent approved for several secrets needs only one file: click **Config · all secrets** next to its name under **Authorized agents** to download a config naming every secret in the vault that key may use. The `keychain run`, `get` and `use` commands take one config; the MCP server also accepts several.
   </Step>
 </Steps>
 

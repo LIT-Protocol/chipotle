@@ -235,21 +235,58 @@ function App() {
     setSelected(updated);
     await refresh();
   };
+  const atLimit =
+    !!billing && secrets.length >= billing.subscription.secretLimit;
+  const locatorOf = (bundle: SecretBundle) => ({
+    manifest: bundle.manifest.document.manifest,
+    actionCid: bundle.manifest.document.actionCid,
+  });
+  const agentConfig = (secrets: AgentConfig["secrets"]): AgentConfig => ({
+    v: 2,
+    litApiUrl: LIT_URL,
+    usageApiKey: client!.lit.usageApiKey,
+    secrets,
+  });
   const exportConfig = (bundle: SecretBundle) => {
-    const m = bundle.manifest.document.manifest;
-    const config: AgentConfig = {
-      v: 2,
-      litApiUrl: LIT_URL,
-      usageApiKey: client!.lit.usageApiKey,
-      secrets: {
-        [bundle.envelope.document.metadata.name]: {
-          manifest: m,
-          actionCid: bundle.manifest.document.actionCid,
-        },
-      },
-    };
-    download(`${bundle.envelope.document.metadata.name}.keychain.json`, config);
+    const name = bundle.envelope.document.metadata.name;
+    const file = `${name}.keychain.json`;
+    download(file, agentConfig({ [name]: locatorOf(bundle) }));
+    setError("");
+    setNotice(
+      `Downloaded ${file}. It names this secret and carries the execution key, no secret value; give it to the agent next to its identity file.`,
+    );
   };
+  /** One config listing every secret this agent is approved for, so `keychain run`
+   *  and `get`/`use` need a single file (the MCP server can also merge several). */
+  const exportAgentConfig = (agent: Grant) =>
+    work("Collecting this agent's secrets…", async () => {
+      const approved: AgentConfig["secrets"] = {};
+      for (const s of secrets) {
+        const bundle: SecretBundle =
+          selected &&
+          selected.manifest.document.manifest.secretId === s.secretId
+            ? selected
+            : await client!.bundle(s.secretId);
+        if (
+          !bundle.policy.document.grants.some(
+            (g) => g.agentPublicKey === agent.agentPublicKey,
+          )
+        )
+          continue;
+        approved[bundle.envelope.document.metadata.name] = locatorOf(bundle);
+      }
+      const names = Object.keys(approved);
+      const file = `${
+        agent.label.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") ||
+        "agent"
+      }.keychain.json`;
+      download(file, agentConfig(approved));
+      setNotice(
+        `Downloaded ${file} for ${agent.label}: ${names.length} secret${
+          names.length === 1 ? "" : "s"
+        } (${names.join(", ")}). It carries no secret values.`,
+      );
+    });
   const reveal = () => {
     if (!selected) return;
     const secretName = selected.envelope.document.metadata.name;
@@ -635,15 +672,17 @@ function App() {
                     <p className="eyebrow">AGENT ACCESS</p>
                     <h1>Secrets</h1>
                     <p>
-                      Start with no agent access. Grant only what each agent
-                      needs.
+                      {atLimit
+                        ? `This plan holds ${billing.subscription.secretLimit} secrets and all are in use. Subscribe above to add more, or rotate an existing secret instead of adding one.`
+                        : "Start with no agent access. Grant only what each agent needs."}
                     </p>
                   </div>
                   <button
-                    disabled={
-                      !!busy ||
-                      !billing ||
-                      secrets.length >= billing.subscription.secretLimit
+                    disabled={!!busy || !billing || atLimit}
+                    title={
+                      atLimit
+                        ? `Plan full: ${secrets.length} of ${billing.subscription.secretLimit} secrets used`
+                        : undefined
                     }
                     onClick={() => {
                       setCreating(true);
@@ -876,39 +915,56 @@ function App() {
                               <strong>{g.label}</strong>
                               <code>{brief(g.agentPublicKey)}</code>
                             </span>
-                            <button
-                              className="danger ghost"
-                              disabled={!!busy}
-                              onClick={() =>
-                                void work("Revoking agent…", () =>
-                                  savePolicy({
-                                    grants:
-                                      selected.policy.document.grants.filter(
-                                        (x) =>
-                                          x.agentPublicKey !== g.agentPublicKey,
-                                      ),
-                                  }),
-                                )
-                              }
-                            >
-                              Revoke
-                            </button>
+                            <span className="row-actions">
+                              <button
+                                className="ghost"
+                                disabled={!!busy}
+                                title="Download one agent config listing every secret in this vault that this public key is approved for"
+                                onClick={() => void exportAgentConfig(g)}
+                              >
+                                Config · all secrets
+                              </button>
+                              <button
+                                className="danger ghost"
+                                disabled={!!busy}
+                                onClick={() =>
+                                  void work("Revoking agent…", () =>
+                                    savePolicy({
+                                      grants:
+                                        selected.policy.document.grants.filter(
+                                          (x) =>
+                                            x.agentPublicKey !==
+                                            g.agentPublicKey,
+                                        ),
+                                    }),
+                                  )
+                                }
+                              >
+                                Revoke
+                              </button>
+                            </span>
                           </div>
                         ))}
                         <form
                           onSubmit={(e) => {
                             e.preventDefault();
+                            const key = agentKey.trim().toLowerCase();
+                            const existing =
+                              selected.policy.document.grants.find(
+                                (g) => g.agentPublicKey === key,
+                              );
                             void work("Approving agent…", async () => {
                               setSelected(
-                                await client.delegate(
-                                  selected,
-                                  agentKey,
-                                  agentName,
-                                ),
+                                await client.delegate(selected, key, agentName),
                               );
                               setAgentKey("");
                               setAgentName("");
                               await refresh();
+                              setNotice(
+                                existing
+                                  ? `${brief(key)} was already approved as "${existing.label}"; it is now labelled "${agentName}". Its access did not change.`
+                                  : `Approved ${agentName}. Download its Agent config and give it to the agent next to its identity file.`,
+                              );
                             });
                           }}
                         >
@@ -928,8 +984,8 @@ function App() {
                               value={agentKey}
                               onChange={(e) => setAgentKey(e.target.value)}
                               required
-                              pattern="[0-9a-f]{64}"
-                              title="64 lowercase hex characters: the publicKey printed by keychain init"
+                              pattern="[0-9a-fA-F]{64}"
+                              title="64 hex characters: the publicKey printed by keychain init (upper- or lowercase)"
                               placeholder="Generate on the agent with keychain init"
                               autoComplete="off"
                             />

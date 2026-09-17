@@ -164,7 +164,16 @@ export function describeCredential(
   if (typeof value !== "string") return "unknown";
   const s = value.trim();
   if (/^(0x)?[0-9a-fA-F]{64}$/.test(s)) return "agent-private-key";
-  if (s.startsWith("{")) return "unknown";
+  if (s.startsWith("{")) {
+    // The raw text of an identity or config file, as an agent that just read
+    // the file from disk would hold it.
+    try {
+      const parsed: unknown = JSON.parse(s);
+      return isRecord(parsed) ? describeCredential(parsed) : "unknown";
+    } catch {
+      return "unknown";
+    }
+  }
   // Chipotle usage keys are currently base64 of 32 random bytes (44 chars).
   if (/^[A-Za-z0-9+/]{43}=$/.test(s)) return "usage-api-key";
   return "unknown";
@@ -1171,6 +1180,12 @@ export class Keychain {
       tlsCertificateSha256?: string;
     } = {},
   ) {
+    requireThat(
+      !isRecord(privateKey),
+      describeCredential(privateKey) === "agent-config"
+        ? "The first argument is an agent config (*.keychain.json); pass identity.privateKey first and the config second."
+        : "Pass identity.privateKey (the 64-hex string from `keychain init`), not the whole identity object.",
+    );
     assertAgentIdentity({ privateKey });
     assertAgentConfig(config);
     if (options.usageApiKey !== undefined)
@@ -1231,7 +1246,7 @@ export class Keychain {
     const definition = actionDefinition(locator.manifest.release);
     requireThat(
       definition.kind === "use",
-      "Secret is an export release; call get()",
+      `Secret "${name}" is a stored secret; call get("${name}") or \`keychain run\` instead of use(). Only connected services have an action to run.`,
     );
     let validated: Record<string, unknown> | undefined;
     if (definition.input) {

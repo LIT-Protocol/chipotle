@@ -76,6 +76,23 @@ test("SDK rejects swapped or mistaken credentials with self-describing errors", 
   assert.equal(describeCredential(identity.privateKey), "agent-private-key");
   assert.equal(describeCredential(usageApiKey), "usage-api-key");
   assert.equal(describeCredential("sk_live_not_a_key"), "unknown");
+  // The raw text of either file, as read from disk.
+  assert.equal(
+    describeCredential(JSON.stringify({ v: 2, ...identity })),
+    "agent-identity",
+  );
+  assert.equal(describeCredential(JSON.stringify(config)), "agent-config");
+  assert.equal(describeCredential("{not json"), "unknown");
+  assert.equal(describeCredential("[1]"), "unknown");
+  // The whole identity object, or the config, where the private key string belongs.
+  assert.throws(
+    () => new Keychain({ v: 2, ...identity } as any, config),
+    /Pass identity\.privateKey .*not the whole identity object/,
+  );
+  assert.throws(
+    () => new Keychain(config as any, config),
+    /first argument is an agent config .*pass identity\.privateKey first/,
+  );
   // Identity and config swapped.
   assert.throws(
     () => assertAgentIdentity(config),

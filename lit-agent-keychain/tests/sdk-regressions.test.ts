@@ -162,6 +162,22 @@ test("unknown secrets name the config's secrets so a typo is obvious", async () 
   }
 });
 
+test("use() on a stored secret names the secret and points at get()/run", async () => {
+  const locator = { manifest: { release: "export" }, actionCid: "test" } as any;
+  const client = new Keychain(Keychain.generateKey().privateKey, {
+    ...config,
+    secrets: { MY_KEY: locator },
+  });
+  try {
+    await assert.rejects(
+      client.use("MY_KEY"),
+      /Secret "MY_KEY" is a stored secret; call get\("MY_KEY"\) or `keychain run` instead of use\(\)/,
+    );
+  } finally {
+    client.destroy();
+  }
+});
+
 test("a 401 from Lit explains that the execution key was probably replaced", async () => {
   const { createServer } = await import("node:http");
   const server = createServer((_req, res) => {
