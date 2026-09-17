@@ -59,22 +59,29 @@ tracks the theme automatically:
 - Mono: `"JetBrains Mono", ui-monospace, ...` for keys, hashes, addresses.
 - Form controls inherit (`font-family: inherit`) — never let browsers pick.
 
-Headings use weight **600** (not 700) with tight negative letter-spacing
-(`-0.01em` to `-0.03em`) for the charcoal, chalk-serif-adjacent feel. Numeric
-stat values also use 600 / `-0.02em`.
+Display headings (the login hero and workspace title) use weight **500** with
+heavy negative tracking (`-0.04em` to `-0.045em`) for the large, quiet
+litprotocol.com feel. Smaller headings use **500-600** with `-0.01em` to
+`-0.03em`. Metric numbers are large and light (36px / 400).
+
+Eyebrows (`.eyebrow`) are the recurring section kicker: 10px, uppercase,
+`0.1em` tracking, muted. They sit above the hero, the sign-in panel, and the
+workspace title.
 
 Scale (semantic, not pixel-perfect):
 
 | Use | Size | Weight | Tracking |
 |---|---|---|---|
-| Login title | 2rem (32px) | 600 | -0.03em |
-| Topbar title | 20px | 600 | -0.01em |
-| Stat value | 1.5rem (24px) | 600 | -0.02em |
+| Login hero (`.login-hero-title`) | clamp 38–62px | 500 | -0.045em |
+| Workspace title (`.workspace-title`) | clamp 30–38px | 500 | -0.04em |
+| Sign-in title (`.login-title`) | 32px | 500 | -0.03em |
+| Next-step h2 | 21px | 500 | -0.025em |
+| Metric value (`.metric-grid .stat-value`) | 36px | 400 | -0.02em |
 | Section h2 | 18px | 600 | -0.01em |
 | Card title | 0.9375rem (15px) | 600 | — |
 | Body | 14px | 400-500 | — |
 | Small / labels | 0.8125rem (13px) | 400-500 | — |
-| Caption | 12px | 500 | — |
+| Eyebrow / caption | 10-12px | 500 | 0.1em (eyebrow) |
 
 ## Spacing
 
@@ -84,6 +91,37 @@ Radii:
 
 - `--radius` = 7px (most surfaces)
 - `--radius-lg` = 10px (cards, hero blocks, empty-state icon containers, dialogs)
+
+## Layout (issue #673)
+
+The dashboard follows the reviewed litprotocol.com preview: a full-bleed brand
+bar, a quiet text sidebar, a flat metric grid, and a page footer. Both the login
+and the authenticated workspace share the same frame.
+
+### App frame
+
+- **Brand bar** (`.marketing-topbar` on login, `.app-topbar` on workspace): the
+  `Lit` wordmark (`.brand-mark`, orange/indigo accent) + a hairline divider +
+  `Dashboard`, on the left. On login the right side is just "Developer docs ↗".
+  On the workspace the right side keeps the working controls (mode badge host
+  `.topbar-title`, billing balance, Add Funds, Auto recharge, Developer docs,
+  theme toggle, Account menu).
+- **Body** (`.dashboard-body`): sidebar + main content in a row. The sidebar is
+  in-flow (not fixed) so the footer can sit below both columns.
+- **Footer** (`.marketing-footer` / `.app-footer`): "Lit Protocol" left,
+  "Confidential, verifiable execution." right. Hairline top border.
+
+### Login layout (`.login-layout`)
+
+Two-column split: a marketing intro (`.login-intro`) on the left and the
+sign-in surface (`.login-signin`, hairline left border) on the right. Collapses
+to one column under 900px, where the intro principles and the panel eyebrow are
+hidden and the sign-in surface gets a top border instead.
+
+### Workspace heading (`.workspace-heading`)
+
+Eyebrow ("Your workspace") + large `Overview` title on the left, one primary
+action ("Run an Action") on the right. One primary action per view.
 
 ## Components
 
@@ -101,11 +139,22 @@ Radii:
   shadow `--shadow`. Inner padding 1.5rem (24px).
 - Use sparingly. Stacking cards inside cards is a smell.
 
-### Stat cards (`stat-card`)
+### Metric grid (`metric-grid` / `metric-cell`)
 
-- Anchor element (`<a>`), not div, so they navigate to their section.
-- Layout: icon left (44px square, brand-tinted bg), value + label stacked right.
-- Click → smooth-scroll to section + sets sidebar active state.
+- Replaces the old boxed stat cards. Flat: four equal cells separated by hairline
+  borders (top + bottom on the grid, a left divider between cells), no card box.
+- Each cell (`<a>`, not div): small muted label on top, a large light number
+  (`.stat-value`, 36px / 400), and a muted sub-label with a `↗` glyph.
+- Hover tints the number to `--primary`. Click → smooth-scroll to section.
+- `updateStatCards()` (auth.js) fills the numbers and toggles the grid vs the
+  all-zero empty state via `[hidden]`. It also mirrors the counts into the
+  sidebar (`sidebar-count-*`) and shows/hides the next-step card.
+
+### Next-step card (`next-step`)
+
+- Muted `--bg-muted` panel under the metric grid: a `</>` code glyph +
+  "From your rules to a signature." + a link into Groups. Rides with the metric
+  grid (hidden in the all-zero empty state).
 
 ### Empty states (`empty-state`)
 
@@ -114,12 +163,17 @@ Radii:
 - Toggle visibility via `style.display = 'none' | ''` from JS, not class swap,
   so existing handlers keep working.
 
-### Sidebar link (`sidebar-link`)
+### Sidebar (`sidebar`)
 
-- Icon (lucide-style 18px SVG) + text label.
-- States: default, `:hover`, `.is-active`.
-- Active state: brand color text, soft hover bg, 3px brand bar on the left edge.
-- Active state is set by IntersectionObserver scroll-spy (`app.js initSidebar`).
+- Text-only nav (no icons), in-flow, hairline right border. Tops out with an
+  account block (`.sidebar-account`: square mark + "Your account" + mode label),
+  and bottoms out with `.sidebar-bottom` ("Open-source ↗").
+- Each `.sidebar-link` is a label + an optional right-aligned count
+  (`.sidebar-count`, filled by `updateStatCards()`).
+- States: default, `:hover` (muted fill), `.is-active` (muted fill, ink text —
+  no orange left bar). Active state is set by IntersectionObserver scroll-spy
+  (`app.js initSidebar`).
+- Under 900px the sidebar becomes a horizontal scroll strip above the content.
 
 ### Mode badge (topbar `topbar-mode-badge`)
 
@@ -127,27 +181,28 @@ Radii:
 - Different copy per mode. ChainSecured popover lists which features are hidden.
 - Closes on outside click and Escape.
 
-### Login mode cards
+### Sign-in surface (`.login-signin`)
 
-- **One clear sign-in surface** (issue #673). The `.login-card-shell` is the
-  only container: Sign in / Create account tabs across the top, the active form
-  panel in the middle, and the "Authentication mode" pill toggle (API mode /
-  ChainSecured) along the bottom. The inner `.login-card` panels are flat — no
-  border, ring, or shadow of their own. Stacking a bordered card inside the
-  shell is the exact "nested white panels" the redesign removed.
-- The auth-mode toggle picks which panel is shown (CSS gates `.login-card-api`
-  and `.login-card-chainsecured` on `body.login-mode-chainsecured` via
-  `display: none`; both stay in the DOM). The choice persists via
-  `setMode()`/sessionStorage so it survives a tab refresh and matches the
-  dashboard's post-login mode.
-- ChainSecured panel carries the `WALLET REQUIRED` badge (muted, neutral fill)
-  to set expectation. API mode panel has no badge.
-- **One primary action per surface.** The primary CTA (Log in / Create account)
-  is a solid ink `.btn-primary`; the wallet actions (Connect wallet / Connect
-  wallet & create) are `.btn-outline`. The button classes drive color directly
-  now — there is no card-selected-state color swap.
-- Each panel: optional badge, icon, title, tagline, body, CTA.
-- Help glyph next to "ChainSecured" → tooltip defining the term.
+- **One clear sign-in surface** (issue #673), living in the right column of the
+  split login. Order: eyebrow → "Sign in to Lit." → subtitle → **Account access**
+  radio cards → the active form panel → a secondary "existing vs new" switch.
+- **Account access** (`.access-options`): two radio cards (`.access-card`,
+  `role="radio"`) — "API key" vs "Wallet (ChainSecured permissions)". This is
+  the primary choice. Selected card gets an ink border and a filled orange radio
+  dot. IDs `login-auth-mode-api` / `login-auth-mode-chainsecured` are unchanged,
+  so auth.js's roving-tabindex radiogroup keeps working; the choice still
+  persists via `setMode()`/sessionStorage.
+- **Panels**: `.login-card-api` / `.login-card-chainsecured` are flat (no border,
+  ring, or shadow). CSS gates them on `body.login-mode-chainsecured` (both stay
+  in the DOM). API existing → account-key field; API new → email/name/desc;
+  Wallet → a `.chain-explainer` + Connect wallet.
+- **Secondary switch** (`.login-switch`): existing vs new. Only the option you can
+  switch *to* is shown — `.login-switch-tab.is-active { display:none }` — so
+  auth.js's existing `is-active` toggle drives the "New to Lit? Create an account
+  →" / "Have an account? Sign in" flip with no extra JS.
+- **One primary action per surface.** The primary CTA (Continue / Create account)
+  is a solid ink `.btn-primary`; the wallet actions are `.btn-outline`.
+- Help glyph in the wallet explainer → tooltip defining ChainSecured.
 
 ### Help disclosure (`details.help-details`)
 
@@ -202,7 +257,8 @@ and survive page reloads.
 
 1. Add a `<section id="section-{name}" class="dashboard-section">` in `index.html`.
 2. Add it to `MAIN_SECTION_IDS` in `app.js` (top of file).
-3. Add a sidebar link with matching `data-scroll="{name}"` and a lucide icon.
+3. Add a text `.sidebar-link` with matching `data-scroll="{name}"` (no icon; add a
+   `.sidebar-count` span if the section has a countable resource).
 4. If it has an empty state, follow the `empty-state` pattern (icon + title + body).
 5. If the section is mode-conditional, gate via `body.is-chainsecured` CSS rule.
 
