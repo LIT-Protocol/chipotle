@@ -18,28 +18,40 @@ API. It should feel like an SDK with a UI on top, not a marketing page.
 All color is driven by CSS custom properties on `:root` (light) and
 `[data-theme="dark"]` (dark). Hard-coded hex values are a bug.
 
+Light is a **chalk + charcoal + restrained burnt orange** system (issue #673):
+paper surfaces, charcoal ink, orange reserved as an *accent* (links, focus rings,
+active states, icon tints). Solid CTAs fill with **ink, not orange** — see
+`--btn-primary-bg`. Dark keeps its indigo palette unchanged.
+
 | Token | Light | Dark |
 |---|---|---|
-| `--primary` | `#3c50e0` | `#6366f1` |
-| `--primary-hover` | `#5a67d8` | `#818cf8` |
-| `--text` | `#1e293b` | `#f1f5f9` |
-| `--text-muted` | `#64748b` | `#94a3b8` |
-| `--body-bg` | `#f1f5f9` | `#0f172a` |
+| `--primary` (accent) | `#bc3b12` | `#6366f1` |
+| `--primary-hover` | `#9e3210` | `#818cf8` |
+| `--primary-rgb` (tint channels) | `188, 59, 18` | `99, 102, 241` |
+| `--btn-primary-bg` (solid CTA fill) | `#181818` | `#6366f1` |
+| `--btn-primary-bg-hover` | `#30302c` | `#818cf8` |
+| `--text` | `#181818` | `#f1f5f9` |
+| `--text-muted` | `#696963` | `#94a3b8` |
+| `--body-bg` | `#fafaf7` | `#0f172a` |
 | `--card-bg` | `#ffffff` | `#1e293b` |
-| `--border` | `#e2e8f0` | `#334155` |
-| `--bg-muted` | `#f3f4f6` | `#1e293b` |
+| `--border` | `#ddddd5` | `#334155` |
+| `--bg-muted` | `#f0f0eb` | `#1e293b` |
 | `--danger` | `#dc2626` | `#f87171` |
 | `--success` | `#16a34a` | `#4ade80` |
-| `--shadow` | light shadow | darker shadow |
+| `--shadow` | whisper (chalk is flat) | darker shadow |
+
+`--primary` is the accent, not the button fill. Primary buttons (`.btn-primary`)
+use `--btn-primary-bg` (ink in light, indigo in dark) so orange stays restrained.
 
 Sidebar has its own scoped tokens (`--sidebar-bg`, `--sidebar-text`, etc.) so
 the sidebar can stay light when the rest goes dark, or vice versa.
 
-When tinting the primary color (e.g., empty-state icon backgrounds), use rgba
-with the same RGB as `--primary` so the alpha is the only knob:
+When tinting the primary color (e.g., empty-state icon backgrounds), use
+`rgba(var(--primary-rgb), <alpha>)` so the alpha is the only knob and the tint
+tracks the theme automatically:
 
-- Light tint: `rgba(60, 80, 224, 0.08)`
-- Dark tint: `rgba(99, 102, 241, 0.15)`
+- Icon-background tint: `rgba(var(--primary-rgb), 0.1)`
+- Subtle fill: `rgba(var(--primary-rgb), 0.08)`
 
 ## Typography
 
@@ -47,17 +59,22 @@ with the same RGB as `--primary` so the alpha is the only knob:
 - Mono: `"JetBrains Mono", ui-monospace, ...` for keys, hashes, addresses.
 - Form controls inherit (`font-family: inherit`) — never let browsers pick.
 
+Headings use weight **600** (not 700) with tight negative letter-spacing
+(`-0.01em` to `-0.03em`) for the charcoal, chalk-serif-adjacent feel. Numeric
+stat values also use 600 / `-0.02em`.
+
 Scale (semantic, not pixel-perfect):
 
-| Use | Size | Weight |
-|---|---|---|
-| Login title | 28px | 700 |
-| Topbar title | 20px | 600 |
-| Section h2 | 18px | 600 |
-| Card title | 0.9375rem (15px) | 600 |
-| Body | 14px | 400-500 |
-| Small / labels | 0.8125rem (13px) | 400-500 |
-| Caption | 12px | 500 |
+| Use | Size | Weight | Tracking |
+|---|---|---|---|
+| Login title | 2rem (32px) | 600 | -0.03em |
+| Topbar title | 20px | 600 | -0.01em |
+| Stat value | 1.5rem (24px) | 600 | -0.02em |
+| Section h2 | 18px | 600 | -0.01em |
+| Card title | 0.9375rem (15px) | 600 | — |
+| Body | 14px | 400-500 | — |
+| Small / labels | 0.8125rem (13px) | 400-500 | — |
+| Caption | 12px | 500 | — |
 
 ## Spacing
 
@@ -65,16 +82,17 @@ Scale (semantic, not pixel-perfect):
 
 Radii:
 
-- `--radius` = 8px (most surfaces)
-- `--radius-lg` = 12px (cards, hero blocks, empty-state icon containers)
+- `--radius` = 7px (most surfaces)
+- `--radius-lg` = 10px (cards, hero blocks, empty-state icon containers, dialogs)
 
 ## Components
 
 ### Buttons
 
 - `.btn` base. Modifiers: `.btn-primary`, `.btn-outline`, `.btn-sm`, `.btn-block`.
-- Primary CTA: solid `--primary` background, white text.
-- Outline: transparent background, primary border + text.
+- Primary CTA: solid `--btn-primary-bg` (ink in light, indigo in dark), white
+  text. Orange is an accent, never a button fill.
+- Outline: transparent background, `--border` border + `--text`.
 - Min height 44px on mobile (`max-width: 768px` media query). Desktop can be 36-40px.
 
 ### Cards
@@ -111,25 +129,24 @@ Radii:
 
 ### Login mode cards
 
-- One card hosts everything: Sign in / Create account tabs across the top,
-  the active form panel in the middle, and the "Authentication mode" pill
-  toggle (API mode / ChainSecured) along the bottom. The auth-mode toggle
-  picks which inner card is shown (CSS gates `.login-card-api` and
-  `.login-card-chainsecured` on `body.login-mode-chainsecured` via
-  `display: none`; both cards stay in the DOM). The choice persists via
+- **One clear sign-in surface** (issue #673). The `.login-card-shell` is the
+  only container: Sign in / Create account tabs across the top, the active form
+  panel in the middle, and the "Authentication mode" pill toggle (API mode /
+  ChainSecured) along the bottom. The inner `.login-card` panels are flat — no
+  border, ring, or shadow of their own. Stacking a bordered card inside the
+  shell is the exact "nested white panels" the redesign removed.
+- The auth-mode toggle picks which panel is shown (CSS gates `.login-card-api`
+  and `.login-card-chainsecured` on `body.login-mode-chainsecured` via
+  `display: none`; both stay in the DOM). The choice persists via
   `setMode()`/sessionStorage so it survives a tab refresh and matches the
   dashboard's post-login mode.
-- ChainSecured card carries the `WALLET REQUIRED` badge (muted, neutral fill)
-  to set expectation. API mode card has no badge.
-- The visible card uses a neutral `--border` ring; hover or focus-within
-  promotes it to the primary ring. The "Wallet required" badge is the only
-  differentiator between modes.
-- Each card's CTA (Log in / Create account / Connect wallet / Connect wallet
-  & create) shares the same shape (full-width, btn-block padding) but its
-  color follows the card's selected state: neutral outlined at rest, primary
-  blue when the card is hovered or focus-within. The btn-primary vs
-  btn-outline class no longer drives color here — the parent card does.
-- Each card: optional badge, icon, title, tagline, body, CTA.
+- ChainSecured panel carries the `WALLET REQUIRED` badge (muted, neutral fill)
+  to set expectation. API mode panel has no badge.
+- **One primary action per surface.** The primary CTA (Log in / Create account)
+  is a solid ink `.btn-primary`; the wallet actions (Connect wallet / Connect
+  wallet & create) are `.btn-outline`. The button classes drive color directly
+  now — there is no card-selected-state color swap.
+- Each panel: optional badge, icon, title, tagline, body, CTA.
 - Help glyph next to "ChainSecured" → tooltip defining the term.
 
 ### Help disclosure (`details.help-details`)
