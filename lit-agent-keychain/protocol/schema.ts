@@ -8,7 +8,6 @@ import {
 export const V = 2 as const;
 export const DOMAIN = "lit-keychain/v2" as const;
 export const MAX_SECRET_BYTES = 16 * 1024;
-export const MAX_POLICY_SECONDS = 90 * 86400;
 const hex = (bytes: number) =>
   z.string().regex(new RegExp(`^[0-9a-f]{${bytes * 2}}$`));
 export const hashSchema = hex(32);
@@ -127,7 +126,8 @@ export const policySchema = z.strictObject({
   previousHash: hashSchema.nullable(),
   disabled: z.boolean(),
   notBefore: integer,
-  expiresAt: integer,
+  /** Unix seconds, or null for a policy the owner chose not to expire. */
+  expiresAt: integer.nullable(),
   grants: z.array(grantSchema).max(100),
 });
 export type Policy = z.infer<typeof policySchema>;

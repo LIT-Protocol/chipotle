@@ -38,7 +38,7 @@ Encrypt once. Approve per agent. Lit checks every request.
     Every secret gets its own immutable Lit Action with its own key, derived inside a hardware enclave. Your browser fetches that action's public key straight from Lit and encrypts locally. Only ciphertext reaches the Keychain database.
   </Step>
   <Step title="You authorize an agent's public key">
-    The agent generates its own Ed25519 identity and gives you only the public half. You approve it for a secret with an expiry of up to 90 days. Your wallet, passkey or Google-verified session signs the approval, and Lit issues a receipt that Keychain cannot forge.
+    The agent generates its own Ed25519 identity and gives you only the public half. You approve it for a secret with an expiry you choose (30 days by default, or none). Your wallet, passkey or Google-verified session signs the approval, and Lit issues a receipt that Keychain cannot forge.
   </Step>
   <Step title="The agent asks Lit, not Keychain">
     The agent signs a request and sends it directly to the Lit action. The action verifies your receipt, the agent's key, scope and expiry, then returns the result encrypted to that agent only. Revoke any time from the dashboard.

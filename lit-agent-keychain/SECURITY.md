@@ -59,8 +59,10 @@ Revision/hash chains give honest concurrency checks, not rollback protection.
 Rollback does not create a new agent identity or extend signed expiry. A requester
 still needs an allowed private key. An operator colluding with a formerly allowed
 agent can restore that agent's prior access while the old permission remains valid.
-Owner credential membership may be indefinite; access policies are always finite
-and capped at 90 days. Credential receipts never make Google session keys permanent.
+Owner credential membership may be indefinite. Access policies default to 30 days and
+the owner chooses their lifetime, including none; a longer lifetime widens the window
+in which a replayed policy stays valid, so the expiry is the owner's rollback bound.
+Credential receipts never make Google session keys permanent.
 The root owner is the initial state when no credential policy exists; withholding a
 later credential policy can restore that initial owner, as part of the accepted model.
 

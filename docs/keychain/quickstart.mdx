@@ -7,7 +7,7 @@ You need a browser for the owner steps and Node 22+ on the agent's machine. Noth
 
 <Note>
 The examples below use the latest published `@lit-protocol/keychain`. Pin an exact version
-(`@lit-protocol/keychain@2.0.4`, for example) in anything you deploy, and check the
+(`@lit-protocol/keychain@2.0.5`, for example) in anything you deploy, and check the
 [npm page](https://www.npmjs.com/package/@lit-protocol/keychain) for release notes before upgrading.
 </Note>
 
@@ -31,7 +31,7 @@ This writes a mode-0600 file containing an Ed25519 key pair and prints its `publ
     Choose **Add secret**, then either **Store a secret** (the agent receives the value) or **Connect a service** (the agent runs one reviewed action and never sees the key). Name it in `UPPER_SNAKE_CASE`, for example `OPENAI_API_KEY`, and paste the value. It is encrypted in your browser before upload.
   </Step>
   <Step title="Approve the agent">
-    Open the secret, paste the agent's public key under **Authorized agents**, give it a name and click **Approve agent**. One wallet prompt or passkey touch signs the policy. Permissions default to 30 days and cap at 90.
+    Open the secret, paste the agent's public key under **Authorized agents**, give it a name and click **Approve agent**. One wallet prompt or passkey touch signs the policy. Permissions default to 30 days; you can pick any length or remove the expiry.
   </Step>
   <Step title="Download the agent config">
     Click **Agent config** to download `OPENAI_API_KEY.keychain.json`. It contains public locators plus a scoped execution key that pays for Lit execution. It is not a backup and holds no secret value, but keep it private.
@@ -92,7 +92,7 @@ Everything is on the secret's page in the dashboard:
 - **Revoke** removes one agent. The action fetches the current policy on every request, so the agent's next request is denied.
 - **Disable** switches the secret off for every agent without deleting it.
 - **Rotate & approve** encrypts a new value and moves the existing agents to it in one signature. Downloaded configs keep working.
-- **Renew permissions** extends the expiry, up to 90 days from now.
+- **Renew permissions** sets a new expiry any number of days from now, or **Never expire** removes it so access lasts until you revoke or disable it.
 
 If you suspect a credential leaked, also revoke it at the provider. Revocation cannot recall plaintext an agent already received.
 

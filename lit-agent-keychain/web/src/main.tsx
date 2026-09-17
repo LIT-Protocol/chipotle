@@ -170,6 +170,8 @@ function App() {
   const [agentName, setAgentName] = useState("");
   const [rotation, setRotation] = useState("");
   const [days, setDays] = useState(30);
+  // 90 for secrets pinned to an older release that still caps lifetimes; null = owner's choice.
+  const [lifetimeCap, setLifetimeCap] = useState<number | null>(null);
   const [recoveryOwners, setRecoveryOwners] = useState<Owner[]>([]);
   const [newWallet, setNewWallet] = useState("");
   const { address } = useAccount();
@@ -218,14 +220,16 @@ function App() {
     });
   const pick = (id: string) =>
     work("Checking secret…", async () => {
-      setSelected(await client!.bundle(id));
+      const bundle = await client!.bundle(id);
+      setLifetimeCap(await client!.policyLifetimeCapDays(bundle));
+      setSelected(bundle);
       setCreating(false);
       setRotation("");
     });
   const savePolicy = async (changes: {
     grants?: Grant[];
     disabled?: boolean;
-    days?: number;
+    days?: number | null;
   }) => {
     const updated = await client!.setPolicy(selected!, changes);
     setSelected(updated);
@@ -715,7 +719,8 @@ function App() {
                               >
                                 {s.disabled
                                   ? "Disabled"
-                                  : s.expiresAt * 1000 <= Date.now()
+                                  : s.expiresAt !== null &&
+                                      s.expiresAt * 1000 <= Date.now()
                                     ? "Expired"
                                     : s.agentCount === 1
                                       ? "1 agent"
@@ -739,6 +744,7 @@ function App() {
                               release,
                             );
                             setCreating(false);
+                            setLifetimeCap(null);
                             setSelected(bundle);
                             await refresh();
                             setNotice(
@@ -761,10 +767,12 @@ function App() {
                         <h2>{selected.envelope.document.metadata.name}</h2>
                         <p className="hint">
                           Version {selected.envelope.document.metadata.version}{" "}
-                          · Permission expires{" "}
-                          {new Date(
-                            selected.policy.document.expiresAt * 1000,
-                          ).toLocaleDateString()}
+                          ·{" "}
+                          {selected.policy.document.expiresAt === null
+                            ? "Permission never expires"
+                            : `Permission expires ${new Date(
+                                selected.policy.document.expiresAt * 1000,
+                              ).toLocaleDateString()}`}
                         </p>
                         <div className="button-row">
                           <button
@@ -974,21 +982,44 @@ function App() {
                             <input
                               type="number"
                               min="1"
-                              max="90"
+                              max={lifetimeCap ?? undefined}
                               value={days}
                               onChange={(e) => setDays(Number(e.target.value))}
                             />
                           </label>
-                          <button
-                            disabled={!!busy}
-                            onClick={() =>
-                              void work("Renewing permissions…", () =>
-                                savePolicy({ days }),
-                              )
-                            }
-                          >
-                            Renew with owner approval
-                          </button>
+                          <p className="hint">
+                            {lifetimeCap === null
+                              ? "Any number of days, or remove the expiry so access lasts until you revoke or disable it. Within the lifetime, the operator could replay a revoked policy; a shorter expiry bounds that."
+                              : `This secret was created under an earlier release that limits permissions to ${lifetimeCap} days. Recreate it to choose a longer or unlimited lifetime.`}
+                          </p>
+                          <div className="button-row">
+                            <button
+                              disabled={!!busy}
+                              onClick={() =>
+                                void work("Renewing permissions…", () =>
+                                  savePolicy({ days }),
+                                )
+                              }
+                            >
+                              Renew with owner approval
+                            </button>
+                            {lifetimeCap === null && (
+                              <button
+                                className="secondary"
+                                disabled={
+                                  !!busy ||
+                                  selected.policy.document.expiresAt === null
+                                }
+                                onClick={() =>
+                                  void work("Removing expiry…", () =>
+                                    savePolicy({ days: null }),
+                                  )
+                                }
+                              >
+                                Never expire
+                              </button>
+                            )}
+                          </div>
                         </details>
                         <details>
                           <summary>Verify identity</summary>

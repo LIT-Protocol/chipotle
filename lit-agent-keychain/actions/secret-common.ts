@@ -4,7 +4,6 @@ import {
   policySchema,
   envelopeSchema,
   signedRequestSchema,
-  MAX_POLICY_SECONDS,
   V,
   type Manifest,
   type KeyBinding,
@@ -183,8 +182,12 @@ export async function execute(
         digest(p) === request.policyHash &&
         !p.disabled,
     );
-    verifyWindow(p.notBefore, p.expiresAt, now, MAX_POLICY_SECONDS);
-    requireThat(p.notBefore <= now);
+    // The owner chooses the policy lifetime, including none (expiresAt: null).
+    requireThat(
+      p.notBefore <= now &&
+        (p.expiresAt === null ||
+          (p.expiresAt > now && p.expiresAt > p.notBefore)),
+    );
     requireThat(
       p.grants.some(
         (g) =>
@@ -213,10 +216,13 @@ export async function execute(
     actionKey = unhex(
       (await Lit.Actions.getLitActionPrivateKey()).replace(/^0x/, ""),
     );
-    requireThat(nowSeconds() < request.expiresAt && nowSeconds() < p.expiresAt);
+    const live = () =>
+      nowSeconds() < request.expiresAt &&
+      (p.expiresAt === null || nowSeconds() < p.expiresAt);
+    requireThat(live());
     key = encryptionKey(actionKey);
     plaintext = await decryptEnvelope(envelope, key);
-    requireThat(nowSeconds() < request.expiresAt && nowSeconds() < p.expiresAt);
+    requireThat(live());
     if (definition.kind === "export") {
       output = plaintext;
     } else {
