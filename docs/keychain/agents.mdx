@@ -1,0 +1,116 @@
+---
+title: "SDK, CLI and MCP"
+description: "Reference for the agent side of Lit Agent Keychain: the @lit-protocol/keychain SDK, the keychain CLI, the local MCP server, the three credential artifacts, and what every refusal message means."
+---
+
+One npm package, [`@lit-protocol/keychain`](https://www.npmjs.com/package/@lit-protocol/keychain), covers the SDK, a CLI and a local MCP server. Node 22+, one runtime dependency, Apache-2.0. The agent's private key never leaves its machine, and the SDK attests the Lit endpoint before it sends an execution request.
+
+The package's own [README](https://keychain.litprotocol.com/sdk/README.md) is the exhaustive reference and is published alongside the app so agents can fetch it. This page is the map.
+
+## Installation and identity
+
+```sh
+npm install @lit-protocol/keychain
+npx @lit-protocol/keychain init ./agent-identity.json     # prints publicKey; share only that
+npx @lit-protocol/keychain --help
+```
+
+## SDK
+
+```js
+import { Keychain } from "@lit-protocol/keychain";
+const keychain = new Keychain(identity.privateKey, config);
+
+await keychain.list();                  // each secret's action and input shape, no values
+await keychain.get("MY_SECRET");        // stored secret: plaintext for this process
+await keychain.use("STRIPE_API_KEY");   // connected service: bounded result, never the key
+await keychain.use("OPENAI_API_KEY", { model: "gpt-4o-mini", messages: [...] });
+await keychain.attest();                // full attestation report for config.litApiUrl
+keychain.destroy();                     // then create a new client before calling again
+```
+
+- `get` on a connected service fails with `Secret "X" was created with the <action> action; call use()`. `use` on a stored secret is the mirror mistake.
+- Pass `{ usageApiKey }` as the third constructor argument to override the config's execution key, for example after the owner replaced it.
+- Import by package name so Node selects the TLS-aware entry point. `dist/index.js` is the browser build and cannot bind the live TLS certificate.
+- `ACTIONS` exports the catalog compiled into the client; `describeCredential(value)` classifies a bare string you are unsure about.
+
+## CLI
+
+| Command | What it does |
+|---|---|
+| `init <identity>` | Generate an Ed25519 identity (mode 0600, never overwrites). |
+| `get <identity> <config> <NAME>` | Print a stored secret to stdout. Avoid piping it into logs. |
+| `use <identity> <config> <NAME> ['<json-input>']` | Run a connected service's action and print the bounded result. |
+| `run <identity> <config> [--only A,B] [--env S=VAR] [--file S=PATH] -- <command>` | Put stored secrets in a child's environment (or a mode-0600 file) and exec the command. Prints nothing. |
+| `actions` | Print the catalog of connected-service actions this client knows. |
+| `attest [url]` | Print the attestation report for the default or given Lit origin. |
+| `mcp <identity> <config> [more configs]` | Start the local MCP server over stdio. |
+
+`run` is a handoff to a tool you trust, not a sandbox: the child inherits the environment and can still log or disclose the value. With `--file`, SIGKILL can leave the file behind and unlinking does not guarantee erasure; prefer a tmpfs path such as `/dev/shm` for anything long-lived.
+
+Set `CHIPOTLE_USAGE_API_KEY` to override the config's execution key and `KEYCHAIN_BASE_RPC_URL` to pin your own Base RPC for the on-chain attestation step.
+
+## MCP server
+
+```sh
+# Claude Code
+claude mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp /absolute/path/agent-identity.json /absolute/path/API_KEY.keychain.json
+# Codex CLI
+codex mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp /absolute/path/agent-identity.json /absolute/path/API_KEY.keychain.json
+```
+
+Cursor, Windsurf and similar clients take the same command in their JSON config:
+
+```json
+{
+  "mcpServers": {
+    "lit-keychain": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@lit-protocol/keychain",
+        "mcp",
+        "/absolute/path/agent-identity.json",
+        "/absolute/path/API_KEY.keychain.json"
+      ]
+    }
+  }
+}
+```
+
+Pass one or more configs after the identity. Paths must be absolute and readable by the client's user, and Node 22+ must be on that client's PATH.
+
+**Tools:** `agent_public_key` (for the owner to approve), `list_actions`, `list_secrets` (names, permitted operation and input shape, no values), `get_secret`, and one tool per catalog action (`stripe_balance`, `openai_chat`, `github_read_file`, `slack_post_message`, `supabase_tables`), each taking `name` and, where the action declares one, `input`.
+
+The server is deliberately local rather than hosted. Decryption needs the agent's private identity, and a remote endpoint would hand that key and every plaintext to whoever runs it, which the Keychain trust boundary forbids. Tool results enter the model context like any other tool output, so approve agents only for the secrets they need.
+
+## The three artifacts
+
+| Artifact | Shape | Sensitivity |
+|---|---|---|
+| Agent identity | JSON `{ "v": 2, "privateKey": <64 hex>, "publicKey": <64 hex> }` | Private. Only `publicKey` is ever shared. |
+| Agent config | JSON `*.keychain.json`: `{ "v": 2, "litApiUrl", "usageApiKey", "secrets" }` | Private. `usageApiKey` is a Chipotle billing key, not authority. |
+| Secret value | Whatever `get` returns | Do not log, echo, or write to disk. |
+
+`usageApiKey` is an opaque string minted by Chipotle (currently 44 characters of base64). It pays for execution and cannot read a secret without the agent identity and an owner grant. There are no setup tokens, management bearer tokens or server-minted grants in Keychain. Never ask an owner for a private key or Google token. The SDK and CLI reject an identity passed as a config, a config passed as an identity, and a private key passed as a usage key, each with a message naming the mistake.
+
+## When a request is refused
+
+The enclave answers every failure with the same bare `access_denied`, so nothing about the policy or the upstream service leaks. Before spending an execution, the client checks the signed policy it already fetched and explains what it can see. Every such message starts with `Access denied:` and tells you who can fix it.
+
+| Message starts with | Meaning | Who fixes it |
+|---|---|---|
+| `Access denied: the owner disabled this secret` | The owner switched the secret off. | Owner: Enable in Keychain. |
+| `Access denied: the owner's permission expired` | The signed policy ran past its expiry (30 days by default). | Owner: Renew permissions. |
+| `Access denied: agent <key> is not approved` | Your public key is not in the policy, or you used the wrong identity file. | Owner approves your `publicKey`; check the identity file. |
+| `Access denied: agent … approved for version N` | The secret was rotated since you were approved. | Owner re-approves the agent (Rotate & approve does this). |
+| `Access denied: Lit ran the <action> … did not complete` | Unclassified execution failure after local policy checks: input or credential mismatch, provider error, timeout, or size/schema limit. | Owner checks input and provider status privately. Do not blindly retry writes. |
+| `Secret "X" was created with the <action> action; call use()` | You called `get` on a connected service. | Call `use` or the action's MCP tool instead. |
+| `Attestation: no Base RPC endpoint answered` | Public Base RPCs throttled or down. | Retry, or set `KEYCHAIN_BASE_RPC_URL`. |
+| `Attestation: …` (anything else) | A check failed, evidence is unavailable, or the environment cannot verify it. | Stop. Do not disable attestation; report it. |
+
+Slack posts and Supabase inserts are not exactly-once. A timeout after an upstream write does not prove nothing was sent; inspect provider state before retrying.
+
+## Owner-side integration
+
+Owner and browser integrations use `OwnerClient`, `LitConnection` and `authorizationTypedData` from the same package. The hosted web app's [`identities.ts`](https://github.com/LIT-Protocol/chipotle/blob/main/lit-agent-keychain/web/src/identities.ts) shows wallet, passkey and Google signers. The first sign-in for a vault provisions its Chipotle groups and execution key on-chain and takes roughly 30 seconds; later sign-ins take a few seconds.

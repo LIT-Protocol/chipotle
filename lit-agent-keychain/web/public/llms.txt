@@ -17,6 +17,7 @@ Key facts for agents:
 
 ## Docs
 
+- [Developer documentation](https://developer.litprotocol.com/keychain): overview, quickstart, SDK/CLI/MCP reference, connected services, sign-in and recovery, security model.
 - [Owner recovery, rotations and deployment](/README.md)
 - [Provider setup recipes](/PROVIDERS.md)
 
@@ -28,9 +29,9 @@ Key facts for agents:
 
 ## Underlying platform
 
-The former Derived Actions and Signed data in untrusted storage platform links
-were removed because those pages are unavailable. Keychain-specific explanations
-are in the [security contract](/SECURITY.md).
+Keychain-specific explanations of the encryption and receipt model are in the
+[security contract](/SECURITY.md) and the
+[security model page](https://developer.litprotocol.com/keychain/security).
 - [Lit attestation](https://developer.litprotocol.com/architecture/verification/attestation): verifying the TEE endpoint.
 - [Lit Protocol developer docs](https://developer.litprotocol.com)
 

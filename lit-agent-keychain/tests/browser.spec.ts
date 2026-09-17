@@ -34,12 +34,37 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
       requests.push(r.postData() || "");
   });
   await page.goto("/");
+  await page.screenshot({
+    path: "../.context/keychain-v2/home-desktop.png",
+    fullPage: true,
+  });
+  const mobile = await context.newPage();
+  await mobile.setViewportSize({ width: 390, height: 844 });
+  await mobile.goto("/");
+  await expect(
+    mobile.getByRole("button", { name: "Create a passkey", exact: true }),
+  ).toBeVisible();
+  // No page-wide horizontal overflow at phone width.
+  expect(
+    await mobile.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await mobile.screenshot({
+    path: "../.context/keychain-v2/home-mobile.png",
+    fullPage: true,
+  });
+  await mobile.close();
   await page
     .getByRole("button", { name: "Create a passkey", exact: true })
     .click();
   await expect(
     page.getByRole("heading", { name: "Secrets", exact: true }),
   ).toBeVisible();
+  await page.screenshot({
+    path: "../.context/keychain-v2/workspace-empty.png",
+    fullPage: true,
+  });
   // Free plan: secrets can be added before any payment.
   await expect(page.getByText("Free includes 5 secrets")).toBeVisible();
   await expect(
@@ -72,6 +97,10 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
   await expect(
     page.getByText("No agents have access.", { exact: true }),
   ).toBeVisible();
+  await page.screenshot({
+    path: "../.context/keychain-v2/workspace-secret.png",
+    fullPage: true,
+  });
   const identity = Keychain.generateKey();
   await page.getByLabel("Agent name", { exact: true }).fill("Browser agent");
   await page

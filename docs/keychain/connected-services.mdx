@@ -1,0 +1,64 @@
+---
+title: "Connected services"
+description: "Connected services let an agent use a credential inside the Lit enclave without ever receiving it: one reviewed action per provider, pinned hosts, bounded results. Stripe, OpenAI, GitHub, Slack and Supabase today; contributions welcome."
+---
+
+A **connected service** does not return the credential to the agent. The action decrypts it inside the enclave, makes one fixed upstream call over TLS, and returns only the documented fields. Each integration is a reviewed action from the open [agent-keychain-library](https://github.com/LIT-Protocol/agent-keychain-library) repository. Its manifest pins the hosts it may reach, the credential shape, the agent input and the result shape, and the harness enforces all of that in the enclave. The action cannot call any other URL, export the key, run caller-supplied code, or be swapped for a different action later.
+
+<Warning>
+This mode cannot export the credential, even to you. Keep a separate secure copy of the
+original. An action upgrade or a lost credential cannot be repaired from ciphertext alone.
+</Warning>
+
+## Catalog
+
+| Action | Provider credential | Agent input | Result |
+|---|---|---|---|
+| `stripe_balance` | Stripe secret or restricted key (`sk_test_…`, `rk_…`) with balance read | none | `available`, `pending`, `livemode` |
+| `openai_chat` | OpenAI project key (`sk-…`) | `model`, `messages`, `maxTokens` | `content`, `model`, `finishReason`, bounded `usage` |
+| `github_read_file` | Fine-grained PAT (`github_pat_…`) with Contents read | `owner`, `repo`, `path`, `ref` | `path`, `sha`, `size`, decoded `content`, `truncated` |
+| `slack_post_message` | Bot token (`xoxb-…`) with `chat:write` | `channel`, `text`, optional `threadTs` | `channel`, `ts` |
+| `supabase_tables` | JSON object: project `ref`, `sb_secret_…` or service-role key, per-table allowlist | table, columns, filters, or rows to insert | rows as JSON under a 14 KiB budget, `truncated` |
+
+`npx @lit-protocol/keychain actions` prints the exact catalog, input schema and limits your installed client knows. All results are capped at 16 KiB.
+
+The dashboard's **Connect a service** wizard renders the same manifest: what the action does, what the agent can never get, how to call it from the SDK, CLI and MCP, and where to create a suitably narrow credential.
+
+## Setting one up
+
+<Steps>
+  <Step title="Create a narrow credential at the provider">
+    Use a test project or account first. Limit the key's resources and permissions to the single operation the action performs where the provider supports it. Keychain's host allowlist is not a substitute for provider-side scoping.
+  </Step>
+  <Step title="Add it in Keychain">
+    Choose **Add secret**, then **Connect a service**, pick the action and paste the credential. Except for Supabase, the value is the bare token, not JSON and not `Bearer …`. The action id becomes part of the secret's encryption key, so the choice is permanent; to do something else with the same credential, add it again as a different connected service.
+  </Step>
+  <Step title="Approve the agent and download its config">
+    Same as a stored secret: approve the agent's public key with a short expiry, then download the config.
+  </Step>
+  <Step title="Call it">
+    ```sh
+    npx @lit-protocol/keychain use ./agent-identity.json ./STRIPE_API_KEY.keychain.json STRIPE_API_KEY
+    npx @lit-protocol/keychain use ./agent-identity.json ./OPENAI_API_KEY.keychain.json OPENAI_API_KEY \
+      '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Say hello"}],"maxTokens":16}'
+    ```
+
+    In the SDK the same call is `keychain.use(name, input)`. In MCP, each action is its own tool taking `{ "name": "SECRET_NAME", "input": … }`.
+  </Step>
+</Steps>
+
+The provider-by-provider recipes, including the exact Supabase credential object and its validation rules, are in [PROVIDERS.md](https://keychain.litprotocol.com/PROVIDERS.md), which is published from the same release as the app.
+
+## Supabase: the allowlist is the policy
+
+The `supabase_tables` action takes a **structured credential**: you paste a JSON object containing the project ref, a secret or service-role key, and a per-table allowlist of columns the agent may `select`, `filter` on, or `insert`, plus `maxRows`. Because the policy is sealed and signed together with the key, the agent can only ever touch the tables and columns you wrote down.
+
+Secret and service-role keys bypass Row Level Security. The allowlist is the access policy, not an RLS session; it does not require a tenant filter or enforce per-row isolation. Use a separate project or appropriately restricted data for sensitive multi-tenant workloads.
+
+## Writes are not exactly-once
+
+Slack posts and Supabase inserts have no idempotency key. A denial or timeout after the upstream write does not prove that nothing happened. Inspect channel history or table state before retrying.
+
+## Adding a new action
+
+Actions are added by pull request to [agent-keychain-library](https://github.com/LIT-Protocol/agent-keychain-library): a manifest (`action.json`) naming the credential pattern, allowed hosts, input and output shapes and request budget, plus the action code, which may import only the library's `lib.ts`. Keychain pins the library at a commit and verifies every template's hash on build. Action ids are permanent; deprecated actions are flagged, never deleted, so existing secrets keep working. Good candidates are capabilities the provider itself lacks: amount caps, allowlists, verb subsetting, projecting a response down to a few fields.

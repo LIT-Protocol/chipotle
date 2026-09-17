@@ -86,6 +86,22 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "Lit Agent Keychain",
+        "pages": [
+          "keychain/index",
+          "keychain/quickstart",
+          {
+            "group": "Guides",
+            "pages": [
+              "keychain/agents",
+              "keychain/connected-services",
+              "keychain/sign-in-and-recovery",
+              "keychain/security"
+            ]
+          }
+        ]
       }
     ]
   },

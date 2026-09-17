@@ -14,7 +14,7 @@ import {
   RainbowKitProvider,
   ConnectButton,
   getDefaultConfig,
-  darkTheme,
+  lightTheme,
   connectorsForWallets,
 } from "@rainbow-me/rainbowkit";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -40,7 +40,13 @@ import {
   LIT_URL,
   type Identity,
 } from "./identities.ts";
-import { Landing, LandingNav, LandingFooter } from "./Landing.tsx";
+import {
+  Brand,
+  Intro,
+  LandingFooter,
+  LitMark,
+  KEYCHAIN_DOCS_URL,
+} from "./Landing.tsx";
 import { NPX_KEYCHAIN } from "./version.ts";
 import { AddSecret, ActionDocs } from "./AddSecret.tsx";
 import "@rainbow-me/rainbowkit/styles.css";
@@ -125,7 +131,7 @@ function GoogleButton({
         theme: "outline",
         size: "large",
         text: "continue_with",
-        width: 280,
+        width: Math.max(200, Math.min(400, ref.current.clientWidth || 400)),
       });
     };
     if ((window as any).google) init();
@@ -298,13 +304,12 @@ function App() {
   };
   return (
     <>
-      <header>
-        <a href="/" className="brand">
-          <span className="brand-mark">L</span> Lit <span>Agent Keychain</span>
-        </a>
-        {!client && <LandingNav />}
+      <header className="topbar">
+        <Brand />
         <div className="header-right">
-          <span className="pill">Encrypted locally</span>
+          <a href={KEYCHAIN_DOCS_URL}>
+            Developer docs <span aria-hidden="true">↗</span>
+          </a>
           {client && (
             <button
               className="ghost"
@@ -346,160 +351,92 @@ function App() {
       )}
       {!client ? (
         <>
-          <main className="welcome">
-            <section>
-              <p className="eyebrow">CREDENTIALS, UNDER YOUR CONTROL</p>
-              <h1>
-                Your agents.
-                <br />
-                Your keys.
-                <br />
-                <em>Your permission.</em>
-              </h1>
-              <p className="intro">
-                Encrypt API keys on your device. Approve exactly which agents
-                may use them. Lit Protocol’s hardware enclaves check your
-                authorization on every request, so nobody else can grant access,
-                not even us.
+          <main className="login-layout">
+            <Intro />
+            <section className="signin" aria-labelledby="signin-title">
+              <p className="eyebrow">Your vault</p>
+              <h2 id="signin-title">Sign in to Keychain.</h2>
+              <p className="muted">
+                Google, a wallet or a passkey. Each can own a vault; Google
+                needs neither a wallet nor a passkey.
               </p>
-              <p className="hero-links">
-                <a href="#how">How it works</a>
-                <a href="#agents">SDK, CLI &amp; MCP server</a>
-                <a href="#faq">Security FAQ</a>
-              </p>
-              <div className="trust-note">
-                <span>01</span>
-                <div>
-                  <strong>Owner-approved access</strong>
-                  <p>
-                    Wallet, passkey, or Google. Keychain cannot invent
-                    permissions.
-                  </p>
-                </div>
-              </div>
-              <div className="trust-note">
-                <span>02</span>
-                <div>
-                  <strong>Encrypted storage</strong>
-                  <p>
-                    Only ciphertext reaches our database. Agents prove they hold
-                    their own key.
-                  </p>
-                </div>
-              </div>
-              <div className="trust-note">
-                <span>03</span>
-                <div>
-                  <strong>Verifiable, not just promised</strong>
-                  <p>
-                    Immutable actions pinned by content hash, attested Intel TDX
-                    hardware, open source. The exact trust boundary is spelled
-                    out in the <a href="#faq">FAQ</a>.
-                  </p>
-                </div>
-              </div>
-              <section className="pricing-card" aria-label="Pricing">
-                <p className="eyebrow">SIMPLE PRICING</p>
-                <h2>
-                  Free <small>for 5 secrets</small>
-                </h2>
-                <p>
-                  Try it with no card. All sign-in methods, agent access,
-                  rotation, and recovery included.
-                </p>
-                <h2>
-                  $10 <small>/ month</small>
-                </h2>
-                <p>Up to 1,000 secrets per account.</p>
-                <p>
-                  Execution included under fair use. No automatic overage
-                  charges. Rotations do not use extra secret slots.
-                </p>
-                <a
-                  href={`mailto:${encodeURIComponent(settings?.pricing?.contactEmail || "support@litprotocol.com")}?subject=Keychain%20custom%20plan`}
-                >
-                  More secrets or high-volume usage? Contact us
-                </a>
-              </section>
-            </section>
-            <section className="login-card">
-              <p className="eyebrow">GET STARTED</p>
-              <h2>Choose how you sign in</h2>
-              <p>
-                Each method can own a vault. Google requires no wallet or
-                passkey.
-              </p>
-              {settings?.googleClientId && (
-                <GoogleButton
-                  clientId={settings.googleClientId}
-                  network={settings.network}
-                  onIdentity={(identity) => void signIn(identity)}
-                  onError={setError}
-                />
-              )}
-              <div className="wallet-row">
-                <ConnectButton chainStatus="none" showBalance={false} />
-                {address && (
-                  <button
-                    disabled={!!busy || !settings}
-                    onClick={() =>
-                      void signIn(
-                        walletIdentity(address, signTypedDataAsync as any),
-                      )
-                    }
-                  >
-                    Sign in with wallet
-                  </button>
+              <div className="signin-methods">
+                {settings?.googleClientId && (
+                  <GoogleButton
+                    clientId={settings.googleClientId}
+                    network={settings.network}
+                    onIdentity={(identity) => void signIn(identity)}
+                    onError={setError}
+                  />
                 )}
+                <div className="wallet-row">
+                  <ConnectButton chainStatus="none" showBalance={false} />
+                  {address && (
+                    <button
+                      disabled={!!busy || !settings}
+                      onClick={() =>
+                        void signIn(
+                          walletIdentity(address, signTypedDataAsync as any),
+                        )
+                      }
+                    >
+                      Sign in with wallet
+                    </button>
+                  )}
+                </div>
+                <p className="divider-label">or use a passkey</p>
+                <button
+                  className="secondary"
+                  disabled={!!busy || !settings}
+                  onClick={() =>
+                    work("Creating a passkey…", async () => {
+                      const identity = await createPasskey("My Keychain");
+                      const c = ownerClient(
+                        identity,
+                        settings.network,
+                        recovery,
+                      );
+                      c.progress = setBusy;
+                      await c.login();
+                      setBusy("Loading your vault…");
+                      setClient(c);
+                      await c.api("/api/billing/refresh", { method: "POST" });
+                      setRecoveryOwners([identity.owner]);
+                      await refresh(c);
+                    })
+                  }
+                >
+                  Create a passkey
+                </button>
+                <button
+                  className="ghost"
+                  disabled={!!busy || !settings}
+                  onClick={() =>
+                    work("Finding your passkey…", async () => {
+                      const found = await discoverPasskey(recovery);
+                      const c = ownerClient(
+                        found.identity,
+                        settings.network,
+                        // An explicitly loaded backup selects the vault, even if lookup
+                        // finds an empty duplicate rooted at the recovery credential.
+                        recovery || found.authority,
+                      );
+                      c.progress = setBusy;
+                      await c.login();
+                      setBusy("Loading your vault…");
+                      setClient(c);
+                      await c.api("/api/billing/refresh", { method: "POST" });
+                      await refresh(c);
+                      const policy = await c.getCredentials();
+                      setRecoveryOwners(
+                        policy?.document.owners || [c.authority.owner],
+                      );
+                    })
+                  }
+                >
+                  Use an existing passkey
+                </button>
               </div>
-              <div className="divider">or use a passkey</div>
-              <button
-                className="secondary full"
-                disabled={!!busy || !settings}
-                onClick={() =>
-                  work("Creating a passkey…", async () => {
-                    const identity = await createPasskey("My Keychain");
-                    const c = ownerClient(identity, settings.network, recovery);
-                    c.progress = setBusy;
-                    await c.login();
-                    setBusy("Loading your vault…");
-                    setClient(c);
-                    await c.api("/api/billing/refresh", { method: "POST" });
-                    setRecoveryOwners([identity.owner]);
-                    await refresh(c);
-                  })
-                }
-              >
-                Create a passkey
-              </button>
-              <button
-                className="ghost full"
-                disabled={!!busy || !settings}
-                onClick={() =>
-                  work("Finding your passkey…", async () => {
-                    const found = await discoverPasskey(recovery);
-                    const c = ownerClient(
-                      found.identity,
-                      settings.network,
-                      // An explicitly loaded backup selects the vault, even if lookup
-                      // finds an empty duplicate rooted at the recovery credential.
-                      recovery || found.authority,
-                    );
-                    c.progress = setBusy;
-                    await c.login();
-                    setBusy("Loading your vault…");
-                    setClient(c);
-                    await c.api("/api/billing/refresh", { method: "POST" });
-                    await refresh(c);
-                    const policy = await c.getCredentials();
-                    setRecoveryOwners(
-                      policy?.document.owners || [c.authority.owner],
-                    );
-                  })
-                }
-              >
-                Use an existing passkey
-              </button>
               <details>
                 <summary>Recover an existing vault</summary>
                 <p>
@@ -530,14 +467,20 @@ function App() {
               </details>
             </section>
           </main>
-          <Landing />
         </>
       ) : (
         <div className="workspace">
           <aside>
-            <p className="eyebrow">YOUR VAULT</p>
-            <code>{brief(client.vaultId)}</code>
-            <nav>
+            <div className="account">
+              <span className="account-mark" aria-hidden="true">
+                <LitMark />
+              </span>
+              <div>
+                <strong>Your vault</strong>
+                <code>{brief(client.vaultId)}</code>
+              </div>
+            </div>
+            <nav aria-label="Vault">
               {(["secrets", "recovery", "activity"] as const).map((t) => (
                 <button
                   key={t}
@@ -1271,10 +1214,11 @@ createRoot(document.getElementById("root")!).render(
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider
-          theme={darkTheme({
-            accentColor: "#bded81",
-            accentColorForeground: "#152017",
-            borderRadius: "medium",
+          theme={lightTheme({
+            accentColor: "#181818",
+            accentColorForeground: "#ffffff",
+            borderRadius: "small",
+            fontStack: "system",
           })}
         >
           <App />

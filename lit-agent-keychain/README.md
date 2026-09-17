@@ -3,7 +3,10 @@
 A React client, Rust API and immutable Lit Actions for owner-authorized agent access
 to credentials. Secrets are encrypted locally; PostgreSQL stores ciphertext and
 owner-authorized policy records. Wallet, passkey and Google-only sign-in are alternatives.
-Google users need neither a wallet nor a passkey.
+Google users need neither a wallet nor a passkey. User-facing documentation (overview,
+quickstart, SDK/CLI/MCP reference, connected services, sign-in and recovery, security
+model) is at https://developer.litprotocol.com/keychain; the files in this directory are
+the operator, contributor and agent references published alongside the app.
 
 ```mermaid
 sequenceDiagram
