@@ -83,8 +83,7 @@ from `NodeConfig.toml` only tells the node *where to register/query* payers
 - Foundry (`cast`) and `jq` on PATH.
 - Phala CLI: `npm install -g phala@1.1.19` (match the pinned version in
   `deploy-staging.yml`).
-- The **deployer secret** for the target network (Makefile: `DEPLOYER_SECRET` /
-  `BASE_DEPLOYER_SECRET`).
+- The **deployer secret** for the target network (`DEPLOYER_SECRET` for `make deploy_*`; `BASE_DEPLOYER_SECRET` only for Base mainnet `update_base` / `propose_update_base`).
 - Authority to send the bootstrap tx from the **diamond owner** — on Base this is
   the owner/Safe set at deploy time. On a fresh diamond, `adminApiPayerAccount`
   is `0x0`, so `setApiPayers` is **owner‑only** until the admin payer exists
