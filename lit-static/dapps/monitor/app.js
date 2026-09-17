@@ -131,6 +131,7 @@ const SET_ADMIN_API_PAYER_ABI = [
 const WALLETCONNECT_PROJECT_ID = '8feea2064504b04d14a55d6fbef18966';
 
 let _wcProvider = null; // cached WalletConnect provider instance
+let _eip1193Provider = null; // raw EIP-1193 provider backing the active connection
 
 /* ═══ Utilities ══════════════════════════════════════════════════════════════ */
 
@@ -905,14 +906,106 @@ async function connectWallet() {
       _wcProvider = null;
       throw err;
     }
+    _eip1193Provider = _wcProvider;
     return new ethers.BrowserProvider(_wcProvider);
   }
 
   // Default: MetaMask / browser wallet
   if (!window.ethereum) throw new Error('No browser wallet found. Install MetaMask or use WalletConnect.');
+  _eip1193Provider = window.ethereum;
   const provider = new ethers.BrowserProvider(window.ethereum);
   await provider.send('eth_requestAccounts', []);
   return provider;
+}
+
+/* ═══ Transaction submission + diagnostics ═══════════════════════════════════ */
+
+// ethers buries the real cause several layers deep and, when its RPC pre-flight
+// fails, throws an opaque "could not coalesce error". Dig out the innermost
+// JSON-RPC code/message and the method that failed so the operator sees what
+// actually went wrong.
+function describeTxError(e) {
+  const rejectCode = e?.code ?? e?.info?.error?.code ?? e?.error?.code;
+  if (rejectCode === 'ACTION_REJECTED' || rejectCode === 4001) {
+    return 'Signature rejected in wallet.';
+  }
+
+  const inner = e?.info?.error ?? e?.error ?? e;
+  const rpcCode = inner?.code ?? rejectCode;
+  const rpcMsg = inner?.message || e?.shortMessage || e?.reason || e?.message || String(e);
+  const method = e?.payload?.method || e?.info?.payload?.method || e?.requestMethod;
+
+  if (rpcCode === -32002 || /too many errors|rate limit|different RPC endpoint/i.test(rpcMsg)) {
+    return `Your wallet's RPC endpoint is throttled / circuit-broken` +
+      (method ? ` on "${method}"` : '') +
+      `. This is the wallet's own RPC, not this app — wait ~10s and retry, or change ` +
+      `the network's RPC in your wallet. (code ${rpcCode}: ${rpcMsg})`;
+  }
+
+  let msg = e?.reason || e?.shortMessage || rpcMsg;
+  if (method) msg += ` [failed on ${method}]`;
+  if (rpcCode != null && rpcCode !== msg) msg += ` (code ${rpcCode})`;
+  return msg;
+}
+
+// Submit a contract write by encoding the call and handing it straight to the
+// wallet via eth_sendTransaction. The wallet owns gas/fee/nonce estimation and
+// the signature prompt, so we skip ethers' own RPC pre-flight (network detect +
+// fee data + estimateGas) which is what coalesce-fails on a flaky endpoint and
+// prevents the prompt from ever appearing. Logs a diagnostic line first.
+async function submitWrite({ contractAddress, abi, method, args, statusId }) {
+  showStatus(statusId, 'Connecting wallet…', false);
+  const provider = await connectWallet();
+  const eip1193 = _eip1193Provider;
+  if (!eip1193) throw new Error('Wallet provider unavailable after connect.');
+
+  const signer = await provider.getSigner();
+  const from = await signer.getAddress();
+
+  const expectedChainId = Number((el('cc-chain-id')?.textContent || '').trim());
+  let walletChainId = null;
+  try { walletChainId = Number(await eip1193.request({ method: 'eth_chainId' })); } catch {}
+
+  console.info('[monitor] submitWrite', {
+    method, args, contract: contractAddress, from,
+    walletChainId, expectedChainId: expectedChainId || null,
+    rpcUrl: (el('cc-rpc-url')?.value || '').trim(), server: getServerUrl(),
+  });
+
+  // Guard against a chain mismatch (a common cause of the wallet hitting the
+  // wrong/default RPC). Try to switch; if that fails, say so plainly.
+  if (expectedChainId && walletChainId && walletChainId !== expectedChainId) {
+    try {
+      await eip1193.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: '0x' + expectedChainId.toString(16) }],
+      });
+      walletChainId = Number(await eip1193.request({ method: 'eth_chainId' }));
+    } catch {
+      throw new Error(
+        `Wallet is on chain ${walletChainId} but the contract is on chain ${expectedChainId}. ` +
+        `Switch networks in your wallet and retry.`
+      );
+    }
+  }
+
+  const data = new ethers.Interface(abi).encodeFunctionData(method, args);
+
+  showStatus(statusId, 'Waiting for signature…', false);
+  const txHash = await eip1193.request({
+    method: 'eth_sendTransaction',
+    params: [{ from, to: contractAddress, data }],
+  });
+
+  showStatus(statusId, 'Transaction submitted: ' + txHash + '. Waiting for confirmation…', false);
+  try {
+    await provider.waitForTransaction(txHash);
+  } catch (waitErr) {
+    // The tx was signed and broadcast; only the receipt poll failed (often the
+    // same RPC throttling). Don't report this as a submit failure.
+    console.warn('[monitor] receipt wait failed for ' + txHash, waitErr);
+  }
+  return txHash;
 }
 
 // ── fetchChainConfigKeys ────────────────────────────────────────────────
@@ -1468,23 +1561,20 @@ el('btn-set-default-api-payer')?.addEventListener('click', async () => {
   }
 
   btn.disabled = true;
-  showStatus('default-api-payer-status', 'Connecting wallet…', false);
 
   try {
-    const provider = await connectWallet();
-    const signer = await provider.getSigner();
-    const contract = new ethers.Contract(contractAddress, SET_ADMIN_API_PAYER_ABI, signer);
-
-    showStatus('default-api-payer-status', 'Waiting for signature…', false);
-    const tx = await contract.setAdminApiPayerAccount(newApiPayer);
-
-    showStatus('default-api-payer-status', 'Transaction submitted: ' + tx.hash + '. Waiting for confirmation…', false);
-    await tx.wait();
-
+    await submitWrite({
+      contractAddress,
+      abi: SET_ADMIN_API_PAYER_ABI,
+      method: 'setAdminApiPayerAccount',
+      args: [newApiPayer],
+      statusId: 'default-api-payer-status',
+    });
     showStatus('default-api-payer-status', 'Done. Default API payer updated to ' + newApiPayer, false);
     el('default-api-payer').value = '';
   } catch (e) {
-    showStatus('default-api-payer-status', 'Error: ' + (e?.reason || e?.message || String(e)), true);
+    console.error('[monitor] setAdminApiPayerAccount failed', e);
+    showStatus('default-api-payer-status', 'Error: ' + describeTxError(e), true);
   } finally {
     btn.disabled = false;
   }
@@ -1509,22 +1599,19 @@ el('btn-set-rebalance-amount')?.addEventListener('click', async () => {
   }
 
   btn.disabled = true;
-  showStatus('rebalance-amount-status', 'Connecting wallet…', false);
 
   try {
-    const provider = await connectWallet();
-    const signer = await provider.getSigner();
-    const contract = new ethers.Contract(contractAddress, SET_REBALANCE_AMOUNT_ABI, signer);
-
-    showStatus('rebalance-amount-status', 'Waiting for signature…', false);
-    const tx = await contract.setRebalanceAmount(amountWei);
-
-    showStatus('rebalance-amount-status', 'Transaction submitted: ' + tx.hash + '. Waiting for confirmation…', false);
-    await tx.wait();
-
+    await submitWrite({
+      contractAddress,
+      abi: SET_REBALANCE_AMOUNT_ABI,
+      method: 'setRebalanceAmount',
+      args: [amountWei],
+      statusId: 'rebalance-amount-status',
+    });
     showStatus('rebalance-amount-status', 'Done. Rebalance amount set to ' + ethers.formatEther(amountWei) + ' ETH', false);
   } catch (e) {
-    showStatus('rebalance-amount-status', 'Error: ' + (e?.reason || e?.message || String(e)), true);
+    console.error('[monitor] setRebalanceAmount failed', e);
+    showStatus('rebalance-amount-status', 'Error: ' + describeTxError(e), true);
   } finally {
     btn.disabled = false;
   }
@@ -1546,25 +1633,22 @@ el('btn-set-node-config')?.addEventListener('click', async () => {
   }
 
   btn.disabled = true;
-  showStatus('node-config-status', 'Connecting wallet…', false);
 
   try {
-    const provider = await connectWallet();
-    const signer   = await provider.getSigner();
-    const contract = new ethers.Contract(contractAddress, SET_NODE_CONFIGURATION_ABI, signer);
-
-    showStatus('node-config-status', 'Waiting for signature…', false);
-    const tx = await contract.setNodeConfiguration(key, value);
-
-    showStatus('node-config-status', 'Transaction submitted: ' + tx.hash + '. Waiting for confirmation…', false);
-    await tx.wait();
-
+    await submitWrite({
+      contractAddress,
+      abi: SET_NODE_CONFIGURATION_ABI,
+      method: 'setNodeConfiguration',
+      args: [key, value],
+      statusId: 'node-config-status',
+    });
     showStatus('node-config-status', 'Done. Configuration key "' + key + '" set.', false);
     el('node-config-key').value   = '';
     el('node-config-value').value = '';
     await fetchNodeConfigValues();
   } catch (e) {
-    showStatus('node-config-status', 'Error: ' + (e?.reason || e?.message || String(e)), true);
+    console.error('[monitor] setNodeConfiguration failed', e);
+    showStatus('node-config-status', 'Error: ' + describeTxError(e), true);
   } finally {
     btn.disabled = false;
   }
@@ -1620,23 +1704,20 @@ el('btn-set-payer-count')?.addEventListener('click', async () => {
 
   btn.disabled = true;
   select.disabled = true;
-  showStatus('payer-count-status', 'Connecting wallet…', false);
 
   try {
-    const provider = await connectWallet();
-    const signer = await provider.getSigner();
-    const contract = new ethers.Contract(contractAddress, SET_REQUESTED_API_PAYER_COUNT_ABI, signer);
-
-    showStatus('payer-count-status', 'Waiting for signature…', false);
-    const tx = await contract.setRequestedApiPayerCount(newCount);
-
-    showStatus('payer-count-status', 'Transaction submitted: ' + tx.hash + '. Waiting for confirmation…', false);
-    await tx.wait();
-
+    await submitWrite({
+      contractAddress,
+      abi: SET_REQUESTED_API_PAYER_COUNT_ABI,
+      method: 'setRequestedApiPayerCount',
+      args: [newCount],
+      statusId: 'payer-count-status',
+    });
     showStatus('payer-count-status', 'Done. Requested payer count updated to ' + newCount, false);
     await refreshBalances();
   } catch (e) {
-    showStatus('payer-count-status', 'Error: ' + (e?.reason || e?.message || String(e)), true);
+    console.error('[monitor] setRequestedApiPayerCount failed', e);
+    showStatus('payer-count-status', 'Error: ' + describeTxError(e), true);
   } finally {
     btn.disabled = false;
     select.disabled = false;
