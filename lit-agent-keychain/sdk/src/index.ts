@@ -29,6 +29,7 @@ import {
   V,
   DOMAIN,
   type Authority,
+  type Batch,
   type OwnerProof,
   type Document,
   type Challenge,
@@ -284,6 +285,15 @@ export type FreshKeySettle = {
   /** Called before each wait with the 1-based retry count. */
   onWait?: (retry: number) => void;
 };
+/**
+ * Authority releases published before batched approval existed. Secrets pinned
+ * to one of these are still rotated under it, one signature per document.
+ * Append-only: a release's bytes never change, so this list never shrinks.
+ */
+export const PRE_BATCH_AUTHORITY_HASHES: ReadonlySet<string> = new Set([
+  "29314b8876a199afde0396711530c4de9de25eca7f99202a09a4d68f32cd0a66",
+  "1c042eed5e526f747a7533cedb0f3b02dff8ad05143d07299717193b4f6e8e2b",
+]);
 export class LitConnection {
   readonly url: string;
   private readonly keys = new Map<string, string>();
@@ -397,7 +407,17 @@ export class LitConnection {
         },
       },
       this.timeoutMs,
-    );
+    ).catch((error: unknown) => {
+      // Chipotle answers 401 when the scoped execution key no longer resolves,
+      // which for an agent almost always means the owner replaced it. Keep the
+      // HttpError type and status: login() retries 401/403 for fresh keys.
+      if (error instanceof HttpError && error.status === 401)
+        throw new HttpError(
+          401,
+          `${(error.detail || "execution key rejected").replace(/[.\s]+$/, "")}. The scoped execution key in this agent config is not accepted by Lit; the owner most likely replaced it in Keychain (Execution and account access). Ask them for a fresh Agent config, or set CHIPOTLE_USAGE_API_KEY`,
+        );
+      throw error;
+    });
     requireThat(result.has_error === false, "Lit execution failed");
     requireThat(
       result.response?.ok === true,
@@ -540,6 +560,62 @@ export class OwnerClient {
     );
     return signed;
   }
+  /**
+   * Approves several secret objects (manifest, envelope, policy) with a single
+   * owner signature and a single authority execution. Each document still comes
+   * back with its own exact-object receipt, so storage and verification are
+   * unchanged. Authority releases from before batching exist (secrets pinned to
+   * them are rotated under that release), so those fall back to one signature
+   * per document.
+   */
+  async authorizeAll<T extends Batch["documents"][number]>(
+    documents: T[],
+    authorityCid?: string,
+  ): Promise<Signed<T>[]> {
+    requireThat(documents.length >= 1 && documents.length <= 8);
+    if (!this.lit.usageApiKey) await this.login();
+    const template = await this.authorityTemplate(authorityCid);
+    if (PRE_BATCH_AUTHORITY_HASHES.has(template.hash)) {
+      const signed: Signed<T>[] = [];
+      for (const document of documents)
+        signed.push(await this.authorize(document, authorityCid));
+      return signed as any;
+    }
+    const batch: Batch = { kind: "batch", vaultId: this.vaultId, documents };
+    const now = nowSeconds();
+    const challenge: Challenge = {
+      v: V,
+      domain: "lit-keychain/authorize/v2",
+      vaultId: this.vaultId,
+      objectHash: digest(batch),
+      operation: "batch",
+      nonce: randomId(),
+      issuedAt: now,
+      expiresAt: now + 120,
+    };
+    const proof = await this.signer(challenge);
+    const response = await this.lit.execute(
+      this.authority,
+      { documents, proof },
+      template,
+    );
+    requireThat(
+      Array.isArray(response.receipts) &&
+        response.receipts.length === documents.length,
+      "Authority returned the wrong number of receipts",
+    );
+    const publicKey = await this.lit.publicKey(
+      await actionCid(this.authority, template.code),
+    );
+    return documents.map((document, i) => {
+      const signed = {
+        document,
+        receipt: receiptSchema.parse(response.receipts[i]),
+      };
+      verifyReceipt(signed, publicKey, this.vaultId);
+      return signed;
+    }) as any;
+  }
   private async approve<T extends Document>(
     document: T,
     template: Template,
@@ -647,15 +723,20 @@ export class OwnerClient {
       release,
     };
     const cid = await actionCid(manifest);
-    const signedManifest = await this.authorize({
+    // Make the derived action executable by this vault's billing key before it
+    // is approved, so its encryption key can be fetched and manifest, envelope
+    // and policy approved together with one owner signature below.
+    this.progress?.("Preparing the secret's action on the Lit network…");
+    await this.api("/api/actions/prepare", post({ manifest, actionCid: cid }));
+    const manifestDocument = {
       v: V,
       domain: DOMAIN,
-      kind: "manifest",
+      kind: "manifest" as const,
       vaultId: this.vaultId,
       manifest,
       actionCid: cid,
-    });
-    await this.api("/api/actions", post(signedManifest));
+    };
+    this.progress?.("Encrypting the secret in your browser…");
     const key = await this.lit.encryptionPublicKey(manifest);
     const envelope = await encryptEnvelope(
       {
@@ -671,9 +752,8 @@ export class OwnerClient {
       key,
       plaintext,
     );
-    const signedEnvelope = await this.authorize(envelope);
     const now = nowSeconds();
-    const policy = await this.authorize({
+    const policyDocument: Policy = {
       v: V,
       domain: DOMAIN,
       kind: "policy",
@@ -686,7 +766,13 @@ export class OwnerClient {
       notBefore: now,
       expiresAt: now + 30 * 86400,
       grants: [],
-    });
+    };
+    this.progress?.("Approving the secret with one signature…");
+    const [signedManifest, signedEnvelope, policy] = (await this.authorizeAll([
+      manifestDocument,
+      envelope,
+      policyDocument,
+    ])) as [Signed<typeof manifestDocument>, Signed<Envelope>, Signed<Policy>];
     const bundle: SecretBundle = {
       manifest: signedManifest,
       envelope: signedEnvelope,
@@ -768,30 +854,35 @@ export class OwnerClient {
       await this.lit.encryptionPublicKey(manifest),
       plaintext,
     );
-    const signedEnvelope = await this.authorize(
-      envelope,
-      manifest.authorityCid,
-    );
     const now = nowSeconds();
-    const policy = await this.authorize(
-      {
-        ...bundle.policy.document,
-        epoch: bundle.policy.document.epoch + 1,
-        previousHash: digest(bundle.policy.document),
-        notBefore: now,
-        expiresAt: now + 30 * 86400,
-        grants: bundle.policy.document.grants.map((g) => ({
-          ...g,
-          versions: [
-            {
-              version: envelope.metadata.version,
-              envelopeHash: digest(envelope),
-            },
-          ],
-        })),
-      },
+    const [signedEnvelope, policy] = (await this.authorizeAll(
+      [
+        envelope,
+        {
+          ...bundle.policy.document,
+          epoch: bundle.policy.document.epoch + 1,
+          previousHash: digest(bundle.policy.document),
+          notBefore: now,
+          // Rotating the value must not shorten (or silently extend) a renewal
+          // the owner already approved; an expired policy restarts at the default.
+          expiresAt:
+            bundle.policy.document.expiresAt !== null &&
+            bundle.policy.document.expiresAt > now
+              ? bundle.policy.document.expiresAt
+              : now + 30 * 86400,
+          grants: bundle.policy.document.grants.map((g) => ({
+            ...g,
+            versions: [
+              {
+                version: envelope.metadata.version,
+                envelopeHash: digest(envelope),
+              },
+            ],
+          })),
+        },
+      ],
       manifest.authorityCid,
-    );
+    )) as [Signed<Envelope>, Signed<Policy>];
     const updated = {
       manifest: bundle.manifest,
       envelope: signedEnvelope,
@@ -1096,7 +1187,7 @@ export class Keychain {
    */
   async use(name: string, input?: Record<string, unknown>): Promise<any> {
     this.assertActive();
-    requireThat(Object.hasOwn(this.config.secrets, name), "Unknown secret");
+    this.requireSecret(name);
     const locator = this.config.secrets[name];
     const definition = actionDefinition(locator.manifest.release);
     requireThat(
@@ -1122,13 +1213,21 @@ export class Keychain {
   async stripeBalance(name: string) {
     return this.use(name);
   }
+  /** Names the config's secrets in the error so a typo is obvious. */
+  private requireSecret(name: string) {
+    const names = Object.keys(this.config.secrets);
+    requireThat(
+      Object.hasOwn(this.config.secrets, name),
+      `Unknown secret "${name}". This agent config contains: ${names.join(", ") || "no secrets"}`,
+    );
+  }
   private async read(
     name: string,
     operation: string,
     input?: Record<string, unknown>,
   ): Promise<string> {
     this.assertActive();
-    requireThat(Object.hasOwn(this.config.secrets, name), "Unknown secret");
+    this.requireSecret(name);
     const locator = this.config.secrets[name];
     const manifest = manifestSchema.parse(locator.manifest);
     // The exact release this secret was created under; fetched by hash if older

@@ -1,12 +1,12 @@
 ---
 name: lit-agent-keychain
 description: Use Lit Agent Keychain v2 for owner-approved agent access to encrypted credentials.
-version: 2.0.0
+version: 2.0.4
 ---
 
 # Lit Agent Keychain v2
 
-1. Generate an agent identity on the agent device with `npx @lit-protocol/keychain@2.0.3 init identity.json`.
+1. Generate an agent identity on the agent device with `npx @lit-protocol/keychain@2.0.4 init identity.json`.
 2. Give only its public key to the owner. The owner signs in with a wallet, passkey,
    or Google account, encrypts a secret locally, and explicitly approves that key.
 3. Download the **Agent config** (public locators plus a scoped billing key) and use `@lit-protocol/keychain` with the local
@@ -16,7 +16,7 @@ version: 2.0.0
    returning its credential to the agent; the provider receives it over TLS.
    `list()` tells you which applies to each secret and the input shape it takes.
 4. For a tool that needs the raw value in its environment, prefer
-   `npx @lit-protocol/keychain@2.0.3 run identity.json CONFIG.keychain.json -- <command>` over `get`. It
+   `npx @lit-protocol/keychain@2.0.4 run identity.json CONFIG.keychain.json -- <command>` over `get`. It
    injects each export-release secret as an environment variable named after the
    secret. The Keychain CLI itself does not print it; a child program can still
    log or disclose it, including into model context. This is not a sandbox.
@@ -26,11 +26,11 @@ version: 2.0.0
 5. Or expose it to an MCP client in one line. The server runs locally, next to the
    identity file, and offers `list_secrets`, `get_secret`, one tool per catalog
    action (`stripe_balance`, `openai_chat`, `github_read_file`, `slack_post_message`,
-   `supabase_tables`; `npx @lit-protocol/keychain@2.0.3 actions` prints the current list), `list_actions` and
+   `supabase_tables`; `npx @lit-protocol/keychain@2.0.4 actions` prints the current list), `list_actions` and
    `agent_public_key`:
 
    ```sh
-   claude mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.0.3 mcp /absolute/path/agent-identity.json /absolute/path/API_KEY.keychain.json
+   claude mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.0.4 mcp /absolute/path/agent-identity.json /absolute/path/API_KEY.keychain.json
    ```
 
 Before execution requests to configured/pinned production origins, the SDK attests the Lit endpoint: it verifies the Intel
@@ -82,7 +82,7 @@ Never request an owner's private key or Google token, and never ask the backend 
 mint a grant. There are no setup bearer tokens or managed per-tenant PKP vaults.
 Agent identity and Lit execution billing are separate. Keep identity and config files private
 and avoid logging credentials returned by `get` or the CLI. When you only need a
-credential for one command, use `npx @lit-protocol/keychain@2.0.3 run` to avoid CLI printing; the child
+credential for one command, use `npx @lit-protocol/keychain@2.0.4 run` to avoid CLI printing; the child
 can still disclose it. `get_secret` returns plaintext into model context. With
 `--file`, SIGKILL may leave plaintext behind and unlink does not guarantee erasure.
 

@@ -140,12 +140,11 @@ export function ActionDocs({
       <p className="hint">
         The upstream provider receives the credential over TLS; this action does
         not return it to the agent. See{" "}
-        <a href="/PROVIDERS.md">provider setup</a>
-        for exact credential formats, including the Supabase JSON allowlist.
-        Supabase secret/service_role keys bypass RLS; the allowlist is the
-        policy. Do not blindly retry writes: Slack posts or Supabase inserts may
-        have completed even when the result was lost. Check provider state
-        first.
+        <a href="/PROVIDERS.md">provider setup</a> for exact credential formats,
+        including the Supabase JSON allowlist. Supabase secret/service_role keys
+        bypass RLS; the allowlist is the policy. Do not blindly retry writes:
+        Slack posts or Supabase inserts may have completed even when the result
+        was lost. Check provider state first.
       </p>
       <h3>What the agent never gets</h3>
       <ul className="limits">
@@ -307,7 +306,7 @@ export function AddSecret({
             <strong>Connect a service</strong>
             <p>
               Approved agents run one reviewed action with the credential inside
-              the Lit enclave. Stripe, OpenAI, GitHub, Slack.
+              the Lit enclave. Stripe, OpenAI, GitHub, Slack, Supabase.
             </p>
             <small>The agent never sees the key.</small>
           </button>
@@ -405,6 +404,7 @@ export function AddSecret({
           <input
             required
             pattern="[A-Z][A-Z0-9_]{0,63}"
+            title="Letters, digits and underscores only, starting with a letter (for example OPENAI_API_KEY). Spaces and dashes are not allowed."
             value={name}
             onChange={(e) => setName(e.target.value.toUpperCase())}
             placeholder={action?.ui.placeholder ?? "API_KEY"}
