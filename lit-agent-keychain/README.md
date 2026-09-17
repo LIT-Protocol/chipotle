@@ -28,33 +28,43 @@ The operator is trusted to serve the latest signed policy. It can replay old val
 permissions, including undoing a revocation, but cannot forge owner authorization.
 The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md).
 
-## SDK 2.0.3 release coordination
+## SDK 2.0.4 release coordination
 
-This source prepares SDK 2.0.3 and pins the hosted examples to that version. The
-customer QA baseline was published 2.0.2; a source merge does **not** publish npm.
-Publish and verify the 2.0.3 package **before deploying these version-pinned docs**.
-Until publication, registry installation of that version is not an acceptance test;
-reviewers should use the locally packed tarball and isolated-consumer tests.
+This source prepares SDK 2.0.4 and pins the hosted examples to that version. A source
+merge does **not** publish npm. Publish and verify the 2.0.4 package **before deploying
+these version-pinned docs**; until then, registry installation of that version is not
+an acceptance test and reviewers should use the locally packed tarball.
+
+2.0.4 is also a **template release**: batched owner approval changed the shared
+protocol schema, so every template in `actions/catalog.lock.json` (authority and
+catalog) has new bytes, archived under `actions/archive/`. Consequences, all handled by
+the release mechanism described in [SECURITY.md](SECURITY.md#authority-releases):
+
+- Existing vaults keep signing in; their recorded authority release moves forward on
+  the first sign-in with the new web app. Existing secrets keep their pinned releases
+  and are read, rotated and restored under them.
+- Secrets created after the deploy pin the new catalog release. An agent still running
+  SDK 2.0.3 does not know those template hashes and cannot read them until it upgrades,
+  so publish 2.0.4 first and tell agent operators to update.
+- Rotating a secret pinned to a pre-batch authority release still takes one signature
+  per document (`PRE_BATCH_AUTHORITY_HASHES` in the SDK).
 
 Release checks: run `npm test` and `npm run build`, publish through the normal
-maintainer release process, verify `npm view @lit-protocol/keychain@2.0.3 version`,
+maintainer release process, verify `npm view @lit-protocol/keychain@2.0.4 version`,
 then repeat the strict external TypeScript consumer and attestation-enabled Node
-smoke test from the registry artifact. Confirm the Node report includes
-`tls-certificate-in-tee`; a browser build cannot perform this check. Only then
-deploy the owner UI/docs and retest passkey recovery against production.
-
-SDK 2.0.3 also rejects inconsistent identity metadata, gives a local error after
-`destroy()`, handles prototype-named lookups safely, rejects malformed MCP request
-IDs, and adds conventional CLI help/version flags. None of these changes upgrades
-existing installed agents automatically. See the [QA report](https://github.com/LIT-Protocol/chipotle/blob/main/lit-agent-keychain/docs/user-qa-2026-09-16.md)
-for actual production coverage and remaining provider/auth/billing tests.
+smoke test from the registry artifact. Only then deploy the owner UI/API and create,
+rotate and read a secret against production. See the QA reports under `docs/` for
+actual production coverage and remaining provider/auth/billing tests.
 
 ## Features
 
 - RainbowKit/wagmi EOA wallet connection, native WebAuthn P-256 passkeys, Google JWT
   verification inside Lit with a nonce-bound, locally held session key.
 - One immutable encryption action per secret; an immutable owner authorization action
-  produces durable receipts without retaining Google tokens in the database.
+  produces durable receipts without retaining Google tokens in the database. Creating
+  or rotating a secret approves its manifest, ciphertext and policy with **one** owner
+  signature (one wallet prompt, one passkey touch); each object still gets its own
+  exact-object receipt.
 - X25519/HKDF-SHA256/AES-256-GCM HPKE key wrapping and response encryption; local
   AES-256-GCM payload encryption. Action signatures authenticate results as well as keys.
 - Explicit agent public-key enrollment, exact ciphertext/version scopes, disable/revoke,

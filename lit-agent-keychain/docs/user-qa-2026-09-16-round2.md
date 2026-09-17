@@ -49,15 +49,38 @@ after the findings below were recorded, to implement the fixes in this PR.
 | 10  | No favicon (404).                                                                                                                                                    | SVG favicon matching the brand mark.                                                                                                           |
 | 11  | `SKILL.md` front matter still said `version: 2.0.0`.                                                                                                                 | 2.0.3.                                                                                                                                         |
 
+## Follow-up in the same PR: one signature per create / rotate
+
+Round 2 observed that a wallet owner signs **three** EIP-712 prompts to create a secret
+(manifest, ciphertext envelope, policy) and two to rotate one. Chris asked for a single
+signature. Implemented as a protocol release:
+
+- `protocol/schema.ts`: challenge operation `batch`; `batchSchema` wraps up to eight
+  manifest/envelope/policy documents (never login or credentials).
+- `actions/authority.ts`: accepts `{ documents[], proof }`, verifies the proof once over
+  the batch digest, applies every per-document invariant, returns one exact-object
+  receipt per document. The single-document path is unchanged.
+- `POST /api/actions/prepare` (Rust): unsigned enrolment of a new secret's derived
+  action so the browser can fetch its encryption key before anything is signed. Same
+  vault binding, capacity and headroom checks as signed enrolment.
+- SDK `OwnerClient.authorizeAll()`; `create()` and `rotate()` use it. Secrets pinned to
+  a pre-batch authority release (`PRE_BATCH_AUTHORITY_HASHES`) fall back to sequential
+  signatures on rotate.
+- Every template re-hashed (schema change), archived, lock updated; SDK bumped to 2.0.4
+  with all doc pins. README explains the publish-before-deploy order and that 2.0.3
+  agents cannot read secrets created after the deploy until they upgrade.
+
+Verified: action-level batch tests (receipts, reorder/drop/add/alter, single↔batch
+replay, login-in-batch, per-document limits), Postgres + mock-Lit integration asserts
+`create` and `rotate` each produce exactly one `batch` signature, wrong-vault `prepare`
+is refused with 403, and the authority-release transition scenario still passes.
+
 ## Observations not changed here (product / config decisions)
 
 - **Stripe Checkout shows "Workgraph, Inc"** and is a **live-mode** session (`cs_live_…`).
   Business name is Stripe account configuration, not code.
 - WalletConnect project id is still the `unused-injected-only` placeholder, so the connect
   modal offers only browser-injected wallets (no mobile/WalletConnect path).
-- Creating one secret asks a wallet user for **three EIP-712 signatures** (manifest,
-  envelope, policy); approving an agent adds one more. Protocol-inherent, but worth a
-  sentence in the UI before the first prompt.
 - **No way to remove a secret**. Free is 5 slots and "secrets are never deleted", so a
   user who tries five test values is stuck until they subscribe. Consider delete/archive
   that frees the slot, or say clearly that disabled secrets still count.

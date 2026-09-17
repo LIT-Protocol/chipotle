@@ -48,6 +48,7 @@ pub fn build(cfg: Config, pool: PgPool, lit: Chipotle, stripe: Stripe) -> Rocket
                 sponsorship::key,
                 sponsorship::rotate,
                 sponsorship::enroll,
+                sponsorship::prepare,
                 registry::credentials,
                 registry::restore_credentials,
                 registry::policy,

@@ -283,8 +283,6 @@ pub async fn enroll(
     cfg: &State<Config>,
 ) -> ApiResult<Value> {
     let vault = &session.vault_id;
-    let mut tx = pool.begin().await.map_err(api::internal)?;
-    let plan = subscriptions::require_capacity(&mut tx, vault, false).await?;
     if field(&body.document, "kind").map_err(api::invalid)? != "manifest" {
         return Err(api::err(Status::BadRequest, "manifest_required"));
     }
@@ -298,8 +296,58 @@ pub async fn enroll(
     let cid = field(&body.document, "actionCid")
         .map_err(api::invalid)?
         .to_owned();
-    let cids = actions::secret_cids(&manifest).map_err(api::invalid)?;
-    if manifest.vault_id != *vault || !cids.contains(&cid) {
+    enroll_cid(vault, &manifest, &cid, pool, lit, cfg).await
+}
+/// Unsigned request to make a not-yet-approved secret action executable by the
+/// vault's own execution key.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PrepareAction {
+    pub manifest: Manifest,
+    pub action_cid: String,
+}
+/// Enrolls a secret's derived action before the owner has signed its manifest.
+///
+/// The browser must execute the derived action once (its key-binding operation)
+/// to learn the encryption key it encrypts the secret to, and only then can the
+/// owner approve manifest, envelope and policy together with one signature. The
+/// CID is a pure function of the manifest, the session is already authenticated,
+/// and enrolment grants nothing to anyone: it only lets this vault's scoped
+/// billing key run this vault's own action. The same capacity checks apply as
+/// for a signed enrolment, so an owner cannot grow the sponsored group past the
+/// plan's headroom by preparing actions that are never written.
+#[post("/api/actions/prepare", format = "json", data = "<body>")]
+pub async fn prepare(
+    _origin: SameOrigin,
+    session: Session,
+    body: Json<PrepareAction>,
+    pool: &State<PgPool>,
+    lit: &State<Chipotle>,
+    cfg: &State<Config>,
+) -> ApiResult<Value> {
+    let vault = &session.vault_id;
+    let PrepareAction {
+        manifest,
+        action_cid,
+    } = body.into_inner();
+    manifest.validate(cfg).map_err(api::invalid)?;
+    // Must name one of this vault's authority releases (key_for enforces that);
+    // the key itself is not needed because nothing is signed yet.
+    crate::authority::key_for(pool, lit, vault, &manifest.authority_cid).await?;
+    enroll_cid(vault, &manifest, &action_cid, pool, lit, cfg).await
+}
+async fn enroll_cid(
+    vault: &str,
+    manifest: &Manifest,
+    cid: &str,
+    pool: &PgPool,
+    lit: &Chipotle,
+    cfg: &Config,
+) -> ApiResult<Value> {
+    let mut tx = pool.begin().await.map_err(api::internal)?;
+    let plan = subscriptions::require_capacity(&mut tx, vault, false).await?;
+    let cids = actions::secret_cids(manifest).map_err(api::invalid)?;
+    if manifest.vault_id != *vault || !cids.iter().any(|c| c == cid) {
         return Err(api::err(Status::Forbidden, "wrong_manifest"));
     }
     crate::authority::ensure_granted(&mut tx, lit, vault, &manifest.authority_cid).await?;
@@ -336,7 +384,7 @@ pub async fn enroll(
         )
         .bind(vault)
         .bind(&manifest.secret_id)
-        .bind(&cid)
+        .bind(cid)
         .execute(&mut *tx)
         .await
         .map_err(api::internal)?;
@@ -344,7 +392,7 @@ pub async fn enroll(
             "INSERT INTO kc_audit(vault_id,event,object_hash) VALUES($1,'action_enrolled',$2)",
         )
         .bind(vault)
-        .bind(&cid)
+        .bind(cid)
         .execute(&mut *tx)
         .await
         .map_err(api::internal)?;
@@ -353,7 +401,7 @@ pub async fn enroll(
     // retried from durable state without leaving an untracked granted CID.
     tx.commit().await.map_err(api::internal)?;
     let mut tx = pool.begin().await.map_err(api::internal)?;
-    reconcile_locked(&mut tx, lit, cfg, vault, false, Some(&cid)).await?;
+    reconcile_locked(&mut tx, lit, cfg, vault, false, Some(cid)).await?;
     tx.commit().await.map_err(api::internal)?;
     Ok(Json(json!({"ok":true})))
 }

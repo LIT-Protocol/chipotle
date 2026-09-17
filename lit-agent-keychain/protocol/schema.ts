@@ -161,6 +161,28 @@ export const documentSchema = z.discriminatedUnion("kind", [
   loginSchema,
 ]);
 export type Document = z.infer<typeof documentSchema>;
+/**
+ * Several documents approved with one owner signature. The owner signs the
+ * digest of this wrapper (operation `batch`) and the authority action issues an
+ * ordinary per-document receipt for each entry, so consumers are unchanged. Only
+ * secret objects may be batched; sign-in and owner-credential changes stay single.
+ */
+export const BATCH_KINDS = ["manifest", "envelope", "policy"] as const;
+export const batchSchema = z.strictObject({
+  kind: z.literal("batch"),
+  vaultId: hashSchema,
+  documents: z
+    .array(
+      z.discriminatedUnion("kind", [
+        envelopeSchema,
+        policySchema,
+        manifestDocumentSchema,
+      ]),
+    )
+    .min(1)
+    .max(8),
+});
+export type Batch = z.infer<typeof batchSchema>;
 export const receiptSchema = z.strictObject({
   payload: z.strictObject({
     v: z.literal(V),
@@ -181,7 +203,7 @@ export const challengeSchema = z.strictObject({
   vaultId: hashSchema,
   objectHash: hashSchema,
   operation: documentSchema.options[0].shape.kind.or(
-    z.enum(["policy", "credentials", "manifest", "login"]),
+    z.enum(["policy", "credentials", "manifest", "login", "batch"]),
   ),
   nonce: hashSchema,
   issuedAt: integer,

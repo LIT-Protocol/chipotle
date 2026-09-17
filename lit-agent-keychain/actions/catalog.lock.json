@@ -1,13 +1,13 @@
 {
   "v": 1,
   "templates": {
-    "authority": "29314b8876a199afde0396711530c4de9de25eca7f99202a09a4d68f32cd0a66",
-    "export": "372485c4bd8a00e01f6c67869665bde9818327d9239a090d5b26f9ceb51f3bfd",
-    "github_read_file": "15a1f3314c95ec4299179b39c4bec6b2e3be90d50753c70ce6135adec786e657",
-    "openai_chat": "3846d5259445bd712a5fddaf85513a62a56c795e1311b4d56d7866a3cbabc2f9",
-    "slack_post_message": "edaf121597cf10980cbcdddeaaec07232f255868ad6eb4e1d979094e7ab5cb67",
-    "stripe_balance": "65e342a6bc70afeec6edbd8b8f63c978ea424459fce00b21e52b34c2b47e9753",
-    "supabase_tables": "9a9f68ede6d852e93da9eadb566800d6aff01f8d7906cce3dedf3f571c106b7f",
+    "authority": "4ca83f7cd984356d56c8bdd455f8ee358cb3dfaa423d7693b34212a0c1b0f3e6",
+    "export": "3f1cbb2664dce5fa83f060aba63b154952ab2ca42a5815a0704ce883278a11cc",
+    "github_read_file": "d4d1692efd3c4a2b43e5c2366337c32c17896050b9badc36899601c8a7d82b38",
+    "openai_chat": "3bf5fc6b5e0a0643cf2d13a0d3d005fdef4583600f3f03ae0859d4f02a3daf60",
+    "slack_post_message": "be5904f99b02d0ef0d9f8041564a4adca28fab0a9b23ad49e93c2bd75c9f73af",
+    "stripe_balance": "9ab2143111a8ad76bc4f9189bc73c381fe51c3acf52ae8c931af1c32f5f4e8e5",
+    "supabase_tables": "c5af62303733c4aa0433807344525d0f724720431f7dcca384066e3e87171fbd",
     "discovery": "b2a9e5871070e5287ce1f416138dde57167ff09d2def77c93b89a2b0313d55a5"
   }
 }
