@@ -759,6 +759,11 @@ hr {
 .agent-row strong {
   font-weight: 500;
 }
+.agent-row .row-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
 .agent-row code {
   display: block;
   margin-top: 3px;

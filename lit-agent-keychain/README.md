@@ -31,9 +31,17 @@ The operator is trusted to serve the latest signed policy. It can replay old val
 permissions, including undoing a revocation, but cannot forge owner authorization.
 The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md).
 
-## SDK 2.0.5 release coordination
+## SDK release coordination
 
-This source prepares SDK 2.0.5 and pins the hosted examples to that version. Merging
+This source prepares SDK 2.0.6 and pins the hosted examples to that version. 2.0.6 is
+an ordinary SDK release with no template change: clearer client-side messages
+(`use()` on a stored secret, an identity object passed where the private key string
+belongs), `describeCredential` accepting the raw JSON text of an identity or config
+file, and the owner UI's per-agent **Config · all secrets** download. Existing agents
+on 2.0.5 keep working. The notes below describe the previous, template-changing
+release and still apply to secrets pinned to it.
+
+Merging
 to `main` publishes the SDK (see Publishing below), before the owner UI/API deploy.
 Until the package is on the registry, registry installation of that version is not
 an acceptance test and reviewers should use the locally packed tarball.
@@ -58,7 +66,7 @@ Consequences, all handled by the release mechanism described in
   release still takes one signature per document (`PRE_BATCH_AUTHORITY_HASHES`).
 
 Release checks: run `npm test` and `npm run build`, publish through the normal
-maintainer release process, verify `npm view @lit-protocol/keychain@2.0.5 version`,
+maintainer release process, verify `npm view @lit-protocol/keychain@2.0.6 version`,
 then repeat the strict external TypeScript consumer and attestation-enabled Node
 smoke test from the registry artifact. Only then deploy the owner UI/API and create,
 rotate and read a secret against production. See the QA reports under `docs/` for
