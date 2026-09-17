@@ -367,8 +367,8 @@ export const ACCOUNT_CONFIG_FULL_ABI = [
  */
 export const ACCOUNT_CONFIG_DEPLOYMENTS = Object.freeze({
   // Base mainnet — `next` (staging) deployment, NodeConfig.next.toml
-  '8453:0x98e501fab2d60a5119a185e1563f10cb54bc6068': {
-    runtimeBytecodeKeccak: '0x3e21f437bf1c1f75d60cdcf90aafef49ef2869aa18e58e37e282152c5c702254',
+  '8453:0x0d6f987b8725457bb0295ad2e642096f2a9cc2b1': {
+    runtimeBytecodeKeccak: '0x0ccf111d049a0ae1f7e862738deb953ea39a77599f01aa4a5131b3f83cda89ca',
   },
   // Base mainnet — `main` deployment, NodeConfig.main.toml
   '8453:0x4c8eb9f329ebfdb369f0c90954875ef8f568ad24': {
