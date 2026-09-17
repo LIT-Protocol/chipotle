@@ -234,9 +234,7 @@ curl -fsS -X POST https://<cold-cvm-phala-url>/new_account \
 
 ## Step 7 — Re‑seed the k6 account pool against the new contract
 
-The committed pools (`k6/data/accounts.next.json`, `accounts.dev.json`) hold API
-keys registered on the **old** contract; on the new diamond they revert
-`NoAccountAccess`. Regenerate them against the new node:
+The committed pools (`k6/data/accounts.next.json`, `k6/data/accounts.dev.json`) hold API
 
 ```bash
 cd k6
