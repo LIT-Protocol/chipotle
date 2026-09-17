@@ -1,4 +1,4 @@
-# Adversarial review of Keychain v2
+# Adversarial review of Keychain
 
 Reviewed during implementation, 2026-09-11. This is the implementing agent's
 adversarial review, not an independent cryptographic audit or production attestation.
@@ -86,7 +86,7 @@ No unresolved authorization bypass was found within this model. This does not es
 absence of bugs. Live Chipotle compatibility passed with temporary scoped keys: public discovery,
 full secret-action encryption-key binding, stable derivation across calls, arbitrary
 code denial, and secret-group permission removal/restoration. The test key/groups were
-removed. Live owner/agent lifecycle on the deployed v2 registry and real Google OAuth
+removed. Live owner/agent lifecycle on the deployed registry and real Google OAuth
 remain deployment checks; this public-key test does not prove that full lifecycle. Keychain relies on Chipotle for
 runtime security and derivation-root continuity across provider restarts/upgrades;
 direct infrastructure access is not an application validation prerequisite. The PR

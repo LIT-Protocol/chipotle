@@ -1,4 +1,4 @@
-# Lit Agent Keychain v2
+# Lit Agent Keychain
 
 A React client, Rust API and immutable Lit Actions for owner-authorized agent access
 to credentials. Secrets are encrypted locally; PostgreSQL stores ciphertext and
@@ -266,11 +266,9 @@ on the package) or, failing that, an `NPM_TOKEN` repository secret. Manual
 `before=` cooldown in `~/.npmrc` does not affect change detection; the published
 tarball is fetched directly and integrity-checked.
 
-This is a prelaunch, incompatible replacement. Migration `20260911000001` drops the
-legacy Keychain tables and their contents. Stop the old service before applying it.
-It does not delete upstream PKPs/usage keys from the old Lit account; retire those
-separately if that account will remain in use. No production deployment or DB reset is part of this PR.
-Live compatibility validation uses temporary Chipotle groups/keys and removes them.
+Keychain is prelaunch with no users, so there is no upgrade or compatibility path
+to maintain. The database can be reset freely.
+Live validation uses temporary Chipotle groups/keys and removes them.
 
 Deploy the private-key telemetry fix and billing-owner guards in `lit-api-server`
 and `lit-payments` before distributing user execution keys. No direct Phala access

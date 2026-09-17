@@ -1,4 +1,4 @@
-name: Keychain v2
+name: Keychain
 on:
   pull_request:
     paths:

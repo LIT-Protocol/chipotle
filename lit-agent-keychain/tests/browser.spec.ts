@@ -35,7 +35,7 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
   });
   await page.goto("/");
   await page.screenshot({
-    path: "../.context/keychain-v2/home-desktop.png",
+    path: "../.context/keychain/home-desktop.png",
     fullPage: true,
   });
   const mobile = await context.newPage();
@@ -51,7 +51,7 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
     ),
   ).toBe(true);
   await mobile.screenshot({
-    path: "../.context/keychain-v2/home-mobile.png",
+    path: "../.context/keychain/home-mobile.png",
     fullPage: true,
   });
   await mobile.close();
@@ -62,7 +62,7 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
     page.getByRole("heading", { name: "Secrets", exact: true }),
   ).toBeVisible();
   await page.screenshot({
-    path: "../.context/keychain-v2/workspace-empty.png",
+    path: "../.context/keychain/workspace-empty.png",
     fullPage: true,
   });
   // Free plan: secrets can be added before any payment.
@@ -98,7 +98,7 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
     page.getByText("No agents have access.", { exact: true }),
   ).toBeVisible();
   await page.screenshot({
-    path: "../.context/keychain-v2/workspace-secret.png",
+    path: "../.context/keychain/workspace-secret.png",
     fullPage: true,
   });
   const identity = Keychain.generateKey();
@@ -124,12 +124,12 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
   // Connected service: catalog picker, manifest-driven wizard, credential check.
   await page.getByRole("button", { name: "+ Add secret" }).click();
   await expect(page.getByText("The agent never sees the key.")).toBeVisible();
-  await page.screenshot({ path: "../.context/keychain-v2/add-choose.png" });
+  await page.screenshot({ path: "../.context/keychain/add-choose.png" });
   await page.getByRole("button", { name: /^Connect a service/ }).click();
   await expect(
     page.getByRole("button", { name: /Read Stripe balance/ }),
   ).toBeVisible();
-  await page.screenshot({ path: "../.context/keychain-v2/add-catalog.png" });
+  await page.screenshot({ path: "../.context/keychain/add-catalog.png" });
   await page.getByRole("button", { name: /Read Stripe balance/ }).click();
   await expect(
     page.getByRole("heading", { name: "Read Stripe balance", exact: true }),
@@ -139,7 +139,7 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
     page.getByText('await keychain.use("STRIPE_API_KEY")'),
   ).toBeVisible();
   await page.screenshot({
-    path: "../.context/keychain-v2/add-wizard.png",
+    path: "../.context/keychain/add-wizard.png",
     fullPage: true,
   });
   await page.getByLabel("Name", { exact: true }).fill("STRIPE_API_KEY");
@@ -171,7 +171,7 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
     page.getByText("CONNECTED SERVICES", { exact: false }),
   ).toBeVisible();
   await page.screenshot({
-    path: "../.context/keychain-v2/service-detail.png",
+    path: "../.context/keychain/service-detail.png",
     fullPage: true,
   });
   expect(requests.every((body) => !body.includes(stripeFixture))).toBeTruthy();
@@ -184,7 +184,7 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
   ).toBeVisible();
   expect(errors).toEqual([]);
   await page.screenshot({
-    path: "../.context/keychain-v2/browser-passkey.png",
+    path: "../.context/keychain/browser-passkey.png",
     fullPage: true,
   });
 });
