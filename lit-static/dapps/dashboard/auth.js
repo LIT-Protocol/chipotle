@@ -481,6 +481,23 @@ export function updateStatCards() {
   if (elWallets) elWallets.textContent = (typeof _stats.wallets === 'number') ? _stats.wallets : '—';
   if (elActions) elActions.textContent = (typeof _stats.actions === 'number') ? _stats.actions : '—';
 
+  // Sidebar item counts (issue #673): mirror the metric grid. Blank until a
+  // store resolves so the sidebar doesn't show a stale "0" during load.
+  const setCount = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = (typeof val === 'number') ? String(val) : '';
+  };
+  setCount('sidebar-count-usage-keys', (typeof _stats.usageKeys === 'number') ? _stats.usageKeys : getUsageKeysStore().length);
+  setCount('sidebar-count-groups', _stats.groups);
+  setCount('sidebar-count-wallets', _stats.wallets);
+  setCount('sidebar-count-actions', _stats.actions);
+
+  // Account-mode label in the sidebar account block.
+  const modeEl = document.getElementById('sidebar-account-mode');
+  if (modeEl) {
+    modeEl.textContent = (getMode() === 'sovereign') ? 'ChainSecured' : 'API mode';
+  }
+
   // Empty hero ↔ stats grid swap. Only swap once all four stores have resolved
   // to numbers, otherwise we'd flash the hero during initial load.
   const allResolved = typeof _stats.groups === 'number'
@@ -493,10 +510,14 @@ export function updateStatCards() {
     && _stats.actions === 0;
   const heroEl = document.getElementById('overview-empty-state');
   const statsEl = document.getElementById('stats-row');
+  const nextStepEl = document.getElementById('stats-next-step');
   if (heroEl && statsEl) {
     heroEl.hidden = !allZero;
     statsEl.hidden = allZero;
   }
+  // Next-step card rides with the metric grid: shown when there's data, hidden
+  // for the all-zero empty state.
+  if (nextStepEl) nextStepEl.hidden = allZero;
 }
 
 // ----- Module-scoped state (replaces window._*) -----

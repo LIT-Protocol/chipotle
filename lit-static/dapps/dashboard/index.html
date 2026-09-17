@@ -15,172 +15,202 @@
   <div class="app">
     <!-- Login (standalone when not authenticated) -->
     <section id="page-login" class="login-page">
-      <div class="login-container">
-        <h1 class="login-title">Chipotle Dashboard</h1>
-        <p class="login-subtitle">Sign in to manage your account, or create a new one to get started.</p>
-        <div id="login-status" class="status info" style="display: none;"></div>
-        <div class="login-card-shell">
-          <div class="login-card-tabs-row">
-            <div class="login-tabs" role="tablist" aria-label="Existing or new user">
-              <button type="button" class="login-tab is-active" role="tab" id="login-tab-existing" aria-selected="true" aria-controls="login-panel-existing" data-tab="existing">
-                <svg class="login-tab-check" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-                <span>Existing User</span>
+      <header class="marketing-topbar">
+        <a class="marketing-brand" href="#" aria-label="Lit dashboard">
+          <span class="brand-mark">Lit</span>
+          <span class="brand-divider" aria-hidden="true"></span>
+          <span class="brand-sub">Dashboard</span>
+        </a>
+        <a class="marketing-doclink" href="https://developer.litprotocol.com" target="_blank" rel="noopener">Developer docs <span aria-hidden="true">↗</span></a>
+      </header>
+
+      <main class="login-layout">
+        <section class="login-intro">
+          <p class="eyebrow">Build with Lit</p>
+          <h1 class="login-hero-title">Your crypto system.<br>Your rules.</h1>
+          <p class="login-lede">Programmable wallets, verifiable Actions, and permissions you control.</p>
+          <div class="login-principles">
+            <p><span>01</span> Run code in confidential hardware.</p>
+            <p><span>02</span> Define what your wallets can sign.</p>
+            <p><span>03</span> Govern permissions on-chain.</p>
+          </div>
+          <a class="text-link" href="https://developer.litprotocol.com" target="_blank" rel="noopener">How ChainSecured works <span aria-hidden="true">↗</span></a>
+        </section>
+
+        <section class="login-signin" aria-labelledby="signin-title">
+          <p class="eyebrow">Your workspace</p>
+          <h2 class="login-title" id="signin-title">Sign in to Lit.</h2>
+          <p class="login-subtitle">Choose how you manage your account.</p>
+          <div id="login-status" class="status info" style="display: none;"></div>
+
+          <!-- Primary choice: how you administer the account (API key vs wallet). -->
+          <fieldset class="access-fieldset">
+            <legend id="login-auth-mode-label">Account access</legend>
+            <div class="access-options" role="radiogroup" aria-labelledby="login-auth-mode-label">
+              <button type="button" class="access-card is-active" role="radio" id="login-auth-mode-api" aria-checked="true" data-auth-mode="api">
+                <span class="access-radio" aria-hidden="true"></span>
+                <span class="access-copy">
+                  <span class="access-title">API key</span>
+                  <span class="access-sub">Manage through the API.</span>
+                </span>
               </button>
-              <button type="button" class="login-tab" role="tab" id="login-tab-new" aria-selected="false" aria-controls="login-panel-new" data-tab="new">
-                <svg class="login-tab-check" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-                <span>New User</span>
+              <button type="button" class="access-card" role="radio" id="login-auth-mode-chainsecured" aria-checked="false" data-auth-mode="sovereign">
+                <span class="access-radio" aria-hidden="true"></span>
+                <span class="access-copy">
+                  <span class="access-title">Wallet</span>
+                  <span class="access-sub">ChainSecured permissions.</span>
+                </span>
               </button>
             </div>
-          </div>
+          </fieldset>
+
+          <!-- Secondary axis (existing vs new) drives which panel below is shown. -->
           <div id="login-panel-existing" class="login-tab-panel is-active" role="tabpanel" aria-labelledby="login-tab-existing">
             <div class="login-cards">
               <div class="login-card login-card-api">
-                <div class="login-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-3 3"/><path d="m18 5 3 3"/></svg></div>
-                <h3 class="login-card-title">API mode</h3>
-                <p class="login-card-tagline">Best if you want the fastest start. One key, no wallet needed.</p>
-                <p class="form-hint" style="margin-bottom: 1rem;">Writes go through the Chipotle API.</p>
                 <div class="form-group">
-                  <label for="login-api-key">API key</label>
-                  <input type="password" id="login-api-key" class="input" placeholder="Paste your API key">
+                  <label class="field-label" for="login-api-key">Account API key</label>
+                  <input type="password" id="login-api-key" class="input" placeholder="Paste your account API key">
+                  <p class="form-hint">Use your account key, not a usage key.</p>
                 </div>
-                <button type="button" id="btn-login" class="btn btn-primary btn-block">Log in</button>
+                <button type="button" id="btn-login" class="btn btn-primary btn-block">Continue <span aria-hidden="true">→</span></button>
+                <p class="access-note">API mode authorizes account changes through your API key.</p>
               </div>
               <div class="login-card login-card-chainsecured">
-                <span class="login-card-required-badge">Wallet required</span>
-                <div class="login-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></div>
-                <h3 class="login-card-title">ChainSecured mode <button type="button" class="login-card-help" aria-label="What is ChainSecured? Your wallet is the key. Writes are signed on-chain — no API key shared." data-tooltip="Your wallet is the key. Writes are signed on-chain — no API key shared.">?</button></h3>
-                <p class="login-card-tagline">Best if you want self-custody. Your wallet signs every write &mdash; the API is only used to call an action.</p>
-                <p class="form-hint" style="margin-bottom: 1rem;">Connect the wallet that owns the account. Your wallet address is the account identity.</p>
-                <button type="button" id="btn-login-wallet" class="btn btn-outline btn-block">Connect wallet</button>
+                <div class="chain-explainer">
+                  <p>Connect the wallet that owns your account. Your wallet address is the account identity.</p>
+                  <p class="form-hint">Permission changes are signed on-chain. Running Actions uses a usage key. <button type="button" class="login-card-help" aria-label="What is ChainSecured? Your wallet is the key. Writes are signed on-chain — no API key shared." data-tooltip="Your wallet is the key. Writes are signed on-chain — no API key shared.">?</button></p>
+                </div>
+                <button type="button" id="btn-login-wallet" class="btn btn-outline btn-block">Connect wallet <span aria-hidden="true">→</span></button>
               </div>
             </div>
           </div>
           <div id="login-panel-new" class="login-tab-panel" role="tabpanel" aria-labelledby="login-tab-new" hidden>
             <div class="login-cards">
               <div class="login-card login-card-api">
-                <div class="login-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-3 3"/><path d="m18 5 3 3"/></svg></div>
-                <h3 class="login-card-title">API mode</h3>
-                <p class="login-card-tagline">Best if you want the fastest start. We manage the account; you get a key.</p>
-                <p class="form-hint" style="margin-bottom: 1rem;">Creates a managed account and returns a new API key. Store it securely.</p>
                 <div class="form-group">
-                  <label for="new-account-email">Email</label>
+                  <label class="field-label" for="new-account-email">Email</label>
                   <input type="email" id="new-account-email" class="input" placeholder="you@example.com" required>
                 </div>
                 <div class="form-group">
-                  <label for="new-account-name">Account name</label>
+                  <label class="field-label" for="new-account-name">Account name</label>
                   <input type="text" id="new-account-name" class="input" placeholder="My account">
                 </div>
                 <div class="form-group">
-                  <label for="new-account-desc">Account description</label>
+                  <label class="field-label" for="new-account-desc">Account description</label>
                   <input type="text" id="new-account-desc" class="input" placeholder="Optional">
                 </div>
-                <button type="button" id="btn-create-account" class="btn btn-primary btn-block">Create account</button>
+                <button type="button" id="btn-create-account" class="btn btn-primary btn-block">Create account <span aria-hidden="true">→</span></button>
+                <p class="access-note">Creates a managed account and returns a new API key. Store it securely.</p>
               </div>
               <div class="login-card login-card-chainsecured">
-                <span class="login-card-required-badge">Wallet required</span>
-                <div class="login-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></div>
-                <h3 class="login-card-title">ChainSecured mode <button type="button" class="login-card-help" aria-label="What is ChainSecured? Your wallet is the key. Writes are signed on-chain — no API key shared." data-tooltip="Your wallet is the key. Writes are signed on-chain — no API key shared.">?</button></h3>
-                <p class="login-card-tagline">Best if you want self-custody. The connected wallet owns the account.</p>
-                <p class="form-hint" style="margin-bottom: 1rem;">Creates an unmanaged account owned by the connected wallet.</p>
                 <div class="form-group">
-                  <label for="new-chainsecured-name">Account name</label>
+                  <label class="field-label" for="new-chainsecured-name">Account name</label>
                   <input type="text" id="new-chainsecured-name" class="input" placeholder="My account">
                 </div>
                 <div class="form-group">
-                  <label for="new-chainsecured-desc">Account description</label>
+                  <label class="field-label" for="new-chainsecured-desc">Account description</label>
                   <input type="text" id="new-chainsecured-desc" class="input" placeholder="Optional">
                 </div>
-                <button type="button" id="btn-create-chainsecured" class="btn btn-outline btn-block">Connect wallet &amp; create</button>
+                <button type="button" id="btn-create-chainsecured" class="btn btn-outline btn-block">Connect wallet &amp; create <span aria-hidden="true">→</span></button>
+                <p class="access-note">Creates an unmanaged account owned by the connected wallet.</p>
               </div>
             </div>
           </div>
-          <div class="login-card-footer">
-            <span class="login-mode-label" id="login-auth-mode-label">Authentication mode:</span>
-            <div class="login-tabs" role="radiogroup" aria-labelledby="login-auth-mode-label">
-              <button type="button" class="login-tab is-active" role="radio" id="login-auth-mode-api" aria-checked="true" data-auth-mode="api">
-                <svg class="login-tab-check" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-                <span>API mode</span>
-              </button>
-              <button type="button" class="login-tab" role="radio" id="login-auth-mode-chainsecured" aria-checked="false" data-auth-mode="sovereign">
-                <svg class="login-tab-check" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-                <span>ChainSecured mode</span>
-              </button>
-            </div>
+
+          <!-- Secondary switch: existing account vs create a new one. Only the
+               option you can switch *to* is shown (CSS gates on .is-active), so
+               auth.js's existing is-active toggle drives the flip with no extra JS. -->
+          <div class="login-switch">
+            <button type="button" class="login-switch-tab is-active" role="tab" id="login-tab-existing" aria-selected="true" aria-controls="login-panel-existing" data-tab="existing"><span class="login-switch-lead">Have an account?</span> Sign in</button>
+            <button type="button" class="login-switch-tab" role="tab" id="login-tab-new" aria-selected="false" aria-controls="login-panel-new" data-tab="new"><span class="login-switch-lead">New to Lit?</span> Create an account <span aria-hidden="true">→</span></button>
           </div>
-        </div>
-      </div>
+        </section>
+      </main>
+
+      <footer class="marketing-footer">
+        <span>Lit Protocol</span>
+        <span>Confidential, verifiable execution.</span>
+      </footer>
     </section>
 
     <!-- Dashboard (single page when authenticated) -->
     <div id="dashboard-wrap" class="dashboard-wrap">
-      <aside class="sidebar">
-        <div class="sidebar-brand">
-          <span class="sidebar-brand-text">Chipotle Dashboard</span>
+      <header class="app-topbar">
+        <a class="marketing-brand" href="#overview" data-scroll="overview" aria-label="Lit dashboard">
+          <span class="brand-mark">Lit</span>
+          <span class="brand-divider" aria-hidden="true"></span>
+          <span class="brand-sub">Dashboard</span>
+        </a>
+        <div class="app-topbar-right">
+          <span class="topbar-title"> </span>
+          <span id="usage-key-override-badge" class="usage-key-badge" style="display:none;" title="Using a usage API key override">Using Usage Key</span>
+          <span id="billing-balance-display" class="billing-balance" style="display:none;"></span>
+          <button type="button" class="btn btn-primary btn-sm" id="btn-add-funds" style="display:none;">Add Funds</button>
+          <button type="button" class="btn btn-outline btn-sm" id="btn-auto-recharge" title="Auto recharge settings">Auto recharge</button>
+          <span id="billing-not-required" class="billing-not-required" style="display:none;">Payment Not Required</span>
+          <a class="marketing-doclink" href="https://developer.litprotocol.com" target="_blank" rel="noopener">Developer docs <span aria-hidden="true">↗</span></a>
+          <button type="button" class="btn btn-topbar btn-theme-toggle" id="theme-toggle" aria-label="Switch to dark mode"><span class="theme-icon" aria-hidden="true"></span></button>
+          <div class="account-dropdown" id="account-dropdown">
+            <button type="button" class="btn btn-topbar account-dropdown-trigger" id="account-dropdown-trigger" aria-expanded="false" aria-haspopup="true" aria-label="Account menu">
+              Account
+              <span class="account-dropdown-chevron" aria-hidden="true">▾</span>
+            </button>
+            <div class="account-dropdown-panel" id="account-dropdown-panel" role="menu" aria-hidden="true">
+              <button type="button" class="account-dropdown-item" id="toggle-usage-override-btn" role="menuitem">Usage Key Override</button>
+              <button type="button" class="account-dropdown-item is-chainsecured-only" id="toggle-chainsecured-rpc-btn" role="menuitem">RPC URL</button>
+              <button type="button" class="account-dropdown-item account-dropdown-convert" id="convert-to-chainsecured-btn" role="menuitem" hidden>Convert to ChainSecured</button>
+              <button type="button" class="account-dropdown-item" id="change-ownership-btn" role="menuitem" hidden>Change Ownership</button>
+              <div class="account-dropdown-divider" role="separator"></div>
+              <button type="button" class="account-dropdown-item" id="about-dashboard-btn" role="menuitem">About Dashboard</button>
+              <button type="button" class="account-dropdown-item account-dropdown-signout" id="account-signout-btn" role="menuitem">Sign out</button>
+            </div>
+          </div>
         </div>
-        <nav class="sidebar-nav">
-          <span class="sidebar-menu-label">MENU</span>
+      </header>
+
+      <div class="dashboard-body">
+      <aside class="sidebar">
+        <div class="sidebar-account">
+          <span class="sidebar-account-mark" aria-hidden="true">L</span>
+          <div class="sidebar-account-meta">
+            <strong>Your account</strong>
+            <small id="sidebar-account-mode">API mode</small>
+          </div>
+        </div>
+        <nav class="sidebar-nav" aria-label="Workspace">
           <a href="#overview" class="sidebar-link" data-scroll="overview">
-            <span class="sidebar-link-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
             <span class="sidebar-link-text">Overview</span>
           </a>
-          <a href="#usage-keys" class="sidebar-link" data-scroll="usage-keys">
-            <span class="sidebar-link-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-3 3"/><path d="m18 5 3 3"/></svg></span>
-            <span class="sidebar-link-text">Usage API Keys</span>
-          </a>
-          <a href="#groups" class="sidebar-link" data-scroll="groups">
-            <span class="sidebar-link-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
-            <span class="sidebar-link-text">Groups</span>
+          <a href="#wallets" class="sidebar-link" data-scroll="wallets">
+            <span class="sidebar-link-text">Wallets</span>
+            <span class="sidebar-count" id="sidebar-count-wallets"></span>
           </a>
           <a href="#actions" class="sidebar-link" data-scroll="actions">
-            <span class="sidebar-link-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
-            <span class="sidebar-link-text">IPFS Actions</span>
+            <span class="sidebar-link-text">Lit Actions</span>
+            <span class="sidebar-count" id="sidebar-count-actions"></span>
           </a>
-          <a href="#wallets" class="sidebar-link" data-scroll="wallets">
-            <span class="sidebar-link-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg></span>
-            <span class="sidebar-link-text">Wallets</span>
+          <a href="#usage-keys" class="sidebar-link" data-scroll="usage-keys">
+            <span class="sidebar-link-text">Usage keys</span>
+            <span class="sidebar-count" id="sidebar-count-usage-keys"></span>
           </a>
-          <hr>
+          <a href="#groups" class="sidebar-link" data-scroll="groups">
+            <span class="sidebar-link-text">Groups</span>
+            <span class="sidebar-count" id="sidebar-count-groups"></span>
+          </a>
           <a href="#action-runner" class="sidebar-link" data-scroll="action-runner">
-            <span class="sidebar-link-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg></span>
             <span class="sidebar-link-text">Action Runner</span>
           </a>
           <a href="#gvisor-runner" class="sidebar-link" data-scroll="gvisor-runner" id="sidebar-link-gvisor-runner" hidden>
-            <span class="sidebar-link-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 9h6v6H9z"/><path d="M9 1v2"/><path d="M15 1v2"/><path d="M9 21v2"/><path d="M15 21v2"/><path d="M1 9h2"/><path d="M1 15h2"/><path d="M21 9h2"/><path d="M21 15h2"/></svg></span>
             <span class="sidebar-link-text">gVisor Runner</span>
           </a>
         </nav>
+        <div class="sidebar-bottom">
+          <a href="https://github.com/LIT-Protocol/chipotle" target="_blank" rel="noopener">Open-source <span aria-hidden="true">↗</span></a>
+        </div>
       </aside>
 
       <div class="dashboard-main">
-        <header class="topbar">
-          <div class="topbar-left">
-            <h1 class="topbar-title"> </h1>
-          </div>
-          <div class="topbar-right">
-            <span id="usage-key-override-badge" class="usage-key-badge" style="display:none;" title="Using a usage API key override">Using Usage Key</span>
-            <button type="button" class="btn btn-topbar btn-theme-toggle" id="theme-toggle" aria-label="Switch to dark mode"><span class="theme-icon" aria-hidden="true"></span></button>
-            <span id="billing-balance-display" class="billing-balance" style="display:none;"></span>
-            <button type="button" class="btn btn-primary btn-sm" id="btn-add-funds" style="display:none;">Add Funds</button>
-            <button type="button" class="btn btn-outline btn-sm" id="btn-auto-recharge" title="Auto recharge settings">Auto recharge</button>
-            <span id="billing-not-required" class="billing-not-required" style="display:none;">Payment Not Required</span>
-            <div class="account-dropdown" id="account-dropdown">
-              <button type="button" class="btn btn-topbar account-dropdown-trigger" id="account-dropdown-trigger" aria-expanded="false" aria-haspopup="true" aria-label="Account menu">
-                Account
-                <span class="account-dropdown-chevron" aria-hidden="true">▾</span>
-              </button>
-              <div class="account-dropdown-panel" id="account-dropdown-panel" role="menu" aria-hidden="true">
-                <button type="button" class="account-dropdown-item" id="toggle-usage-override-btn" role="menuitem">Usage Key Override</button>
-                <button type="button" class="account-dropdown-item is-chainsecured-only" id="toggle-chainsecured-rpc-btn" role="menuitem">RPC URL</button>
-                <button type="button" class="account-dropdown-item account-dropdown-convert" id="convert-to-chainsecured-btn" role="menuitem" hidden>Convert to ChainSecured</button>
-                <button type="button" class="account-dropdown-item" id="change-ownership-btn" role="menuitem" hidden>Change Ownership</button>
-                <div class="account-dropdown-divider" role="separator"></div>
-                <button type="button" class="account-dropdown-item" id="about-dashboard-btn" role="menuitem">About Dashboard</button>
-                <button type="button" class="account-dropdown-item account-dropdown-signout" id="account-signout-btn" role="menuitem">Sign out</button>
-              </div>
-            </div>
-          </div>
-        </header>
-
         <div class="dashboard-content">
           <!-- Global dashboard status (post-auth errors and notices) -->
           <div id="dashboard-status" class="status" style="display: none;"></div>
@@ -216,41 +246,52 @@
             <a href="#usage-keys" class="btn btn-primary" data-scroll="usage-keys">Create your first usage key</a>
           </div>
 
-          <!-- Stat cards -->
-          <div class="stats-row" id="stats-row">
-            <a href="#usage-keys" class="stat-card" data-scroll="usage-keys">
-              <span class="stat-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-3 3"/><path d="m18 5 3 3"/></svg></span>
-              <span class="stat-card-text">
-                <span class="stat-value" id="stat-usage-keys">—</span>
-                <span class="stat-label">Usage API Keys</span>
-              </span>
+          <!-- Workspace heading -->
+          <div class="workspace-heading">
+            <div>
+              <p class="eyebrow" id="workspace-eyebrow">Your workspace</p>
+              <h1 class="workspace-title">Overview</h1>
+            </div>
+            <a href="#action-runner" class="btn btn-primary btn-workspace-action" data-scroll="action-runner">Run an Action <span aria-hidden="true">↗</span></a>
+          </div>
+
+          <!-- Metric grid -->
+          <div class="metric-grid" id="stats-row">
+            <a href="#wallets" class="metric-cell" data-scroll="wallets">
+              <span class="metric-label">Wallets</span>
+              <strong class="stat-value" id="stat-wallets">—</strong>
+              <span class="metric-sub">Signing accounts <span aria-hidden="true">↗</span></span>
             </a>
-            <a href="#groups" class="stat-card" data-scroll="groups">
-              <span class="stat-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
-              <span class="stat-card-text">
-                <span class="stat-value" id="stat-groups">—</span>
-                <span class="stat-label">Groups</span>
-              </span>
+            <a href="#actions" class="metric-cell" data-scroll="actions">
+              <span class="metric-label">Lit Actions</span>
+              <strong class="stat-value" id="stat-actions">—</strong>
+              <span class="metric-sub">Authorized code <span aria-hidden="true">↗</span></span>
             </a>
-            <a href="#wallets" class="stat-card" data-scroll="wallets">
-              <span class="stat-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg></span>
-              <span class="stat-card-text">
-                <span class="stat-value" id="stat-wallets">—</span>
-                <span class="stat-label">Wallets</span>
-              </span>
+            <a href="#usage-keys" class="metric-cell" data-scroll="usage-keys">
+              <span class="metric-label">Usage keys</span>
+              <strong class="stat-value" id="stat-usage-keys">—</strong>
+              <span class="metric-sub">Scoped application access <span aria-hidden="true">↗</span></span>
             </a>
-            <a href="#actions" class="stat-card" data-scroll="actions">
-              <span class="stat-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
-              <span class="stat-card-text">
-                <span class="stat-value" id="stat-actions">—</span>
-                <span class="stat-label">IPFS CIDs</span>
-              </span>
+            <a href="#groups" class="metric-cell" data-scroll="groups">
+              <span class="metric-label">Groups</span>
+              <strong class="stat-value" id="stat-groups">—</strong>
+              <span class="metric-sub">Action + wallet policy <span aria-hidden="true">↗</span></span>
             </a>
           </div>
 
+          <!-- Next step (from rules to a signature) -->
+          <section class="next-step" id="stats-next-step" hidden>
+            <div class="code-symbol" aria-hidden="true">&lt;/&gt;</div>
+            <div>
+              <h2>From your rules to a signature.</h2>
+              <p>Connect a wallet and an Action through a group. Give your application a usage key scoped to that group.</p>
+              <a href="#groups" class="text-link" data-scroll="groups">Review your groups <span aria-hidden="true">→</span></a>
+            </div>
+          </section>
+
           <!-- Overview / Instructions -->
           <section id="section-overview" class="dashboard-section">
-            <h2 class="section-title">Overview</h2>
+            <h2 class="section-title">Account</h2>
             <p class="section-desc">Instructions and account details.</p>
             <div id="overview-status" class="status" style="display: none;"></div>
             <div class="card" id="usage-key-override-card" style="display:none;">
@@ -512,6 +553,11 @@
           </section>
         </div>
       </div>
+      </div>
+      <footer class="app-footer">
+        <span>Lit Protocol</span>
+        <span>Confidential, verifiable execution.</span>
+      </footer>
     </div>
   </div>
 
