@@ -1,0 +1,130 @@
+---
+title: "Bug Bounty Program"
+description: "How to report security vulnerabilities in Lit Chipotle, what is in and out of scope, the rules of engagement, and how rewards work."
+---
+
+We pay rewards for security vulnerabilities responsibly disclosed to us. If you
+find a way to break the security model described in this section — extract keys,
+forge attestation, bypass the permission model, escape the Lit Actions sandbox —
+we want to hear about it, and we will pay you for it.
+
+## How to report
+
+Email **[security@litprotocol.com](mailto:security@litprotocol.com)**.
+
+**Please do not open a public GitHub issue for security vulnerabilities.** If you
+prefer, you may instead open a
+[private security advisory](https://github.com/LIT-Protocol/chipotle/security/advisories/new)
+on the repository.
+
+Include in your report:
+
+- A description of the issue and its potential impact.
+- Steps to reproduce, or a proof of concept.
+- The component affected (API server, Lit Actions runtime, contracts,
+  deployment/CI, governance, attestation/verification flow).
+- Any relevant version, commit hash, compose hash, or deployment URL.
+
+You can expect an **acknowledgement within 3 business days** and a **triage and
+severity assessment within 7 business days**.
+
+## Rewards
+
+Rewards are paid for valid, previously unknown vulnerabilities, sized by severity
+and real-world impact. Issues that compromise keys, funds, user data, or the
+attestation and governance guarantees earn the largest rewards; lower-impact
+issues earn proportionally smaller ones. We determine severity using
+[CVSS](https://www.first.org/cvss/) as a starting point, adjusted for actual
+exploitability and impact on the deployed system.
+
+- Only the **first reporter** of a given issue is eligible for a reward.
+- Duplicates of issues we already know about (internally or from another
+  reporter) are not eligible, but we will tell you it was a duplicate.
+- A working proof of concept meaningfully increases the reward for the same
+  finding.
+- Rewards are at our discretion and require that you followed the
+  [rules of engagement](#rules-of-engagement) below.
+
+## In scope
+
+- The `lit-api-server`, `lit-actions` runtime, and `lit-static` dashboard.
+- Smart contracts in this repository (account/permission model, and the
+  attestation-governance contracts on Base).
+- The deployment pipeline and TEE attestation / verification flow.
+- The on-chain governance and key-release model.
+
+Before reporting an issue that depends on "what code is running," verify the live
+state yourself — see [Verify in 30 Seconds](/architecture/verification/quick-verify).
+
+## Out of scope
+
+The following are **not** eligible for rewards:
+
+- **Insider attacks.** Attacks that require a malicious Lit employee, a
+  compromised governance signer, or any other privileged insider as a
+  precondition. The threat model for insiders is addressed by
+  [attestation](/architecture/verification/attestation) and
+  [upgrade governance](/architecture/verification/upgrade-governance), not by
+  the bounty program.
+- **The marketing website** (litprotocol.com and other brochure/marketing
+  properties), the blog, and documentation sites. These hold no keys and no user
+  data.
+- **Vulnerabilities in the underlying platform** — Intel TDX, the dstack OS, or
+  Phala Cloud infrastructure. Report these upstream to
+  [Intel](https://www.intel.com/content/www/us/en/security-center/default.html),
+  [dstack](https://github.com/Dstack-TEE/dstack), or
+  [Phala](https://docs.phala.com/) respectively — but do tell us if they affect
+  our deployment.
+- **Third-party dependencies.** Report upstream; we track advisories via
+  `deny.toml`. A concrete, exploitable impact on our deployment of a dependency
+  vulnerability *is* in scope.
+- **Denial of service** of any kind — volumetric attacks, resource exhaustion,
+  rate-limit exhaustion — and any report whose proof requires degrading the
+  service for real users.
+- **Social engineering and phishing** of Lit employees, contractors, or users.
+- **Physical attacks** on data centers, offices, or hardware, including physical
+  side-channel attacks against the TEE hardware itself.
+- **Best-practice reports without a demonstrated vulnerability**: missing
+  security headers, SPF/DKIM/DMARC configuration, TLS cipher-suite preferences,
+  clickjacking on pages with no sensitive actions, verbose error messages or
+  stack traces without security impact, and output from automated scanners with
+  no accompanying analysis.
+- **Self-inflicted issues**: self-XSS, attacks requiring a victim's rooted or
+  malware-compromised device, or issues requiring the victim to paste attacker
+  code into their own console.
+- **Leaked or compromised user credentials and API keys** obtained outside our
+  systems (credential stuffing, keys committed to third-party repos, etc.).
+- **Known issues** already tracked publicly in this repository's issues,
+  advisories, or changelog.
+
+If you are unsure whether something is in scope, email us and ask before you
+start testing.
+
+## Rules of engagement
+
+To be eligible for a reward, you must:
+
+- **Test only against your own accounts and data.** Never access, modify, or
+  delete another user's data or keys. If a vulnerability exposes someone else's
+  data, stop immediately, capture the minimum evidence needed to demonstrate the
+  issue, and report it.
+- **Not degrade the service.** No DoS, no high-volume automated scanning, no
+  spamming endpoints. Keep testing traffic modest.
+- **Not pivot.** If you gain unexpected access, demonstrate the issue and stop —
+  do not use it to move laterally, persist, or explore further.
+- **Not publicly disclose** the issue before we have released a fix and agreed
+  on a disclosure timeline with you. We work in good faith on coordinated
+  disclosure and will credit you (if you wish) when the fix ships.
+- **Not extort.** Reports conditioned on payment before details are shared are
+  not eligible.
+- **Use mainnet funds and production accounts at your own risk.** Where a
+  vulnerability can be demonstrated against a local deployment (see
+  [Self-Hosting](/architecture/self-hosting)) or with trivial value at stake,
+  prefer that.
+
+## Safe harbor
+
+We will not pursue legal action against researchers who make a good-faith effort
+to follow these rules, stay within scope, and report promptly. This safe harbor
+does not extend to actions that intentionally harm users, destroy data, or
+violate the rules above.

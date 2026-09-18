@@ -74,7 +74,8 @@
                   "architecture/verification/onchain-kms",
                   "architecture/verification/upgrade-governance",
                   "architecture/verification/full-verification",
-                  "architecture/verification/chain-of-trust"
+                  "architecture/verification/chain-of-trust",
+                  "architecture/verification/bug-bounty"
                 ]
               }
             ]

@@ -25,6 +25,13 @@ In your report, please include:
   governance, attestation/verification flow).
 - Any relevant version, commit hash, compose hash, or deployment URL.
 
+## Bug bounty
+
+We pay rewards for valid, responsibly disclosed vulnerabilities, sized by severity
+and impact. See the [Bug Bounty Program](docs/architecture/verification/bug-bounty.mdx)
+page for scope, exclusions (insider attacks, the marketing website, DoS, and more),
+and the rules of engagement.
+
 ## What to expect
 
 - **Acknowledgement** within 3 business days.
