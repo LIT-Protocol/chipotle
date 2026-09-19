@@ -30,7 +30,8 @@ cargo run --release --bin contract_deployer -- \
   [--secret=<private_key>] \
   [--address=<diamond_address>] \
   [--output=<proposal_json_path>] \
-  [--rpc-url=<custom_rpc_url>]
+  [--rpc-url=<custom_rpc_url>] \
+  [--removals=<diamond-removals.json>]
 ```
 
 | Argument | Description |
@@ -42,6 +43,7 @@ cargo run --release --bin contract_deployer -- \
 | `--address` | Existing diamond address; required for `update` and `propose-update`. |
 | `--output` | Proposal JSON output path for `propose-update` (default: `diamond_cut_proposal.json`). |
 | `--rpc-url` | Optional RPC URL override. |
+| `--removals` | Selector-removals manifest for `update`/`propose-update`. Defaults to `diamond-removals.json` in the **current working directory**, which only resolves when run from `lit_node_express/` (as the Makefile does). Pass it explicitly when invoking the binary from elsewhere; an explicit path that does not exist is an error. |
 
 ### Notes
 
