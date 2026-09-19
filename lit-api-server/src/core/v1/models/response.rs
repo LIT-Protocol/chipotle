@@ -94,6 +94,35 @@ pub struct AccountOpResponse {
     pub success: bool,
 }
 
+/// The stored spending rules for a usage key (see set_spending_rules).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub struct SpendingRulesItem {
+    pub spend_cap_cents: Option<i64>,
+    pub spend_window_seconds: Option<i64>,
+    pub rate_limit_rps: Option<i32>,
+    pub rate_limit_burst: Option<i32>,
+    pub max_concurrency: Option<i32>,
+    pub ip_rate_limit_rps: Option<i32>,
+    pub ip_rate_limit_burst: Option<i32>,
+    pub allowed_origins: Option<Vec<String>>,
+    pub enabled: bool,
+}
+
+/// Response for set_spending_rules / get_spending_rules.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SpendingRulesResponse {
+    /// The usage key's 0x-prefixed 32-byte hash the rules are stored under.
+    pub usage_api_key_hash: String,
+    /// Stored rules, or null when the key has none.
+    pub rules: Option<SpendingRulesItem>,
+    /// Cents spent in the current rolling window (null when no cap / no usage yet).
+    pub spent_cents_in_window: Option<i64>,
+    /// Whether the on-chain `hasSpendingRules` gate is set for this key. Should
+    /// equal `rules.is_some()`; a mismatch means a previous write half-failed —
+    /// re-run set_spending_rules or remove_spending_rules to reconcile.
+    pub on_chain_flag: bool,
+}
+
 /// Response for add_group, includes the on-chain group ID.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AddGroupResponse {

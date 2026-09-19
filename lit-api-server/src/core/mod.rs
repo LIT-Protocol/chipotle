@@ -4,6 +4,7 @@ pub mod account_management;
 pub mod cache_metadata;
 pub mod core_features;
 pub mod eip712;
+pub mod spending_rules;
 pub mod v1;
 
 pub async fn pkp_id_to_derviation_path(api_key: &str, pkp_id: &str) -> Result<String, String> {

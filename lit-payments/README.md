@@ -200,6 +200,13 @@ LIT_ACCOUNTS_CONTRACT_ADDRESS=0x...  # same value as lit-api-server NodeConfig.t
 # LIT_API_SERVER_BASE_URL=http://localhost:8000
 # LIT_INTERNAL_SHARED_SECRET=$(openssl rand -base64 32)
 
+# Spending rules (Lambda parity) — the /internal/spending-* endpoints the
+# gateway calls are bearer-token authed. They accept INTERNAL_SERVICE_TOKEN,
+# falling back to LIT_INTERNAL_SHARED_SECRET, so no extra secret is needed.
+# Disabled (503) if neither is set. On the lit-api-server side set
+# LIT_PAYMENTS_INTERNAL_URL to this service's base URL (same token).
+# INTERNAL_SERVICE_TOKEN=
+
 # Optional — gas funder (see "Gas funder" section below). Off entirely
 # unless GAS_FUNDER_PRIVATE_KEY is set. Leave GAS_FUNDER_ENABLED unset to
 # run in OBSERVE mode (alerts only, no on-chain sends).

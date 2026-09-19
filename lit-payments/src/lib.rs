@@ -18,3 +18,4 @@ mod litkey_reconciler_tests;
 pub mod mail;
 pub mod portal;
 pub mod rate;
+pub mod spending;

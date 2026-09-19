@@ -363,6 +363,113 @@ export interface UpdateUsageApiKeyMetadataRequest {
 }
 
 /**
+ * Stored rules, or null when the key has none.
+ * @nullable
+ */
+export type SpendingRulesResponseRules = SpendingRulesItem | null;
+
+/**
+ * Response for set_spending_rules / get_spending_rules.
+ */
+export interface SpendingRulesResponse {
+  /** The usage key's 0x-prefixed 32-byte hash the rules are stored under. */
+  usage_api_key_hash: string;
+  /**
+   * Stored rules, or null when the key has none.
+   * @nullable
+   */
+  rules?: SpendingRulesResponseRules;
+  /**
+   * Cents spent in the current rolling window (null when no cap / no usage yet).
+   * @nullable
+   */
+  spent_cents_in_window?: number | null;
+  /** Whether the on-chain `hasSpendingRules` gate is set for this key. Should equal `rules.is_some()`; a mismatch means a previous write half-failed — re-run set_spending_rules or remove_spending_rules to reconcile. */
+  on_chain_flag: boolean;
+}
+
+/**
+ * The stored spending rules for a usage key (see set_spending_rules).
+ */
+export interface SpendingRulesItem {
+  /** @nullable */
+  spend_cap_cents?: number | null;
+  /** @nullable */
+  spend_window_seconds?: number | null;
+  /** @nullable */
+  rate_limit_rps?: number | null;
+  /** @nullable */
+  rate_limit_burst?: number | null;
+  /** @nullable */
+  max_concurrency?: number | null;
+  /** @nullable */
+  ip_rate_limit_rps?: number | null;
+  /** @nullable */
+  ip_rate_limit_burst?: number | null;
+  /** @nullable */
+  allowed_origins?: string[] | null;
+  enabled: boolean;
+}
+
+/**
+ * Request for set_spending_rules: make a usage key safe to embed in a frontend by bounding its blast radius. Omitted limits mean "no limit"; paired fields must be supplied together. Master API key via header.
+ */
+export interface SetSpendingRulesRequest {
+  /** The usage API key (raw key or its 0x-prefixed 32-byte hash as returned by list_api_keys) the rules apply to. Must belong to the calling account. */
+  usage_api_key: string;
+  /**
+   * Rolling spend cap in cents; pair with `spend_window_seconds`. 402 once reached.
+   * @nullable
+   */
+  spend_cap_cents?: number | null;
+  /**
+   * Length of the rolling spend window in seconds; pair with `spend_cap_cents`.
+   * @nullable
+   */
+  spend_window_seconds?: number | null;
+  /**
+   * Sustained requests/second for the key across all callers; pair with `rate_limit_burst`.
+   * @nullable
+   */
+  rate_limit_rps?: number | null;
+  /**
+   * Burst allowance for the per-key limit; pair with `rate_limit_rps`.
+   * @nullable
+   */
+  rate_limit_burst?: number | null;
+  /**
+   * Maximum simultaneously-executing actions for the key (429 above it).
+   * @nullable
+   */
+  max_concurrency?: number | null;
+  /**
+   * Sustained requests/second per client IP; pair with `ip_rate_limit_burst`.
+   * @nullable
+   */
+  ip_rate_limit_rps?: number | null;
+  /**
+   * Burst allowance for the per-IP limit; pair with `ip_rate_limit_rps`.
+   * @nullable
+   */
+  ip_rate_limit_burst?: number | null;
+  /**
+   * Browser origins (`scheme://host[:port]`, `*.` host prefix allowed) permitted to use the key. When set, requests without a matching `Origin` header get 403.
+   * @nullable
+   */
+  allowed_origins?: string[] | null;
+  /** Set false to keep the rules stored but not enforced. Defaults to true. */
+  enabled?: boolean;
+}
+
+/**
+ * Request for remove_spending_rules / get_spending_rules. Master API key via header.
+ */
+export interface UsageKeySpendingRulesRequest {
+  /** The usage API key (raw key or its 0x-prefixed 32-byte hash). */
+  usage_api_key: string;
+}
+
+/**
  * One item from list_groups, list_wallets, list_wallets_in_group, or list_actions (AccountConfig.sol Metadata).
  */
 export interface ListMetadataItem {
@@ -860,6 +967,37 @@ export type UpdateUsageApiKeyMetadataHeaders = {
 };
 
 export type UpdateUsageApiKeyMetadataDefault = AccountOpResponse | ErrMessage;
+
+export type SetSpendingRulesHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type SetSpendingRulesDefault = SpendingRulesResponse | ErrMessage;
+
+export type RemoveSpendingRulesHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type RemoveSpendingRulesDefault = SpendingRulesResponse | ErrMessage;
+
+export type GetSpendingRulesParams = {
+  usage_api_key: string;
+};
+
+export type GetSpendingRulesHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type GetSpendingRulesDefault = SpendingRulesResponse | ErrMessage;
 
 export type ListGroupsParams = {
   /**
@@ -2249,6 +2387,156 @@ NOT IDEMPOTENT: every call returns a brand-new wallet (a fresh random derivation
       response,
       data,
       operationId: "update_usage_api_key_metadata",
+    };
+  }
+
+  /**
+ * Set (create or replace) the spending rules for one of your usage API keys and turn on its on-chain `hasSpendingRules` gate. Use this to make a usage key safe to embed in a frontend: a rolling spend cap (402 when reached), per-key and per-client-IP rate limits and a concurrency cap (429), and a browser origin allowlist (403). Keys without rules pay no extra latency.
+
+Requires the account's master API key. Returns 503 if this node is not connected to the spending-rules store, 400 if the rules are invalid, and 403 if the usage key does not belong to your account.
+ */
+  setSpendingRules(
+    setSpendingRulesRequest: SetSpendingRulesRequest,
+    headers: SetSpendingRulesHeaders,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: SetSpendingRulesDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/set_spending_rules`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "POST",
+      k6url.toString(),
+      JSON.stringify(setSpendingRulesRequest),
+      {
+        ...mergedRequestParameters,
+        headers: {
+          ...mergedRequestParameters?.headers,
+          "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
+        },
+      },
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "set_spending_rules",
+    };
+  }
+
+  /**
+   * Remove the spending rules from one of your usage API keys and clear its on-chain gate, returning it to unrestricted (account-level) limits.
+   */
+  removeSpendingRules(
+    usageKeySpendingRulesRequest: UsageKeySpendingRulesRequest,
+    headers: RemoveSpendingRulesHeaders,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: RemoveSpendingRulesDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/remove_spending_rules`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "POST",
+      k6url.toString(),
+      JSON.stringify(usageKeySpendingRulesRequest),
+      {
+        ...mergedRequestParameters,
+        headers: {
+          ...mergedRequestParameters?.headers,
+          "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
+        },
+      },
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "remove_spending_rules",
+    };
+  }
+
+  /**
+   * Read the spending rules, current-window spend and on-chain gate state for one of your usage API keys. `usage_api_key` may be the raw key or its hash.
+   */
+  getSpendingRules(
+    params: GetSpendingRulesParams,
+    headers: GetSpendingRulesHeaders,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: GetSpendingRulesDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(
+      this.cleanBaseUrl +
+        `/get_spending_rules` +
+        `?${new URLSearchParams(params).toString()}`,
+    );
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request("GET", k6url.toString(), undefined, {
+      ...mergedRequestParameters,
+      headers: {
+        ...mergedRequestParameters?.headers,
+        // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+        ...Object.fromEntries(
+          Object.entries(headers || {}).map(([key, value]) => [
+            key,
+            String(value),
+          ]),
+        ),
+      },
+    });
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "get_spending_rules",
     };
   }
 

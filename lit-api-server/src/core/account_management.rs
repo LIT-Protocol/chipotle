@@ -3,27 +3,30 @@ use std::sync::Arc;
 use crate::accounts::chain_config::config_key_names;
 use crate::accounts::signer_pool::SignerPool;
 use crate::config::GLOBAL_NODE_CONFIG;
+use crate::core::spending_rules::{RuleSet, SpendingRulesError, SpendingRulesState};
 use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::{
     AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
     AddUsageApiKeyRequest, AddUsageApiKeyWithSignatureRequest, ConvertToChainSecuredAccountRequest,
     CreateWalletWithSignatureRequest, DeleteActionRequest, DeleteWalletRequest, NewAccountRequest,
     RemoveActionFromGroupRequest, RemoveGroupRequest, RemovePkpFromGroupRequest,
-    RemoveUsageApiKeyRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
-    UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
+    RemoveUsageApiKeyRequest, SetSpendingRulesRequest, UpdateActionMetadataRequest,
+    UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
+    UsageKeySpendingRulesRequest,
 };
 use crate::core::v1::models::response::{
     AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse,
     AddUsageApiKeyWithSignatureResponse, ApiKeyItem, ChainConfigKeysResponse, CreateWalletResponse,
     CreateWalletWithSignatureResponse, ListMetadataItem, NewAccountResponse,
-    NodeChainConfigResponse, PrepareWalletResponse, WalletItem,
+    NodeChainConfigResponse, PrepareWalletResponse, SpendingRulesItem, SpendingRulesResponse,
+    WalletItem,
 };
 use crate::dstack::v1::get_client_key;
 use crate::stripe::StripeState;
 use crate::utils::generate_unique_derivation_path;
 use crate::utils::parse_with_hash::{
     hashed_cid_to_u256, hex_array_to_h160_array, hex_array_to_u256_array, ipfs_cid_to_u256,
-    is_precomputed_hash_shape, string_group_id_to_u256,
+    is_precomputed_hash_shape, string_group_id_to_u256, usage_api_key_to_hash,
 };
 use crate::{accounts, dstack};
 use alloy::primitives::{Address, U256};
@@ -971,6 +974,188 @@ pub async fn get_admin_api_payer() -> Result<String, ApiStatus> {
         ApiStatus::internal_server_error(anyhow::anyhow!(e), "PrivateKeySigner::from_slice failed")
     })?;
     Ok(bytes_to_0x_hex(signer.address().as_slice()))
+}
+
+// ─── Spending rules (Lambda parity) ─────────────────────────────────────────
+
+fn map_spending_error(e: SpendingRulesError) -> ApiStatus {
+    match e {
+        SpendingRulesError::NotConfigured => ApiStatus {
+            status: rocket::http::Status::ServiceUnavailable,
+            message: e.to_string(),
+        },
+        SpendingRulesError::Rejected(m) => ApiStatus::bad_request(anyhow::anyhow!(m.clone()), m),
+        SpendingRulesError::Upstream(_) => ApiStatus {
+            status: rocket::http::Status::BadGateway,
+            message: e.to_string(),
+        },
+    }
+}
+
+fn usage_key_hash_hex(usage_api_key_or_hash: &str) -> String {
+    let h = usage_api_key_to_hash(usage_api_key_or_hash);
+    format!("0x{:0>64}", format!("{h:x}"))
+}
+
+fn rules_item(r: RuleSet) -> SpendingRulesItem {
+    SpendingRulesItem {
+        spend_cap_cents: r.spend_cap_cents,
+        spend_window_seconds: r.spend_window_seconds,
+        rate_limit_rps: r.rate_limit_rps,
+        rate_limit_burst: r.rate_limit_burst,
+        max_concurrency: r.max_concurrency,
+        ip_rate_limit_rps: r.ip_rate_limit_rps,
+        ip_rate_limit_burst: r.ip_rate_limit_burst,
+        allowed_origins: r.allowed_origins,
+        enabled: r.enabled,
+    }
+}
+
+/// Store a usage key's spending rules in lit-payments, then set the on-chain
+/// `hasSpendingRules` gate so the gateway starts enforcing them.
+///
+/// Order matters: the row is written first so that the moment the flag flips,
+/// the gateway's fetch finds rules rather than a 404 (which it treats as
+/// "no rules", i.e. fails open). If the flag tx fails after the row is stored,
+/// the rules are inert but harmless; `get_spending_rules` exposes the mismatch
+/// via `on_chain_flag` and re-running this call repairs it.
+pub async fn set_spending_rules(
+    signer_pool: Arc<SignerPool>,
+    spending: &SpendingRulesState,
+    api_key: &str,
+    req: Json<SetSpendingRulesRequest>,
+) -> Result<SpendingRulesResponse, ApiStatus> {
+    let req = req.into_inner();
+    let usage_key = req.usage_api_key.trim().to_string();
+    if usage_key.is_empty() {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("usage_api_key is required"),
+            "usage_api_key is required",
+        ));
+    }
+    let rules = RuleSet {
+        spend_cap_cents: req.spend_cap_cents,
+        spend_window_seconds: req.spend_window_seconds,
+        rate_limit_rps: req.rate_limit_rps,
+        rate_limit_burst: req.rate_limit_burst,
+        max_concurrency: req.max_concurrency,
+        ip_rate_limit_rps: req.ip_rate_limit_rps,
+        ip_rate_limit_burst: req.ip_rate_limit_burst,
+        allowed_origins: req.allowed_origins,
+        enabled: req.enabled,
+    };
+
+    // Fail fast (and before any on-chain write) if this node can't reach the store.
+    if !spending.is_configured() {
+        return Err(map_spending_error(SpendingRulesError::NotConfigured));
+    }
+
+    // Authorization is the on-chain write: `setSpendingRulesFlag` reverts with
+    // NoAccountAccess unless `api_key` owns the account. Do the (cheap,
+    // simulated) chain write first so a foreign usage key never gets a row.
+    let already_flagged = accounts::get_spending_rules_flag(&usage_key)
+        .await
+        .map_err(|e| map_contract_error(e, "get_spending_rules_flag failed"))?;
+    if already_flagged {
+        // Still prove ownership before touching the row: an unflagged write
+        // below would do it implicitly; here nothing else would.
+        accounts::set_spending_rules_flag(signer_pool.clone(), api_key, &usage_key, true)
+            .await
+            .map_err(|e| map_contract_error(e, "set_spending_rules_flag failed"))?;
+    }
+
+    let stored = spending
+        .set_rules(&usage_key, &rules)
+        .await
+        .map_err(map_spending_error)?;
+
+    if !already_flagged {
+        accounts::set_spending_rules_flag(signer_pool, api_key, &usage_key, true)
+            .await
+            .map_err(|e| map_contract_error(e, "set_spending_rules_flag failed"))?;
+    }
+
+    Ok(SpendingRulesResponse {
+        usage_api_key_hash: usage_key_hash_hex(&usage_key),
+        rules: Some(rules_item(stored)),
+        spent_cents_in_window: None,
+        on_chain_flag: true,
+    })
+}
+
+/// Clear the on-chain gate first (so the gateway stops consulting rules), then
+/// delete the row + usage counter in lit-payments.
+pub async fn remove_spending_rules(
+    signer_pool: Arc<SignerPool>,
+    spending: &SpendingRulesState,
+    api_key: &str,
+    req: Json<UsageKeySpendingRulesRequest>,
+) -> Result<SpendingRulesResponse, ApiStatus> {
+    let usage_key = req.usage_api_key.trim().to_string();
+    if usage_key.is_empty() {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("usage_api_key is required"),
+            "usage_api_key is required",
+        ));
+    }
+    if !spending.is_configured() {
+        return Err(map_spending_error(SpendingRulesError::NotConfigured));
+    }
+    // Ownership check + gate off in one tx (reverts for a foreign key).
+    accounts::set_spending_rules_flag(signer_pool, api_key, &usage_key, false)
+        .await
+        .map_err(|e| map_contract_error(e, "set_spending_rules_flag failed"))?;
+    spending
+        .delete_rules(&usage_key)
+        .await
+        .map_err(map_spending_error)?;
+    Ok(SpendingRulesResponse {
+        usage_api_key_hash: usage_key_hash_hex(&usage_key),
+        rules: None,
+        spent_cents_in_window: None,
+        on_chain_flag: false,
+    })
+}
+
+/// Read a usage key's stored rules + current window spend + on-chain flag.
+/// Ownership is checked by confirming the usage key is listed under the caller's
+/// account (a read-only chain call; no tx).
+pub async fn get_spending_rules(
+    spending: &SpendingRulesState,
+    api_key: &str,
+    usage_api_key: &str,
+) -> Result<SpendingRulesResponse, ApiStatus> {
+    let usage_key = usage_api_key.trim();
+    if usage_key.is_empty() {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("usage_api_key is required"),
+            "usage_api_key is required",
+        ));
+    }
+    let usage_hash = usage_api_key_to_hash(usage_key);
+    let owned = accounts::list_api_keys(api_key, U256::ZERO, U256::from(1000u64))
+        .await?
+        .iter()
+        .any(|k| k.apiKeyHash == usage_hash);
+    if !owned {
+        return Err(ApiStatus::forbidden(
+            "usage_api_key does not belong to this account",
+        ));
+    }
+    let on_chain_flag = accounts::get_spending_rules_flag(usage_key).await?;
+    let stored = spending
+        .get_rules(usage_key)
+        .await
+        .map_err(map_spending_error)?;
+    Ok(SpendingRulesResponse {
+        usage_api_key_hash: usage_key_hash_hex(usage_key),
+        spent_cents_in_window: stored
+            .as_ref()
+            .and_then(|s| s.usage.as_ref())
+            .map(|u| u.spent_cents),
+        rules: stored.map(|s| rules_item(s.rules)),
+        on_chain_flag,
+    })
 }
 
 #[cfg(test)]

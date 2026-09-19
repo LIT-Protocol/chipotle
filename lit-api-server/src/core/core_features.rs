@@ -1,4 +1,4 @@
-use crate::accounts::can_execute_action;
+use crate::accounts::can_execute_action_with_spending_rules;
 use crate::accounts::chain_config::{ChainConfig, ConfigKeys};
 use crate::actions::client::ClientBuilder;
 use crate::actions::client::models::DenoExecutionEnv;
@@ -9,6 +9,8 @@ use crate::actions::client::{
 };
 use crate::actions::grpc::GrpcClientPool;
 use crate::core::cache_metadata::CacheMetadataIndex;
+use crate::core::spending_rules::SpendingRulesState;
+use crate::core::v1::guards::request_meta::SpendingContext;
 use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::{LitActionRequest, LitBinaryActionRequest};
 use crate::core::v1::models::response::{
@@ -39,6 +41,8 @@ pub async fn lit_action(
     http_client: &reqwest::Client,
     chain_config: Arc<ChainConfig>,
     stripe_state: Option<Arc<StripeState>>,
+    spending: &SpendingRulesState,
+    spending_ctx: &SpendingContext,
     lit_action_request: Json<LitActionRequest>,
 ) -> Result<LitActionResponse, ApiStatus> {
     let request_id = request_span.request_id.clone();
@@ -56,15 +60,27 @@ pub async fn lit_action(
     )
     .await?;
     let cid_hash = ipfs_cid_to_u256(&derived_ipfs_id)?;
-    let can_execute = can_execute_action(api_key, cid_hash)
-        .instrument(tracing::debug_span!("lit_action::can_execute_action"))
-        .await?;
+    // Single multicall returns the execute permission AND the zero-latency
+    // spending-rules gate. has_spending_rules is false for almost every key, so
+    // the spending-rules path below is skipped entirely for them.
+    let (can_execute, has_spending_rules) =
+        can_execute_action_with_spending_rules(api_key, cid_hash)
+            .instrument(tracing::debug_span!("lit_action::can_execute_action"))
+            .await?;
     if !can_execute {
         let msg = format!(
             "The provided API key is not authorized to execute the specified action ({derived_ipfs_id}/{cid_hash})."
         );
         return Err(ApiStatus::forbidden(msg));
     }
+
+    // Enforce per-key spending rules (origin / rate / per-IP / rolling cap /
+    // concurrency) before execution. Inert unless the key is flagged AND
+    // enforcement is configured. The returned admission holds any concurrency
+    // permit until end of scope.
+    let admission = spending
+        .admit(api_key, has_spending_rules, spending_ctx)
+        .await?;
 
     // Cache after authorization so unauthorized requests cannot pollute the cache.
     ipfs_cache
@@ -131,6 +147,7 @@ pub async fn lit_action(
         startup_script: None,
     };
 
+    let exec_start = std::time::Instant::now();
     let result = match client
         .execute_js(execution_options)
         .instrument(tracing::debug_span!("lit_action::execute_js"))
@@ -139,6 +156,11 @@ pub async fn lit_action(
         Ok(result) => result,
         Err(e) => return Err(anyhow::anyhow!("Actions failed with : {:?}", e).into()),
     };
+
+    // Record execution against the key's rolling spend counter (no-op unless the
+    // key has a spend cap). Off the response path — the local update is in-memory
+    // and the lit-payments write is fire-and-forget.
+    admission.record_seconds(exec_start.elapsed().as_secs_f64().ceil() as u64);
 
     let response = match serde_json::from_str::<serde_json::Value>(&result.response) {
         Ok(response) => response,
@@ -243,6 +265,8 @@ pub async fn lit_binary_action(
     http_client: &reqwest::Client,
     chain_config: Arc<ChainConfig>,
     stripe_state: Option<Arc<StripeState>>,
+    spending: &SpendingRulesState,
+    spending_ctx: &SpendingContext,
     gvisor_socket: PathBuf,
     request: Json<LitBinaryActionRequest>,
 ) -> Result<LitActionResponse, ApiStatus> {
@@ -260,17 +284,23 @@ pub async fn lit_binary_action(
     // the derived IPFS CID: `can_execute_action` keccak-hashes the id string,
     // so on-chain registration of the same bundle bytes matches here.
     let cid_hash = ipfs_cid_to_u256(&checksum)?;
-    let can_execute = can_execute_action(api_key, cid_hash)
-        .instrument(tracing::debug_span!(
-            "lit_binary_action::can_execute_action"
-        ))
-        .await?;
+    // Same combined check as the JS path: a frontend-safe key must not be able
+    // to sidestep its spending rules by calling the binary runner instead.
+    let (can_execute, has_spending_rules) =
+        can_execute_action_with_spending_rules(api_key, cid_hash)
+            .instrument(tracing::debug_span!(
+                "lit_binary_action::can_execute_action"
+            ))
+            .await?;
     if !can_execute {
         let msg = format!(
             "The provided API key is not authorized to execute the specified action ({checksum}/{cid_hash})."
         );
         return Err(ApiStatus::forbidden(msg));
     }
+    let admission = spending
+        .admit(api_key, has_spending_rules, spending_ctx)
+        .await?;
 
     // The gVisor runner still routes ops (fetch, key derivation, …) back
     // through this server's op handlers, so wire the same execution env the JS
@@ -318,6 +348,7 @@ pub async fn lit_binary_action(
             .filter(|s| !s.trim().is_empty()),
     };
 
+    let exec_start = std::time::Instant::now();
     let result = match client
         .execute_js(execution_options)
         .instrument(tracing::debug_span!("lit_binary_action::execute_js"))
@@ -326,6 +357,7 @@ pub async fn lit_binary_action(
         Ok(result) => result,
         Err(e) => return Err(anyhow::anyhow!("action execution failed: {e:#}").into()),
     };
+    admission.record_seconds(exec_start.elapsed().as_secs_f64().ceil() as u64);
 
     let response = match serde_json::from_str::<serde_json::Value>(&result.response) {
         Ok(response) => response,

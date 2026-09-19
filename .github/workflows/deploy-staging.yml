@@ -439,7 +439,8 @@ jobs:
             -e "CERTBOT_AWS_SECRET_ACCESS_KEY=$CERTBOT_AWS_SECRET_ACCESS_KEY" \
             -e "CERTBOT_AWS_ROLE_ARN=$CERTBOT_AWS_ROLE_ARN" \
             -e "CERTBOT_AWS_REGION=${{ vars.CERTBOT_AWS_REGION }}" \
-            -e "LIT_INTERNAL_SHARED_SECRET=$LIT_INTERNAL_SHARED_SECRET"
+            -e "LIT_INTERNAL_SHARED_SECRET=$LIT_INTERNAL_SHARED_SECRET" \
+            -e "LIT_PAYMENTS_INTERNAL_URL=${{ vars.LIT_PAYMENTS_STAGING_URL }}"
 
   wait-for-api-available:
     needs: [deploy, determine-target, detect-changes]

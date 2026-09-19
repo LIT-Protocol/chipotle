@@ -40,6 +40,55 @@ pub struct AddGroupRequest {
     pub cid_hashes_permitted: Vec<String>,
 }
 
+/// Request for set_spending_rules: make a usage key safe to embed in a frontend
+/// by bounding its blast radius. Omitted limits mean "no limit"; paired fields
+/// must be supplied together. Master API key via header.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub struct SetSpendingRulesRequest {
+    /// The usage API key (raw key or its 0x-prefixed 32-byte hash as returned
+    /// by list_api_keys) the rules apply to. Must belong to the calling account.
+    pub usage_api_key: String,
+    /// Rolling spend cap in cents; pair with `spend_window_seconds`. 402 once reached.
+    #[serde(default)]
+    pub spend_cap_cents: Option<i64>,
+    /// Length of the rolling spend window in seconds; pair with `spend_cap_cents`.
+    #[serde(default)]
+    pub spend_window_seconds: Option<i64>,
+    /// Sustained requests/second for the key across all callers; pair with `rate_limit_burst`.
+    #[serde(default)]
+    pub rate_limit_rps: Option<i32>,
+    /// Burst allowance for the per-key limit; pair with `rate_limit_rps`.
+    #[serde(default)]
+    pub rate_limit_burst: Option<i32>,
+    /// Maximum simultaneously-executing actions for the key (429 above it).
+    #[serde(default)]
+    pub max_concurrency: Option<i32>,
+    /// Sustained requests/second per client IP; pair with `ip_rate_limit_burst`.
+    #[serde(default)]
+    pub ip_rate_limit_rps: Option<i32>,
+    /// Burst allowance for the per-IP limit; pair with `ip_rate_limit_rps`.
+    #[serde(default)]
+    pub ip_rate_limit_burst: Option<i32>,
+    /// Browser origins (`scheme://host[:port]`, `*.` host prefix allowed) permitted
+    /// to use the key. When set, requests without a matching `Origin` header get 403.
+    #[serde(default)]
+    pub allowed_origins: Option<Vec<String>>,
+    /// Set false to keep the rules stored but not enforced. Defaults to true.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Request for remove_spending_rules / get_spending_rules. Master API key via header.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct UsageKeySpendingRulesRequest {
+    /// The usage API key (raw key or its 0x-prefixed 32-byte hash).
+    pub usage_api_key: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AddActionRequest {
     /// IPFS CID for the action (keccak256-hashed on server).

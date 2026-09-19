@@ -540,6 +540,7 @@ fn build_rocket(
         .manage(cpu_monitor)
         .manage(rate_limiter)
         .manage(stripe_state)
+        .manage(core::spending_rules::SpendingRulesState::from_env())
         .manage(internal_config)
         .manage(auth_resolver)
         .manage(supported_languages)
