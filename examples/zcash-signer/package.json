@@ -1,0 +1,15 @@
+{
+  "name": "zcash-signer",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Lit Action example: a keyless Zcash transparent wallet bound to the action's CID. The action derives a secp256k1 t1 address from its own identity key, builds + ZIP-243-signs the transaction it's asked to send, and signs only capped P2PKH transfers on mainnet.",
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "address": "node scripts/address.js",
+    "balance": "node scripts/balance.js",
+    "transfer": "node scripts/transfer.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
