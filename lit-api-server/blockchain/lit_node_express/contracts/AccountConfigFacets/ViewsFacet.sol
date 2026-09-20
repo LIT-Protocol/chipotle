@@ -173,12 +173,23 @@ contract ViewsFacet {
         // owner == 0 means a pre-migration wallet not yet backfilled: fall
         // through so signing keeps working until backfillPkpOwners runs.
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        uint256 resolvedMaster = s.allApiKeyHashesToMaster[apiKeyHash];
         uint256 owner = s.pkpIdToOwnerMaster[walletAddress];
         if (owner != 0) {
-            uint256 resolvedMaster = s.allApiKeyHashesToMaster[apiKeyHash];
             if (owner != resolvedMaster) {
                 revert AppStorage.InvalidRequest("PKP owned by another account");
             }
+        }
+        // Path-aliasing defense (companion to the pkpId binding above). The pkpId
+        // binding only protects the address label; the key is derived from the
+        // path. If a resolving account is not the path's first owner, this is a
+        // stale pre-fix aliasing registration pointing at someone else's key —
+        // fail closed instead of releasing it. owner == 0 means a pre-migration
+        // path not yet backfilled: fall through so signing keeps working until
+        // backfillPathOwners runs.
+        uint256 pathOwner = s.pathToOwnerMaster[derivation];
+        if (pathOwner != 0 && pathOwner != resolvedMaster) {
+            revert AppStorage.InvalidRequest("derivation path owned by another account");
         }
         return derivation;
     }
@@ -190,6 +201,19 @@ contract ViewsFacet {
     function getPkpOwnerMaster(address pkpId) public view returns (uint256) {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         return s.pkpIdToOwnerMaster[pkpId];
+    }
+
+    /// @notice Return the master apiKeyHash that first registered a derivationPath,
+    ///         or 0 if the path has never been bound (pre-migration wallet or never
+    ///         registered).
+    /// @dev Companion to getPkpOwnerMaster. The binding survives
+    ///      removeWalletDerivation by design; used to audit the path first-owner
+    ///      rule and the backfillPathOwners migration.
+    function getPathOwnerMaster(
+        uint256 derivationPath
+    ) public view returns (uint256) {
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        return s.pathToOwnerMaster[derivationPath];
     }
 
     function listApiKeys(

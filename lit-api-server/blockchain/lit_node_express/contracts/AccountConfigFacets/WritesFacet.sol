@@ -72,6 +72,10 @@ contract WritesFacet {
         address indexed pkpId,
         uint256 indexed masterHash
     );
+    event PathOwnerBackfilled(
+        uint256 indexed derivationPath,
+        uint256 indexed masterHash
+    );
     event UsageApiKeyRemoved(
         uint256 indexed accountApiKeyHash,
         uint256 indexed usageApiKeyHash
@@ -698,6 +702,19 @@ contract WritesFacet {
         } else if (existingOwner != masterHash) {
             revert AppStorage.InvalidRequest("PKP owned by another account");
         }
+        // Global first-owner binding on the derivationPath itself. The pkpId
+        // binding above only protects the address label, but the private key is a
+        // stateless function of the path (get_client_key(path)) and paths are
+        // public, so an attacker could otherwise register a fresh, self-owned
+        // pkpId carrying a victim's path and have the node release the victim's
+        // key. Binding the path to its first owner makes that registration revert.
+        // Enforced symmetrically at resolve time in ViewsFacet.getWalletDerivation.
+        uint256 existingPathOwner = s.pathToOwnerMaster[derivationPath];
+        if (existingPathOwner == 0) {
+            s.pathToOwnerMaster[derivationPath] = masterHash;
+        } else if (existingPathOwner != masterHash) {
+            revert AppStorage.InvalidRequest("derivation path owned by another account");
+        }
         account.pkpData[pkpId].id = derivationPath;
         account.pkpData[pkpId].name = name;
         account.pkpData[pkpId].description = description;
@@ -788,6 +805,42 @@ contract WritesFacet {
             }
             s.pkpIdToOwnerMaster[pkpIds[i]] = masterHashes[i];
             emit PkpOwnerBackfilled(pkpIds[i], masterHashes[i]);
+        }
+    }
+
+    /// @notice One-time migration helper: bind derivation paths registered before
+    ///         the global path-owner binding existed to their original master
+    ///         account. Companion to backfillPkpOwners — until a path is
+    ///         backfilled, getWalletDerivation falls through (pathOwner == 0), so
+    ///         the aliasing hole stays open for that path. Run this over every
+    ///         historical path to fully close it for pre-fix wallets.
+    /// @dev Pairs should be derived off-chain from the EARLIEST
+    ///      `WalletDerivationRegistered(masterHash, pkpId, derivationPath)` event
+    ///      per derivationPath (first registration wins, matching the rule
+    ///      registerWalletDerivation now enforces). Already-bound paths are
+    ///      skipped, never re-assigned, so the call is idempotent and safe to
+    ///      re-run. Restricted to the diamond owner or config operator.
+    function backfillPathOwners(
+        uint256[] calldata derivationPaths,
+        uint256[] calldata masterHashes
+    ) public {
+        SecurityLib.revertIfNotConfigOperatorOrOwner(msg.sender);
+        if (derivationPaths.length != masterHashes.length) {
+            revert AppStorage.InvalidRequest("array length mismatch");
+        }
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        for (uint256 i = 0; i < derivationPaths.length; i++) {
+            if (masterHashes[i] == 0) {
+                revert AppStorage.InvalidRequest("masterHash must be non-zero");
+            }
+            if (derivationPaths[i] == 0) {
+                revert AppStorage.InvalidRequest("derivationPath must be non-zero");
+            }
+            if (s.pathToOwnerMaster[derivationPaths[i]] != 0) {
+                continue; // already bound — never re-assign ownership
+            }
+            s.pathToOwnerMaster[derivationPaths[i]] = masterHashes[i];
+            emit PathOwnerBackfilled(derivationPaths[i], masterHashes[i]);
         }
     }
 

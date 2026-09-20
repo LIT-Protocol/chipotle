@@ -107,7 +107,7 @@ library DiamondDeploy {
     }
 
     function viewsSelectors() internal pure returns (bytes4[] memory s) {
-        s = new bytes4[](35);
+        s = new bytes4[](36);
         s[0] = ViewsFacet.adminApiPayerAccount.selector;
         s[1] = ViewsFacet.api_payers.selector;
         s[2] = ViewsFacet.pricingOperator.selector;
@@ -143,10 +143,11 @@ library DiamondDeploy {
         s[32] = ViewsFacet.canUseWalletInActionFast.selector;
         s[33] = ViewsFacet.canExecuteActionAndUseWallet.selector;
         s[34] = ViewsFacet.getPkpOwnerMaster.selector;
+        s[35] = ViewsFacet.getPathOwnerMaster.selector;
     }
 
     function writesSelectors() internal pure returns (bytes4[] memory s) {
-        s = new bytes4[](21);
+        s = new bytes4[](22);
         s[0] = WritesFacet.newChainSecuredAccount.selector;
         s[1] = WritesFacet.newAccount.selector;
         s[2] = WritesFacet.convertToChainSecuredAccount.selector;
@@ -168,6 +169,7 @@ library DiamondDeploy {
         s[18] = WritesFacet.removeWalletDerivation.selector;
         s[19] = WritesFacet.setNodeConfiguration.selector;
         s[20] = WritesFacet.backfillPkpOwners.selector;
+        s[21] = WritesFacet.backfillPathOwners.selector;
     }
 
     function apiConfigSelectors() internal pure returns (bytes4[] memory s) {
