@@ -1,0 +1,154 @@
+# Backfill pathToOwnerMaster after the #690 derivation-path aliasing fix.
+#
+# Run this IMMEDIATELY after the diamondCut that ships the #690 facets (same
+# maintenance window): until it runs, historical paths are unbound and any
+# account can claim them. Same task for every target; only the signing differs:
+#
+#   next  → the diamond owner/config operator is the EOA behind
+#           PHALA_DSTACKAPP_PRIVATE_KEY, so mode=execute sends directly.
+#   prod  → the diamond is owned by the Safe (SAFE_ADDRESS_CHIPOTLE_PROD), so
+#           use mode=safe-json: the workflow uploads Safe Transaction Builder
+#           batches as an artifact. Import each in the Safe UI, execute, then
+#           re-run with mode=dry-run and confirm "Nothing to do".
+#
+# Always run mode=dry-run first and read the conflict report. Conflicts are a
+# hard stop unless allow_conflicts is set.
+#
+# Required secrets:
+#   BASE_CHAIN_RPC                 - RPC endpoint for Base (event scan + storage reconstruction)
+#   PHALA_DSTACKAPP_PRIVATE_KEY    - next diamond owner (mode=execute, target=next only)
+
+name: "Backfill Path Owners (#690)"
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Deploy target whose NodeConfig (contract_address) to use"
+        required: true
+        type: choice
+        options:
+          - next
+          - prod
+        default: next
+      mode:
+        description: "dry-run (report only), execute (EOA owner sends; next only), safe-json (write Safe Transaction Builder batches; prod)"
+        required: true
+        type: choice
+        options:
+          - dry-run
+          - execute
+          - safe-json
+        default: dry-run
+      allow_conflicts:
+        description: "Proceed even if paths were registered by multiple master accounts (review the dry-run report first)"
+        required: false
+        type: boolean
+        default: false
+      from_block:
+        description: "Block to start the event scan from (0 = genesis; next diamond was created at 51394331)"
+        required: false
+        type: string
+        default: "0"
+      events_only:
+        description: "Skip the diamond-storage reconstruction (not recommended: prod has PKPs with no registration event)"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: backfill-path-owners-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read config from NodeConfig
+        id: config
+        run: |
+          CONFIG="lit-api-server/NodeConfig.${{ inputs.target }}.toml"
+          if [ ! -f "$CONFIG" ]; then
+            echo "::error::$CONFIG not found."
+            exit 1
+          fi
+          NETWORK=$(grep '^name' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+          ADDRESS=$(grep '^contract_address' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+          if [ "$NETWORK" != "base" ]; then
+            echo "::error::Expected network 'base' in $CONFIG, got '$NETWORK'."
+            exit 1
+          fi
+          if ! printf '%s' "$ADDRESS" | grep -Eq '^0x[a-fA-F0-9]{40}$'; then
+            echo "::error::Invalid contract_address '$ADDRESS' in $CONFIG."
+            exit 1
+          fi
+          if ! printf '%s' "${{ inputs.from_block }}" | grep -Eq '^[0-9]+$'; then
+            echo "::error::from_block must be a non-negative integer."
+            exit 1
+          fi
+          if [ "${{ inputs.mode }}" = "execute" ] && [ "${{ inputs.target }}" != "next" ]; then
+            echo "::error::mode=execute is only wired for target=next (EOA owner). prod is Safe-owned: use mode=safe-json."
+            exit 1
+          fi
+          echo "address=$ADDRESS" >> "$GITHUB_OUTPUT"
+          echo "Resolved from $CONFIG: network=$NETWORK address=$ADDRESS"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install contract dependencies
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: npm ci
+
+      - name: Backfill path owners
+        working-directory: lit-api-server/blockchain/lit_node_express
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_CHAIN_RPC }}
+          CONFIG_OPERATOR_PRIVATE_KEY: ${{ inputs.mode == 'execute' && secrets.PHALA_DSTACKAPP_PRIVATE_KEY || '' }}
+          MODE: ${{ inputs.mode }}
+          ALLOW_CONFLICTS: ${{ inputs.allow_conflicts }}
+          EVENTS_ONLY: ${{ inputs.events_only }}
+          FROM_BLOCK: ${{ inputs.from_block }}
+          ADDRESS: ${{ steps.config.outputs.address }}
+        run: |
+          set -o pipefail
+          ARGS=(--network base --diamond "$ADDRESS" --from-block "$FROM_BLOCK")
+          case "$MODE" in
+            execute)   ARGS+=(--execute) ;;
+            safe-json) ARGS+=(--safe-out safe-backfill-paths) ;;
+            dry-run)   ;;
+          esac
+          [ "$ALLOW_CONFLICTS" = "true" ] && ARGS+=(--allow-conflicts)
+          [ "$EVENTS_ONLY" = "true" ] && ARGS+=(--events-only)
+          npx hardhat backfill-path-owners "${ARGS[@]}" 2>&1 | tee backfill.log
+
+          {
+            echo "## Backfill Path Owners — ${{ inputs.target }} (${MODE})"
+            echo
+            echo "**Diamond:** \`$ADDRESS\`"
+            echo
+            echo '```'
+            grep -E "distinct derivationPaths|storage agrees|need backfilling|Nothing to do|MULTIPLE master|Backfill complete|wrote |Refusing" backfill.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Safe Transaction Builder batches
+        if: inputs.mode == 'safe-json'
+        uses: actions/upload-artifact@v4
+        with:
+          name: safe-backfill-paths-${{ inputs.target }}
+          path: lit-api-server/blockchain/lit_node_express/safe-backfill-paths/
+          if-no-files-found: warn
+
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backfill-log-${{ inputs.target }}-${{ inputs.mode }}
+          path: lit-api-server/blockchain/lit_node_express/backfill.log

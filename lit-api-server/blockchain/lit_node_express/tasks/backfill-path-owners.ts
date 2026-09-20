@@ -1,24 +1,79 @@
 import { task } from "hardhat/config";
 import { ethers } from "ethers";
+import * as fs from "fs";
+import * as path from "path";
 import { withRetry } from "./rpc-retry";
 
-// Minimal ABI: the event we scan plus the migration entry points.
+// Minimal ABI: the event we scan, the storage views used to reconstruct
+// ownership for registrations that never emitted an event, and the migration
+// entry points.
 const DIAMOND_ABI = [
   "event WalletDerivationRegistered(uint256 indexed apiKeyHash, address indexed pkpId, uint256 derivationPath)",
   "function backfillPathOwners(uint256[] derivationPaths, uint256[] masterHashes)",
   "function getPathOwnerMaster(uint256 derivationPath) view returns (uint256)",
+  "function getPkpOwnerMaster(address pkpId) view returns (uint256)",
+  "function getWalletDerivation(uint256 apiKeyHash, address walletAddress) view returns (uint256)",
+  "function pkpCount() view returns (uint256)",
+  "function allPkpIdsAt(uint256 index) view returns (address)",
 ];
+
+const diamondIface = new ethers.Interface(DIAMOND_ABI);
 
 interface FirstRegistration {
   derivationPath: bigint;
   masterHash: bigint;
   pkpId: string;
+  // Block/tx of the first WalletDerivationRegistered event, or 0 / "storage"
+  // when the binding was reconstructed from diamond storage only.
   blockNumber: number;
   txHash: string;
+  source: "event" | "storage" | "both";
   // Other master accounts that later registered the same derivationPath
   // (under the same or a different pkpId label). Either way the later account
   // can drive the node onto this path's key, so both are conflicts here.
-  conflicts: { masterHash: bigint; pkpId: string }[];
+  conflicts: { masterHash: bigint; pkpId: string; via: "event" | "storage" }[];
+}
+
+/** Run `fn` over `items` with at most `limit` in flight. */
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+/** Safe Transaction Builder JSON (same shape the #575 Safe backfill used). */
+function buildSafeBatch(
+  chainId: bigint,
+  diamondAddress: string,
+  name: string,
+  description: string,
+  calls: string[]
+) {
+  return {
+    version: "1.0",
+    chainId: chainId.toString(),
+    createdAt: Date.now(),
+    meta: { name, description, txBuilderVersion: "1.16.5" },
+    transactions: calls.map((data) => ({
+      to: ethers.getAddress(diamondAddress),
+      value: "0",
+      data,
+      contractMethod: null,
+      contractInputsValues: null,
+    })),
+  };
 }
 
 /**
@@ -38,11 +93,24 @@ interface FirstRegistration {
  * maintenance window), dry-run first, and treat reported conflicts as
  * incidents to investigate before --execute.
  *
- * This task rebuilds the binding from history: it scans every
- * WalletDerivationRegistered event, takes the FIRST registration per
- * derivationPath (the same rule the contract now enforces), and submits
- * backfillPathOwners in batches. Already-bound paths are skipped on-chain, so
- * the task is idempotent and safe to re-run until it reports nothing left.
+ * Ownership is rebuilt from TWO sources and cross-checked:
+ *  1. Event history: every WalletDerivationRegistered event, FIRST registration
+ *     per derivationPath (the rule the contract now enforces).
+ *  2. Diamond storage: every pkpId in the global list -> its #575 owner
+ *     (getPkpOwnerMaster) -> that account's derivation path
+ *     (getWalletDerivation). This is the authoritative pkpData the node reads,
+ *     and it covers wallets migrated into the diamond without an event — the
+ *     #575 event-only backfill missed 436 such PKPs on prod.
+ * Disagreements between the two are reported as conflicts.
+ *
+ * Output modes:
+ *  - default: dry run, prints the plan.
+ *  - --execute: send backfillPathOwners from CONFIG_OPERATOR_PRIVATE_KEY /
+ *    OWNER_PRIVATE_KEY (EOA owner or config operator, e.g. `next`).
+ *  - --safe-out <dir>: write Safe Transaction Builder JSON batches for a
+ *    Safe-owned diamond (`prod`). Import each file in the Safe UI, execute,
+ *    then re-run this task (dry run) until it reports nothing left.
+ * Already-bound paths are skipped on-chain, so every mode is idempotent.
  *
  * Companion tasks: `backfill-pkp-owners` (the #575 pkpId binding) and
  * `scan-path-aliases` (read-only detector for cross-pkpId path aliasing).
@@ -60,10 +128,21 @@ task(
     "Blocks to stay behind chain head to avoid reorgs (0 = use the 'finalized' tag)",
     "0"
   )
+  .addOptionalParam("concurrency", "Parallel RPC reads during storage reconstruction", "8")
+  .addOptionalParam(
+    "safeOut",
+    "Write Safe Transaction Builder JSON batches to this directory instead of sending (for a Safe-owned diamond)"
+  )
+  .addOptionalParam(
+    "callsPerFile",
+    "backfillPathOwners calls bundled per Safe JSON file (--safe-out only)",
+    "10"
+  )
+  .addFlag("eventsOnly", "Skip the diamond-storage reconstruction (events only)")
   .addFlag("execute", "Send the backfill transactions (default is dry-run)")
   .addFlag(
     "allowConflicts",
-    "Proceed even if paths were registered by multiple master accounts (pre-fix hijacks/aliases). Off by default: conflicts are a hard stop under --execute."
+    "Proceed even if paths were registered by multiple master accounts (pre-fix hijacks/aliases). Off by default: conflicts are a hard stop under --execute / --safe-out."
   )
   .setAction(async (taskArgs, hre) => {
     const { diamond: diamondAddress } = taskArgs;
@@ -71,6 +150,12 @@ task(
     const chunkSize = parseInt(taskArgs.chunkSize, 10);
     const batchSize = parseInt(taskArgs.batchSize, 10);
     const confirmations = parseInt(taskArgs.confirmations, 10);
+    const concurrency = Math.max(1, parseInt(taskArgs.concurrency, 10));
+    const callsPerFile = Math.max(1, parseInt(taskArgs.callsPerFile, 10));
+    const safeOut: string | undefined = taskArgs.safeOut;
+    if (taskArgs.execute && safeOut) {
+      throw new Error("--execute and --safe-out are mutually exclusive");
+    }
 
     const rpcUrl =
       (hre.network.config as { url?: string }).url || "https://mainnet.base.org";
@@ -157,6 +242,7 @@ task(
           pkpId,
           blockNumber: log.blockNumber,
           txHash: log.transactionHash,
+          source: "event",
           conflicts: [],
         });
       } else if (
@@ -165,22 +251,113 @@ task(
           (c) => c.masterHash === masterHash && c.pkpId === pkpId
         )
       ) {
-        existing.conflicts.push({ masterHash, pkpId });
+        existing.conflicts.push({ masterHash, pkpId, via: "event" });
       }
     }
     console.log(
       `\nFound ${allLogs.length} registration events across ${firstByPath.size} distinct derivationPaths.`
     );
 
-    // 2. Surface paths registered by more than one master account. Each is a
+    // 2. Reconstruct from diamond storage. For every pkpId the diamond knows,
+    //    its #575 owner (pkpIdToOwnerMaster, populated by backfill-pkp-owners /
+    //    registration) tells us which account's pkpData row is authoritative,
+    //    and getWalletDerivation on that account yields the path. This is what
+    //    the node actually reads, so it is the ground truth for wallets that
+    //    were migrated into the diamond without a WalletDerivationRegistered
+    //    event. Cross-check against the event view: a path whose storage owner
+    //    differs from its first event registrant is a conflict.
+    let storageOnly = 0;
+    let storageAgree = 0;
+    let unboundPkps = 0;
+    let unresolved = 0;
+    if (!taskArgs.eventsOnly) {
+      const total = Number(await withRetry("pkpCount", () => readOnly.pkpCount()));
+      console.log(`\nReconstructing from storage: ${total} pkpIds on the diamond...`);
+      const indices = Array.from({ length: total }, (_, i) => i);
+      let done = 0;
+      const rows = await mapLimit(indices, concurrency, async (i) => {
+        const pkpId: string = (
+          await withRetry(`allPkpIdsAt ${i}`, () => readOnly.allPkpIdsAt(i))
+        ).toLowerCase();
+        const owner: bigint = await withRetry(`getPkpOwnerMaster ${pkpId}`, () =>
+          readOnly.getPkpOwnerMaster(pkpId)
+        );
+        let derivationPath = 0n;
+        let error: string | undefined;
+        if (owner !== 0n) {
+          try {
+            derivationPath = await withRetry(`getWalletDerivation ${pkpId}`, () =>
+              readOnly.getWalletDerivation(owner, pkpId)
+            );
+          } catch (err) {
+            error = (err as Error).message.slice(0, 120);
+          }
+        }
+        done++;
+        if (done % 250 === 0 || done === total) {
+          process.stdout.write(`\r  resolved ${done}/${total} pkpIds`);
+        }
+        return { pkpId, owner, derivationPath, error };
+      });
+      console.log("");
+      for (const r of rows) {
+        if (r.owner === 0n) {
+          unboundPkps++;
+          continue;
+        }
+        if (r.error) {
+          unresolved++;
+          console.log(
+            `  ⚠️  pkpId ${r.pkpId} (owner 0x${r.owner.toString(16)}): getWalletDerivation reverted — ${r.error}`
+          );
+          continue;
+        }
+        if (r.derivationPath === 0n) continue; // derivation removed; nothing to bind
+        const key = r.derivationPath.toString();
+        const existing = firstByPath.get(key);
+        if (!existing) {
+          storageOnly++;
+          firstByPath.set(key, {
+            derivationPath: r.derivationPath,
+            masterHash: r.owner,
+            pkpId: r.pkpId,
+            blockNumber: 0,
+            txHash: "storage",
+            source: "storage",
+            conflicts: [],
+          });
+        } else if (existing.masterHash === r.owner) {
+          storageAgree++;
+          existing.source = "both";
+        } else if (
+          !existing.conflicts.some(
+            (c) => c.masterHash === r.owner && c.pkpId === r.pkpId
+          )
+        ) {
+          existing.conflicts.push({ masterHash: r.owner, pkpId: r.pkpId, via: "storage" });
+        }
+      }
+      console.log(
+        `  storage agrees with events on ${storageAgree} path(s); ${storageOnly} path(s) exist ONLY in storage (no event); ` +
+          `${unboundPkps} pkpId(s) have no #575 owner binding; ${unresolved} could not be resolved.`
+      );
+      if (unboundPkps > 0) {
+        console.log(
+          "  ⚠️  pkpIds without a pkpIdToOwnerMaster binding cannot be attributed from storage — run backfill-pkp-owners first, or rely on their events."
+        );
+      }
+    }
+
+    // 3. Surface paths registered by more than one master account. Each is a
     //    key another account also claimed pre-fix — a probable hijack (same
     //    pkpId label) or alias (different label). The backfill binds the FIRST
     //    registrant and the hardened getWalletDerivation then refuses to serve
     //    the later registrant. But a conflict still means: (a) verify the first
     //    registrant is genuinely the rightful owner (an attacker who registered
     //    BEFORE the victim would be bound as owner here), and (b) the later
-    //    account's pkpData row should be removed. Hard stop under --execute
-    //    unless the operator has reviewed them and passes --allow-conflicts.
+    //    account's pkpData row should be removed. Hard stop under --execute /
+    //    --safe-out unless the operator has reviewed them and passes
+    //    --allow-conflicts.
     const conflicted = [...firstByPath.values()].filter(
       (r) => r.conflicts.length > 0
     );
@@ -192,33 +369,38 @@ task(
         console.log(
           `  path 0x${r.derivationPath.toString(16)} first master=0x${r.masterHash.toString(
             16
-          )} pkpId=${r.pkpId} (block ${r.blockNumber}, ${r.txHash})`
+          )} pkpId=${r.pkpId} (${r.source === "storage" ? "storage" : `block ${r.blockNumber}, ${r.txHash}`})`
         );
         for (const c of r.conflicts) {
           const kind = c.pkpId === r.pkpId ? "same pkpId (label hijack)" : `pkpId=${c.pkpId} (alias)`;
           console.log(
-            `    also registered by master 0x${c.masterHash.toString(16)} — ${kind}`
+            `    also registered by master 0x${c.masterHash.toString(16)} — ${kind} [via ${c.via}]`
           );
         }
       }
       console.log(
         "  Backfill binds the FIRST registrant; the later registrant's stale pkpData row must be removed separately."
       );
-      if (taskArgs.execute && !taskArgs.allowConflicts) {
+      if ((taskArgs.execute || safeOut) && !taskArgs.allowConflicts) {
         throw new Error(
-          `Refusing to --execute with ${conflicted.length} unresolved conflict(s). Review them, remediate the later registrants, then re-run with --allow-conflicts.`
+          `Refusing to proceed with ${conflicted.length} unresolved conflict(s). Review them, remediate the later registrants, then re-run with --allow-conflicts.`
         );
       }
     }
 
-    // 3. Drop paths that are already bound (post-upgrade registrations, or a
+    // 4. Drop paths that are already bound (post-upgrade registrations, or a
     //    previous run of this task).
     console.log("\nChecking current on-chain bindings...");
     const toBind: FirstRegistration[] = [];
-    for (const r of firstByPath.values()) {
-      const owner: bigint = await withRetry("getPathOwnerMaster", () =>
-        readOnly.getPathOwnerMaster(r.derivationPath)
-      );
+    let alreadyBound = 0;
+    const candidates = [...firstByPath.values()];
+    const owners = await mapLimit(candidates, concurrency, (r) =>
+      withRetry("getPathOwnerMaster", () =>
+        readOnly.getPathOwnerMaster(r.derivationPath) as Promise<bigint>
+      )
+    );
+    candidates.forEach((r, i) => {
+      const owner = owners[i];
       if (owner === 0n) {
         toBind.push(r);
       } else if (owner !== r.masterHash) {
@@ -231,26 +413,69 @@ task(
             16
           )} — a post-upgrade claim of an unbound historical path; investigate`
         );
+      } else {
+        alreadyBound++;
       }
-    }
-    console.log(`${toBind.length} derivationPath(s) need backfilling.`);
+    });
+    console.log(
+      `${toBind.length} derivationPath(s) need backfilling (${alreadyBound} already bound correctly).`
+    );
     if (toBind.length === 0) {
       console.log("Nothing to do.");
       return;
     }
 
+    const batches: FirstRegistration[][] = [];
+    for (let i = 0; i < toBind.length; i += batchSize) {
+      batches.push(toBind.slice(i, i + batchSize));
+    }
+    const encodeBatch = (batch: FirstRegistration[]) =>
+      diamondIface.encodeFunctionData("backfillPathOwners", [
+        batch.map((r) => r.derivationPath),
+        batch.map((r) => r.masterHash),
+      ]);
+
+    // 5a. Safe mode: write Transaction Builder JSON and stop. Idempotent on
+    //     chain, so files may be executed in any order and re-generated later.
+    if (safeOut) {
+      const chainId = (await provider.getNetwork()).chainId;
+      fs.mkdirSync(safeOut, { recursive: true });
+      const files: string[] = [];
+      for (let f = 0; f * callsPerFile < batches.length; f++) {
+        const slice = batches.slice(f * callsPerFile, (f + 1) * callsPerFile);
+        const pathCount = slice.reduce((n, b) => n + b.length, 0);
+        const json = buildSafeBatch(
+          chainId,
+          diamondAddress,
+          `backfillPathOwners ${String(f + 1).padStart(2, "0")}`,
+          `#690 pathToOwnerMaster backfill on ${diamondAddress}: ${slice.length} call(s), ${pathCount} derivationPath(s). Idempotent; already-bound paths are skipped.`,
+          slice.map(encodeBatch)
+        );
+        const file = path.join(safeOut, `safe-backfill-paths-${String(f + 1).padStart(2, "0")}.json`);
+        fs.writeFileSync(file, JSON.stringify(json, null, 2));
+        files.push(file);
+        console.log(
+          `  wrote ${file}: ${slice.length} call(s), ${pathCount} path(s), ~${(50_000 + pathCount * 26_500).toLocaleString()} gas`
+        );
+      }
+      console.log(
+        `\nWrote ${files.length} Safe Transaction Builder file(s). Import each in the Safe UI (Transaction Builder → Load batch), execute, then re-run this task without --safe-out to verify 0 remaining.`
+      );
+      return;
+    }
+
     if (!taskArgs.execute) {
-      console.log("\nDry run (pass --execute to send transactions):");
+      console.log("\nDry run (pass --execute to send, or --safe-out <dir> for Safe JSON):");
       for (const r of toBind) {
         console.log(
-          `  path 0x${r.derivationPath.toString(16)} -> 0x${r.masterHash.toString(16)}`
+          `  path 0x${r.derivationPath.toString(16)} -> 0x${r.masterHash.toString(16)} [${r.source}]`
         );
       }
       return;
     }
 
-    // 4. Send backfillPathOwners in batches. Caller must be the diamond owner
-    //    or config operator.
+    // 5b. Send backfillPathOwners in batches. Caller must be the diamond owner
+    //     or config operator.
     const signerKey =
       process.env.CONFIG_OPERATOR_PRIVATE_KEY || process.env.OWNER_PRIVATE_KEY;
     if (!signerKey) {
@@ -262,33 +487,35 @@ task(
     const diamond = new ethers.Contract(diamondAddress, DIAMOND_ABI, wallet);
     console.log(`\nSending backfill as ${wallet.address}...`);
 
-    for (let i = 0; i < toBind.length; i += batchSize) {
-      const batch = toBind.slice(i, i + batchSize);
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
       const tx = await diamond.backfillPathOwners(
         batch.map((r) => r.derivationPath),
         batch.map((r) => r.masterHash)
       );
-      console.log(
-        `  batch ${i / batchSize + 1} (${batch.length} paths): ${tx.hash}`
-      );
+      console.log(`  batch ${i + 1}/${batches.length} (${batch.length} paths): ${tx.hash}`);
       const receipt = await tx.wait();
       console.log(`    confirmed in block ${receipt.blockNumber}`);
     }
 
-    // 5. Verify every pair landed.
+    // 6. Verify every pair landed.
     console.log("\nVerifying...");
     let failures = 0;
-    for (const r of toBind) {
-      const owner: bigint = await readOnly.getPathOwnerMaster(r.derivationPath);
-      if (owner !== r.masterHash) {
+    const after = await mapLimit(toBind, concurrency, (r) =>
+      withRetry("getPathOwnerMaster", () =>
+        readOnly.getPathOwnerMaster(r.derivationPath) as Promise<bigint>
+      )
+    );
+    toBind.forEach((r, i) => {
+      if (after[i] !== r.masterHash) {
         failures++;
         console.log(
           `  ❌ path 0x${r.derivationPath.toString(
             16
-          )}: expected 0x${r.masterHash.toString(16)}, got 0x${owner.toString(16)}`
+          )}: expected 0x${r.masterHash.toString(16)}, got 0x${after[i].toString(16)}`
         );
       }
-    }
+    });
     if (failures > 0) {
       throw new Error(`${failures} binding(s) failed verification`);
     }
