@@ -8,6 +8,28 @@ const DIAMOND_ABI = [
   "function getPathOwnerMaster(uint256 derivationPath) view returns (uint256)",
 ];
 
+// Public Base RPCs cap eth_getLogs ranges (2,000 blocks on mainnet.base.org)
+// and rate-limit bursts. Retry transient failures with backoff so a long scan
+// does not die halfway; range-cap errors are not transient and surface at once
+// with a hint to lower --chunk-size.
+async function withRetry<T>(label: string, fn: () => Promise<T>, attempts = 6): Promise<T> {
+  let delay = 500;
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const msg = (err as Error).message || String(err);
+      if (/limited to a [\d,]+ range|block range/i.test(msg)) {
+        throw new Error(`${label}: ${msg} — lower --chunk-size`);
+      }
+      if (i >= attempts) throw err;
+      process.stderr.write(`\n  ${label} failed (${msg.slice(0, 80)}); retry ${i}/${attempts - 1} in ${delay}ms`);
+      await new Promise((r) => setTimeout(r, delay));
+      delay = Math.min(delay * 2, 10_000);
+    }
+  }
+}
+
 interface FirstRegistration {
   derivationPath: bigint;
   masterHash: bigint;
@@ -121,7 +143,9 @@ task(
     const allLogs: ethers.EventLog[] = [];
     for (let start = fromBlock; start <= latestBlock; start += chunkSize) {
       const end = Math.min(start + chunkSize - 1, latestBlock);
-      const logs = await readOnly.queryFilter(filter, start, end);
+      const logs = await withRetry(`getLogs ${start}-${end}`, () =>
+        readOnly.queryFilter(filter, start, end)
+      );
       for (const log of logs) allLogs.push(log as ethers.EventLog);
       if (end < latestBlock) {
         process.stdout.write(
@@ -213,7 +237,9 @@ task(
     console.log("\nChecking current on-chain bindings...");
     const toBind: FirstRegistration[] = [];
     for (const r of firstByPath.values()) {
-      const owner: bigint = await readOnly.getPathOwnerMaster(r.derivationPath);
+      const owner: bigint = await withRetry("getPathOwnerMaster", () =>
+        readOnly.getPathOwnerMaster(r.derivationPath)
+      );
       if (owner === 0n) {
         toBind.push(r);
       } else if (owner !== r.masterHash) {
