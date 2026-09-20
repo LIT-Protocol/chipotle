@@ -463,15 +463,238 @@ contract AccountsTest is BaseTest {
         assertEq(views_.getWalletDerivation(legacyHash, legacyPkp), 7);
     }
 
-    /// @dev Storage slot of `pkpIdToOwnerMaster[pkpId]`. The mapping is the last
-    ///      field of AccountConfigStorage (field index 18, counting the two
-    ///      EnumerableSet fields as 2 slots each) at base slot
-    ///      keccak256("com.litprotocol.accountconfig.storage"). Used to plant the
-    ///      pre-fix on-chain state that the public API can no longer create.
+    /// @dev Storage slot of `pkpIdToOwnerMaster[pkpId]`. The mapping is at field
+    ///      index 18 (counting the two EnumerableSet fields as 2 slots each) at
+    ///      base slot keccak256("com.litprotocol.accountconfig.storage"). Used to
+    ///      plant the pre-fix on-chain state that the public API can no longer
+    ///      create.
     function _pkpOwnerSlot(address pkpId) internal pure returns (bytes32) {
         bytes32 base = keccak256("com.litprotocol.accountconfig.storage");
         bytes32 mapSlot = bytes32(uint256(base) + 18);
         return keccak256(abi.encode(pkpId, mapSlot));
+    }
+
+    /// @dev Storage slot of `pathToOwnerMaster[derivationPath]`. Appended
+    ///      immediately after pkpIdToOwnerMaster, so field index 19.
+    function _pathOwnerSlot(
+        uint256 derivationPath
+    ) internal pure returns (bytes32) {
+        bytes32 base = keccak256("com.litprotocol.accountconfig.storage");
+        bytes32 mapSlot = bytes32(uint256(base) + 19);
+        return keccak256(abi.encode(derivationPath, mapSlot));
+    }
+
+    /// The core path-aliasing attack: the private key is a stateless function of
+    /// the derivationPath, and paths are public. The #575 pkpId binding only
+    /// protects the address label, so an attacker could register a FRESH,
+    /// self-owned pkpId carrying the victim's public path and drive the node to
+    /// release the victim's key. The path first-owner binding blocks that at
+    /// registration — note the attacker uses a DIFFERENT pkpId than the victim,
+    /// so it is the path binding, not the pkpId binding, doing the work.
+    function test_registerWalletDerivation_pathAliasingAcrossAccountsReverts()
+        public
+    {
+        uint256 victimPath = 42;
+
+        vm.prank(user);
+        writes.newChainSecuredAccount("victim", "victim");
+        uint256 victimHash = apiKeyHashOf(user);
+        address victimPkp = address(0xBEEF);
+        vm.prank(user);
+        writes.registerWalletDerivation(
+            victimHash,
+            victimPkp,
+            victimPath,
+            "v",
+            "v"
+        );
+        assertEq(views_.getPathOwnerMaster(victimPath), victimHash);
+
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+
+        // Fresh pkpId label the attacker legitimately owns, aliased to the
+        // victim's path. The pkpId binding would let this through (new address);
+        // the path binding is what must revert.
+        address attackerPkp = address(0xF00D);
+        assertEq(views_.getPkpOwnerMaster(attackerPkp), 0);
+
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "derivation path owned by another account"
+            )
+        );
+        writes.registerWalletDerivation(
+            attackerHash,
+            attackerPkp,
+            victimPath,
+            "a",
+            "a"
+        );
+    }
+
+    function test_pathOwnerBinding_survivesRemoveAndAllowsOwnerReRegister()
+        public
+    {
+        uint256 path = 42;
+
+        vm.prank(user);
+        writes.newChainSecuredAccount("victim", "victim");
+        uint256 victimHash = apiKeyHashOf(user);
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+
+        address victimPkp = address(0xBEEF);
+        vm.prank(user);
+        writes.registerWalletDerivation(victimHash, victimPkp, path, "v", "v");
+
+        // Hard delete wipes the account-local entry, but the path binding is
+        // kept (symmetric with the pkpId binding) so the key stays claimable
+        // only by its first owner.
+        vm.prank(user);
+        writes.removeWalletDerivation(victimHash, victimPkp);
+        assertEq(views_.getPathOwnerMaster(path), victimHash);
+
+        // Attacker cannot claim the freed path under any fresh label.
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "derivation path owned by another account"
+            )
+        );
+        writes.registerWalletDerivation(
+            attackerHash,
+            address(0xF00D),
+            path,
+            "a",
+            "a"
+        );
+
+        // The original owner can re-register the path (recovery flow intact).
+        vm.prank(user);
+        writes.registerWalletDerivation(victimHash, victimPkp, path, "v2", "v2");
+        assertEq(views_.getWalletDerivation(victimHash, victimPkp), path);
+    }
+
+    function test_getWalletDerivation_preExistingPathAliasFailsClosed() public {
+        uint256 path = 42;
+
+        // Attacker holds a legitimate account-local entry keyed on a fresh label
+        // pointing at `path` — exactly the stale row a pre-fix aliasing attack
+        // would have left behind (pkpId owner = attacker, so the pkpId check
+        // passes).
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+        address attackerPkp = address(0xF00D);
+        vm.prank(stranger);
+        writes.registerWalletDerivation(
+            attackerHash,
+            attackerPkp,
+            path,
+            "a",
+            "a"
+        );
+
+        // Sanity-check the slot math against the contract's own getter before
+        // relying on vm.store (guards against storage-layout drift).
+        assertEq(
+            uint256(vm.load(address(views_), _pathOwnerSlot(path))),
+            attackerHash
+        );
+
+        // Simulate post-backfill truth: the VICTIM was the real first owner of
+        // the path. (The attacker still owns the pkpId label locally.)
+        uint256 victimHash = apiKeyHashOf(user);
+        vm.store(address(views_), _pathOwnerSlot(path), bytes32(victimHash));
+        assertEq(views_.getPathOwnerMaster(path), victimHash);
+
+        // The node's key-release path resolves via getWalletDerivation with the
+        // caller's account hash. The pkpId check passes (attacker owns the
+        // label), but the path check now fails closed — neutralizing an alias
+        // that predates the upgrade.
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "derivation path owned by another account"
+            )
+        );
+        views_.getWalletDerivation(attackerHash, attackerPkp);
+    }
+
+    function test_backfillPathOwners_bindsLegacyPathsAndBlocksAliasing()
+        public
+    {
+        uint256 legacyPath = 4242;
+
+        vm.prank(user);
+        writes.newChainSecuredAccount("legacy", "legacy");
+        uint256 legacyHash = apiKeyHashOf(user);
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+
+        assertEq(views_.getPathOwnerMaster(legacyPath), 0);
+
+        uint256[] memory paths = new uint256[](1);
+        paths[0] = legacyPath;
+        uint256[] memory masters = new uint256[](1);
+        masters[0] = legacyHash;
+
+        // Only the diamond owner or config operator may backfill.
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.OnlyConfigOperatorOrOwner.selector,
+                stranger
+            )
+        );
+        writes.backfillPathOwners(paths, masters);
+
+        vm.prank(owner);
+        writes.backfillPathOwners(paths, masters);
+        assertEq(views_.getPathOwnerMaster(legacyPath), legacyHash);
+
+        // Idempotent: never re-assigns an existing binding.
+        masters[0] = attackerHash;
+        vm.prank(owner);
+        writes.backfillPathOwners(paths, masters);
+        assertEq(views_.getPathOwnerMaster(legacyPath), legacyHash);
+
+        // Post-backfill, the attacker cannot alias the legacy path...
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "derivation path owned by another account"
+            )
+        );
+        writes.registerWalletDerivation(
+            attackerHash,
+            address(0xF00D),
+            legacyPath,
+            "a",
+            "a"
+        );
+
+        // ...but the legacy owner can still register it.
+        vm.prank(user);
+        writes.registerWalletDerivation(
+            legacyHash,
+            address(0xBEEF),
+            legacyPath,
+            "l",
+            "l"
+        );
+        assertEq(
+            views_.getWalletDerivation(legacyHash, address(0xBEEF)),
+            legacyPath
+        );
     }
 
     function test_getWalletDerivation_preExistingHijackFailsClosed() public {

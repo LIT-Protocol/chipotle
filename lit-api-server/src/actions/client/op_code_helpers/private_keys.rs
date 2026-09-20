@@ -1,7 +1,4 @@
-use crate::{
-    core::pkp_id_to_derviation_path,
-    dstack::v1::{get_client_key, get_lit_action_key},
-};
+use crate::{core::get_verified_client_key, dstack::v1::get_lit_action_key};
 use alloy::signers::local::PrivateKeySigner;
 use anyhow::Result;
 use lit_core::utils::binary::bytes_to_0x_hex;
@@ -9,10 +6,10 @@ use tracing::instrument;
 
 #[instrument(skip_all, err)]
 pub async fn get_private_key(api_key: &str, pkp_id: &str) -> Result<String> {
-    let derivation_path = pkp_id_to_derviation_path(api_key, pkp_id)
-        .await
-        .map_err(|e| anyhow::anyhow!("Unable to get derivation path for private key: {e}"))?;
-    let secret_bytes = get_client_key(&derivation_path)
+    // get_verified_client_key resolves the path AND verifies the derived key's
+    // address matches pkp_id, so an aliased (pkpId, path) registration can't
+    // exfiltrate another wallet's key.
+    let secret_bytes = get_verified_client_key(api_key, pkp_id)
         .await
         .map_err(|e| anyhow::anyhow!("Unable to get client key for private key: {e}"))?;
     let secret = bytes_to_0x_hex(secret_bytes);
