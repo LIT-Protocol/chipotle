@@ -17,7 +17,9 @@ jobs:
     if: >
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: self-hosted
+    # Offline config checks need no private runner access. Hosted Ubuntu also
+    # provides the Python toolcache and Docker Compose required by this job.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
