@@ -1,0 +1,40 @@
+name: Phala Deployment Env Check
+
+on:
+  push:
+    branches: [main, next]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  phala-deployment-env:
+    if: >
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check offline Phala deployment env contracts
+        run: |
+          set -euo pipefail
+          docker compose version
+          VENV=$(mktemp -d)
+          trap 'rm -rf "$VENV"' EXIT
+          python3 -m venv "$VENV"
+          "$VENV/bin/python" -m pip install PyYAML==6.0.2
+          "$VENV/bin/python" scripts/test-phala-deployment-env.py

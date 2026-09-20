@@ -317,7 +317,8 @@ jobs:
                 "CERTBOT_AWS_SECRET_ACCESS_KEY",
                 "CERTBOT_AWS_ROLE_ARN",
                 "CERTBOT_AWS_REGION",
-                "LIT_INTERNAL_SHARED_SECRET"
+                "LIT_INTERNAL_SHARED_SECRET",
+                "NEW_ACCOUNT_RATE_LIMIT_ENABLED"
               ]
             }' > "$PROVISION_FILE"
           echo "Request payload size: $(wc -c < "$PROVISION_FILE") bytes"
@@ -457,6 +458,8 @@ jobs:
               { key: "CERTBOT_AWS_ROLE_ARN", value: process.env.CERTBOT_AWS_ROLE_ARN },
               { key: "CERTBOT_AWS_REGION", value: process.env.CERTBOT_AWS_REGION },
               { key: "LIT_INTERNAL_SHARED_SECRET", value: process.env.LIT_INTERNAL_SHARED_SECRET },
+              // Shared gateway IP makes the per-IP new-account limit a global cap.
+              { key: "NEW_ACCOUNT_RATE_LIMIT_ENABLED", value: "false" },
             ];
             const pubkey = process.env.ENCRYPT_PUBKEY;
             encryptEnvVars(envs, pubkey).then(hex => process.stdout.write(hex));
