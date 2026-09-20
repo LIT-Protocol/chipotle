@@ -299,6 +299,14 @@ contract WritesFacet {
             );
         }
         SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
+        // The account arg must be the MASTER account, not any key that merely
+        // resolves to it. revertIfNoAccountAccess above resolves a usage-key hash
+        // to its master and returns true for the api_payer on a managed account,
+        // so without this a scoped usage key could pass accountApiKeyHash = its
+        // own hash and rewrite its own scopes (or mint new keys) under the master.
+        // Every sibling structural write (updateGroup, updateActionMetadata,
+        // removeUsageApiKey, debitApiKey, ...) enforces this same invariant.
+        SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         uint256 masterAccountApiKeyHash = s.allApiKeyHashesToMaster[
             accountApiKeyHash
