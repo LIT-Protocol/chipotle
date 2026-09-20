@@ -1,5 +1,6 @@
 import { task } from "hardhat/config";
 import { ethers } from "ethers";
+import { withRetry } from "./rpc-retry";
 
 // Minimal ABI: the registration event plus the owner-binding getters used to
 // annotate findings. getPathOwnerMaster only exists on diamonds upgraded with
@@ -92,7 +93,9 @@ task(
     const allLogs: ethers.EventLog[] = [];
     for (let start = fromBlock; start <= latestBlock; start += chunkSize) {
       const end = Math.min(start + chunkSize - 1, latestBlock);
-      const logs = await readOnly.queryFilter(filter, start, end);
+      const logs = await withRetry(`getLogs ${start}-${end}`, () =>
+        readOnly.queryFilter(filter, start, end)
+      );
       for (const log of logs) allLogs.push(log as ethers.EventLog);
       if (end < latestBlock) {
         process.stdout.write(
