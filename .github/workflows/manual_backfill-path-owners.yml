@@ -106,6 +106,10 @@ jobs:
         working-directory: lit-api-server/blockchain/lit_node_express
         run: npm ci
 
+      - name: Test backfill safety checks
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: node --test test/backfill-path-owners.test.cjs
+
       - name: Backfill path owners
         working-directory: lit-api-server/blockchain/lit_node_express
         env:
