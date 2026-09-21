@@ -113,6 +113,24 @@ class PhalaDeploymentEnvTests(unittest.TestCase):
         self.assertEqual(set(allowed), set(encrypted))
         self.assertEqual(set(committed), set(encrypted))
 
+    def test_production_provisions_and_commits_environment_changes(self):
+        # Evaluate the actual jq payloads: matching key lists alone is not
+        # sufficient if provisioning silently preserves the previous list.
+        for filename, output in [
+            ("deploy-prod-1-propose.yml", "PROVISION_FILE"),
+            ("deploy-prod-2-execute-manual.yml", "COMMIT_PAYLOAD"),
+        ]:
+            with self.subTest(workflow=filename):
+                runs = workflow_runs(filename)
+                payload = extract(r"'(\{[^']*\})' > \"\$" + output + r'"', runs)
+                result = subprocess.run(
+                    ["jq", "-n", "--arg", "dc", "test compose",
+                     "--arg", "hash", "test hash", "--arg", "env", "test ciphertext",
+                     "--argjson", "keys", "[]", payload],
+                    check=True, capture_output=True, text=True,
+                )
+                self.assertIs(json.loads(result.stdout).get("update_env_vars"), True)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
