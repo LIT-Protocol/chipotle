@@ -17,26 +17,42 @@ Report privately, via either:
 - **GitHub:** open a [private security advisory](https://github.com/LIT-Protocol/chipotle/security/advisories/new)
   on this repository.
 
-In your report, please include:
+Every report **must** include:
 
-- A description of the issue and its potential impact.
-- Steps to reproduce, or a proof of concept.
-- The component affected (API server, Lit Actions runtime, contracts, deployment/CI,
-  governance, attestation/verification flow).
-- Any relevant version, commit hash, compose hash, or deployment URL.
+- **A working proof of concept** — a script, request sequence, Foundry/Hardhat
+  test, Lit Action, or exact steps with real inputs that we can replay ourselves.
+  Screenshots, video, or a description of a vulnerability class do not qualify.
+- **Demonstrated security impact** — which key, account, funds, data, or guarantee
+  (attestation, permission model, sandbox isolation, governance) is compromised.
+- **The exact target** — endpoint, contract address and function, or file and line,
+  and the component affected (API server, Lit Actions runtime, contracts,
+  deployment/CI, governance, attestation/verification flow).
+- **Reproduction context** — the commit hash, compose hash, or deployment URL tested.
+- **One vulnerability per report**, written and verified by a human. Unverified
+  scanner or AI-tool output is closed immediately; repeat submissions are banned.
+
+Reports missing any of the above are closed without triage and are not eligible
+for a reward.
 
 ## Bug bounty
 
-We pay rewards for valid, responsibly disclosed vulnerabilities, sized by severity
-and impact. See the [Bug Bounty Program](docs/architecture/verification/bug-bounty.mdx)
-page for scope, exclusions (insider attacks, the marketing website, DoS, and more),
-and the rules of engagement.
+We pay rewards for valid, previously unknown, **demonstrated** vulnerabilities that
+we assess as Medium severity or higher. Low and Informational findings are not
+rewarded. See the [Bug Bounty Program](docs/architecture/verification/bug-bounty.mdx)
+page for the full report requirements, scope, exclusions (insider attacks, the
+marketing website, DoS, best-practice findings without impact, and more), and the
+rules of engagement.
 
 ## What to expect
+
+For reports that meet the requirements above:
 
 - **Acknowledgement** within 3 business days.
 - **Triage and severity assessment** within 7 business days, with an initial
   remediation plan.
+
+Reports that do not meet the requirements receive a short closure notice or no
+reply.
 - **Coordinated disclosure.** We will work with you on a disclosure timeline and
   credit you (if you wish) once a fix is released. Please give us a reasonable window
   to remediate before any public disclosure.
@@ -58,6 +74,10 @@ Out of scope (report upstream, but tell us if it affects us):
   [dstack](https://github.com/Dstack-TEE/dstack), or
   [Phala](https://docs.phala.com/) respectively.
 - Third-party dependencies — report upstream; we track advisories via `deny.toml`.
+  A working exploit of a dependency CVE against our deployment *is* in scope.
+- Best-practice findings without a working exploit and demonstrated impact
+  (security headers, email auth records, TLS preferences, rate limiting,
+  version disclosure, scanner output). See the bug bounty page for the full list.
 
 ## Verifying the production deployment
 
