@@ -8,6 +8,11 @@ find a way to break the security model described in this section — extract key
 forge attestation, bypass the permission model, escape the Lit Actions sandbox —
 we want to hear about it, and we will pay you for it.
 
+This program rewards **demonstrated, exploitable vulnerabilities**. It does not
+reward theoretical weaknesses, best-practice deviations, scanner output, or
+speculation. Reports that do not meet the requirements below are closed without
+triage.
+
 ## How to report
 
 Email **[security@litprotocol.com](mailto:security@litprotocol.com)**.
@@ -17,33 +22,69 @@ prefer, you may instead open a
 [private security advisory](https://github.com/LIT-Protocol/chipotle/security/advisories/new)
 on the repository.
 
-Include in your report:
+## Report requirements
 
-- A description of the issue and its potential impact.
-- Steps to reproduce, or a proof of concept.
-- The component affected (API server, Lit Actions runtime, contracts,
-  deployment/CI, governance, attestation/verification flow).
-- Any relevant version, commit hash, compose hash, or deployment URL.
+Every report **must** include all of the following. Reports missing any item are
+closed without triage and are not eligible for a reward.
 
-You can expect an **acknowledgement within 3 business days** and a **triage and
-severity assessment within 7 business days**.
+1. **A working proof of concept.** A PoC is required, not optional. It must be
+   something we can run or replay ourselves: a script, an HTTP request sequence,
+   a Foundry/Hardhat test, a Lit Action, or exact step-by-step instructions with
+   the actual inputs used. Screenshots or video alone are not a PoC. A description
+   of a vulnerability *class* ("this endpoint could be vulnerable to X") is not a
+   PoC.
+2. **Demonstrated security impact against our system.** State concretely what an
+   attacker gains: which key, account, funds, or data is compromised, or which
+   guarantee (attestation, permission model, sandbox isolation, governance) is
+   broken. "Could potentially lead to" is not impact.
+3. **The exact target.** The endpoint, contract address and function, file and
+   line, or component (API server, Lit Actions runtime, contracts, deployment/CI,
+   governance, attestation/verification flow).
+4. **Reproduction context.** The commit hash, compose hash, or deployment URL you
+   tested against. Where the issue is reproducible against a
+   [self-hosted deployment](/architecture/self-hosting) in default configuration,
+   say so and include the steps.
+5. **One vulnerability per report.** Do not bundle unrelated findings. Do not
+   split one finding into several reports.
+6. **Human-written and human-verified.** You must have personally reproduced the
+   issue. Unverified output from automated scanners or AI tools — including
+   reports that cite code paths, endpoints, or behavior that do not exist — is
+   closed immediately. Repeatedly submitting such reports results in a permanent
+   ban from the program.
+
+Reports must be in English and in plain text or Markdown. We do not open
+attachments other than source files, patches, and HTTP captures.
+
+We reply to reports that meet these requirements with an **acknowledgement within
+3 business days** and a **triage and severity assessment within 7 business days**.
+Reports that do not meet them receive a short closure notice or no reply.
+Follow-up emails asking for status do not change the triage order.
 
 ## Rewards
 
-Rewards are paid for valid, previously unknown vulnerabilities, sized by severity
-and real-world impact. Issues that compromise keys, funds, user data, or the
-attestation and governance guarantees earn the largest rewards; lower-impact
-issues earn proportionally smaller ones. We determine severity using
-[CVSS](https://www.first.org/cvss/) as a starting point, adjusted for actual
-exploitability and impact on the deployed system.
+Rewards are paid for valid, previously unknown, **demonstrated** vulnerabilities,
+sized by severity and real-world impact. Issues that compromise keys, funds, user
+data, or the attestation and governance guarantees earn the largest rewards. We
+determine severity using [CVSS](https://www.first.org/cvss/) as a starting point,
+adjusted for actual exploitability and impact on the deployed system — we set the
+severity, not the reporter.
 
+- **Severity floor.** Only findings we assess as **Medium or higher** are
+  eligible for a reward. Low and Informational findings are not paid, though we
+  will fix them and may credit you.
 - Only the **first reporter** of a given issue is eligible for a reward.
-- Duplicates of issues we already know about (internally or from another
-  reporter) are not eligible, but we will tell you it was a duplicate.
-- A working proof of concept meaningfully increases the reward for the same
-  finding.
-- Rewards are at our discretion and require that you followed the
-  [rules of engagement](#rules-of-engagement) below.
+- Duplicates of issues we already know about (internally, from another
+  reporter, or already tracked in this repository's issues, advisories, or
+  changelog) are not eligible. We will tell you it was a duplicate.
+- Findings that reduce to the same root cause are treated as one issue and
+  rewarded once.
+- Findings that are only reachable through an out-of-scope precondition (a
+  malicious insider, a compromised governance signer, a compromised user device)
+  are not eligible.
+- Rewards are at our sole discretion and require that you followed the
+  [rules of engagement](#rules-of-engagement) below. We may require identity and
+  tax information before paying, and we cannot pay individuals or entities we are
+  legally prohibited from paying.
 
 ## In scope
 
@@ -58,7 +99,10 @@ state yourself — see [Verify in 30 Seconds](/architecture/verification/quick-v
 
 ## Out of scope
 
-The following are **not** eligible for rewards:
+The following are **not** eligible for rewards. Reports consisting only of items on
+this list are closed without a response.
+
+**Threat-model exclusions**
 
 - **Insider attacks.** Attacks that require a malicious Lit employee, a
   compromised governance signer, or any other privileged insider as a
@@ -66,9 +110,6 @@ The following are **not** eligible for rewards:
   [attestation](/architecture/verification/attestation) and
   [upgrade governance](/architecture/verification/upgrade-governance), not by
   the bounty program.
-- **The marketing website** (litprotocol.com and other brochure/marketing
-  properties), the blog, and documentation sites. These hold no keys and no user
-  data.
 - **Vulnerabilities in the underlying platform** — Intel TDX, the dstack OS, or
   Phala Cloud infrastructure. Report these upstream to
   [Intel](https://www.intel.com/content/www/us/en/security-center/default.html),
@@ -76,29 +117,66 @@ The following are **not** eligible for rewards:
   [Phala](https://docs.phala.com/) respectively — but do tell us if they affect
   our deployment.
 - **Third-party dependencies.** Report upstream; we track advisories via
-  `deny.toml`. A concrete, exploitable impact on our deployment of a dependency
-  vulnerability *is* in scope.
+  `deny.toml`. "You use version X of library Y, which has CVE Z" is not a
+  finding. A working exploit of that CVE against our deployment *is* in scope.
 - **Denial of service** of any kind — volumetric attacks, resource exhaustion,
-  rate-limit exhaustion — and any report whose proof requires degrading the
-  service for real users.
+  rate-limit exhaustion, gas griefing without loss of funds — and any report
+  whose proof requires degrading the service for real users.
 - **Social engineering and phishing** of Lit employees, contractors, or users.
 - **Physical attacks** on data centers, offices, or hardware, including physical
   side-channel attacks against the TEE hardware itself.
-- **Best-practice reports without a demonstrated vulnerability**: missing
-  security headers, SPF/DKIM/DMARC configuration, TLS cipher-suite preferences,
-  clickjacking on pages with no sensitive actions, verbose error messages or
-  stack traces without security impact, and output from automated scanners with
-  no accompanying analysis.
 - **Self-inflicted issues**: self-XSS, attacks requiring a victim's rooted or
-  malware-compromised device, or issues requiring the victim to paste attacker
-  code into their own console.
+  malware-compromised device, browser extension, or a victim who pastes attacker
+  code into their own console or signs an arbitrary attacker-supplied
+  transaction.
 - **Leaked or compromised user credentials and API keys** obtained outside our
   systems (credential stuffing, keys committed to third-party repos, etc.).
-- **Known issues** already tracked publicly in this repository's issues,
-  advisories, or changelog.
+
+**Out-of-scope assets**
+
+- **The marketing website** (litprotocol.com and other brochure/marketing
+  properties), the blog, the documentation sites, and the status page. These
+  hold no keys and no user data.
+- Third-party services we use (GitHub, npm, Stripe, Railway, email providers,
+  analytics) and anything hosted on domains we do not control.
+- Testnet deployments and local development builds, except as a reproduction
+  vehicle for an issue that also affects production.
+
+**Low-value findings without demonstrated impact**
+
+The following are closed without triage unless the report includes a working PoC
+that chains them into a concrete compromise of keys, funds, user data, or a
+security guarantee:
+
+- Missing or misconfigured security headers (CSP, HSTS, X-Frame-Options, etc.),
+  cookie flags, CORS configuration, and clickjacking.
+- SPF/DKIM/DMARC configuration, email spoofing, and mail-server settings.
+- TLS/SSL cipher-suite, protocol-version, or certificate-configuration
+  preferences.
+- Software version disclosure, server banners, stack traces, verbose error
+  messages, and directory listings.
+- Missing rate limiting, missing CAPTCHA, account or username enumeration,
+  password-policy and session-timeout opinions, and lack of 2FA options.
+- Open redirects, tabnabbing, host-header injection, and content or text
+  injection without a demonstrated exploit.
+- CSRF on unauthenticated endpoints, logout, or endpoints with no state-changing
+  effect.
+- Public files and metadata (`robots.txt`, `.well-known`, source maps, EXIF data,
+  public API keys that are designed to be public).
+- Secrets in git history or public repositories that are not valid or grant no
+  access.
+- Theoretical race conditions, timing side channels, or cryptographic weaknesses
+  without a working exploit.
+- Smart-contract gas optimizations, style, floating pragma, unused variables,
+  missing events, and compiler-version warnings.
+- Anything found by an automated scanner, static-analysis tool, or AI tool and
+  submitted without independent human verification and a working PoC.
+- Reports whose only evidence is a video, a screenshot, or a link to a
+  third-party writeup.
 
 If you are unsure whether something is in scope, email us and ask before you
-start testing.
+start testing. "Is this in scope?" questions are welcome; speculative reports
+are not.
 
 ## Rules of engagement
 
@@ -115,8 +193,13 @@ To be eligible for a reward, you must:
 - **Not publicly disclose** the issue before we have released a fix and agreed
   on a disclosure timeline with you. We work in good faith on coordinated
   disclosure and will credit you (if you wish) when the fix ships.
-- **Not extort.** Reports conditioned on payment before details are shared are
-  not eligible.
+- **Not extort.** Reports conditioned on payment before details are shared,
+  reports that withhold the PoC pending a reward commitment, and reports that
+  threaten disclosure are not eligible and end your participation in the
+  program.
+- **Not spam.** Sending many low-quality reports, resubmitting closed reports
+  without new evidence, or repeatedly requesting status updates results in a
+  ban from the program.
 - **Use mainnet funds and production accounts at your own risk.** Where a
   vulnerability can be demonstrated against a local deployment (see
   [Self-Hosting](/architecture/self-hosting)) or with trivial value at stake,
