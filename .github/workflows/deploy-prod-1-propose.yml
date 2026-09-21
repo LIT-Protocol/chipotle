@@ -298,6 +298,9 @@ jobs:
           # the list of allowed environment variable keys. The actual secret
           # values are encrypted client-side in a separate step and sent
           # during the Phase 2 commit call.
+          # Provision must update allowed_envs too, matching Phase 2's
+          # update_env_vars=true. Otherwise Phala hashes the old key list
+          # here, then changes the manifest (and hash) when committing.
           COMPOSE_CONTENT=$(cat docker-compose.deploy.yml)
           PROVISION_FILE=$(mktemp)
           trap 'rm -f "$PROVISION_FILE"' EXIT
@@ -306,6 +309,7 @@ jobs:
             '{
               name: "",
               docker_compose_file: $dc,
+              update_env_vars: true,
               allowed_envs: [
                 "STRIPE_SECRET_KEY",
                 "STRIPE_PUBLISHABLE_KEY",
