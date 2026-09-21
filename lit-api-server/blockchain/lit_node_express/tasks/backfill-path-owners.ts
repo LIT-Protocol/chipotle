@@ -8,6 +8,7 @@ import { withRetry } from "./rpc-retry";
 // ownership for registrations that never emitted an event, and the migration
 // entry points.
 const DIAMOND_ABI = [
+  "error InvalidRequest(string message)",
   "event WalletDerivationRegistered(uint256 indexed apiKeyHash, address indexed pkpId, uint256 derivationPath)",
   "function backfillPathOwners(uint256[] derivationPaths, uint256[] masterHashes)",
   "function getPathOwnerMaster(uint256 derivationPath) view returns (uint256)",
@@ -246,10 +247,12 @@ task(
     );
 
     const firstByPath = new Map<string, FirstRegistration>();
+    const lastByWallet = new Map<string, bigint>();
     for (const log of allLogs) {
       const masterHash = log.args[0] as bigint;
       const pkpId = (log.args[1] as string).toLowerCase();
       const derivationPath = log.args[2] as bigint;
+      lastByWallet.set(`${masterHash}:${pkpId}`, derivationPath);
       if (derivationPath === 0n) continue; // contract rejects path 0; nothing to bind
       const key = derivationPath.toString();
       const existing = firstByPath.get(key);
@@ -288,6 +291,7 @@ task(
     let storageAgree = 0;
     let unboundPkps = 0;
     let unresolved = 0;
+    let blockedAliases = 0;
     if (!taskArgs.eventsOnly) {
       const snapshot = { blockTag: latestBlock };
       const total = Number(await withRetry("pkpCount", () => readOnly.pkpCount(snapshot)));
@@ -304,6 +308,7 @@ task(
         );
         let derivationPath = 0n;
         let error: string | undefined;
+        let pathOwnershipDenied = false;
         if (owner !== 0n) {
           try {
             derivationPath = await withRetry(`getWalletDerivation ${pkpId}`, () =>
@@ -311,13 +316,21 @@ task(
             );
           } catch (err) {
             error = (err as Error).message.slice(0, 120);
+            const data = (err as { data?: string }).data;
+            if (data) {
+              try {
+                const decoded = diamondIface.parseError(data);
+                pathOwnershipDenied = decoded?.name === "InvalidRequest" &&
+                  decoded.args[0] === "derivation path owned by another account";
+              } catch { /* Unknown errors remain unresolved. */ }
+            }
           }
         }
         done++;
         if (done % 250 === 0 || done === total) {
           process.stdout.write(`\r  resolved ${done}/${total} pkpIds`);
         }
-        return { pkpId, owner, derivationPath, error };
+        return { pkpId, owner, derivationPath, error, pathOwnershipDenied };
       });
       console.log("");
       for (const r of rows) {
@@ -326,6 +339,20 @@ task(
           continue;
         }
         if (r.error) {
+          // A completed backfill intentionally makes historical aliases revert.
+          // Accept only that precise contract error, corroborated by this
+          // wallet's last event and the canonical path binding at the snapshot.
+          const lastPath = lastByWallet.get(`${r.owner}:${r.pkpId}`);
+          const first = lastPath === undefined ? undefined : firstByPath.get(lastPath.toString());
+          if (r.pathOwnershipDenied && first && first.masterHash !== r.owner) {
+            const bound = await withRetry("verify blocked alias", () =>
+              readOnly.getPathOwnerMaster(first.derivationPath, snapshot) as Promise<bigint>
+            );
+            if (bound === first.masterHash) {
+              blockedAliases++;
+              continue;
+            }
+          }
           unresolved++;
           console.log(
             `  ⚠️  pkpId ${r.pkpId} (owner 0x${r.owner.toString(16)}): getWalletDerivation reverted — ${r.error}`
@@ -359,7 +386,8 @@ task(
       }
       console.log(
         `  storage agrees with events on ${storageAgree} path(s); ${storageOnly} path(s) exist ONLY in storage (no event); ` +
-          `${unboundPkps} pkpId(s) have no #575 owner binding; ${unresolved} could not be resolved.`
+          `${unboundPkps} pkpId(s) have no #575 owner binding; ${unresolved} could not be resolved; ` +
+          `${blockedAliases} historical alias(es) correctly blocked by path ownership.`
       );
       if (unboundPkps > 0) {
         console.log(

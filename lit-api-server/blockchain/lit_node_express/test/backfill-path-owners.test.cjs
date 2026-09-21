@@ -29,6 +29,11 @@ function harness(options = {}) {
     async getWalletDerivation(_owner, pkp, s) {
       reads.push(['path', s]);
       if (options.unresolved) throw new Error('unresolved');
+      if (options.denied) {
+        const error = new Error('ownership denied');
+        error.data = new ethers.Interface(['error InvalidRequest(string)']).encodeErrorResult('InvalidRequest', [options.denied]);
+        throw error;
+      }
       return BigInt(pkp) + 1000n;
     },
     async getPathOwnerMaster(p) { return p === 1n ? 0n : (options.bound ?? 0n); },
@@ -93,4 +98,21 @@ test('rejects wrong RPC chain', async () => { await assert.rejects(harness({ cha
 test('event/storage conflict blocks Safe output by default', async () => {
   const h = harness({ logs: [{ args: [88n, ethers.toBeHex(2, 20), 1001n], blockNumber: 1, transactionIndex: 0, index: 0, transactionHash: '0x1234' }] });
   await assert.rejects(h.run({ safeOut: 'out' }), /unresolved conflict/); assert.equal(h.files.length, 0);
+});
+
+function aliasHistory() {
+  return [88n, 99n].map((master, i) => ({ args: [master, ethers.toBeHex(1, 20), 1001n], blockNumber: i + 1, transactionIndex: 0, index: 0, transactionHash: '0x1234' }));
+}
+test('post-backfill denial of a corroborated historical alias is expected', async () => {
+  const h = harness({ logs: aliasHistory(), bound: 88n, denied: 'derivation path owned by another account' });
+  await h.run();
+  assert.equal(h.files.length, 0);
+});
+test('alias denial without the canonical binding remains unresolved', async () => {
+  const h = harness({ logs: aliasHistory(), bound: 0n, denied: 'derivation path owned by another account' });
+  await assert.rejects(h.run(), /1 unresolved PKP/);
+});
+test('unrelated errors on historical aliases remain unresolved', async () => {
+  const h = harness({ logs: aliasHistory(), bound: 88n, denied: 'PKP owned by another account' });
+  await assert.rejects(h.run(), /1 unresolved PKP/);
 });
