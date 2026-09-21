@@ -136,7 +136,7 @@ task(
   .addOptionalParam(
     "callsPerFile",
     "backfillPathOwners calls bundled per Safe JSON file (--safe-out only)",
-    "10"
+    "2"
   )
   .addFlag("eventsOnly", "Skip the diamond-storage reconstruction (events only)")
   .addFlag("execute", "Send the backfill transactions (default is dry-run)")
@@ -146,20 +146,38 @@ task(
   )
   .setAction(async (taskArgs, hre) => {
     const { diamond: diamondAddress } = taskArgs;
-    const fromBlock = parseInt(taskArgs.fromBlock, 10);
-    const chunkSize = parseInt(taskArgs.chunkSize, 10);
-    const batchSize = parseInt(taskArgs.batchSize, 10);
-    const confirmations = parseInt(taskArgs.confirmations, 10);
-    const concurrency = Math.max(1, parseInt(taskArgs.concurrency, 10));
-    const callsPerFile = Math.max(1, parseInt(taskArgs.callsPerFile, 10));
+    const fromBlock = Number(taskArgs.fromBlock);
+    const chunkSize = Number(taskArgs.chunkSize);
+    const batchSize = Number(taskArgs.batchSize);
+    const confirmations = Number(taskArgs.confirmations);
+    const concurrency = Number(taskArgs.concurrency);
+    const callsPerFile = Number(taskArgs.callsPerFile);
     const safeOut: string | undefined = taskArgs.safeOut;
+    for (const [name, value, minimum] of [
+      ["fromBlock", fromBlock, 0], ["chunkSize", chunkSize, 1],
+      ["batchSize", batchSize, 1], ["confirmations", confirmations, 0],
+      ["concurrency", concurrency, 1], ["callsPerFile", callsPerFile, 1],
+    ] as const) {
+      if (!Number.isSafeInteger(value) || value < minimum) {
+        throw new Error(`${name} must be an integer >= ${minimum}`);
+      }
+    }
     if (taskArgs.execute && safeOut) {
       throw new Error("--execute and --safe-out are mutually exclusive");
+    }
+    // Leave room for Safe/MultiSend overhead under the 2^24 transaction gas cap.
+    if (safeOut && batchSize * callsPerFile > 400) {
+      throw new Error("Safe files must contain at most 400 paths; lower batchSize or callsPerFile");
     }
 
     const rpcUrl =
       (hre.network.config as { url?: string }).url || "https://mainnet.base.org";
     const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const network = await provider.getNetwork();
+    if (hre.network.config.chainId === undefined ||
+        network.chainId !== BigInt(hre.network.config.chainId)) {
+      throw new Error(`RPC chain ID ${network.chainId} does not match configured network`);
+    }
     const readOnly = new ethers.Contract(diamondAddress, DIAMOND_ABI, provider);
 
     console.log(`Network: ${hre.network.name}`);
@@ -271,23 +289,25 @@ task(
     let unboundPkps = 0;
     let unresolved = 0;
     if (!taskArgs.eventsOnly) {
-      const total = Number(await withRetry("pkpCount", () => readOnly.pkpCount()));
+      const snapshot = { blockTag: latestBlock };
+      const total = Number(await withRetry("pkpCount", () => readOnly.pkpCount(snapshot)));
       console.log(`\nReconstructing from storage: ${total} pkpIds on the diamond...`);
-      const indices = Array.from({ length: total }, (_, i) => i);
+      // registerWalletDerivation increments pkpCount BEFORE storing the ID.
+      const indices = Array.from({ length: total }, (_, i) => i + 1);
       let done = 0;
       const rows = await mapLimit(indices, concurrency, async (i) => {
         const pkpId: string = (
-          await withRetry(`allPkpIdsAt ${i}`, () => readOnly.allPkpIdsAt(i))
+          await withRetry(`allPkpIdsAt ${i}`, () => readOnly.allPkpIdsAt(i, snapshot))
         ).toLowerCase();
         const owner: bigint = await withRetry(`getPkpOwnerMaster ${pkpId}`, () =>
-          readOnly.getPkpOwnerMaster(pkpId)
+          readOnly.getPkpOwnerMaster(pkpId, snapshot)
         );
         let derivationPath = 0n;
         let error: string | undefined;
         if (owner !== 0n) {
           try {
             derivationPath = await withRetry(`getWalletDerivation ${pkpId}`, () =>
-              readOnly.getWalletDerivation(owner, pkpId)
+              readOnly.getWalletDerivation(owner, pkpId, snapshot)
             );
           } catch (err) {
             error = (err as Error).message.slice(0, 120);
@@ -393,6 +413,7 @@ task(
     console.log("\nChecking current on-chain bindings...");
     const toBind: FirstRegistration[] = [];
     let alreadyBound = 0;
+    let incorrectlyBound = 0;
     const candidates = [...firstByPath.values()];
     const owners = await mapLimit(candidates, concurrency, (r) =>
       withRetry("getPathOwnerMaster", () =>
@@ -404,6 +425,7 @@ task(
       if (owner === 0n) {
         toBind.push(r);
       } else if (owner !== r.masterHash) {
+        incorrectlyBound++;
         console.log(
           `  ⚠️  path 0x${r.derivationPath.toString(
             16
@@ -420,6 +442,12 @@ task(
     console.log(
       `${toBind.length} derivationPath(s) need backfilling (${alreadyBound} already bound correctly).`
     );
+    if (incorrectlyBound > 0 || unboundPkps > 0 || unresolved > 0) {
+      throw new Error(
+        `Incomplete ownership verification: ${incorrectlyBound} incorrectly bound path(s), ` +
+        `${unboundPkps} PKP(s) without owners, ${unresolved} unresolved PKP(s). Investigate before proceeding.`
+      );
+    }
     if (toBind.length === 0) {
       console.log("Nothing to do.");
       return;
