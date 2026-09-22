@@ -122,11 +122,15 @@ impl Supervisor {
         let exec_dir = tempfile::tempdir().context("failed to create exec dir")?;
         let sock_dir = exec_dir.path().join("sock");
         std::fs::create_dir_all(&sock_dir)?;
-        // Lock the socket's own directory to 0700 rather than trusting the
-        // umask default (0755): the ops socket below is 0777 so any guest uid
-        // can connect, and this dir is bind-mounted into the sandbox, so its
-        // permissions are the real host-side gate. Only this process's uid may
-        // traverse it on the host.
+        // Lock the socket's directory to 0700 rather than trusting the umask
+        // default (~0755). This is purely a HOST-side gate against other host
+        // uids / co-tenant processes: only this process's uid can traverse it
+        // on the host (the parent exec tempdir is already 0700; this hardens
+        // the immediate dir too). It does NOT restrict the sandboxed guest —
+        // the guest reaches the socket through gVisor's gofer, which runs as
+        // this process's uid (the dir owner), not by traversing this dir as
+        // its own in-sandbox uid. Guest-side access is governed by the socket
+        // mode set below, so a non-root guest uid would still connect.
         std::fs::set_permissions(&sock_dir, std::fs::Permissions::from_mode(0o700))?;
         let sock_path = sock_dir.join(OP_SOCK_FILE);
 
@@ -161,9 +165,11 @@ impl Supervisor {
         // spawns so the guest never races the listener.
         let listener = UnixListener::bind(&sock_path)
             .with_context(|| format!("failed to bind op socket {}", sock_path.display()))?;
-        // The guest may run as any uid, so the socket itself is 0777; the
-        // 0700 sock_dir above (and the 0700 exec tempdir) are what actually
-        // gate host-side access, so exposure stays confined to this process.
+        // 0777 is the GUEST-side gate: the in-sandbox process (today uid 0,
+        // but any uid should work) must pass gVisor's permission check against
+        // this mode to connect. Host-side cross-tenant exposure is bounded by
+        // the 0700 sock_dir above (and the 0700 exec tempdir), so the socket
+        // being world-rw does not widen reach beyond this process.
         std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o777))?;
 
         let job = Job {
