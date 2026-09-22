@@ -114,6 +114,15 @@ pub(crate) const DENY_NET_IPV6_SUBNETS: &[&str] = &[
 ///
 /// The operator allowlist ([`egress_allowlist`]) carves matching entries out of
 /// both layers, exactly as [`effective_deny_net`] does for the IPv4 side.
+///
+/// Blast radius of the carve: Deno's permission model is deny-always-wins with no
+/// per-IP allow override, so exempting a literal internal IP means dropping the
+/// *entire* covering deny descriptor. For the IPv6 ranges that descriptor is a
+/// very large subnet (`fc00::/7`, `fe80::/10`), so allowlisting a single ULA or
+/// link-local address re-opens literal-IP `fetch()` to that whole range. This is
+/// an operator-only, prod-empty escape hatch (see [`EGRESS_ALLOWLIST_ENV`]), so
+/// the coarse carve is accepted rather than worked around with subnet splitting —
+/// but each dropped range is logged at WARN so the widening is visible.
 pub(crate) fn base_net_permission() -> UnaryPermission<NetDescriptor> {
     // IPv4 CIDRs + single IPv6 literals, via the string parser. These all parse
     // (no bare IPv6 subnet among them); a bad entry is a build-time bug.
@@ -132,7 +141,16 @@ pub(crate) fn base_net_permission() -> UnaryPermission<NetDescriptor> {
             .parse()
             .expect("DENY_NET_IPV6_SUBNETS entries must be valid CIDRs");
         // Match effective_deny_net: drop a range that covers an allowlisted IP.
-        if allow.iter().any(|ip| net.contains(*ip)) {
+        // Deny-wins semantics mean there's no finer carve than the whole subnet,
+        // so make the (large) widening loud rather than silent.
+        if let Some(ip) = allow.iter().find(|ip| net.contains(**ip)) {
+            tracing::warn!(
+                allowlisted_ip = %ip,
+                subnet = %cidr,
+                "egress allowlist entry falls inside an internal IPv6 range; \
+                 dropping the entire deny subnet re-opens literal-IP fetch() to \
+                 the whole range"
+            );
             continue;
         }
         deny.push(NetDescriptor(Host::IpSubnet(net), None));
