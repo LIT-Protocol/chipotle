@@ -68,10 +68,12 @@ contract WritesFacet {
         uint256 indexed apiKeyHash,
         address indexed pkpId
     );
+    // Retained in the ABI for decoding historical migration logs.
     event PkpOwnerBackfilled(
         address indexed pkpId,
         uint256 indexed masterHash
     );
+    // Retained in the ABI for decoding historical migration logs.
     event PathOwnerBackfilled(
         uint256 indexed derivationPath,
         uint256 indexed masterHash
@@ -785,71 +787,6 @@ contract WritesFacet {
         }
 
         emit WalletDerivationRemoved(apiKeyHash, pkpId);
-    }
-
-    /// @notice One-time migration helper: bind wallets registered before the global
-    ///         owner binding existed to their original master account.
-    /// @dev Pairs should be derived off-chain from the EARLIEST
-    ///      `WalletDerivationRegistered(masterHash, pkpId, ...)` event per pkpId
-    ///      (first registration wins, matching the rule `registerWalletDerivation`
-    ///      now enforces). Already-bound pkpIds are skipped, never re-assigned, so
-    ///      the call is idempotent and safe to run in batches / re-run. Restricted
-    ///      to the diamond owner or config operator.
-    function backfillPkpOwners(
-        address[] calldata pkpIds,
-        uint256[] calldata masterHashes
-    ) public {
-        SecurityLib.revertIfNotConfigOperatorOrOwner(msg.sender);
-        if (pkpIds.length != masterHashes.length) {
-            revert AppStorage.InvalidRequest("array length mismatch");
-        }
-        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        for (uint256 i = 0; i < pkpIds.length; i++) {
-            if (masterHashes[i] == 0) {
-                revert AppStorage.InvalidRequest("masterHash must be non-zero");
-            }
-            if (s.pkpIdToOwnerMaster[pkpIds[i]] != 0) {
-                continue; // already bound — never re-assign ownership
-            }
-            s.pkpIdToOwnerMaster[pkpIds[i]] = masterHashes[i];
-            emit PkpOwnerBackfilled(pkpIds[i], masterHashes[i]);
-        }
-    }
-
-    /// @notice One-time migration helper: bind derivation paths registered before
-    ///         the global path-owner binding existed to their original master
-    ///         account. Companion to backfillPkpOwners — until a path is
-    ///         backfilled, getWalletDerivation falls through (pathOwner == 0), so
-    ///         the aliasing hole stays open for that path. Run this over every
-    ///         historical path to fully close it for pre-fix wallets.
-    /// @dev Pairs should be derived off-chain from the EARLIEST
-    ///      `WalletDerivationRegistered(masterHash, pkpId, derivationPath)` event
-    ///      per derivationPath (first registration wins, matching the rule
-    ///      registerWalletDerivation now enforces). Already-bound paths are
-    ///      skipped, never re-assigned, so the call is idempotent and safe to
-    ///      re-run. Restricted to the diamond owner or config operator.
-    function backfillPathOwners(
-        uint256[] calldata derivationPaths,
-        uint256[] calldata masterHashes
-    ) public {
-        SecurityLib.revertIfNotConfigOperatorOrOwner(msg.sender);
-        if (derivationPaths.length != masterHashes.length) {
-            revert AppStorage.InvalidRequest("array length mismatch");
-        }
-        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        for (uint256 i = 0; i < derivationPaths.length; i++) {
-            if (masterHashes[i] == 0) {
-                revert AppStorage.InvalidRequest("masterHash must be non-zero");
-            }
-            if (derivationPaths[i] == 0) {
-                revert AppStorage.InvalidRequest("derivationPath must be non-zero");
-            }
-            if (s.pathToOwnerMaster[derivationPaths[i]] != 0) {
-                continue; // already bound — never re-assign ownership
-            }
-            s.pathToOwnerMaster[derivationPaths[i]] = masterHashes[i];
-            emit PathOwnerBackfilled(derivationPaths[i], masterHashes[i]);
-        }
     }
 
     function setNodeConfiguration(

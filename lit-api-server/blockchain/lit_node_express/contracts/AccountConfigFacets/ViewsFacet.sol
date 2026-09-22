@@ -171,7 +171,8 @@ contract ViewsFacet {
         // that owner, the local pkpData entry is a stale pre-fix hijack
         // registration — fail closed instead of leaking the victim's path.
         // owner == 0 means a pre-migration wallet not yet backfilled: fall
-        // through so signing keeps working until backfillPkpOwners runs.
+        // through for deployments that have not migrated. Completed bindings
+        // survive removal of the historical backfill entry point.
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         uint256 resolvedMaster = s.allApiKeyHashesToMaster[apiKeyHash];
         uint256 owner = s.pkpIdToOwnerMaster[walletAddress];
@@ -185,8 +186,8 @@ contract ViewsFacet {
         // path. If a resolving account is not the path's first owner, this is a
         // stale pre-fix aliasing registration pointing at someone else's key —
         // fail closed instead of releasing it. owner == 0 means a pre-migration
-        // path not yet backfilled: fall through so signing keeps working until
-        // backfillPathOwners runs.
+        // path not yet backfilled. Keep the legacy fallback for deployments that
+        // have not migrated; completed bindings survive removal of the backfill.
         uint256 pathOwner = s.pathToOwnerMaster[derivation];
         if (pathOwner != 0 && pathOwner != resolvedMaster) {
             revert AppStorage.InvalidRequest("derivation path owned by another account");
