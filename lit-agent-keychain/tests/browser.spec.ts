@@ -110,6 +110,21 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
     .getByRole("button", { name: "Approve agent", exact: true })
     .click();
   await expect(page.getByText("Browser agent", { exact: true })).toBeVisible();
+  for (const width of [320, 390, 768, 1024, 1440, 2560]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+      `populated workspace fits at ${width}px`,
+    ).toBe(true);
+    const actions = page.locator(".agent-row .row-actions");
+    await actions.scrollIntoViewIfNeeded();
+    await expect(
+      actions.getByRole("button", { name: "Revoke", exact: true }),
+    ).toBeInViewport();
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole("button", { name: "Revoke", exact: true }).click();
   await expect(
     page.getByText("No agents have access.", { exact: true }),
@@ -291,4 +306,40 @@ test("RainbowKit injected wallet connects and signs an EIP-712 owner proof", asy
   await expect(
     page.getByRole("heading", { name: "Secrets", exact: true }),
   ).toBeVisible();
+  await expect(page.locator(".alert.success")).toBeVisible();
+  // The banner and workspace share a centered shell at every breakpoint.
+  for (const width of [320, 390, 700, 768, 1024, 1440, 2560, 3840]) {
+    await page.setViewportSize({ width, height: 900 });
+    const layout = await page.evaluate(() => {
+      const workspace = document
+        .querySelector(".workspace")!
+        .getBoundingClientRect();
+      const alert = document
+        .querySelector(".alert.success")!
+        .getBoundingClientRect();
+      return {
+        overflow: document.documentElement.scrollWidth > window.innerWidth,
+        center: workspace.x + workspace.width / 2,
+        width: workspace.width,
+        bannerLeft: alert.x,
+        workspaceLeft: workspace.x,
+        bannerWidth: alert.width,
+      };
+    });
+    expect(layout.overflow, `page overflow at ${width}px`).toBe(false);
+    expect(layout.center).toBeCloseTo(width / 2, 0);
+    expect(layout.width).toBeLessThanOrEqual(1440);
+    expect(layout.bannerLeft).toBeCloseTo(layout.workspaceLeft, 0);
+    expect(layout.bannerWidth).toBeCloseTo(layout.width, 0);
+    if ([390, 1440, 2560].includes(width)) {
+      await page.screenshot({
+        path: `../.context/keychain/workspace-${width}.png`,
+        fullPage: true,
+      });
+    }
+    await expect(
+      page.getByRole("button", { name: "+ Add secret" }),
+    ).toBeInViewport();
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
 });
