@@ -40,17 +40,27 @@ contract APIConfigFacet {
         emit RequestedApiPayerCountUpdated(newRequestedApiPayerCount);
     }
 
+    // The adminApiPayerAccount is a privileged role, so assigning it is restricted
+    // to the diamond owner or config operator. Previously this was gated to
+    // `revertIfNotApiPayerOrOwner`, which let any api_payer (or the admin payer
+    // itself) promote an arbitrary address into the admin payer slot — the first
+    // link in a payer-takeover chain. Removing that path keeps admin-payer
+    // assignment in owner/operator hands only.
     function setAdminApiPayerAccount(address newAdminApiPayerAccount) public {
-        SecurityLib.revertIfNotApiPayerOrOwner(msg.sender);
+        SecurityLib.revertIfNotConfigOperatorOrOwner(msg.sender);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         s.adminApiPayerAccount = newAdminApiPayerAccount;
         emit AdminApiPayerUpdated(newAdminApiPayerAccount);
     }
 
-    // setApiPayers is used to add new signers (accounts that pay for state mutation made by api calls) to the list of api payers.
-    // Restricted to owner + admin API payer (not regular API payers) to prevent hostile payer takeover.
+    // setApiPayers replaces the entire api_payer set (clear + rebuild), and api
+    // payers can create accounts, move balances, register PKPs, and convert
+    // accounts. Granting/revoking that role is therefore restricted to the
+    // diamond owner ONLY. It used to also allow the adminApiPayerAccount, but
+    // combined with a reachable setAdminApiPayerAccount that formed a privilege-
+    // escalation chain (any payer -> admin payer -> rewrite the whole payer set).
     function setApiPayers(address[] memory newApiPayers) public {
-        SecurityLib.revertIfNotOwnerOrAdminApiPayer(msg.sender);
+        SecurityLib.revertIfNotOwner(msg.sender);
 
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
 

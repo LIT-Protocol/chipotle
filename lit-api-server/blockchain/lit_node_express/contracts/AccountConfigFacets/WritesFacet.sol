@@ -91,6 +91,7 @@ contract WritesFacet {
         address indexed previousAdminWalletAddress,
         address indexed newAdminWalletAddress
     );
+    event NodeConfigurationSet(string key, string value);
 
     function newChainSecuredAccount(
         string memory accountName,
@@ -813,13 +814,21 @@ contract WritesFacet {
         emit WalletDerivationRemoved(apiKeyHash, pkpId);
     }
 
+    /// @notice Set an on-chain node configuration key/value that the Lit nodes read
+    ///         to drive how they process requests.
+    /// @dev    Restricted to the diamond owner or config operator. This used to be
+    ///         gated to `revertIfNotApiPayerOrOwner`, which let any api_payer write
+    ///         arbitrary node configuration — an unnecessarily broad privilege that
+    ///         could redirect or crash nodes. Config changes now emit an event so
+    ///         they can be monitored and audited off-chain.
     function setNodeConfiguration(
         string memory key,
         string memory value
     ) public {
-        SecurityLib.revertIfNotApiPayerOrOwner(msg.sender);
+        SecurityLib.revertIfNotConfigOperatorOrOwner(msg.sender);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         s.nodeConfigurationKeys.add(key);
         s.nodeConfigurationValues[key] = value;
+        emit NodeConfigurationSet(key, value);
     }
 }
