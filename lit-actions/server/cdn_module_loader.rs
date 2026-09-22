@@ -196,8 +196,34 @@ impl CdnModuleLoader {
     /// Check whether a URL is from the allowed CDN npm backend.
     /// Only `https://cdn.jsdelivr.net/npm/` URLs are accepted; other jsDelivr
     /// backends (`/gh/`, `/wp/`, etc.) serve mutable content and are rejected.
+    ///
+    /// This is a raw *string prefix* check and is only safe on URLs that have
+    /// already been normalized (e.g. the output of `ModuleSpecifier::join` or
+    /// `normalize_allowed_cdn_url`). For any URL that could still contain
+    /// `.`/`..` path segments, use `normalize_allowed_cdn_url` instead — a raw
+    /// prefix check accepts `.../npm/pkg@1/../../gh/evil/x.js`, which the URL
+    /// parser (and jsDelivr) later collapse to the mutable `/gh/` backend.
     pub(crate) fn is_allowed_cdn(url: &str) -> bool {
         url.starts_with(ALLOWED_NPM_PREFIX)
+    }
+
+    /// Parse a full CDN URL, apply WHATWG normalization, and confirm it still
+    /// lands on the immutable jsDelivr `/npm/` backend. Returns the normalized
+    /// URL string (fragment preserved) only when the host is `cdn.jsdelivr.net`
+    /// and the normalized path starts with `/npm/`.
+    ///
+    /// Unlike the raw `is_allowed_cdn` prefix check, this collapses any
+    /// `.`/`..` segments *before* validating, so a traversal URL such as
+    /// `https://cdn.jsdelivr.net/npm/zod@3.22.4/../../gh/evil/x.js` — which
+    /// starts with the allowed `/npm/` prefix as a raw string but normalizes to
+    /// the mutable `/gh/` backend — is rejected. Use this for any full URL that
+    /// originates from user-supplied action code.
+    pub(crate) fn normalize_allowed_cdn_url(url: &str) -> Option<String> {
+        let parsed = ModuleSpecifier::parse(url).ok()?;
+        if parsed.host_str() != Some("cdn.jsdelivr.net") || !parsed.path().starts_with("/npm/") {
+            return None;
+        }
+        Some(parsed.to_string())
     }
 
     /// Parse an npm package specifier into a full jsDelivr URL.
@@ -375,6 +401,26 @@ impl CdnModuleLoader {
         let mut fetch_url = parsed.clone();
         fetch_url.set_fragment(None);
         let url = fetch_url.to_string();
+
+        // Defense in depth: re-assert the *normalized* URL is on the immutable
+        // jsDelivr /npm/ backend. Callers (`resolve_entry_specifier`,
+        // `resolve_dep_specifier`) validate before reaching us, but they check
+        // the pre-fetch specifier; this guards against any future caller — or a
+        // normalization discrepancy between the allowlist check and the fetch —
+        // reaching jsDelivr's mutable /gh/ (or other) backends via `..`
+        // traversal that only collapses once the URL is parsed here.
+        if fetch_url.host_str() != Some("cdn.jsdelivr.net")
+            || !fetch_url.path().starts_with("/npm/")
+        {
+            error!(
+                module_url = %url,
+                "CDN module fetch rejected: URL is not on the allowed jsDelivr /npm/ backend"
+            );
+            return Err(JsErrorBox::generic(format!(
+                "Refusing to fetch {url}: only the immutable jsDelivr /npm/ backend is allowed \
+                 (other backends such as /gh/ serve mutable content)"
+            )));
+        }
 
         if let Some(ref h) = inline_hash {
             info!(
@@ -724,15 +770,29 @@ impl ModuleLoader for CdnModuleLoader {
             }
         }
 
-        // If it's already a full jsDelivr URL, pass through
-        if Self::is_allowed_cdn(specifier) {
-            info!(specifier = %truncate_for_log(specifier), "CDN module resolve: full URL accepted");
-            return ModuleSpecifier::parse(specifier).map_err(|e| {
-                JsErrorBox::generic(format!(
-                    "Invalid module URL: {}: {e}",
-                    truncate_for_log(specifier)
-                ))
-            });
+        // If it's already a full jsDelivr URL, normalize and validate it. A raw
+        // prefix check here would accept `/npm/pkg@1/../../gh/evil/x.js`, which
+        // `ModuleSpecifier::parse` then collapses to the mutable /gh/ backend;
+        // `normalize_allowed_cdn_url` parses first and rejects any URL that does
+        // not stay on /npm/ after normalization.
+        if specifier.starts_with("https://") {
+            if let Some(normalized) = Self::normalize_allowed_cdn_url(specifier) {
+                info!(specifier = %truncate_for_log(specifier), resolved_url = %normalized, "CDN module resolve: full URL accepted");
+                return ModuleSpecifier::parse(&normalized).map_err(|e| {
+                    JsErrorBox::generic(format!(
+                        "Invalid module URL: {}: {e}",
+                        truncate_for_log(&normalized)
+                    ))
+                });
+            }
+            warn!(
+                specifier = %truncate_for_log(specifier),
+                "CDN module resolve rejected: full URL is not on the allowed jsDelivr /npm/ backend"
+            );
+            return Err(JsErrorBox::generic(format!(
+                "URL {} is not on the allowed jsDelivr /npm/ CDN",
+                truncate_for_log(specifier)
+            )));
         }
 
         // Try parsing as an npm specifier (e.g. "zod@3.22.4/+esm")
@@ -887,6 +947,71 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
         assert_eq!(
             CdnModuleLoader::parse_npm_specifier("pkg@1.0.0/dist/./../dist/index.js"),
             Some("https://cdn.jsdelivr.net/npm/pkg@1.0.0/dist/index.js".to_string())
+        );
+    }
+
+    #[test]
+    fn test_normalize_allowed_cdn_url() {
+        // Plain /npm/ URL is accepted and returned unchanged.
+        assert_eq!(
+            CdnModuleLoader::normalize_allowed_cdn_url(
+                "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm"
+            ),
+            Some("https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm".to_string())
+        );
+        // Traversal that escapes /npm/ into /gh/ is rejected (GH #14).
+        assert_eq!(
+            CdnModuleLoader::normalize_allowed_cdn_url(
+                "https://cdn.jsdelivr.net/npm/zod@3.22.4/../../gh/jquery/jquery@main/src/core.js"
+            ),
+            None
+        );
+        // Direct /gh/ backend is rejected.
+        assert_eq!(
+            CdnModuleLoader::normalize_allowed_cdn_url(
+                "https://cdn.jsdelivr.net/gh/user/repo@main/file.js"
+            ),
+            None
+        );
+        // Other hosts are rejected.
+        assert_eq!(
+            CdnModuleLoader::normalize_allowed_cdn_url("https://evil.example.com/npm/x.js"),
+            None
+        );
+        // Traversal that stays inside /npm/ is normalized and accepted.
+        assert_eq!(
+            CdnModuleLoader::normalize_allowed_cdn_url(
+                "https://cdn.jsdelivr.net/npm/pkg@1.0.0/dist/../index.js"
+            ),
+            Some("https://cdn.jsdelivr.net/npm/pkg@1.0.0/index.js".to_string())
+        );
+    }
+
+    /// Defense in depth: even if a caller hands `fetch_module_bytes` a traversal
+    /// URL, the post-parse re-assertion must reject it before any network fetch,
+    /// because `ModuleSpecifier::parse` collapses `..` onto the mutable /gh/
+    /// backend (GH #14). The empty cache + empty manifest mean any URL that got
+    /// past the check would attempt a live fetch; rejection happens first.
+    #[tokio::test]
+    async fn fetch_module_bytes_rejects_traversal_to_gh() {
+        let loader = CdnModuleLoader::with_options(
+            Arc::new(RwLock::new(HashMap::new())),
+            true,
+            Arc::new(RwLock::new(HashMap::new())),
+            None,
+            None,
+            LoadedModules::default(),
+        );
+        let err = loader
+            .fetch_module_bytes(
+                "https://cdn.jsdelivr.net/npm/zod@3.22.4/../../gh/jquery/jquery@main/src/core.js",
+            )
+            .await
+            .expect_err("traversal URL to /gh/ must be rejected");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("/npm/") && msg.contains("Refusing to fetch"),
+            "unexpected error message: {msg}"
         );
     }
 
