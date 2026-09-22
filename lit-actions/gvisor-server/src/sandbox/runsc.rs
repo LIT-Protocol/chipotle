@@ -2,9 +2,11 @@
 //!
 //! Spike-validated invariants (2026-07-01, Phala TDX dev CVMs — see the
 //! build plan):
-//! - `--host-uds=all` is required or the sandbox cannot reach the per-exec
-//!   op socket (the default refuses host UDS). The socket we expose is
-//!   per-sandbox, never a shared one.
+//! - `--host-uds=open` is required or the sandbox cannot reach the per-exec
+//!   op socket (the default refuses host UDS). `open` is connect-only; the
+//!   guest never creates host sockets, so we do not grant the broader `all`
+//!   (connect + bind). The socket we expose is per-sandbox, never a shared
+//!   one.
 //! - Nested in a container, each sandbox needs a delegated leaf cgroup or
 //!   runsc hits cgroup-v2 `subtree_control: EBUSY`; `--ignore-cgroups`
 //!   sidesteps this for dev/tests (per-exec limits are then not enforced by
@@ -86,8 +88,12 @@ impl SandboxRuntime for RunscRuntime {
 
         let mut cmd = Command::new(&self.cfg.runsc_path);
         cmd.arg(format!("--root={}", self.state_root(spec).display()))
-            // Reach the per-exec op socket bind-mounted at /run/lit.
-            .arg("--host-uds=all")
+            // Connect to the per-exec op socket bind-mounted at /run/lit. The
+            // host binds that socket; the guest only ever connects to it and
+            // never creates host-side sockets, so `open` (connect-only) is
+            // sufficient and strictly narrower than `all` (connect + bind),
+            // which would also let the sandbox create arbitrary host UDS.
+            .arg("--host-uds=open")
             // Fresh in-memory tmpfs upper over the shared read-only rootfs:
             // the sandbox can write anywhere, nothing survives it, and the
             // base image is never touched.

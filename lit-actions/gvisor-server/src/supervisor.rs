@@ -122,6 +122,12 @@ impl Supervisor {
         let exec_dir = tempfile::tempdir().context("failed to create exec dir")?;
         let sock_dir = exec_dir.path().join("sock");
         std::fs::create_dir_all(&sock_dir)?;
+        // Lock the socket's own directory to 0700 rather than trusting the
+        // umask default (0755): the ops socket below is 0777 so any guest uid
+        // can connect, and this dir is bind-mounted into the sandbox, so its
+        // permissions are the real host-side gate. Only this process's uid may
+        // traverse it on the host.
+        std::fs::set_permissions(&sock_dir, std::fs::Permissions::from_mode(0o700))?;
         let sock_path = sock_dir.join(OP_SOCK_FILE);
 
         // Materialize the startup script — the only thing the sandbox will
@@ -155,8 +161,9 @@ impl Supervisor {
         // spawns so the guest never races the listener.
         let listener = UnixListener::bind(&sock_path)
             .with_context(|| format!("failed to bind op socket {}", sock_path.display()))?;
-        // The guest may run as any uid; the socket sits in a 0700 host
-        // tempdir, so host-side exposure is unchanged.
+        // The guest may run as any uid, so the socket itself is 0777; the
+        // 0700 sock_dir above (and the 0700 exec tempdir) are what actually
+        // gate host-side access, so exposure stays confined to this process.
         std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o777))?;
 
         let job = Job {

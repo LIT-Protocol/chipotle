@@ -7,6 +7,7 @@ import {ViewsFacet} from "../contracts/AccountConfigFacets/ViewsFacet.sol";
 import {IDiamond} from "../interfaces/IDiamond.sol";
 import {FunctionNotFound} from "../contracts/AccountConfig.sol";
 import {SecurityLib} from "../contracts/AccountConfigFacets/SecurityLib.sol";
+import {NotContractOwner} from "../libraries/LibDiamond.sol";
 
 // Historical migration facet, used only to exercise its removal from a diamond.
 contract LegacyOwnerBackfills {
@@ -1131,6 +1132,7 @@ contract AccountsTest is BaseTest {
         assertEq(keys.length, 0);
     }
 
+<<<<<<< HEAD
     // --- Usage API key expiration enforcement (issue #31 / #24 finding 4) ---
 
     /// @notice Registers a wildcard-execute usage key with the given expiration
@@ -1237,5 +1239,32 @@ contract AccountsTest is BaseTest {
         vm.warp(block.timestamp + 3650 days);
         assertTrue(views_.canExecuteAction(usageHash, cidHash));
         assertTrue(views_.canExecuteActionFast(usageHash, cidHash));
+    }
+
+    function test_setAdminApiPayerAccount_ownerOnly() public {
+        // Owner can (re)assign the admin api payer.
+        vm.prank(owner);
+        apiConfig.setAdminApiPayerAccount(user);
+        assertEq(views_.adminApiPayerAccount(), user);
+    }
+
+    function test_setAdminApiPayerAccount_apiPayerCannotSelfPromote() public {
+        // A regular api_payer must NOT be able to promote itself (or anyone)
+        // to admin api payer — that would let it seize the whole payer set.
+        vm.prank(apiPayer);
+        vm.expectRevert(abi.encodeWithSelector(NotContractOwner.selector, apiPayer, owner));
+        apiConfig.setAdminApiPayerAccount(apiPayer);
+
+        // The existing admin api payer likewise cannot rotate the role itself.
+        vm.prank(adminApiPayer);
+        vm.expectRevert(
+            abi.encodeWithSelector(NotContractOwner.selector, adminApiPayer, owner)
+        );
+        apiConfig.setAdminApiPayerAccount(adminApiPayer);
+
+        // A stranger obviously cannot either.
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(NotContractOwner.selector, stranger, owner));
+        apiConfig.setAdminApiPayerAccount(stranger);
     }
 }

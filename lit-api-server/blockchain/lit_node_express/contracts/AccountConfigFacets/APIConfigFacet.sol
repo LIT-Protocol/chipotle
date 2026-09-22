@@ -40,14 +40,14 @@ contract APIConfigFacet {
         emit RequestedApiPayerCountUpdated(newRequestedApiPayerCount);
     }
 
-    // The adminApiPayerAccount is a privileged role, so assigning it is restricted
-    // to the diamond owner or config operator. Previously this was gated to
-    // `revertIfNotApiPayerOrOwner`, which let any api_payer (or the admin payer
-    // itself) promote an arbitrary address into the admin payer slot — the first
-    // link in a payer-takeover chain. Removing that path keeps admin-payer
-    // assignment in owner/operator hands only.
+    // Owner-only: the admin api payer outranks every regular api_payer
+    // (it alone gates setApiPayers), so letting any api_payer set it would let
+    // a single api_payer self-promote to admin and seize the whole payer set.
+    // Deploy/rotation always sends this from the diamond owner, never an
+    // api_payer, so owner-only closes the self-promotion path with no
+    // legitimate caller affected.
     function setAdminApiPayerAccount(address newAdminApiPayerAccount) public {
-        SecurityLib.revertIfNotConfigOperatorOrOwner(msg.sender);
+        SecurityLib.revertIfNotOwner(msg.sender);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         s.adminApiPayerAccount = newAdminApiPayerAccount;
         emit AdminApiPayerUpdated(newAdminApiPayerAccount);
