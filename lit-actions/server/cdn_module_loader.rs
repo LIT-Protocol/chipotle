@@ -755,19 +755,35 @@ impl ModuleLoader for CdnModuleLoader {
         // Handle root-relative /npm/ paths from jsDelivr's ESM output.
         // jsDelivr's +esm endpoint rewrites nested imports as root-relative paths
         // (e.g. `from"/npm/@noble/hashes@1.3.2/hmac/+esm"`). Resolve these by
-        // prepending the CDN origin, then validate the result.
+        // prepending the CDN origin, then normalize-and-validate the result.
+        // The URL is built by string concatenation, so a `..` traversal such as
+        // `/npm/pkg@1/../../gh/evil/x.js` would pass a raw prefix check and then
+        // normalize onto the mutable /gh/ backend; `normalize_allowed_cdn_url`
+        // collapses `..` before validating, closing that bypass.
         if specifier.starts_with("/npm/") {
             let full_url = format!("{ALLOWED_CDN_PREFIX}{}", &specifier[1..]);
-            if Self::is_allowed_cdn(&full_url) {
-                info!(
-                    specifier,
-                    resolved_url = %full_url,
-                    "CDN module resolve: root-relative /npm/ import resolved to full jsDelivr URL"
-                );
-                return ModuleSpecifier::parse(&full_url).map_err(|e| {
-                    JsErrorBox::generic(format!("Invalid resolved URL: {full_url}: {e}"))
-                });
-            }
+            return match Self::normalize_allowed_cdn_url(&full_url) {
+                Some(normalized) => {
+                    info!(
+                        specifier,
+                        resolved_url = %normalized,
+                        "CDN module resolve: root-relative /npm/ import resolved to full jsDelivr URL"
+                    );
+                    ModuleSpecifier::parse(&normalized).map_err(|e| {
+                        JsErrorBox::generic(format!("Invalid resolved URL: {normalized}: {e}"))
+                    })
+                }
+                None => {
+                    warn!(
+                        specifier = %truncate_for_log(specifier),
+                        "CDN module resolve rejected: root-relative /npm/ import escapes the /npm/ backend"
+                    );
+                    Err(JsErrorBox::generic(format!(
+                        "Root-relative import \"{}\" resolved outside the allowed /npm/ CDN path",
+                        truncate_for_log(specifier)
+                    )))
+                }
+            };
         }
 
         // If it's already a full jsDelivr URL, normalize and validate it. A raw
@@ -1125,6 +1141,24 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
         assert_eq!(
             result.as_str(),
             "https://cdn.jsdelivr.net/npm/aes-js@4.0.0-beta.5/+esm"
+        );
+    }
+
+    /// A root-relative `/npm/` import whose `..` segments escape into /gh/ must
+    /// be rejected. The concatenated URL starts with the allowed `/npm/` prefix
+    /// as a raw string, so this only fails if the URL is normalized before the
+    /// allowlist check (GH #14, Copilot follow-up).
+    #[test]
+    fn test_resolve_root_relative_rejects_traversal_to_gh() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        assert!(
+            loader
+                .resolve(
+                    "/npm/pkg@1.0.0/../../gh/evil/repo@main/x.js",
+                    "https://cdn.jsdelivr.net/npm/pkg@1.0.0/+esm",
+                    ResolutionKind::Import
+                )
+                .is_err()
         );
     }
 
