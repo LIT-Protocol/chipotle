@@ -4,6 +4,10 @@ import * as fs from "fs";
 import * as path from "path";
 import { withRetry } from "./rpc-retry";
 
+// Historical migration tool: dry-run remains usable after backfillPathOwners
+// is removed. Execute / Safe batches require a deployment that still exposes
+// the migration selector; finish and verify each target before upgrading it.
+//
 // Minimal ABI: the event we scan, the storage views used to reconstruct
 // ownership for registrations that never emitted an event, and the migration
 // entry points.

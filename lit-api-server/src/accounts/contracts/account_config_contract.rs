@@ -1666,7 +1666,6 @@ interface AccountConfig {
     function apiKeyCanExecuteForAnyGroup(uint256 apiKeyHash, uint256[] memory groupIds) external view returns (bool);
     function apiPayerCount() external view returns (uint256);
     function api_payers() external view returns (address[] memory);
-    function backfillPathOwners(uint256[] memory derivationPaths, uint256[] memory masterHashes) external;
     function backfillPkpOwners(address[] memory pkpIds, uint256[] memory masterHashes) external;
     function canExecuteAction(uint256 apiKeyHash, uint256 cidHash) external view returns (bool);
     function canExecuteActionAndUseWallet(uint256 apiKeyHash, uint256 cidHash, address walletAddress) external view returns (bool canExecute, bool canUseWallet);
@@ -1957,24 +1956,6 @@ interface AccountConfig {
       }
     ],
     "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "backfillPathOwners",
-    "inputs": [
-      {
-        "name": "derivationPaths",
-        "type": "uint256[]",
-        "internalType": "uint256[]"
-      },
-      {
-        "name": "masterHashes",
-        "type": "uint256[]",
-        "internalType": "uint256[]"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -10787,160 +10768,6 @@ pub mod AccountConfig {
                     let r: api_payersReturn = r.into();
                     r._0
                 })
-            }
-        }
-    };
-    #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
-    /*Function with signature `backfillPathOwners(uint256[],uint256[])` and selector `0x1b496105`.
-    ```solidity
-    function backfillPathOwners(uint256[] memory derivationPaths, uint256[] memory masterHashes) external;
-    ```*/
-    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
-    #[derive(Clone)]
-    pub struct backfillPathOwnersCall {
-        #[allow(missing_docs)]
-        pub derivationPaths:
-            alloy::sol_types::private::Vec<alloy::sol_types::private::primitives::aliases::U256>,
-        #[allow(missing_docs)]
-        pub masterHashes:
-            alloy::sol_types::private::Vec<alloy::sol_types::private::primitives::aliases::U256>,
-    }
-    //Container type for the return parameters of the [`backfillPathOwners(uint256[],uint256[])`](backfillPathOwnersCall) function.
-    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
-    #[derive(Clone)]
-    pub struct backfillPathOwnersReturn {}
-    #[allow(
-        non_camel_case_types,
-        non_snake_case,
-        clippy::pub_underscore_fields,
-        clippy::style
-    )]
-    const _: () = {
-        use alloy::sol_types as alloy_sol_types;
-        {
-            #[doc(hidden)]
-            #[allow(dead_code)]
-            type UnderlyingSolTuple<'a> = (
-                alloy::sol_types::sol_data::Array<alloy::sol_types::sol_data::Uint<256>>,
-                alloy::sol_types::sol_data::Array<alloy::sol_types::sol_data::Uint<256>>,
-            );
-            #[doc(hidden)]
-            type UnderlyingRustTuple<'a> = (
-                alloy::sol_types::private::Vec<
-                    alloy::sol_types::private::primitives::aliases::U256,
-                >,
-                alloy::sol_types::private::Vec<
-                    alloy::sol_types::private::primitives::aliases::U256,
-                >,
-            );
-            #[cfg(test)]
-            #[allow(dead_code, unreachable_patterns)]
-            fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
-                match _t {
-                    alloy_sol_types::private::AssertTypeEq::<
-                        <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
-                    >(_) => {}
-                }
-            }
-            #[automatically_derived]
-            #[doc(hidden)]
-            impl ::core::convert::From<backfillPathOwnersCall> for UnderlyingRustTuple<'_> {
-                fn from(value: backfillPathOwnersCall) -> Self {
-                    (value.derivationPaths, value.masterHashes)
-                }
-            }
-            #[automatically_derived]
-            #[doc(hidden)]
-            impl ::core::convert::From<UnderlyingRustTuple<'_>> for backfillPathOwnersCall {
-                fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
-                    Self {
-                        derivationPaths: tuple.0,
-                        masterHashes: tuple.1,
-                    }
-                }
-            }
-        }
-        {
-            #[doc(hidden)]
-            #[allow(dead_code)]
-            type UnderlyingSolTuple<'a> = ();
-            #[doc(hidden)]
-            type UnderlyingRustTuple<'a> = ();
-            #[cfg(test)]
-            #[allow(dead_code, unreachable_patterns)]
-            fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
-                match _t {
-                    alloy_sol_types::private::AssertTypeEq::<
-                        <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
-                    >(_) => {}
-                }
-            }
-            #[automatically_derived]
-            #[doc(hidden)]
-            impl ::core::convert::From<backfillPathOwnersReturn> for UnderlyingRustTuple<'_> {
-                fn from(value: backfillPathOwnersReturn) -> Self {
-                    ()
-                }
-            }
-            #[automatically_derived]
-            #[doc(hidden)]
-            impl ::core::convert::From<UnderlyingRustTuple<'_>> for backfillPathOwnersReturn {
-                fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
-                    Self {}
-                }
-            }
-        }
-        impl backfillPathOwnersReturn {
-            fn _tokenize(
-                &self,
-            ) -> <backfillPathOwnersCall as alloy_sol_types::SolCall>::ReturnToken<'_> {
-                ()
-            }
-        }
-        #[automatically_derived]
-        impl alloy_sol_types::SolCall for backfillPathOwnersCall {
-            type Parameters<'a> = (
-                alloy::sol_types::sol_data::Array<alloy::sol_types::sol_data::Uint<256>>,
-                alloy::sol_types::sol_data::Array<alloy::sol_types::sol_data::Uint<256>>,
-            );
-            type Token<'a> = <Self::Parameters<'a> as alloy_sol_types::SolType>::Token<'a>;
-            type Return = backfillPathOwnersReturn;
-            type ReturnTuple<'a> = ();
-            type ReturnToken<'a> = <Self::ReturnTuple<'a> as alloy_sol_types::SolType>::Token<'a>;
-            const SIGNATURE: &'static str = "backfillPathOwners(uint256[],uint256[])";
-            const SELECTOR: [u8; 4] = [27u8, 73u8, 97u8, 5u8];
-            #[inline]
-            fn new<'a>(
-                tuple: <Self::Parameters<'a> as alloy_sol_types::SolType>::RustType,
-            ) -> Self {
-                tuple.into()
-            }
-            #[inline]
-            fn tokenize(&self) -> Self::Token<'_> {
-                (
-                    <alloy::sol_types::sol_data::Array<
-                        alloy::sol_types::sol_data::Uint<256>,
-                    > as alloy_sol_types::SolType>::tokenize(&self.derivationPaths),
-                    <alloy::sol_types::sol_data::Array<
-                        alloy::sol_types::sol_data::Uint<256>,
-                    > as alloy_sol_types::SolType>::tokenize(&self.masterHashes),
-                )
-            }
-            #[inline]
-            fn tokenize_returns(ret: &Self::Return) -> Self::ReturnToken<'_> {
-                backfillPathOwnersReturn::_tokenize(ret)
-            }
-            #[inline]
-            fn abi_decode_returns(data: &[u8]) -> alloy_sol_types::Result<Self::Return> {
-                <Self::ReturnTuple<'_> as alloy_sol_types::SolType>::abi_decode_sequence(data)
-                    .map(Into::into)
-            }
-            #[inline]
-            fn abi_decode_returns_validate(data: &[u8]) -> alloy_sol_types::Result<Self::Return> {
-                <Self::ReturnTuple<'_> as alloy_sol_types::SolType>::abi_decode_sequence_validate(
-                    data,
-                )
-                .map(Into::into)
             }
         }
     };
@@ -19917,8 +19744,6 @@ pub mod AccountConfig {
         #[allow(missing_docs)]
         api_payers(api_payersCall),
         #[allow(missing_docs)]
-        backfillPathOwners(backfillPathOwnersCall),
-        #[allow(missing_docs)]
         backfillPkpOwners(backfillPkpOwnersCall),
         #[allow(missing_docs)]
         canExecuteAction(canExecuteActionCall),
@@ -20049,7 +19874,6 @@ pub mod AccountConfig {
             [20u8, 42u8, 98u8, 206u8],
             [25u8, 97u8, 82u8, 4u8],
             [26u8, 26u8, 5u8, 159u8],
-            [27u8, 73u8, 97u8, 5u8],
             [31u8, 82u8, 170u8, 66u8],
             [34u8, 58u8, 121u8, 98u8],
             [37u8, 40u8, 74u8, 193u8],
@@ -20122,7 +19946,6 @@ pub mod AccountConfig {
             ::core::stringify!(configOperator),
             ::core::stringify!(nodeConfigurationValue),
             ::core::stringify!(transferChainSecuredAccountOwnership),
-            ::core::stringify!(backfillPathOwners),
             ::core::stringify!(addActionToGroup),
             ::core::stringify!(pkpCount),
             ::core::stringify!(canUseWalletInAction),
@@ -20195,7 +20018,6 @@ pub mod AccountConfig {
             <configOperatorCall as alloy_sol_types::SolCall>::SIGNATURE,
             <nodeConfigurationValueCall as alloy_sol_types::SolCall>::SIGNATURE,
             <transferChainSecuredAccountOwnershipCall as alloy_sol_types::SolCall>::SIGNATURE,
-            <backfillPathOwnersCall as alloy_sol_types::SolCall>::SIGNATURE,
             <addActionToGroupCall as alloy_sol_types::SolCall>::SIGNATURE,
             <pkpCountCall as alloy_sol_types::SolCall>::SIGNATURE,
             <canUseWalletInActionCall as alloy_sol_types::SolCall>::SIGNATURE,
@@ -20283,7 +20105,7 @@ pub mod AccountConfig {
     impl alloy_sol_types::SolInterface for AccountConfigCalls {
         const NAME: &'static str = "AccountConfigCalls";
         const MIN_DATA_LENGTH: usize = 0usize;
-        const COUNT: usize = 70usize;
+        const COUNT: usize = 69usize;
         #[inline]
         fn selector(&self) -> [u8; 4] {
             match self {
@@ -20306,9 +20128,6 @@ pub mod AccountConfig {
                 }
                 Self::apiPayerCount(_) => <apiPayerCountCall as alloy_sol_types::SolCall>::SELECTOR,
                 Self::api_payers(_) => <api_payersCall as alloy_sol_types::SolCall>::SELECTOR,
-                Self::backfillPathOwners(_) => {
-                    <backfillPathOwnersCall as alloy_sol_types::SolCall>::SELECTOR
-                }
                 Self::backfillPkpOwners(_) => {
                     <backfillPkpOwnersCall as alloy_sol_types::SolCall>::SELECTOR
                 }
@@ -20526,15 +20345,6 @@ pub mod AccountConfig {
                             )
                     }
                     transferChainSecuredAccountOwnership
-                },
-                {
-                    fn backfillPathOwners(
-                        data: &[u8],
-                    ) -> alloy_sol_types::Result<AccountConfigCalls> {
-                        <backfillPathOwnersCall as alloy_sol_types::SolCall>::abi_decode_raw(data)
-                            .map(AccountConfigCalls::backfillPathOwners)
-                    }
-                    backfillPathOwners
                 },
                 {
                     fn addActionToGroup(
@@ -21167,17 +20977,6 @@ pub mod AccountConfig {
                             )
                     }
                     transferChainSecuredAccountOwnership
-                },
-                {
-                    fn backfillPathOwners(
-                        data: &[u8],
-                    ) -> alloy_sol_types::Result<AccountConfigCalls> {
-                        <backfillPathOwnersCall as alloy_sol_types::SolCall>::abi_decode_raw_validate(
-                                data,
-                            )
-                            .map(AccountConfigCalls::backfillPathOwners)
-                    }
-                    backfillPathOwners
                 },
                 {
                     fn addActionToGroup(
@@ -21849,11 +21648,6 @@ pub mod AccountConfig {
                 Self::api_payers(inner) => {
                     <api_payersCall as alloy_sol_types::SolCall>::abi_encoded_size(inner)
                 }
-                Self::backfillPathOwners(inner) => {
-                    <backfillPathOwnersCall as alloy_sol_types::SolCall>::abi_encoded_size(
-                        inner,
-                    )
-                }
                 Self::backfillPkpOwners(inner) => {
                     <backfillPkpOwnersCall as alloy_sol_types::SolCall>::abi_encoded_size(
                         inner,
@@ -22197,12 +21991,6 @@ pub mod AccountConfig {
                 }
                 Self::api_payers(inner) => {
                     <api_payersCall as alloy_sol_types::SolCall>::abi_encode_raw(
-                        inner,
-                        out,
-                    )
-                }
-                Self::backfillPathOwners(inner) => {
-                    <backfillPathOwnersCall as alloy_sol_types::SolCall>::abi_encode_raw(
                         inner,
                         out,
                     )
@@ -24318,21 +24106,6 @@ pub mod AccountConfig {
         //Creates a new call builder for the [`api_payers`] function.
         pub fn api_payers(&self) -> alloy_contract::SolCallBuilder<&P, api_payersCall, N> {
             self.call_builder(&api_payersCall)
-        }
-        //Creates a new call builder for the [`backfillPathOwners`] function.
-        pub fn backfillPathOwners(
-            &self,
-            derivationPaths: alloy::sol_types::private::Vec<
-                alloy::sol_types::private::primitives::aliases::U256,
-            >,
-            masterHashes: alloy::sol_types::private::Vec<
-                alloy::sol_types::private::primitives::aliases::U256,
-            >,
-        ) -> alloy_contract::SolCallBuilder<&P, backfillPathOwnersCall, N> {
-            self.call_builder(&backfillPathOwnersCall {
-                derivationPaths,
-                masterHashes,
-            })
         }
         //Creates a new call builder for the [`backfillPkpOwners`] function.
         pub fn backfillPkpOwners(

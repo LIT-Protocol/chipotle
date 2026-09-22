@@ -738,24 +738,6 @@
     {
       "inputs": [
         {
-          "internalType": "uint256[]",
-          "name": "derivationPaths",
-          "type": "uint256[]"
-        },
-        {
-          "internalType": "uint256[]",
-          "name": "masterHashes",
-          "type": "uint256[]"
-        }
-      ],
-      "name": "backfillPathOwners",
-      "outputs": [],
-      "stateMutability": "nonpayable",
-      "type": "function"
-    },
-    {
-      "inputs": [
-        {
           "internalType": "address[]",
           "name": "pkpIds",
           "type": "address[]"

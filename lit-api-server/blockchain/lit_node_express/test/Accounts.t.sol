@@ -4,6 +4,53 @@ pragma solidity =0.8.28;
 import {BaseTest} from "./helpers/BaseTest.sol";
 import {AppStorage} from "../contracts/AccountConfigFacets/AppStorage.sol";
 import {ViewsFacet} from "../contracts/AccountConfigFacets/ViewsFacet.sol";
+import {IDiamond} from "../interfaces/IDiamond.sol";
+import {FunctionNotFound} from "../contracts/AccountConfig.sol";
+import {SecurityLib} from "../contracts/AccountConfigFacets/SecurityLib.sol";
+
+// Historical migration facet, used only to exercise its removal from a diamond.
+contract LegacyPathBackfill {
+    event PathOwnerBackfilled(
+        uint256 indexed derivationPath,
+        uint256 indexed masterHash
+    );
+
+    /// @notice One-time migration helper: bind derivation paths registered before
+    ///         the global path-owner binding existed to their original master
+    ///         account. Companion to backfillPkpOwners — until a path is
+    ///         backfilled, getWalletDerivation falls through (pathOwner == 0), so
+    ///         the aliasing hole stays open for that path. Run this over every
+    ///         historical path to fully close it for pre-fix wallets.
+    /// @dev Pairs should be derived off-chain from the EARLIEST
+    ///      `WalletDerivationRegistered(masterHash, pkpId, derivationPath)` event
+    ///      per derivationPath (first registration wins, matching the rule
+    ///      registerWalletDerivation now enforces). Already-bound paths are
+    ///      skipped, never re-assigned, so the call is idempotent and safe to
+    ///      re-run. Restricted to the diamond owner or config operator.
+    function backfillPathOwners(
+        uint256[] calldata derivationPaths,
+        uint256[] calldata masterHashes
+    ) public {
+        SecurityLib.revertIfNotConfigOperatorOrOwner(msg.sender);
+        if (derivationPaths.length != masterHashes.length) {
+            revert AppStorage.InvalidRequest("array length mismatch");
+        }
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        for (uint256 i = 0; i < derivationPaths.length; i++) {
+            if (masterHashes[i] == 0) {
+                revert AppStorage.InvalidRequest("masterHash must be non-zero");
+            }
+            if (derivationPaths[i] == 0) {
+                revert AppStorage.InvalidRequest("derivationPath must be non-zero");
+            }
+            if (s.pathToOwnerMaster[derivationPaths[i]] != 0) {
+                continue; // already bound — never re-assign ownership
+            }
+            s.pathToOwnerMaster[derivationPaths[i]] = masterHashes[i];
+            emit PathOwnerBackfilled(derivationPaths[i], masterHashes[i]);
+        }
+    }
+}
 
 contract AccountsTest is BaseTest {
     function test_newChainSecuredAccount_writesPersistAndAreReadable() public {
@@ -627,9 +674,21 @@ contract AccountsTest is BaseTest {
         views_.getWalletDerivation(attackerHash, attackerPkp);
     }
 
-    function test_backfillPathOwners_bindsLegacyPathsAndBlocksAliasing()
+    function test_removeBackfillPathOwners_preservesBindingsAndBlocksAliasing()
         public
     {
+        bytes4 selector = LegacyPathBackfill.backfillPathOwners.selector;
+        // Fresh deployments must not expose the retired selector.
+        assertEq(loupe.facetAddress(selector), address(0));
+        bytes4[] memory selectors = new bytes4[](1);
+        selectors[0] = selector;
+        IDiamond.FacetCut[] memory cuts = new IDiamond.FacetCut[](1);
+        cuts[0] = IDiamond.FacetCut(
+            address(new LegacyPathBackfill()), IDiamond.FacetCutAction.Add, selectors
+        );
+        vm.prank(owner);
+        cut.diamondCut(cuts, address(0), "");
+        LegacyPathBackfill legacy = LegacyPathBackfill(d.diamond);
         uint256 legacyPath = 4242;
 
         vm.prank(user);
@@ -639,6 +698,12 @@ contract AccountsTest is BaseTest {
         writes.newChainSecuredAccount("attacker", "attacker");
         uint256 attackerHash = apiKeyHashOf(stranger);
 
+        // Recreate a pre-fix alias: the label belongs to the attacker, but
+        // the historical path has not yet been bound to its original owner.
+        vm.prank(stranger);
+        writes.registerWalletDerivation(attackerHash, address(0xCAFE), legacyPath, "a", "a");
+        assertEq(uint256(vm.load(address(views_), _pathOwnerSlot(legacyPath))), attackerHash);
+        vm.store(address(views_), _pathOwnerSlot(legacyPath), bytes32(0));
         assertEq(views_.getPathOwnerMaster(legacyPath), 0);
 
         uint256[] memory paths = new uint256[](1);
@@ -654,17 +719,39 @@ contract AccountsTest is BaseTest {
                 stranger
             )
         );
-        writes.backfillPathOwners(paths, masters);
+        legacy.backfillPathOwners(paths, masters);
 
         vm.prank(owner);
-        writes.backfillPathOwners(paths, masters);
+        legacy.backfillPathOwners(paths, masters);
         assertEq(views_.getPathOwnerMaster(legacyPath), legacyHash);
 
         // Idempotent: never re-assigns an existing binding.
         masters[0] = attackerHash;
         vm.prank(owner);
-        writes.backfillPathOwners(paths, masters);
+        legacy.backfillPathOwners(paths, masters);
         assertEq(views_.getPathOwnerMaster(legacyPath), legacyHash);
+
+        vm.prank(user);
+        writes.registerWalletDerivation(legacyHash, address(0xBEEF), legacyPath, "l", "l");
+
+        // Retire the selector using the same Remove action as the deployment manifest.
+        cuts[0] = IDiamond.FacetCut(address(0), IDiamond.FacetCutAction.Remove, selectors);
+        vm.prank(owner);
+        cut.diamondCut(cuts, address(0), "");
+        assertEq(loupe.facetAddress(selector), address(0));
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(FunctionNotFound.selector, selector));
+        legacy.backfillPathOwners(paths, masters);
+        assertEq(views_.getPathOwnerMaster(legacyPath), legacyHash);
+
+        assertEq(views_.getWalletDerivation(legacyHash, address(0xBEEF)), legacyPath);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "derivation path owned by another account"
+            )
+        );
+        views_.getWalletDerivation(attackerHash, address(0xCAFE));
 
         // Post-backfill, the attacker cannot alias the legacy path...
         vm.prank(stranger);
@@ -682,17 +769,17 @@ contract AccountsTest is BaseTest {
             "a"
         );
 
-        // ...but the legacy owner can still register it.
+        // ...but the legacy owner can still register another label for it.
         vm.prank(user);
         writes.registerWalletDerivation(
             legacyHash,
-            address(0xBEEF),
+            address(0xBEF0),
             legacyPath,
             "l",
             "l"
         );
         assertEq(
-            views_.getWalletDerivation(legacyHash, address(0xBEEF)),
+            views_.getWalletDerivation(legacyHash, address(0xBEF0)),
             legacyPath
         );
     }
