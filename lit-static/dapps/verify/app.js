@@ -127,7 +127,12 @@ function composeHashFromEventLog(eventLog) {
   if (!Array.isArray(entries)) return null;
   for (const e of entries) {
     if (e && typeof e === 'object' && String(e.event).toLowerCase() === 'compose-hash') {
-      return normHex(e.event_payload);
+      // Only a well-formed 32-byte hex value counts as a real commitment. A
+      // missing/empty/non-hex payload is an unrecognized shape, not evidence of
+      // a different config — return null so the caller degrades to 'unknown'
+      // rather than hard-failing the genuine endpoint on a malformed log.
+      const payload = normHex(e.event_payload);
+      return /^[0-9a-f]{64}$/.test(payload) ? payload : null;
     }
   }
   return null;
@@ -454,14 +459,21 @@ async function stepOnChain(rpcUrl, dstackAppAddress, composeHash) {
 
 /** Step 5 — defer the heavy checks to the Phala Trust Center. */
 function stepTrustCenter(info, expectedAppId) {
-  const appId = normHex(info && info.app_id) || normHex(expectedAppId);
+  const reportedAppId = normHex(info && info.app_id);
+  const appId = reportedAppId || normHex(expectedAppId);
   const trustUrl = `https://trust.phala.com/app/${appId}`;
+  // Keep the warning honest about which app_id the link was actually built from:
+  // the endpoint's self-reported value, or — when it reported none — the expected
+  // address the user configured.
+  const handoffWarning = reportedAppId
+    ? `<p class="note bad">This link is built from the server's <em>self-reported</em> app_id. If this endpoint is a relay, it describes the genuine deployment — not necessarily the server you are connected to. Confirm the certificate the Trust Center attests is the one this endpoint actually serves before trusting it.</p>`
+    : `<p class="note bad">This endpoint reported no app_id, so the link falls back to the <em>expected</em> DstackApp address you configured. It therefore describes that expected deployment, not anything this endpoint proved — confirm the certificate the Trust Center attests is the one this endpoint actually serves before trusting it.</p>`;
   setPill('step-trust', 'info', 'manual');
   setDetail(
     'step-trust',
     `<p class="note">${link(trustUrl, 'Open the Phala Trust Center report →')}</p>` +
       `<p class="note">It validates the Intel TDX hardware quote, the OS measurements, and — crucially — that HTTPS is terminated inside the enclave. That TLS-in-TEE check binds the endpoint you are actually talking to (this TLS connection) to the attested deployment, so it is the step that catches a relay or proxy that merely copies a genuine attestation.</p>` +
-      `<p class="note bad">This link is built from the server's <em>self-reported</em> app_id. If this endpoint is a relay, it describes the genuine deployment — not necessarily the server you are connected to. Confirm the certificate the Trust Center attests is the one this endpoint actually serves before trusting it.</p>` +
+      handoffWarning +
       `<p class="note">On-chain governance (Base): ${link(
         'https://basescan.org/address/' + expectedAppId,
         'DstackApp'
