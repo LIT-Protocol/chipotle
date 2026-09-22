@@ -69,6 +69,13 @@ determine severity using [CVSS](https://www.first.org/cvss/) as a starting point
 adjusted for actual exploitability and impact on the deployed system — we set the
 severity, not the reporter.
 
+**Sharing your discovery methodology increases the likelihood of a reward.**
+Include the steps you took to find and investigate the bug, the tools you used,
+and, if you used AI, the prompts that helped you uncover it. Explain how you
+personally verified the finding. This context helps us understand and validate
+your work. Methodology is encouraged, but optional; all report requirements and
+reward eligibility criteria still apply.
+
 - **Severity floor.** Only findings we assess as **Medium or higher** are
   eligible for a reward. Low and Informational findings are not paid, though we
   will fix them and may credit you.
@@ -87,6 +94,9 @@ severity, not the reporter.
   legally prohibited from paying.
 
 ## In scope
+
+The repository in scope is [LIT-Protocol/chipotle](https://github.com/LIT-Protocol/chipotle),
+covering the following components, subject to the exclusions below:
 
 - The `lit-api-server`, `lit-actions` runtime, and `lit-static` dashboard.
 - Smart contracts in this repository (account/permission model, and the
@@ -123,6 +133,10 @@ this list are closed without a response.
   rate-limit exhaustion, gas griefing without loss of funds — and any report
   whose proof requires degrading the service for real users.
 - **Social engineering and phishing** of Lit employees, contractors, or users.
+- **User misconfiguration.** Issues caused by a user configuring their setup
+  insecurely — for example, granting overly broad permissions or disabling
+  available security controls — are user error and are not valid bounty reports.
+  The ability to choose an insecure configuration is not itself a vulnerability.
 - **Physical attacks** on data centers, offices, or hardware, including physical
   side-channel attacks against the TEE hardware itself.
 - **Self-inflicted issues**: self-XSS, attacks requiring a victim's rooted or

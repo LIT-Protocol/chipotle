@@ -43,6 +43,11 @@ page for the full report requirements, scope, exclusions (insider attacks, the
 marketing website, DoS, best-practice findings without impact, and more), and the
 rules of engagement.
 
+Including your discovery methodology increases the likelihood of a reward. Share
+the steps you took to find and investigate the bug, the tools and any AI prompts
+you used, and how you personally verified the finding. This is encouraged, but
+optional; all report requirements and reward eligibility criteria still apply.
+
 ## What to expect
 
 For reports that meet the requirements above:
@@ -59,7 +64,8 @@ reply.
 
 ## Scope
 
-In scope:
+The repository in scope is [LIT-Protocol/chipotle](https://github.com/LIT-Protocol/chipotle),
+covering the following components, subject to the exclusions below:
 
 - The `lit-api-server`, `lit-actions` runtime, and `lit-static` dashboard.
 - Smart contracts in this repository (account/permission model, and the
@@ -67,12 +73,16 @@ In scope:
 - The deployment pipeline and TEE attestation / verification flow.
 - The on-chain governance and key-release model.
 
-Out of scope (report upstream, but tell us if it affects us):
+Out of scope:
 
+- **User misconfiguration** — issues caused by a user configuring their setup
+  insecurely, such as granting overly broad permissions or disabling available
+  security controls, are user error and are not valid bounty reports. The ability
+  to choose an insecure configuration is not itself a vulnerability.
 - Vulnerabilities in Intel TDX, the dstack OS, or Phala Cloud infrastructure —
   report to [Intel](https://www.intel.com/content/www/us/en/security-center/default.html),
   [dstack](https://github.com/Dstack-TEE/dstack), or
-  [Phala](https://docs.phala.com/) respectively.
+  [Phala](https://docs.phala.com/) respectively, but tell us if they affect us.
 - Third-party dependencies — report upstream; we track advisories via `deny.toml`.
   A working exploit of a dependency CVE against our deployment *is* in scope.
 - Best-practice findings without a working exploit and demonstrated impact
