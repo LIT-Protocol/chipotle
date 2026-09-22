@@ -67,9 +67,12 @@ export function logError(context, e, extra) {
 
 export function escapeHtml(s) {
   if (s == null) return '';
-  const div = document.createElement('div');
-  div.textContent = s;
-  return div.innerHTML;
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // ----- Clipboard -----
