@@ -12,6 +12,9 @@
   --shade: #f0f0eb;
   --white: #fff;
   --radius: 7px;
+  --page-width: 1440px;
+  --page-gutter: 48px;
+  --page-inset: max(var(--page-gutter), calc((100% - var(--page-width)) / 2));
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-family:
     Inter,
@@ -39,6 +42,9 @@ body {
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-width: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 [hidden] {
   display: none !important;
@@ -180,11 +186,13 @@ button.full {
 
 /* Top bar */
 header.topbar {
-  height: 78px;
+  min-height: 78px;
+  flex-wrap: wrap;
+  gap: 12px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 48px;
+  padding: 16px var(--page-inset);
   border-bottom: 1px solid var(--line);
   font-size: 13px;
 }
@@ -249,7 +257,7 @@ header.topbar {
   }
 }
 .alert {
-  width: min(1120px, 100% - 96px);
+  width: min(var(--page-width), 100% - 2 * var(--page-gutter));
   margin: 14px auto 0;
   padding: 11px 16px;
   border-radius: var(--radius);
@@ -278,7 +286,7 @@ header.topbar {
 
 /* Home: intro on the left, the sign-in surface on the right. */
 main.login-layout {
-  width: min(1120px, 100% - 96px);
+  width: min(1120px, 100% - 2 * var(--page-gutter));
   margin: 0 auto;
   display: grid;
   grid-template-columns: 1.2fr 1fr;
@@ -407,12 +415,15 @@ summary {
 /* Workspace */
 .workspace {
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 220px minmax(0, 1fr);
+  width: min(var(--page-width), 100% - 2 * var(--page-gutter));
+  margin: 0 auto;
   flex: 1;
 }
 aside {
   border-right: 1px solid var(--line);
-  padding: 32px 20px;
+  min-width: 0;
+  padding: 32px 20px 32px 0;
   display: flex;
   flex-direction: column;
 }
@@ -481,8 +492,7 @@ nav button.active {
 .dashboard {
   min-width: 0;
   width: 100%;
-  max-width: 1280px;
-  padding: 44px 52px 64px;
+  padding: 44px 0 64px 40px;
 }
 .page-heading {
   display: flex;
@@ -555,7 +565,7 @@ nav button.active {
 /* Secrets */
 .secret-layout {
   display: grid;
-  grid-template-columns: 1fr 1.2fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
   gap: 32px;
   align-items: start;
 }
@@ -823,7 +833,7 @@ hr {
 .choice-grid,
 .catalog-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   margin: 22px 0;
 }
@@ -940,7 +950,7 @@ footer.site-footer {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 10px 20px;
-  padding: 22px 48px;
+  padding: 22px var(--page-inset);
   border-top: 1px solid var(--line);
   font-size: 11px;
   color: var(--muted);
@@ -951,8 +961,37 @@ footer.site-footer {
   gap: 8px 18px;
 }
 
+/* Long identifiers and action groups must fit their grid/flex columns. */
+.alert,
+.billing-panel,
+.detail-card,
+.choice-card,
+.catalog-card {
+  overflow-wrap: anywhere;
+}
+.agent-row,
+.activity-row,
+.agent-row .row-actions {
+  flex-wrap: wrap;
+}
+.agent-row > span,
+.activity-row > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.shape-table {
+  table-layout: fixed;
+}
+.shape-table td:first-child {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 /* Responsive */
-@media (max-width: 1000px) {
+@media (max-width: 1100px) {
+  :root {
+    --page-gutter: 28px;
+  }
   main.login-layout {
     gap: 44px;
   }
@@ -960,19 +999,22 @@ footer.site-footer {
     padding-left: 36px;
   }
   .workspace {
-    grid-template-columns: 200px 1fr;
+    grid-template-columns: 190px minmax(0, 1fr);
   }
   .dashboard {
-    padding: 32px 28px;
+    padding: 32px 0 44px 28px;
   }
   .secret-layout {
     grid-template-columns: 1fr;
   }
 }
 @media (max-width: 700px) {
+  :root {
+    --page-gutter: 20px;
+  }
   header.topbar {
-    height: 68px;
-    padding: 0 22px;
+    min-height: 68px;
+    padding-block: 14px;
   }
   .brand {
     gap: 14px;
@@ -980,12 +1022,8 @@ footer.site-footer {
   .header-right {
     gap: 14px;
   }
-  .alert {
-    width: calc(100% - 44px);
-  }
   main.login-layout {
     display: block;
-    width: calc(100% - 44px);
     padding: 40px 0 48px;
   }
   .intro h1 {
@@ -1013,7 +1051,7 @@ footer.site-footer {
     display: block;
   }
   aside {
-    padding: 16px 22px;
+    padding: 20px 0 16px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
@@ -1032,7 +1070,7 @@ footer.site-footer {
     display: none;
   }
   .dashboard {
-    padding: 28px 22px 44px;
+    padding: 28px 0 44px;
   }
   .page-heading {
     flex-direction: column;
@@ -1051,7 +1089,20 @@ footer.site-footer {
     grid-template-columns: 1fr;
   }
   footer.site-footer {
-    padding: 20px 22px;
+    padding-block: 20px;
     flex-direction: column;
+  }
+}
+
+@media (max-width: 400px) {
+  :root {
+    --page-gutter: 16px;
+  }
+  .header-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .detail-card {
+    padding: 16px;
   }
 }
