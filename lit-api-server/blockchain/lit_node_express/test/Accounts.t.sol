@@ -1047,4 +1047,112 @@ contract AccountsTest is BaseTest {
         ViewsFacet.UsageApiKeyReturn[] memory keys = views_.listApiKeys(master, 0, 10);
         assertEq(keys.length, 0);
     }
+
+    // --- Usage API key expiration enforcement (issue #31 / #24 finding 4) ---
+
+    /// @notice Registers a wildcard-execute usage key with the given expiration
+    ///         and returns its hash. The key can execute any action in any group.
+    function _wildcardUsageKey(
+        uint256 master,
+        uint256 expiration
+    ) internal returns (uint256 usageHash) {
+        usageHash = uint256(keccak256("expiring-usage-key"));
+        uint256[] memory empty = new uint256[](0);
+        uint256[] memory wildcard = new uint256[](1);
+        wildcard[0] = 0; // group-0 wildcard: execute in any group
+        vm.prank(user);
+        writes.setUsageApiKey(
+            master,
+            usageHash,
+            expiration,
+            0,
+            "expiring",
+            "expiring usage key",
+            false,
+            false,
+            false,
+            empty,
+            empty,
+            empty,
+            wildcard
+        );
+    }
+
+    function test_canExecuteAction_deniesExpiredUsageKey() public {
+        vm.prank(user);
+        writes.newChainSecuredAccount("alice", "primary");
+        uint256 master = apiKeyHashOf(user);
+
+        uint256 usageHash = _wildcardUsageKey(master, block.timestamp + 7 days);
+        uint256 cidHash = uint256(keccak256("some-action"));
+
+        // Before expiry the key authorizes execution and wallet use.
+        assertTrue(views_.canExecuteAction(usageHash, cidHash));
+        assertTrue(views_.canExecuteActionFast(usageHash, cidHash));
+        assertTrue(
+            views_.canUseWalletInAction(usageHash, cidHash, address(0xBEEF))
+        );
+        assertTrue(
+            views_.canUseWalletInActionFast(usageHash, cidHash, address(0xBEEF))
+        );
+        (bool canExec, bool canWallet) = views_.canExecuteActionAndUseWallet(
+            usageHash,
+            cidHash,
+            address(0xBEEF)
+        );
+        assertTrue(canExec);
+        assertTrue(canWallet);
+
+        // Warp past the expiration. Every authorization path must now deny.
+        vm.warp(block.timestamp + 8 days);
+
+        assertFalse(views_.canExecuteAction(usageHash, cidHash));
+        assertFalse(views_.canExecuteActionFast(usageHash, cidHash));
+        assertFalse(
+            views_.canUseWalletInAction(usageHash, cidHash, address(0xBEEF))
+        );
+        assertFalse(
+            views_.canUseWalletInActionFast(usageHash, cidHash, address(0xBEEF))
+        );
+        (canExec, canWallet) = views_.canExecuteActionAndUseWallet(
+            usageHash,
+            cidHash,
+            address(0xBEEF)
+        );
+        assertFalse(canExec);
+        assertFalse(canWallet);
+    }
+
+    function test_canExecuteAction_deniesKeyExpiredAtCreation() public {
+        // A key whose expiration is already in the past must never authorize,
+        // even immediately after being written. block.timestamp is warped
+        // forward first so an expiration in the past is expressible.
+        vm.warp(30 days);
+        vm.prank(user);
+        writes.newChainSecuredAccount("alice", "primary");
+        uint256 master = apiKeyHashOf(user);
+
+        uint256 usageHash = _wildcardUsageKey(master, block.timestamp - 1 days);
+        uint256 cidHash = uint256(keccak256("some-action"));
+
+        assertFalse(views_.canExecuteAction(usageHash, cidHash));
+        assertFalse(views_.canExecuteActionFast(usageHash, cidHash));
+    }
+
+    function test_canExecuteAction_zeroExpirationNeverExpires() public {
+        // expiration == 0 is the "never expires" sentinel and must keep
+        // authorizing even far into the future.
+        vm.prank(user);
+        writes.newChainSecuredAccount("alice", "primary");
+        uint256 master = apiKeyHashOf(user);
+
+        uint256 usageHash = _wildcardUsageKey(master, 0);
+        uint256 cidHash = uint256(keccak256("some-action"));
+
+        assertTrue(views_.canExecuteAction(usageHash, cidHash));
+
+        vm.warp(block.timestamp + 3650 days);
+        assertTrue(views_.canExecuteAction(usageHash, cidHash));
+        assertTrue(views_.canExecuteActionFast(usageHash, cidHash));
+    }
 }
