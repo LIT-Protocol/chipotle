@@ -171,7 +171,8 @@ contract ViewsFacet {
         // that owner, the local pkpData entry is a stale pre-fix hijack
         // registration — fail closed instead of leaking the victim's path.
         // owner == 0 means a pre-migration wallet not yet backfilled: fall
-        // through so signing keeps working until backfillPkpOwners runs.
+        // through for deployments that have not migrated. Completed bindings
+        // survive removal of the historical backfill entry point.
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         uint256 resolvedMaster = s.allApiKeyHashesToMaster[apiKeyHash];
         uint256 owner = s.pkpIdToOwnerMaster[walletAddress];

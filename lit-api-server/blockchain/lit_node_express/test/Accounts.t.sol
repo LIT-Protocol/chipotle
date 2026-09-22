@@ -9,7 +9,39 @@ import {FunctionNotFound} from "../contracts/AccountConfig.sol";
 import {SecurityLib} from "../contracts/AccountConfigFacets/SecurityLib.sol";
 
 // Historical migration facet, used only to exercise its removal from a diamond.
-contract LegacyPathBackfill {
+contract LegacyOwnerBackfills {
+    event PkpOwnerBackfilled(address indexed pkpId, uint256 indexed masterHash);
+
+    /// @notice One-time migration helper: bind wallets registered before the global
+    ///         owner binding existed to their original master account.
+    /// @dev Pairs should be derived off-chain from the EARLIEST
+    ///      `WalletDerivationRegistered(masterHash, pkpId, ...)` event per pkpId
+    ///      (first registration wins, matching the rule `registerWalletDerivation`
+    ///      now enforces). Already-bound pkpIds are skipped, never re-assigned, so
+    ///      the call is idempotent and safe to run in batches / re-run. Restricted
+    ///      to the diamond owner or config operator.
+    function backfillPkpOwners(
+        address[] calldata pkpIds,
+        uint256[] calldata masterHashes
+    ) public {
+        SecurityLib.revertIfNotConfigOperatorOrOwner(msg.sender);
+        if (pkpIds.length != masterHashes.length) {
+            revert AppStorage.InvalidRequest("array length mismatch");
+        }
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        for (uint256 i = 0; i < pkpIds.length; i++) {
+            if (masterHashes[i] == 0) {
+                revert AppStorage.InvalidRequest("masterHash must be non-zero");
+            }
+            if (s.pkpIdToOwnerMaster[pkpIds[i]] != 0) {
+                continue; // already bound — never re-assign ownership
+            }
+            s.pkpIdToOwnerMaster[pkpIds[i]] = masterHashes[i];
+            emit PkpOwnerBackfilled(pkpIds[i], masterHashes[i]);
+        }
+    }
+
+
     event PathOwnerBackfilled(
         uint256 indexed derivationPath,
         uint256 indexed masterHash
@@ -456,7 +488,18 @@ contract AccountsTest is BaseTest {
         assertEq(views_.getPkpOwnerMaster(pkpAddr), victimHash);
     }
 
-    function test_backfillPkpOwners_bindsLegacyWalletsAndBlocksHijack() public {
+    function test_removeBackfillPkpOwners_preservesBindingsAndBlocksHijack() public {
+        bytes4 selector = LegacyOwnerBackfills.backfillPkpOwners.selector;
+        assertEq(loupe.facetAddress(selector), address(0));
+        bytes4[] memory selectors = new bytes4[](1);
+        selectors[0] = selector;
+        IDiamond.FacetCut[] memory cuts = new IDiamond.FacetCut[](1);
+        cuts[0] = IDiamond.FacetCut(
+            address(new LegacyOwnerBackfills()), IDiamond.FacetCutAction.Add, selectors
+        );
+        vm.prank(owner);
+        cut.diamondCut(cuts, address(0), "");
+        LegacyOwnerBackfills legacy = LegacyOwnerBackfills(d.diamond);
         vm.prank(user);
         writes.newChainSecuredAccount("legacy", "legacy");
         uint256 legacyHash = apiKeyHashOf(user);
@@ -467,6 +510,10 @@ contract AccountsTest is BaseTest {
         // Simulate a pre-migration wallet: registered in the account but with no
         // global owner binding (as if registered before the upgrade).
         address legacyPkp = address(0x1E9AC7);
+        vm.prank(stranger);
+        writes.registerWalletDerivation(attackerHash, legacyPkp, 8, "a", "a");
+        assertEq(uint256(vm.load(address(views_), _pkpOwnerSlot(legacyPkp))), attackerHash);
+        vm.store(address(views_), _pkpOwnerSlot(legacyPkp), bytes32(0));
         assertEq(views_.getPkpOwnerMaster(legacyPkp), 0);
 
         address[] memory pkpIds = new address[](1);
@@ -482,27 +529,50 @@ contract AccountsTest is BaseTest {
                 stranger
             )
         );
-        writes.backfillPkpOwners(pkpIds, masters);
+        legacy.backfillPkpOwners(pkpIds, masters);
 
         vm.prank(owner);
-        writes.backfillPkpOwners(pkpIds, masters);
+        legacy.backfillPkpOwners(pkpIds, masters);
         assertEq(views_.getPkpOwnerMaster(legacyPkp), legacyHash);
 
         // Backfill never re-assigns an existing binding (idempotent, skip-if-set).
         masters[0] = attackerHash;
         vm.prank(owner);
-        writes.backfillPkpOwners(pkpIds, masters);
+        legacy.backfillPkpOwners(pkpIds, masters);
         assertEq(views_.getPkpOwnerMaster(legacyPkp), legacyHash);
 
-        // Post-backfill, the attacker cannot register the legacy wallet...
-        vm.prank(stranger);
+        vm.prank(user);
+        writes.registerWalletDerivation(legacyHash, legacyPkp, 7, "l", "l");
+
+        cuts[0] = IDiamond.FacetCut(address(0), IDiamond.FacetCutAction.Remove, selectors);
+        vm.prank(owner);
+        cut.diamondCut(cuts, address(0), "");
+        assertEq(loupe.facetAddress(selector), address(0));
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(FunctionNotFound.selector, selector));
+        legacy.backfillPkpOwners(pkpIds, masters);
+        assertEq(views_.getPkpOwnerMaster(legacyPkp), legacyHash);
+        assertEq(views_.getWalletDerivation(legacyHash, legacyPkp), 7);
+        vm.expectRevert(
+            abi.encodeWithSelector(AppStorage.InvalidRequest.selector, "PKP owned by another account")
+        );
+        views_.getWalletDerivation(attackerHash, legacyPkp);
+
+        vm.prank(user);
+        writes.removeWalletDerivation(legacyHash, legacyPkp);
+
+        // A fresh account cannot claim the PKP after the original removes it.
+        // The historical attacker's stale row was already tested above.
+        vm.prank(apiPayer);
+        writes.newChainSecuredAccount("new attacker", "new attacker");
+        vm.prank(apiPayer);
         vm.expectRevert(
             abi.encodeWithSelector(
                 AppStorage.InvalidRequest.selector,
                 "PKP owned by another account"
             )
         );
-        writes.registerWalletDerivation(attackerHash, legacyPkp, 7, "a", "a");
+        writes.registerWalletDerivation(apiKeyHashOf(apiPayer), legacyPkp, 7, "a", "a");
 
         // ...but the legacy owner can (e.g. #450 recovery re-registration).
         vm.prank(user);
@@ -677,18 +747,18 @@ contract AccountsTest is BaseTest {
     function test_removeBackfillPathOwners_preservesBindingsAndBlocksAliasing()
         public
     {
-        bytes4 selector = LegacyPathBackfill.backfillPathOwners.selector;
+        bytes4 selector = LegacyOwnerBackfills.backfillPathOwners.selector;
         // Fresh deployments must not expose the retired selector.
         assertEq(loupe.facetAddress(selector), address(0));
         bytes4[] memory selectors = new bytes4[](1);
         selectors[0] = selector;
         IDiamond.FacetCut[] memory cuts = new IDiamond.FacetCut[](1);
         cuts[0] = IDiamond.FacetCut(
-            address(new LegacyPathBackfill()), IDiamond.FacetCutAction.Add, selectors
+            address(new LegacyOwnerBackfills()), IDiamond.FacetCutAction.Add, selectors
         );
         vm.prank(owner);
         cut.diamondCut(cuts, address(0), "");
-        LegacyPathBackfill legacy = LegacyPathBackfill(d.diamond);
+        LegacyOwnerBackfills legacy = LegacyOwnerBackfills(d.diamond);
         uint256 legacyPath = 4242;
 
         vm.prank(user);

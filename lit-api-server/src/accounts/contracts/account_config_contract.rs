@@ -1666,7 +1666,6 @@ interface AccountConfig {
     function apiKeyCanExecuteForAnyGroup(uint256 apiKeyHash, uint256[] memory groupIds) external view returns (bool);
     function apiPayerCount() external view returns (uint256);
     function api_payers() external view returns (address[] memory);
-    function backfillPkpOwners(address[] memory pkpIds, uint256[] memory masterHashes) external;
     function canExecuteAction(uint256 apiKeyHash, uint256 cidHash) external view returns (bool);
     function canExecuteActionAndUseWallet(uint256 apiKeyHash, uint256 cidHash, address walletAddress) external view returns (bool canExecute, bool canUseWallet);
     function canExecuteActionFast(uint256 apiKeyHash, uint256 cidHash) external view returns (bool);
@@ -1956,24 +1955,6 @@ interface AccountConfig {
       }
     ],
     "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "backfillPkpOwners",
-    "inputs": [
-      {
-        "name": "pkpIds",
-        "type": "address[]",
-        "internalType": "address[]"
-      },
-      {
-        "name": "masterHashes",
-        "type": "uint256[]",
-        "internalType": "uint256[]"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -10768,157 +10749,6 @@ pub mod AccountConfig {
                     let r: api_payersReturn = r.into();
                     r._0
                 })
-            }
-        }
-    };
-    #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
-    /*Function with signature `backfillPkpOwners(address[],uint256[])` and selector `0x41275609`.
-    ```solidity
-    function backfillPkpOwners(address[] memory pkpIds, uint256[] memory masterHashes) external;
-    ```*/
-    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
-    #[derive(Clone)]
-    pub struct backfillPkpOwnersCall {
-        #[allow(missing_docs)]
-        pub pkpIds: alloy::sol_types::private::Vec<alloy::sol_types::private::Address>,
-        #[allow(missing_docs)]
-        pub masterHashes:
-            alloy::sol_types::private::Vec<alloy::sol_types::private::primitives::aliases::U256>,
-    }
-    //Container type for the return parameters of the [`backfillPkpOwners(address[],uint256[])`](backfillPkpOwnersCall) function.
-    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
-    #[derive(Clone)]
-    pub struct backfillPkpOwnersReturn {}
-    #[allow(
-        non_camel_case_types,
-        non_snake_case,
-        clippy::pub_underscore_fields,
-        clippy::style
-    )]
-    const _: () = {
-        use alloy::sol_types as alloy_sol_types;
-        {
-            #[doc(hidden)]
-            #[allow(dead_code)]
-            type UnderlyingSolTuple<'a> = (
-                alloy::sol_types::sol_data::Array<alloy::sol_types::sol_data::Address>,
-                alloy::sol_types::sol_data::Array<alloy::sol_types::sol_data::Uint<256>>,
-            );
-            #[doc(hidden)]
-            type UnderlyingRustTuple<'a> = (
-                alloy::sol_types::private::Vec<alloy::sol_types::private::Address>,
-                alloy::sol_types::private::Vec<
-                    alloy::sol_types::private::primitives::aliases::U256,
-                >,
-            );
-            #[cfg(test)]
-            #[allow(dead_code, unreachable_patterns)]
-            fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
-                match _t {
-                    alloy_sol_types::private::AssertTypeEq::<
-                        <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
-                    >(_) => {}
-                }
-            }
-            #[automatically_derived]
-            #[doc(hidden)]
-            impl ::core::convert::From<backfillPkpOwnersCall> for UnderlyingRustTuple<'_> {
-                fn from(value: backfillPkpOwnersCall) -> Self {
-                    (value.pkpIds, value.masterHashes)
-                }
-            }
-            #[automatically_derived]
-            #[doc(hidden)]
-            impl ::core::convert::From<UnderlyingRustTuple<'_>> for backfillPkpOwnersCall {
-                fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
-                    Self {
-                        pkpIds: tuple.0,
-                        masterHashes: tuple.1,
-                    }
-                }
-            }
-        }
-        {
-            #[doc(hidden)]
-            #[allow(dead_code)]
-            type UnderlyingSolTuple<'a> = ();
-            #[doc(hidden)]
-            type UnderlyingRustTuple<'a> = ();
-            #[cfg(test)]
-            #[allow(dead_code, unreachable_patterns)]
-            fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
-                match _t {
-                    alloy_sol_types::private::AssertTypeEq::<
-                        <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
-                    >(_) => {}
-                }
-            }
-            #[automatically_derived]
-            #[doc(hidden)]
-            impl ::core::convert::From<backfillPkpOwnersReturn> for UnderlyingRustTuple<'_> {
-                fn from(value: backfillPkpOwnersReturn) -> Self {
-                    ()
-                }
-            }
-            #[automatically_derived]
-            #[doc(hidden)]
-            impl ::core::convert::From<UnderlyingRustTuple<'_>> for backfillPkpOwnersReturn {
-                fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
-                    Self {}
-                }
-            }
-        }
-        impl backfillPkpOwnersReturn {
-            fn _tokenize(
-                &self,
-            ) -> <backfillPkpOwnersCall as alloy_sol_types::SolCall>::ReturnToken<'_> {
-                ()
-            }
-        }
-        #[automatically_derived]
-        impl alloy_sol_types::SolCall for backfillPkpOwnersCall {
-            type Parameters<'a> = (
-                alloy::sol_types::sol_data::Array<alloy::sol_types::sol_data::Address>,
-                alloy::sol_types::sol_data::Array<alloy::sol_types::sol_data::Uint<256>>,
-            );
-            type Token<'a> = <Self::Parameters<'a> as alloy_sol_types::SolType>::Token<'a>;
-            type Return = backfillPkpOwnersReturn;
-            type ReturnTuple<'a> = ();
-            type ReturnToken<'a> = <Self::ReturnTuple<'a> as alloy_sol_types::SolType>::Token<'a>;
-            const SIGNATURE: &'static str = "backfillPkpOwners(address[],uint256[])";
-            const SELECTOR: [u8; 4] = [65u8, 39u8, 86u8, 9u8];
-            #[inline]
-            fn new<'a>(
-                tuple: <Self::Parameters<'a> as alloy_sol_types::SolType>::RustType,
-            ) -> Self {
-                tuple.into()
-            }
-            #[inline]
-            fn tokenize(&self) -> Self::Token<'_> {
-                (
-                    <alloy::sol_types::sol_data::Array<
-                        alloy::sol_types::sol_data::Address,
-                    > as alloy_sol_types::SolType>::tokenize(&self.pkpIds),
-                    <alloy::sol_types::sol_data::Array<
-                        alloy::sol_types::sol_data::Uint<256>,
-                    > as alloy_sol_types::SolType>::tokenize(&self.masterHashes),
-                )
-            }
-            #[inline]
-            fn tokenize_returns(ret: &Self::Return) -> Self::ReturnToken<'_> {
-                backfillPkpOwnersReturn::_tokenize(ret)
-            }
-            #[inline]
-            fn abi_decode_returns(data: &[u8]) -> alloy_sol_types::Result<Self::Return> {
-                <Self::ReturnTuple<'_> as alloy_sol_types::SolType>::abi_decode_sequence(data)
-                    .map(Into::into)
-            }
-            #[inline]
-            fn abi_decode_returns_validate(data: &[u8]) -> alloy_sol_types::Result<Self::Return> {
-                <Self::ReturnTuple<'_> as alloy_sol_types::SolType>::abi_decode_sequence_validate(
-                    data,
-                )
-                .map(Into::into)
             }
         }
     };
@@ -19744,8 +19574,6 @@ pub mod AccountConfig {
         #[allow(missing_docs)]
         api_payers(api_payersCall),
         #[allow(missing_docs)]
-        backfillPkpOwners(backfillPkpOwnersCall),
-        #[allow(missing_docs)]
         canExecuteAction(canExecuteActionCall),
         #[allow(missing_docs)]
         canExecuteActionAndUseWallet(canExecuteActionAndUseWalletCall),
@@ -19888,7 +19716,6 @@ pub mod AccountConfig {
             [56u8, 54u8, 3u8, 254u8],
             [64u8, 180u8, 212u8, 83u8],
             [64u8, 212u8, 65u8, 27u8],
-            [65u8, 39u8, 86u8, 9u8],
             [74u8, 66u8, 196u8, 10u8],
             [77u8, 190u8, 191u8, 229u8],
             [80u8, 64u8, 144u8, 1u8],
@@ -19960,7 +19787,6 @@ pub mod AccountConfig {
             ::core::stringify!(adminApiPayerAccount),
             ::core::stringify!(debitApiKey),
             ::core::stringify!(removeAction),
-            ::core::stringify!(backfillPkpOwners),
             ::core::stringify!(removePkpFromGroup),
             ::core::stringify!(newChainSecuredAccount),
             ::core::stringify!(listPkps),
@@ -20032,7 +19858,6 @@ pub mod AccountConfig {
             <adminApiPayerAccountCall as alloy_sol_types::SolCall>::SIGNATURE,
             <debitApiKeyCall as alloy_sol_types::SolCall>::SIGNATURE,
             <removeActionCall as alloy_sol_types::SolCall>::SIGNATURE,
-            <backfillPkpOwnersCall as alloy_sol_types::SolCall>::SIGNATURE,
             <removePkpFromGroupCall as alloy_sol_types::SolCall>::SIGNATURE,
             <newChainSecuredAccountCall as alloy_sol_types::SolCall>::SIGNATURE,
             <listPkpsCall as alloy_sol_types::SolCall>::SIGNATURE,
@@ -20105,7 +19930,7 @@ pub mod AccountConfig {
     impl alloy_sol_types::SolInterface for AccountConfigCalls {
         const NAME: &'static str = "AccountConfigCalls";
         const MIN_DATA_LENGTH: usize = 0usize;
-        const COUNT: usize = 69usize;
+        const COUNT: usize = 68usize;
         #[inline]
         fn selector(&self) -> [u8; 4] {
             match self {
@@ -20128,9 +19953,6 @@ pub mod AccountConfig {
                 }
                 Self::apiPayerCount(_) => <apiPayerCountCall as alloy_sol_types::SolCall>::SELECTOR,
                 Self::api_payers(_) => <api_payersCall as alloy_sol_types::SolCall>::SELECTOR,
-                Self::backfillPkpOwners(_) => {
-                    <backfillPkpOwnersCall as alloy_sol_types::SolCall>::SELECTOR
-                }
                 Self::canExecuteAction(_) => {
                     <canExecuteActionCall as alloy_sol_types::SolCall>::SELECTOR
                 }
@@ -20457,15 +20279,6 @@ pub mod AccountConfig {
                             .map(AccountConfigCalls::removeAction)
                     }
                     removeAction
-                },
-                {
-                    fn backfillPkpOwners(
-                        data: &[u8],
-                    ) -> alloy_sol_types::Result<AccountConfigCalls> {
-                        <backfillPkpOwnersCall as alloy_sol_types::SolCall>::abi_decode_raw(data)
-                            .map(AccountConfigCalls::backfillPkpOwners)
-                    }
-                    backfillPkpOwners
                 },
                 {
                     fn removePkpFromGroup(
@@ -21109,17 +20922,6 @@ pub mod AccountConfig {
                     removeAction
                 },
                 {
-                    fn backfillPkpOwners(
-                        data: &[u8],
-                    ) -> alloy_sol_types::Result<AccountConfigCalls> {
-                        <backfillPkpOwnersCall as alloy_sol_types::SolCall>::abi_decode_raw_validate(
-                                data,
-                            )
-                            .map(AccountConfigCalls::backfillPkpOwners)
-                    }
-                    backfillPkpOwners
-                },
-                {
                     fn removePkpFromGroup(
                         data: &[u8],
                     ) -> alloy_sol_types::Result<AccountConfigCalls> {
@@ -21648,11 +21450,6 @@ pub mod AccountConfig {
                 Self::api_payers(inner) => {
                     <api_payersCall as alloy_sol_types::SolCall>::abi_encoded_size(inner)
                 }
-                Self::backfillPkpOwners(inner) => {
-                    <backfillPkpOwnersCall as alloy_sol_types::SolCall>::abi_encoded_size(
-                        inner,
-                    )
-                }
                 Self::canExecuteAction(inner) => {
                     <canExecuteActionCall as alloy_sol_types::SolCall>::abi_encoded_size(
                         inner,
@@ -21991,12 +21788,6 @@ pub mod AccountConfig {
                 }
                 Self::api_payers(inner) => {
                     <api_payersCall as alloy_sol_types::SolCall>::abi_encode_raw(
-                        inner,
-                        out,
-                    )
-                }
-                Self::backfillPkpOwners(inner) => {
-                    <backfillPkpOwnersCall as alloy_sol_types::SolCall>::abi_encode_raw(
                         inner,
                         out,
                     )
@@ -24106,19 +23897,6 @@ pub mod AccountConfig {
         //Creates a new call builder for the [`api_payers`] function.
         pub fn api_payers(&self) -> alloy_contract::SolCallBuilder<&P, api_payersCall, N> {
             self.call_builder(&api_payersCall)
-        }
-        //Creates a new call builder for the [`backfillPkpOwners`] function.
-        pub fn backfillPkpOwners(
-            &self,
-            pkpIds: alloy::sol_types::private::Vec<alloy::sol_types::private::Address>,
-            masterHashes: alloy::sol_types::private::Vec<
-                alloy::sol_types::private::primitives::aliases::U256,
-            >,
-        ) -> alloy_contract::SolCallBuilder<&P, backfillPkpOwnersCall, N> {
-            self.call_builder(&backfillPkpOwnersCall {
-                pkpIds,
-                masterHashes,
-            })
         }
         //Creates a new call builder for the [`canExecuteAction`] function.
         pub fn canExecuteAction(
