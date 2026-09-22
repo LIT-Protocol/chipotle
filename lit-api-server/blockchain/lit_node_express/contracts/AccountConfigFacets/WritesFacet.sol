@@ -136,8 +136,32 @@ contract WritesFacet {
                 );
             }
         }
-        if (s.allApiKeyHashesToMaster[apiKeyHash] != 0) {
-            revert AppStorage.AccountAlreadyExists(apiKeyHash);
+        uint256 existingMaster = s.allApiKeyHashesToMaster[apiKeyHash];
+        if (existingMaster != 0) {
+            // A real account already owns this hash: hard stop. But a *usage
+            // key* pre-squatting this slot (allApiKeyHashesToMaster[keccak256(
+            // victimWallet)] = attackerMaster, set via setUsageApiKey before the
+            // victim ever onboards) must NOT permanently block account creation.
+            // The account-hash namespace is sovereign to the wallet whose
+            // keccak256 it is — only that wallet's owner can produce the hash
+            // (self-service path), and an api_payer is trusted — so a
+            // subordinate usage key can never outrank a master account at the
+            // same slot. Evict the squatted usage key and continue.
+            //
+            // existingMaster == apiKeyHash means a master account already lives
+            // here (created via newAccount). A hash that merely resolves to
+            // another master but is NOT a registered usage key is an admin-wallet
+            // alias from convert/transfer ownership — that is a legitimate
+            // account reference and is left untouched (falls through to revert).
+            bool squatIsUsageKey = existingMaster != apiKeyHash &&
+                s.accounts[existingMaster].usageApiKeys[apiKeyHash].apiKeyHash ==
+                apiKeyHash;
+            if (!squatIsUsageKey) {
+                revert AppStorage.AccountAlreadyExists(apiKeyHash);
+            }
+            s.accounts[existingMaster].usageApiKeysList.remove(apiKeyHash);
+            delete s.accounts[existingMaster].usageApiKeys[apiKeyHash];
+            emit UsageApiKeyRemoved(existingMaster, apiKeyHash);
         }
         AppStorage.Account storage account = s.accounts[apiKeyHash];
         account.managed = managed;

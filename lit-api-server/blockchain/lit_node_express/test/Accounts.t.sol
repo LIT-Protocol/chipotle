@@ -345,6 +345,89 @@ contract AccountsTest is BaseTest {
         assertEq(keys[0].metadata.name, "usage-1-updated");
     }
 
+    function test_newChainSecuredAccount_reclaimsSquattedUsageKeyHash() public {
+        // Attacker onboards, then squats keccak256(victimWallet) as one of their
+        // own usage keys BEFORE the victim ever creates an account. Pre-fix this
+        // stamped allApiKeyHashesToMaster[victimHash] = attackerMaster and
+        // permanently blocked the victim's newChainSecuredAccount.
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+
+        uint256 victimHash = apiKeyHashOf(user);
+        uint256[] memory empty = new uint256[](0);
+        vm.prank(stranger);
+        writes.setUsageApiKey(
+            attackerHash,
+            victimHash, // squat the victim's would-be account hash
+            block.timestamp + 7 days,
+            0,
+            "squat",
+            "squat",
+            false,
+            false,
+            false,
+            empty,
+            empty,
+            empty,
+            empty
+        );
+
+        // The squat currently resolves the victim's hash to the attacker.
+        assertEq(views_.getAccountWalletAddress(victimHash), stranger);
+        assertEq(views_.listApiKeys(attackerHash, 0, 10).length, 1);
+
+        // The victim can still onboard: the sovereign wallet owner reclaims their
+        // own account-hash namespace, evicting the squatted usage key.
+        vm.prank(user);
+        writes.newChainSecuredAccount("victim", "victim");
+
+        // Victim now owns a real master account at their hash.
+        assertEq(views_.getAccountWalletAddress(victimHash), user);
+        assertEq(views_.getBillingWalletAddress(victimHash), user);
+
+        // The squatted usage key is gone from the attacker's account.
+        assertEq(views_.listApiKeys(attackerHash, 0, 10).length, 0);
+
+        // The victim's account is a genuine master (resolves to itself), so a
+        // second creation attempt now hard-reverts as a normal duplicate.
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.AccountAlreadyExists.selector,
+                victimHash
+            )
+        );
+        writes.newChainSecuredAccount("victim2", "victim2");
+    }
+
+    function test_newAccount_doesNotEvictAdminWalletAlias() public {
+        // convertToChainSecuredAccount registers keccak256(newAdmin) as an alias
+        // that resolves to the master but is NOT a usage key. A later newAccount
+        // targeting that alias hash must still hard-revert (never be "reclaimed").
+        uint256 managedHash = uint256(keccak256("managed-1"));
+        vm.prank(apiPayer);
+        writes.newAccount(managedHash, true, "managed", "m", apiPayer);
+
+        vm.prank(apiPayer);
+        writes.convertToChainSecuredAccount(managedHash, user);
+        uint256 aliasHash = apiKeyHashOf(user);
+
+        // The alias resolves to the underlying master, not to itself.
+        assertEq(views_.getAccountWalletAddress(aliasHash), user);
+
+        // The user cannot create a fresh account at their alias hash — it is a
+        // legitimate reference to the converted account, not a squat.
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.AccountAlreadyExists.selector,
+                aliasHash
+            )
+        );
+        writes.newChainSecuredAccount("dup", "dup");
+    }
+
     function test_addAction_thenListActions_thenRemove() public {
         vm.prank(user);
         writes.newChainSecuredAccount("alice", "primary");
