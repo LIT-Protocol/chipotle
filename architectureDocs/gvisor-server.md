@@ -75,7 +75,7 @@ code.
 │                                │  • bundle RO-mounted /action  │       │
 │                                │  • tmpfs /tmp                 │       │
 │                                │  • op socket at /run/lit/     │       │
-│                                │    ops.sock (--host-uds=all)  │       │
+│                                │    ops.sock (--host-uds=open) │       │
 │                                │  • preinstalled `lit` CLI     │       │
 │                                │  • entrypoint = user code     │       │
 │                                └─────────────────────────────┘        │
@@ -340,7 +340,7 @@ spec (`sandbox/runsc.rs`) that:
   it, and the base image is never mutated;
 - bind-mounts the bundle **read-only** at `/action`, gives writable scratch via a
   size-capped tmpfs at `/tmp`, and bind-mounts the **per-exec** op socket at
-  `/run/lit/ops.sock` (`--host-uds=all` is required for the sandbox to reach it);
+  `/run/lit/ops.sock` (`--host-uds=open` is required for the sandbox to reach it);
 - runs as uid 0 *inside* the sandbox — the gVisor Sentry plus the CVM are the
   isolation boundary, so the base image needn't carry users;
 - applies cgroup limits (memory / pids) via a **delegated leaf cgroup**
@@ -350,8 +350,9 @@ spec (`sandbox/runsc.rs`) that:
 
 Spike-validated invariants (2026-07-01, Phala TDX dev CVMs):
 
-- `--host-uds=all` is mandatory (the socket exposed is per-sandbox, in a 0700
-  host tempdir — never a shared one).
+- `--host-uds=open` is mandatory (connect-only — the guest never creates host
+  sockets, so the broader `all` is not granted). The socket exposed is
+  per-sandbox, in a 0700 host tempdir — never a shared one.
 - Nested-in-container needs the delegated leaf cgroup; `--ignore-cgroups`
   sidesteps it for dev/tests at the cost of per-exec cgroup limits (the
   supervisor timeout still applies).

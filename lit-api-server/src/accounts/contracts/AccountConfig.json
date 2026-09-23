@@ -193,6 +193,17 @@
     {
       "inputs": [
         {
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        }
+      ],
+      "name": "OnlyConfigOperatorOrOwner",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
           "internalType": "uint256",
           "name": "apiKeyHash",
           "type": "uint256"
@@ -439,6 +450,25 @@
         }
       ],
       "name": "GroupUpdated",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "key",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "value",
+          "type": "string"
+        }
+      ],
+      "name": "NodeConfigurationSet",
       "type": "event"
     },
     {
@@ -2172,17 +2202,6 @@
         }
       ],
       "name": "NotContractOwner",
-      "type": "error"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "address",
-          "name": "caller",
-          "type": "address"
-        }
-      ],
-      "name": "OnlyConfigOperatorOrOwner",
       "type": "error"
     },
     {

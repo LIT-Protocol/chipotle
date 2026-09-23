@@ -372,7 +372,7 @@
 │                                │  • bundle RO-mounted /action  │       │
 │                                │  • tmpfs /tmp                 │       │
 │                                │  • op socket at /run/lit/     │       │
-│                                │    ops.sock (--host-uds=all)  │       │
+│                                │    ops.sock (--host-uds=open) │       │
 │                                │  • preinstalled `lit` CLI     │       │
 │                                │  • entrypoint = user code     │       │
 │                                └─────────────────────────────┘        │
@@ -605,14 +605,14 @@ lit increment-fetch-count</code></pre>
     </p>
     <ul>
       <li>roots at the shared read-only base rootfs with a per-exec <strong>in-memory overlay</strong> (<code>--overlay2=root:memory</code>) — the sandbox can write anywhere, nothing survives it, and the base image is never mutated;</li>
-      <li>bind-mounts the bundle <strong>read-only</strong> at <code>/action</code>, gives writable scratch via a size-capped tmpfs at <code>/tmp</code>, and bind-mounts the <strong>per-exec</strong> op socket at <code>/run/lit/ops.sock</code> (<code>--host-uds=all</code> is required for the sandbox to reach it);</li>
+      <li>bind-mounts the bundle <strong>read-only</strong> at <code>/action</code>, gives writable scratch via a size-capped tmpfs at <code>/tmp</code>, and bind-mounts the <strong>per-exec</strong> op socket at <code>/run/lit/ops.sock</code> (<code>--host-uds=open</code> is required for the sandbox to reach it);</li>
       <li>runs as uid 0 <em>inside</em> the sandbox — the gVisor Sentry plus the CVM are the isolation boundary, so the base image needn't carry users;</li>
       <li>applies cgroup limits (memory / pids) via a <strong>delegated leaf cgroup</strong> (<code>lit-sandboxes/&lt;exec-id&gt;</code>), required to avoid cgroup-v2 <code>subtree_control: EBUSY</code> when nested in a container;</li>
       <li>uses fresh PID/IPC/UTS/mount/network namespaces.</li>
     </ul>
     <p>Spike-validated invariants (2026-07-01, Phala TDX dev CVMs):</p>
     <ul>
-      <li><code>--host-uds=all</code> is mandatory (the socket exposed is per-sandbox, in a 0700 host tempdir — never a shared one).</li>
+      <li><code>--host-uds=open</code> is mandatory (connect-only — the guest never creates host sockets, so the broader <code>all</code> is not granted); the socket exposed is per-sandbox, in a 0700 host tempdir — never a shared one.</li>
       <li>Nested-in-container needs the delegated leaf cgroup; <code>--ignore-cgroups</code> sidesteps it for dev/tests at the cost of per-exec cgroup limits (the supervisor timeout still applies).</li>
       <li><code>systrap</code> (default) and <code>ptrace</code> platforms both work inside TDX; there is no <code>/dev/kvm</code> in the CVM, so the kvm platform is not an option.</li>
     </ul>

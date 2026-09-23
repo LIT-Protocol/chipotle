@@ -15,18 +15,18 @@ contract AccessControlTest is BaseTest {
         address[] memory empty = new address[](0);
         vm.prank(stranger);
         vm.expectRevert(
-            abi.encodeWithSelector(AppStorage.OnlyApiPayerOrOwner.selector, stranger)
+            abi.encodeWithSelector(NotContractOwner.selector, stranger, owner)
         );
         apiConfig.setApiPayers(empty);
     }
 
     function test_setApiPayers_regularApiPayerReverts() public {
-        // setApiPayers is gated to owner OR adminApiPayer only — even an existing
-        // api payer (apiPayer) is rejected, to prevent hostile takeover.
+        // setApiPayers is gated to the diamond owner ONLY — an existing api payer
+        // (apiPayer) is rejected, to prevent hostile takeover.
         address[] memory empty = new address[](0);
         vm.prank(apiPayer);
         vm.expectRevert(
-            abi.encodeWithSelector(AppStorage.OnlyApiPayerOrOwner.selector, apiPayer)
+            abi.encodeWithSelector(NotContractOwner.selector, apiPayer, owner)
         );
         apiConfig.setApiPayers(empty);
     }
@@ -41,12 +41,70 @@ contract AccessControlTest is BaseTest {
         assertEq(got[0], user);
     }
 
-    function test_setApiPayers_adminApiPayer() public {
+    function test_setApiPayers_adminApiPayerReverts() public {
+        // The admin api payer used to be able to rewrite the payer set. That path
+        // is now closed: only the owner may call setApiPayers, which breaks the
+        // (any payer -> admin payer -> rewrite payers) escalation chain.
         address[] memory next = new address[](1);
         next[0] = user;
         vm.prank(adminApiPayer);
+        vm.expectRevert(
+            abi.encodeWithSelector(NotContractOwner.selector, adminApiPayer, owner)
+        );
         apiConfig.setApiPayers(next);
-        assertEq(views_.api_payers()[0], user);
+    }
+
+    function test_setAdminApiPayerAccount_apiPayerReverts() public {
+        // A regular api payer can no longer promote an admin payer — this was the
+        // first link in the payer-takeover chain. setAdminApiPayerAccount is now
+        // owner-only, so the call reverts NotContractOwner.
+        vm.prank(apiPayer);
+        vm.expectRevert(
+            abi.encodeWithSelector(NotContractOwner.selector, apiPayer, owner)
+        );
+        apiConfig.setAdminApiPayerAccount(stranger);
+    }
+
+    function test_setAdminApiPayerAccount_owner() public {
+        vm.prank(owner);
+        apiConfig.setAdminApiPayerAccount(user);
+        assertEq(views_.adminApiPayerAccount(), user);
+    }
+
+    function test_setAdminApiPayerAccount_configOperatorReverts() public {
+        // setAdminApiPayerAccount is owner-only: even a config operator cannot
+        // assign the admin api payer, since the admin payer outranks every other
+        // role (it alone gates setApiPayers). Reassign the config operator to
+        // `user` and confirm they are still rejected.
+        vm.prank(owner);
+        apiConfig.setConfigOperator(user);
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(NotContractOwner.selector, user, owner)
+        );
+        apiConfig.setAdminApiPayerAccount(stranger);
+    }
+
+    function test_setNodeConfiguration_apiPayerReverts() public {
+        vm.prank(apiPayer);
+        vm.expectRevert(
+            abi.encodeWithSelector(AppStorage.OnlyConfigOperatorOrOwner.selector, apiPayer)
+        );
+        writes.setNodeConfiguration("default_rpc_endpoint", "https://evil.example");
+    }
+
+    function test_setNodeConfiguration_owner() public {
+        vm.prank(owner);
+        writes.setNodeConfiguration("k", "v");
+        assertEq(views_.nodeConfigurationValue("k"), "v");
+    }
+
+    function test_setNodeConfiguration_configOperator() public {
+        vm.prank(owner);
+        apiConfig.setConfigOperator(user);
+        vm.prank(user);
+        writes.setNodeConfiguration("k", "v");
+        assertEq(views_.nodeConfigurationValue("k"), "v");
     }
 
     function test_setConfigOperator_strangerReverts() public {

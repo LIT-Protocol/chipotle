@@ -5965,6 +5965,7 @@ dependencies = [
  "hyper-util",
  "indoc",
  "ipfs-hasher",
+ "ipnetwork",
  "lit-actions-ext",
  "lit-actions-grpc",
  "lit-actions-snapshot",

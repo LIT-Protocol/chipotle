@@ -23,6 +23,10 @@ futures = "0.3"
 # deno_fetch's custom-DNS `Resolve` trait used by the egress filter (CPL-295).
 hyper-util = { version = "0.1", features = ["client-legacy"] }
 indoc = { workspace = true }
+# Same version deno_permissions (0.20) uses for `Host::IpSubnet`, so the
+# `IpNetwork` values we hand it are the exact type it expects. Lets us build
+# IPv6-CIDR deny descriptors that `deny_net`'s string parser can't express (F-01).
+ipnetwork = "0.20"
 ipfs-hasher = "0.13.0"
 lit-actions-ext = { workspace = true }
 lit-actions-grpc = { workspace = true }

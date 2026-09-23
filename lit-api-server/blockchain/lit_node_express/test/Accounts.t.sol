@@ -7,6 +7,7 @@ import {ViewsFacet} from "../contracts/AccountConfigFacets/ViewsFacet.sol";
 import {IDiamond} from "../interfaces/IDiamond.sol";
 import {FunctionNotFound} from "../contracts/AccountConfig.sol";
 import {SecurityLib} from "../contracts/AccountConfigFacets/SecurityLib.sol";
+import {NotContractOwner} from "../libraries/LibDiamond.sol";
 
 // Historical migration facet, used only to exercise its removal from a diamond.
 contract LegacyOwnerBackfills {
@@ -343,6 +344,89 @@ contract AccountsTest is BaseTest {
         ViewsFacet.UsageApiKeyReturn[] memory keys = views_.listApiKeys(hash, 0, 10);
         assertEq(keys.length, 1);
         assertEq(keys[0].metadata.name, "usage-1-updated");
+    }
+
+    function test_newChainSecuredAccount_reclaimsSquattedUsageKeyHash() public {
+        // Attacker onboards, then squats keccak256(victimWallet) as one of their
+        // own usage keys BEFORE the victim ever creates an account. Pre-fix this
+        // stamped allApiKeyHashesToMaster[victimHash] = attackerMaster and
+        // permanently blocked the victim's newChainSecuredAccount.
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+
+        uint256 victimHash = apiKeyHashOf(user);
+        uint256[] memory empty = new uint256[](0);
+        vm.prank(stranger);
+        writes.setUsageApiKey(
+            attackerHash,
+            victimHash, // squat the victim's would-be account hash
+            block.timestamp + 7 days,
+            0,
+            "squat",
+            "squat",
+            false,
+            false,
+            false,
+            empty,
+            empty,
+            empty,
+            empty
+        );
+
+        // The squat currently resolves the victim's hash to the attacker.
+        assertEq(views_.getAccountWalletAddress(victimHash), stranger);
+        assertEq(views_.listApiKeys(attackerHash, 0, 10).length, 1);
+
+        // The victim can still onboard: the sovereign wallet owner reclaims their
+        // own account-hash namespace, evicting the squatted usage key.
+        vm.prank(user);
+        writes.newChainSecuredAccount("victim", "victim");
+
+        // Victim now owns a real master account at their hash.
+        assertEq(views_.getAccountWalletAddress(victimHash), user);
+        assertEq(views_.getBillingWalletAddress(victimHash), user);
+
+        // The squatted usage key is gone from the attacker's account.
+        assertEq(views_.listApiKeys(attackerHash, 0, 10).length, 0);
+
+        // The victim's account is a genuine master (resolves to itself), so a
+        // second creation attempt now hard-reverts as a normal duplicate.
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.AccountAlreadyExists.selector,
+                victimHash
+            )
+        );
+        writes.newChainSecuredAccount("victim2", "victim2");
+    }
+
+    function test_newAccount_doesNotEvictAdminWalletAlias() public {
+        // convertToChainSecuredAccount registers keccak256(newAdmin) as an alias
+        // that resolves to the master but is NOT a usage key. A later newAccount
+        // targeting that alias hash must still hard-revert (never be "reclaimed").
+        uint256 managedHash = uint256(keccak256("managed-1"));
+        vm.prank(apiPayer);
+        writes.newAccount(managedHash, true, "managed", "m", apiPayer);
+
+        vm.prank(apiPayer);
+        writes.convertToChainSecuredAccount(managedHash, user);
+        uint256 aliasHash = apiKeyHashOf(user);
+
+        // The alias resolves to the underlying master, not to itself.
+        assertEq(views_.getAccountWalletAddress(aliasHash), user);
+
+        // The user cannot create a fresh account at their alias hash — it is a
+        // legitimate reference to the converted account, not a squat.
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.AccountAlreadyExists.selector,
+                aliasHash
+            )
+        );
+        writes.newChainSecuredAccount("dup", "dup");
     }
 
     function test_addAction_thenListActions_thenRemove() public {
@@ -1046,5 +1130,140 @@ contract AccountsTest is BaseTest {
         assertEq(views_.getAccountWalletAddress(aliasHash), user);
         ViewsFacet.UsageApiKeyReturn[] memory keys = views_.listApiKeys(master, 0, 10);
         assertEq(keys.length, 0);
+    }
+
+    // --- Usage API key expiration enforcement (issue #31 / #24 finding 4) ---
+
+    /// @notice Registers a wildcard-execute usage key with the given expiration
+    ///         and returns its hash. The key can execute any action in any group.
+    function _wildcardUsageKey(
+        uint256 master,
+        uint256 expiration
+    ) internal returns (uint256 usageHash) {
+        usageHash = uint256(keccak256("expiring-usage-key"));
+        uint256[] memory empty = new uint256[](0);
+        uint256[] memory wildcard = new uint256[](1);
+        wildcard[0] = 0; // group-0 wildcard: execute in any group
+        vm.prank(user);
+        writes.setUsageApiKey(
+            master,
+            usageHash,
+            expiration,
+            0,
+            "expiring",
+            "expiring usage key",
+            false,
+            false,
+            false,
+            empty,
+            empty,
+            empty,
+            wildcard
+        );
+    }
+
+    function test_canExecuteAction_deniesExpiredUsageKey() public {
+        vm.prank(user);
+        writes.newChainSecuredAccount("alice", "primary");
+        uint256 master = apiKeyHashOf(user);
+
+        uint256 usageHash = _wildcardUsageKey(master, block.timestamp + 7 days);
+        uint256 cidHash = uint256(keccak256("some-action"));
+
+        // Before expiry the key authorizes execution and wallet use.
+        assertTrue(views_.canExecuteAction(usageHash, cidHash));
+        assertTrue(views_.canExecuteActionFast(usageHash, cidHash));
+        assertTrue(
+            views_.canUseWalletInAction(usageHash, cidHash, address(0xBEEF))
+        );
+        assertTrue(
+            views_.canUseWalletInActionFast(usageHash, cidHash, address(0xBEEF))
+        );
+        (bool canExec, bool canWallet) = views_.canExecuteActionAndUseWallet(
+            usageHash,
+            cidHash,
+            address(0xBEEF)
+        );
+        assertTrue(canExec);
+        assertTrue(canWallet);
+
+        // Warp past the expiration. Every authorization path must now deny.
+        vm.warp(block.timestamp + 8 days);
+
+        assertFalse(views_.canExecuteAction(usageHash, cidHash));
+        assertFalse(views_.canExecuteActionFast(usageHash, cidHash));
+        assertFalse(
+            views_.canUseWalletInAction(usageHash, cidHash, address(0xBEEF))
+        );
+        assertFalse(
+            views_.canUseWalletInActionFast(usageHash, cidHash, address(0xBEEF))
+        );
+        (canExec, canWallet) = views_.canExecuteActionAndUseWallet(
+            usageHash,
+            cidHash,
+            address(0xBEEF)
+        );
+        assertFalse(canExec);
+        assertFalse(canWallet);
+    }
+
+    function test_canExecuteAction_deniesKeyExpiredAtCreation() public {
+        // A key whose expiration is already in the past must never authorize,
+        // even immediately after being written. block.timestamp is warped
+        // forward first so an expiration in the past is expressible.
+        vm.warp(30 days);
+        vm.prank(user);
+        writes.newChainSecuredAccount("alice", "primary");
+        uint256 master = apiKeyHashOf(user);
+
+        uint256 usageHash = _wildcardUsageKey(master, block.timestamp - 1 days);
+        uint256 cidHash = uint256(keccak256("some-action"));
+
+        assertFalse(views_.canExecuteAction(usageHash, cidHash));
+        assertFalse(views_.canExecuteActionFast(usageHash, cidHash));
+    }
+
+    function test_canExecuteAction_zeroExpirationNeverExpires() public {
+        // expiration == 0 is the "never expires" sentinel and must keep
+        // authorizing even far into the future.
+        vm.prank(user);
+        writes.newChainSecuredAccount("alice", "primary");
+        uint256 master = apiKeyHashOf(user);
+
+        uint256 usageHash = _wildcardUsageKey(master, 0);
+        uint256 cidHash = uint256(keccak256("some-action"));
+
+        assertTrue(views_.canExecuteAction(usageHash, cidHash));
+
+        vm.warp(block.timestamp + 3650 days);
+        assertTrue(views_.canExecuteAction(usageHash, cidHash));
+        assertTrue(views_.canExecuteActionFast(usageHash, cidHash));
+    }
+
+    function test_setAdminApiPayerAccount_ownerOnly() public {
+        // Owner can (re)assign the admin api payer.
+        vm.prank(owner);
+        apiConfig.setAdminApiPayerAccount(user);
+        assertEq(views_.adminApiPayerAccount(), user);
+    }
+
+    function test_setAdminApiPayerAccount_apiPayerCannotSelfPromote() public {
+        // A regular api_payer must NOT be able to promote itself (or anyone)
+        // to admin api payer — that would let it seize the whole payer set.
+        vm.prank(apiPayer);
+        vm.expectRevert(abi.encodeWithSelector(NotContractOwner.selector, apiPayer, owner));
+        apiConfig.setAdminApiPayerAccount(apiPayer);
+
+        // The existing admin api payer likewise cannot rotate the role itself.
+        vm.prank(adminApiPayer);
+        vm.expectRevert(
+            abi.encodeWithSelector(NotContractOwner.selector, adminApiPayer, owner)
+        );
+        apiConfig.setAdminApiPayerAccount(adminApiPayer);
+
+        // A stranger obviously cannot either.
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(NotContractOwner.selector, stranger, owner));
+        apiConfig.setAdminApiPayerAccount(stranger);
     }
 }

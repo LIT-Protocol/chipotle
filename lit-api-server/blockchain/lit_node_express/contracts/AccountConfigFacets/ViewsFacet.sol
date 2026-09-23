@@ -451,6 +451,22 @@ contract ViewsFacet {
         return account;
     }
 
+    /// @notice Returns true when a usage API key's on-chain expiration has passed.
+    /// @dev The `expiration` field is stored on-chain and surfaced to users as a
+    ///      real access-control deadline, so every authorization path must honor
+    ///      it. An expiration of 0 is the "never expires" sentinel (a key created
+    ///      without an explicit deadline); any non-zero value in the past
+    ///      de-authorizes the key. Reads `block.timestamp`, so this must only be
+    ///      called from view functions that already tolerate miner timestamp
+    ///      drift (seconds-level, irrelevant at day-scale expirations).
+    function _isExpired(
+        AppStorage.UsageApiKey storage usageApiKey
+    ) internal view returns (bool) {
+        return
+            usageApiKey.expiration != 0 &&
+            block.timestamp >= usageApiKey.expiration;
+    }
+
     function canExecuteAction(
         uint256 apiKeyHash,
         uint256 cidHash
@@ -480,6 +496,11 @@ contract ViewsFacet {
         AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[
             apiKeyHash
         ];
+
+        // An expired usage key authorizes nothing, regardless of its scopes.
+        if (_isExpired(usageApiKey)) {
+            return false;
+        }
 
         //  wildcard scenario
         if (usageApiKey.executeInGroups.contains(0)) {
@@ -556,6 +577,10 @@ contract ViewsFacet {
             apiKeyHash
         ];
 
+        if (_isExpired(usageApiKey)) {
+            return false; // expired key authorizes nothing
+        }
+
         if (usageApiKey.executeInGroups.contains(0)) {
             return true; // wildcard: can execute in any group
         }
@@ -585,6 +610,10 @@ contract ViewsFacet {
         AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[
             apiKeyHash
         ];
+
+        if (_isExpired(usageApiKey)) {
+            return false; // expired key authorizes nothing
+        }
 
         if (usageApiKey.executeInGroups.contains(0)) {
             return true; // wildcard
@@ -619,6 +648,10 @@ contract ViewsFacet {
         AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[
             apiKeyHash
         ];
+
+        if (_isExpired(usageApiKey)) {
+            return (false, false); // expired key authorizes nothing
+        }
 
         if (usageApiKey.executeInGroups.contains(0)) {
             return (true, true); // wildcard: both trivially true
