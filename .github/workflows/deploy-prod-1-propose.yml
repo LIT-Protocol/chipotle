@@ -289,7 +289,7 @@ jobs:
           # the current replica default below.
           CVM_NAME="${{ inputs.phala_cvm_name }}"
           if [ -z "$CVM_NAME" ]; then
-            CVM_NAME="chipotle-prod-rep-r68r6"
+            CVM_NAME="chipotle-prod-rep-08tv3"
           fi
           echo "Target prod CVM: $CVM_NAME"
           echo "cvm_name=$CVM_NAME" >> "$GITHUB_OUTPUT"
