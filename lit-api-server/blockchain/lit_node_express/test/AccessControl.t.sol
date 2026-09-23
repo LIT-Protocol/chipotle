@@ -56,10 +56,11 @@ contract AccessControlTest is BaseTest {
 
     function test_setAdminApiPayerAccount_apiPayerReverts() public {
         // A regular api payer can no longer promote an admin payer — this was the
-        // first link in the payer-takeover chain.
+        // first link in the payer-takeover chain. setAdminApiPayerAccount is now
+        // owner-only, so the call reverts NotContractOwner.
         vm.prank(apiPayer);
         vm.expectRevert(
-            abi.encodeWithSelector(AppStorage.OnlyConfigOperatorOrOwner.selector, apiPayer)
+            abi.encodeWithSelector(NotContractOwner.selector, apiPayer, owner)
         );
         apiConfig.setAdminApiPayerAccount(stranger);
     }
@@ -70,14 +71,18 @@ contract AccessControlTest is BaseTest {
         assertEq(views_.adminApiPayerAccount(), user);
     }
 
-    function test_setAdminApiPayerAccount_configOperator() public {
-        // Owner is the initial config operator; reassign it to `user`, who may then
-        // set the admin api payer.
+    function test_setAdminApiPayerAccount_configOperatorReverts() public {
+        // setAdminApiPayerAccount is owner-only: even a config operator cannot
+        // assign the admin api payer, since the admin payer outranks every other
+        // role (it alone gates setApiPayers). Reassign the config operator to
+        // `user` and confirm they are still rejected.
         vm.prank(owner);
         apiConfig.setConfigOperator(user);
         vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(NotContractOwner.selector, user, owner)
+        );
         apiConfig.setAdminApiPayerAccount(stranger);
-        assertEq(views_.adminApiPayerAccount(), stranger);
     }
 
     function test_setNodeConfiguration_apiPayerReverts() public {

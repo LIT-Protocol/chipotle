@@ -1132,7 +1132,6 @@ contract AccountsTest is BaseTest {
         assertEq(keys.length, 0);
     }
 
-<<<<<<< HEAD
     // --- Usage API key expiration enforcement (issue #31 / #24 finding 4) ---
 
     /// @notice Registers a wildcard-execute usage key with the given expiration

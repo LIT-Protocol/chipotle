@@ -1641,6 +1641,7 @@ interface AccountConfig {
     event GroupAdded(uint256 indexed apiKeyHash, uint256 indexed groupId);
     event GroupRemoved(uint256 indexed apiKeyHash, uint256 indexed groupId);
     event GroupUpdated(uint256 indexed accountApiKeyHash, uint256 indexed groupId);
+    event NodeConfigurationSet(string key, string value);
     event PathOwnerBackfilled(uint256 indexed derivationPath, uint256 indexed masterHash);
     event PkpAddedToGroup(uint256 indexed apiKeyHash, uint256 indexed groupId, address pkpId);
     event PkpOwnerBackfilled(address indexed pkpId, uint256 indexed masterHash);
@@ -3727,6 +3728,25 @@ interface AccountConfig {
         "type": "uint256",
         "indexed": true,
         "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "NodeConfigurationSet",
+    "inputs": [
+      {
+        "name": "key",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      },
+      {
+        "name": "value",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
       }
     ],
     "anonymous": false
@@ -7657,6 +7677,116 @@ pub mod AccountConfig {
         impl From<&GroupUpdated> for alloy_sol_types::private::LogData {
             #[inline]
             fn from(this: &GroupUpdated) -> alloy_sol_types::private::LogData {
+                alloy_sol_types::SolEvent::encode_log_data(this)
+            }
+        }
+    };
+    #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
+    /*Event with signature `NodeConfigurationSet(string,string)` and selector `0xfccbf912212b0484ad810bd3c88d8ec1e6f245212b9bc4fb4a8d55d3381d1069`.
+    ```solidity
+    event NodeConfigurationSet(string key, string value);
+    ```*/
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
+    #[derive(Clone)]
+    pub struct NodeConfigurationSet {
+        #[allow(missing_docs)]
+        pub key: alloy::sol_types::private::String,
+        #[allow(missing_docs)]
+        pub value: alloy::sol_types::private::String,
+    }
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
+    const _: () = {
+        use alloy::sol_types as alloy_sol_types;
+        #[automatically_derived]
+        impl alloy_sol_types::SolEvent for NodeConfigurationSet {
+            type DataTuple<'a> = (
+                alloy::sol_types::sol_data::String,
+                alloy::sol_types::sol_data::String,
+            );
+            type DataToken<'a> = <Self::DataTuple<'a> as alloy_sol_types::SolType>::Token<'a>;
+            type TopicList = (alloy_sol_types::sol_data::FixedBytes<32>,);
+            const SIGNATURE: &'static str = "NodeConfigurationSet(string,string)";
+            const SIGNATURE_HASH: alloy_sol_types::private::B256 =
+                alloy_sol_types::private::B256::new([
+                    252u8, 203u8, 249u8, 18u8, 33u8, 43u8, 4u8, 132u8, 173u8, 129u8, 11u8, 211u8,
+                    200u8, 141u8, 142u8, 193u8, 230u8, 242u8, 69u8, 33u8, 43u8, 155u8, 196u8,
+                    251u8, 74u8, 141u8, 85u8, 211u8, 56u8, 29u8, 16u8, 105u8,
+                ]);
+            const ANONYMOUS: bool = false;
+            #[allow(unused_variables)]
+            #[inline]
+            fn new(
+                topics: <Self::TopicList as alloy_sol_types::SolType>::RustType,
+                data: <Self::DataTuple<'_> as alloy_sol_types::SolType>::RustType,
+            ) -> Self {
+                Self {
+                    key: data.0,
+                    value: data.1,
+                }
+            }
+            #[inline]
+            fn check_signature(
+                topics: &<Self::TopicList as alloy_sol_types::SolType>::RustType,
+            ) -> alloy_sol_types::Result<()> {
+                if topics.0 != Self::SIGNATURE_HASH {
+                    return Err(alloy_sol_types::Error::invalid_event_signature_hash(
+                        Self::SIGNATURE,
+                        topics.0,
+                        Self::SIGNATURE_HASH,
+                    ));
+                }
+                Ok(())
+            }
+            #[inline]
+            fn tokenize_body(&self) -> Self::DataToken<'_> {
+                (
+                    <alloy::sol_types::sol_data::String as alloy_sol_types::SolType>::tokenize(
+                        &self.key,
+                    ),
+                    <alloy::sol_types::sol_data::String as alloy_sol_types::SolType>::tokenize(
+                        &self.value,
+                    ),
+                )
+            }
+            #[inline]
+            fn topics(&self) -> <Self::TopicList as alloy_sol_types::SolType>::RustType {
+                (Self::SIGNATURE_HASH.into(),)
+            }
+            #[inline]
+            fn encode_topics_raw(
+                &self,
+                out: &mut [alloy_sol_types::abi::token::WordToken],
+            ) -> alloy_sol_types::Result<()> {
+                if out.len() < <Self::TopicList as alloy_sol_types::TopicList>::COUNT {
+                    return Err(alloy_sol_types::Error::Overrun);
+                }
+                out[0usize] = alloy_sol_types::abi::token::WordToken(Self::SIGNATURE_HASH);
+                Ok(())
+            }
+        }
+        #[automatically_derived]
+        impl alloy_sol_types::private::IntoLogData for NodeConfigurationSet {
+            fn to_log_data(&self) -> alloy_sol_types::private::LogData {
+                From::from(self)
+            }
+            fn into_log_data(self) -> alloy_sol_types::private::LogData {
+                From::from(&self)
+            }
+        }
+        #[automatically_derived]
+        impl From<&NodeConfigurationSet> for alloy_sol_types::private::LogData {
+            #[inline]
+            fn from(this: &NodeConfigurationSet) -> alloy_sol_types::private::LogData {
                 alloy_sol_types::SolEvent::encode_log_data(this)
             }
         }
@@ -23008,6 +23138,8 @@ pub mod AccountConfig {
         #[allow(missing_docs)]
         GroupUpdated(GroupUpdated),
         #[allow(missing_docs)]
+        NodeConfigurationSet(NodeConfigurationSet),
+        #[allow(missing_docs)]
         PathOwnerBackfilled(PathOwnerBackfilled),
         #[allow(missing_docs)]
         PkpAddedToGroup(PkpAddedToGroup),
@@ -23182,6 +23314,11 @@ pub mod AccountConfig {
                 9u8, 149u8, 252u8, 37u8, 156u8, 47u8, 232u8, 118u8, 141u8, 26u8, 158u8, 173u8,
                 53u8, 124u8, 141u8, 173u8, 18u8, 72u8, 216u8, 40u8,
             ],
+            [
+                252u8, 203u8, 249u8, 18u8, 33u8, 43u8, 4u8, 132u8, 173u8, 129u8, 11u8, 211u8,
+                200u8, 141u8, 142u8, 193u8, 230u8, 242u8, 69u8, 33u8, 43u8, 155u8, 196u8, 251u8,
+                74u8, 141u8, 85u8, 211u8, 56u8, 29u8, 16u8, 105u8,
+            ],
         ];
         // The names of the variants in the same order as `SELECTORS`.
         pub const VARIANT_NAMES: &'static [&'static str] = &[
@@ -23213,6 +23350,7 @@ pub mod AccountConfig {
             ::core::stringify!(ActionRemoved),
             ::core::stringify!(UsageApiKeyRemoved),
             ::core::stringify!(GroupAdded),
+            ::core::stringify!(NodeConfigurationSet),
         ];
         // The signatures in the same order as `SELECTORS`.
         pub const SIGNATURES: &'static [&'static str] = &[
@@ -23244,6 +23382,7 @@ pub mod AccountConfig {
             <ActionRemoved as alloy_sol_types::SolEvent>::SIGNATURE,
             <UsageApiKeyRemoved as alloy_sol_types::SolEvent>::SIGNATURE,
             <GroupAdded as alloy_sol_types::SolEvent>::SIGNATURE,
+            <NodeConfigurationSet as alloy_sol_types::SolEvent>::SIGNATURE,
         ];
         // Returns the signature for the given selector, if known.
         #[inline]
@@ -23267,7 +23406,7 @@ pub mod AccountConfig {
     #[automatically_derived]
     impl alloy_sol_types::SolEventInterface for AccountConfigEvents {
         const NAME: &'static str = "AccountConfigEvents";
-        const COUNT: usize = 28usize;
+        const COUNT: usize = 29usize;
         fn decode_raw_log(
             topics: &[alloy_sol_types::Word],
             data: &[u8],
@@ -23389,6 +23528,15 @@ pub mod AccountConfig {
                             data,
                         )
                         .map(Self::GroupUpdated)
+                }
+                Some(
+                    <NodeConfigurationSet as alloy_sol_types::SolEvent>::SIGNATURE_HASH,
+                ) => {
+                    <NodeConfigurationSet as alloy_sol_types::SolEvent>::decode_raw_log(
+                            topics,
+                            data,
+                        )
+                        .map(Self::NodeConfigurationSet)
                 }
                 Some(
                     <PathOwnerBackfilled as alloy_sol_types::SolEvent>::SIGNATURE_HASH,
@@ -23562,6 +23710,9 @@ pub mod AccountConfig {
                 Self::GroupUpdated(inner) => {
                     alloy_sol_types::private::IntoLogData::to_log_data(inner)
                 }
+                Self::NodeConfigurationSet(inner) => {
+                    alloy_sol_types::private::IntoLogData::to_log_data(inner)
+                }
                 Self::PathOwnerBackfilled(inner) => {
                     alloy_sol_types::private::IntoLogData::to_log_data(inner)
                 }
@@ -23648,6 +23799,9 @@ pub mod AccountConfig {
                     alloy_sol_types::private::IntoLogData::into_log_data(inner)
                 }
                 Self::GroupUpdated(inner) => {
+                    alloy_sol_types::private::IntoLogData::into_log_data(inner)
+                }
+                Self::NodeConfigurationSet(inner) => {
                     alloy_sol_types::private::IntoLogData::into_log_data(inner)
                 }
                 Self::PathOwnerBackfilled(inner) => {
@@ -24598,6 +24752,12 @@ pub mod AccountConfig {
         //Creates a new event filter for the [`GroupUpdated`] event.
         pub fn GroupUpdated_filter(&self) -> alloy_contract::Event<&P, GroupUpdated, N> {
             self.event_filter::<GroupUpdated>()
+        }
+        //Creates a new event filter for the [`NodeConfigurationSet`] event.
+        pub fn NodeConfigurationSet_filter(
+            &self,
+        ) -> alloy_contract::Event<&P, NodeConfigurationSet, N> {
+            self.event_filter::<NodeConfigurationSet>()
         }
         //Creates a new event filter for the [`PathOwnerBackfilled`] event.
         pub fn PathOwnerBackfilled_filter(

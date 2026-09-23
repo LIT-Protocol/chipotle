@@ -320,7 +320,10 @@ mod tests {
         }
 
         // Public IPv6 (Cloudflare/Google DNS) must remain reachable.
-        for url_str in ["https://[2606:4700:4700::1111]/", "https://[2001:4860:4860::8888]/"] {
+        for url_str in [
+            "https://[2606:4700:4700::1111]/",
+            "https://[2001:4860:4860::8888]/",
+        ] {
             let url = url::Url::parse(url_str).unwrap();
             assert!(
                 perms.check_net_url(&url, "fetch()").is_ok(),
