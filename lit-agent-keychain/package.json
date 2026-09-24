@@ -10,6 +10,7 @@
     "dev": "vite --config web/vite.config.ts",
     "test": "npm run build:actions && node scripts/build-sdk.mjs && tsx --test tests/*.test.ts",
     "test:browser": "playwright test --config tests/playwright.config.ts",
+    "test:owner-onboarding": "playwright test --config tests/owner-onboarding.playwright.config.ts",
     "check": "tsc --noEmit",
     "test:runtime": "node scripts/test-runtime.mjs",
     "format": "prettier --write protocol actions sdk web tests scripts *.json *.md",

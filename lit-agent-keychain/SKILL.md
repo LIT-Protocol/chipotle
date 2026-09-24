@@ -7,12 +7,22 @@ version: 2.0.6
 # Lit Agent Keychain
 
 1. Generate an agent identity on the agent device with `npx @lit-protocol/keychain@2.0.6 init identity.json`.
-2. Give only its public key to the owner. The owner signs in with a wallet, passkey,
-   or Google account, encrypts a secret locally, and explicitly approves that key.
-3. Download the **Agent config** (public locators plus a scoped billing key). When one
-   agent is approved for several secrets, the owner clicks **Config · all secrets** next to
-   the agent's name instead, for a single config naming all of them; `run`, `get` and `use`
-   take one config file, `mcp` takes several. Use `@lit-protocol/keychain` with the local
+2. Give only its public key to the owner; reuse an existing identity if one was already
+   generated. The owner signs in at https://keychain.litprotocol.com with a wallet,
+   passkey, or Google account. On **Secrets**, click **+ Add agent** beside **+ Add secret**.
+   Enter a name and paste the 64-character public key, then select only the secrets
+   this agent needs and click **Approve selected secrets**. Nothing is selected by
+   default. An empty vault needs **Add secret** first; disabled/expired secrets need
+   separate enabling/renewal. Never request the owner's private key or the agent's identity file.
+3. Click **Download agent config** in the approval result and send the downloaded
+   `*.keychain.json` to the agent. It names only the successfully approved selection
+   and includes a scoped execution key, not secret values; keep it private.
+   Approvals are separate: if signing fails partway through, earlier approvals remain.
+   **Retry remaining approvals** checks existing access before continuing; closing does
+   not revoke access. Later, **Download agent config** next to an agent under a secret's
+   **Authorized agents** downloads all secrets already approved for that key (not a new grant).
+   `run`, `get` and `use` take one config file, `mcp` takes several.
+   Use `@lit-protocol/keychain` with the local
    private identity. `get(name)` decrypts a recipient-encrypted result;
    `use(name, input)` runs the secret's catalog action (Stripe balance, OpenAI chat,
    GitHub file read, Slack message, Supabase table query, …) inside Lit without

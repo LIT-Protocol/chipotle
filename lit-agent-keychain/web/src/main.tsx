@@ -49,6 +49,8 @@ import {
 } from "./Landing.tsx";
 import { NPX_KEYCHAIN } from "./version.ts";
 import { AddSecret, ActionDocs } from "./AddSecret.tsx";
+import { AgentOnboarding } from "./AgentOnboarding.tsx";
+import { downloadAgentConfig } from "./agent-config.ts";
 import "@rainbow-me/rainbowkit/styles.css";
 import "./style.css";
 
@@ -166,6 +168,8 @@ function App() {
   );
   const [events, setEvents] = useState<any[]>([]);
   const [creating, setCreating] = useState(false);
+  const [addingAgent, setAddingAgent] = useState(false);
+  const addAgentButton = useRef<HTMLButtonElement>(null);
   const [agentKey, setAgentKey] = useState("");
   const [agentName, setAgentName] = useState("");
   const [rotation, setRotation] = useState("");
@@ -354,11 +358,14 @@ function App() {
           {client && (
             <button
               className="ghost"
+              disabled={!!busy}
               onClick={() =>
                 work("Signing out…", async () => {
                   await fetch("/auth/logout", { method: "POST" });
                   client.lit.usageApiKey = undefined;
                   setClient(undefined);
+                  setTab("secrets");
+                  setAddingAgent(false);
                   setSelected(undefined);
                   setSecrets([]);
                   setBilling(undefined);
@@ -525,6 +532,7 @@ function App() {
               {(["secrets", "recovery", "activity"] as const).map((t) => (
                 <button
                   key={t}
+                  disabled={!!busy}
                   className={tab === t ? "active" : ""}
                   onClick={() => {
                     setTab(t);
@@ -562,6 +570,10 @@ function App() {
                   {(billing?.subscription?.secretLimit ?? 5).toLocaleString()}{" "}
                   secrets
                 </p>
+                <small>
+                  Execution included under fair use. No automatic overage
+                  charges.
+                </small>
                 {billing?.subscription?.active ? (
                   <small>
                     {billing.subscription.cancelAtPeriodEnd
@@ -632,38 +644,6 @@ function App() {
                   Contact us for more
                 </a>
               </div>
-              <details>
-                <summary>Execution and account access</summary>
-                <p>
-                  Execution is included under fair use on every plan, with no
-                  automatic overage charges. Canceled subscriptions remain
-                  active through the paid period, then return to Free.
-                  Cancellation never deletes your secrets or encrypted backups.
-                </p>
-                <p>
-                  Agent configurations include a scoped execution key. Replacing
-                  it stops old configurations from connecting; agents still need
-                  your separate approval to access secrets.
-                </p>
-                <button
-                  className="secondary"
-                  disabled={!!busy}
-                  onClick={() =>
-                    work("Replacing execution key…", async () => {
-                      const { usageApiKey } = await client.api(
-                        "/api/execution-key/rotate",
-                        { method: "POST" },
-                      );
-                      client.lit.usageApiKey = usageApiKey;
-                      setNotice(
-                        "Execution key replaced. Download updated configurations for your agents.",
-                      );
-                    })
-                  }
-                >
-                  Replace execution key
-                </button>
-              </details>
             </section>
             {tab === "secrets" && (
               <>
@@ -677,22 +657,66 @@ function App() {
                         : "Start with no agent access. Grant only what each agent needs."}
                     </p>
                   </div>
-                  <button
-                    disabled={!!busy || !billing || atLimit}
-                    title={
-                      atLimit
-                        ? `Plan full: ${secrets.length} of ${billing.subscription.secretLimit} secrets used`
-                        : undefined
+                  <div className="button-row">
+                    <button
+                      ref={addAgentButton}
+                      disabled={!!busy}
+                      onClick={() => {
+                        setAddingAgent(true);
+                        setCreating(false);
+                      }}
+                    >
+                      + Add agent
+                    </button>
+                    <button
+                      className="secondary"
+                      disabled={!!busy || !billing || atLimit}
+                      title={
+                        atLimit
+                          ? `Plan full: ${secrets.length} of ${billing.subscription.secretLimit} secrets used`
+                          : undefined
+                      }
+                      onClick={() => {
+                        setCreating(true);
+                        setAddingAgent(false);
+                        setSelected(undefined);
+                      }}
+                    >
+                      + Add secret
+                    </button>
+                  </div>
+                </div>
+                {addingAgent && (
+                  <AgentOnboarding
+                    client={client}
+                    secrets={secrets}
+                    onBusyChange={(active) =>
+                      setBusy(active ? "Approving selected secrets…" : "")
                     }
-                    onClick={() => {
+                    onClose={() => {
+                      setAddingAgent(false);
+                      addAgentButton.current?.focus();
+                    }}
+                    onAddSecret={() => {
+                      setAddingAgent(false);
                       setCreating(true);
                       setSelected(undefined);
                     }}
-                  >
-                    + Add secret
-                  </button>
-                </div>
-                <div className="secret-layout">
+                    onApproved={async () => {
+                      setSelected(undefined);
+                      await refresh();
+                    }}
+                    onDownload={(label, bundles) =>
+                      downloadAgentConfig(
+                        label,
+                        bundles,
+                        LIT_URL,
+                        client.lit.usageApiKey,
+                      )
+                    }
+                  />
+                )}
+                <div className="secret-layout" hidden={addingAgent}>
                   <section className="secret-list">
                     {secrets.length === 0 && (
                       <div className="empty">
@@ -922,7 +946,7 @@ function App() {
                                 title="Download one agent config listing every secret in this vault that this public key is approved for"
                                 onClick={() => void exportAgentConfig(g)}
                               >
-                                Config · all secrets
+                                Download agent config
                               </button>
                               <button
                                 className="danger ghost"

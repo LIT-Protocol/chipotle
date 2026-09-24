@@ -37,7 +37,7 @@ This source prepares SDK 2.0.6 and pins the hosted examples to that version. 2.0
 an ordinary SDK release with no template change: clearer client-side messages
 (`use()` on a stored secret, an identity object passed where the private key string
 belongs), `describeCredential` accepting the raw JSON text of an identity or config
-file, and the owner UI's per-agent **Config · all secrets** download. Existing agents
+file, and the owner UI's per-agent **Download agent config** download. Existing agents
 on 2.0.5 keep working. The notes below describe the previous, template-changing
 release and still apply to secrets pinned to it.
 
