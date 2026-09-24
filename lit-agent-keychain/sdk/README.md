@@ -30,8 +30,9 @@ bootstrap. Lit still requires the agent signature and owner authorization.
 
 `list()` returns `id` (`vaultId/secretId`), `name`, vault/secret IDs, release,
 operation and input shape. Use `id` if names overlap across vaults; ambiguous bare
-names fail, never select the first vault. `run` also rejects ambiguous names; use
-`--only VAULT/SECRET --env VAULT/SECRET=ENV_VAR` to select and name one explicitly.
+names fail, never select the first vault. `run` injects every export secret by
+default; when two vaults share a name, give each a variable with
+`--env VAULT/SECRET=ENV_VAR` or pick one with `--only VAULT/SECRET`.
 A discovery request is capped at 1,000 candidate secrets; larger inventories fail
 explicitly, never silently truncate. Revocation means the next request; plaintext
 already received and already-authorized in-flight operations cannot be recalled.

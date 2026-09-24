@@ -1203,6 +1203,11 @@ export class Keychain {
       usageApiKey?: string;
       attestation?: AttestationOption;
       tlsCertificateSha256?: string;
+      /**
+       * Reuse an attested connection whose usage key already matches this
+       * config, instead of attesting a fresh one. Used by the live client.
+       */
+      lit?: LitConnection;
     } = {},
   ) {
     requireThat(
@@ -1217,13 +1222,23 @@ export class Keychain {
       assertUsageApiKey(options.usageApiKey);
     this.key = unhex(privateKey);
     this.publicKey = agentPublicKey(this.key);
-    this.lit = new LitConnection(
-      config.litApiUrl,
-      options.timeoutMs,
-      options.usageApiKey ?? config.usageApiKey,
-      options.attestation,
-      { tlsCertificateSha256: options.tlsCertificateSha256 },
-    );
+    const usageApiKey = options.usageApiKey ?? config.usageApiKey;
+    if (options.lit) {
+      requireThat(
+        options.lit.url === origin(config.litApiUrl) &&
+          options.lit.usageApiKey === usageApiKey,
+        "Shared Lit connection does not match this agent config",
+      );
+      this.lit = options.lit;
+    } else {
+      this.lit = new LitConnection(
+        config.litApiUrl,
+        options.timeoutMs,
+        usageApiKey,
+        options.attestation,
+        { tlsCertificateSha256: options.tlsCertificateSha256 },
+      );
+    }
   }
   /** Attests the Lit endpoint now instead of lazily on the first read. */
   attest() {
