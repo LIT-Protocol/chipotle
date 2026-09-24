@@ -51,7 +51,7 @@ hd "PART A — sign with the ACTION's own (CID-derived) key"
 ########################################################################
 ACCT=$(api POST /new_account '{"account_name":"runbook-a","account_description":"action-key sign"}')
 A_KEY=$(echo "$ACCT" | jq -r .api_key)
-[ "$A_KEY" != null ] && ok "account created" || { fail "new_account failed: $ACCT"; }
+{ [ -n "$A_KEY" ] && [ "$A_KEY" != null ]; } && ok "account created" || fail "new_account failed: $ACCT"
 
 A_USAGE=$(api POST /add_usage_api_key \
   '{"name":"a-usage","description":"exec","can_create_groups":false,"can_delete_groups":false,"can_create_pkps":false,"manage_ipfs_ids_in_groups":[],"add_pkp_to_groups":[],"remove_pkp_from_groups":[],"execute_in_groups":[0]}' \
@@ -75,7 +75,7 @@ hd "B1. create account"
 ACCT=$(api POST /new_account '{"account_name":"runbook-b","account_description":"pkp sign"}')
 API_KEY=$(echo "$ACCT" | jq -r .api_key)
 ACCT_WALLET=$(echo "$ACCT" | jq -r .wallet_address)
-[ "$API_KEY" != null ] && ok "account wallet=$ACCT_WALLET" || { fail "new_account failed: $ACCT"; summary; exit 1; }
+{ [ -n "$API_KEY" ] && [ "$API_KEY" != null ]; } && ok "account wallet=$ACCT_WALLET" || { fail "new_account failed: $ACCT"; summary; exit 1; }
 AUTH=(-H "X-Api-Key: $API_KEY")
 
 hd "B2. mint PKP (the signer)"

@@ -312,8 +312,10 @@ docker exec -e CHIPOTLE_DIR=/root/GitHub/chipotle chipotle-e2e bash /runbook/scr
 docker exec -e CHIPOTLE_DIR=/root/GitHub/chipotle chipotle-e2e bash /runbook/scripts/04-run-local.sh
 docker exec -e CHIPOTLE_DIR=/root/GitHub/chipotle chipotle-e2e bash /runbook/scripts/05-verify-pkp-sign.sh
 
-# Prove the runtime is air-gapped: cut the network and re-verify (still passes):
+# Prove the runtime is air-gapped: cut the network, confirm it's really off, re-verify:
 docker network disconnect bridge chipotle-e2e
+docker exec chipotle-e2e bash -lc \
+  'curl -sS --max-time 5 https://github.com >/dev/null 2>&1 && echo "STILL ONLINE (unexpected)" || echo "OFFLINE: external network unreachable ✅"'
 docker exec -e CHIPOTLE_DIR=/root/GitHub/chipotle chipotle-e2e bash /runbook/scripts/05-verify-pkp-sign.sh
 docker network connect bridge chipotle-e2e
 
@@ -444,8 +446,11 @@ is expected off-TEE.
 
 ### Air-gap proof — `05` re-run with the network disconnected
 
+First the manual reachability check (from the Docker appendix) confirms the network
+is really off, then `05-verify-pkp-sign.sh` is re-run and still passes:
+
 ```
-OFFLINE: external network unreachable ✅
+OFFLINE: external network unreachable ✅       # from the curl check, not the script
 ...
    ✅ MATCH — the signature was produced by the minted PKP
 ----- summary -----

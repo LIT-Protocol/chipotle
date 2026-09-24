@@ -5,7 +5,10 @@
 #
 # Usage:  bash local-runbook/scripts/06-teardown.sh
 set -uo pipefail
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; source "$DIR/_common.sh" || true
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# _common.sh provides hd/info/ok/warn/fail — require it (don't silently continue
+# without the helpers). It sets `set -e`; we disable it right after for teardown.
+source "$DIR/_common.sh"
 set +e
 
 hd "Tearing down local Chipotle stack"
@@ -23,7 +26,10 @@ fi
 
 # 2. Kill remaining stack processes. TERM first (graceful), then escalate to KILL
 #    for anything that ignores TERM (the Rust services do a slow graceful shutdown).
-PATTERNS=('local_test.sh' 'target/debug/lit-api-server' 'target/debug/lit_actions' 'lit-api-server' 'lit_actions')
+#    Match only the `target/debug/...` command lines that `cargo run` produces —
+#    NOT bare `lit-api-server`/`lit_actions`, which could match an unrelated
+#    checkout or environment on the same machine.
+PATTERNS=('local_test.sh' 'target/debug/lit-api-server' 'target/debug/lit_actions')
 NAMES=(anvil dstack-simulator static-web-server)
 
 for pat in "${PATTERNS[@]}"; do pkill -TERM -f "$pat" 2>/dev/null && info "TERM: $pat" || true; done

@@ -3,7 +3,7 @@
 # needs no internet. NEEDS THE INTERNET (this is the last install-phase step).
 #
 # What it warms:
-#   1. Contract deps + Solidity compile (npm i + hardhat compile) — caches solc
+#   1. Contract deps + Solidity compile (npm ci + hardhat compile) — caches solc
 #      and node_modules so deploy_anvil runs offline afterward.
 #   2. contract_deployer (Rust) — the binary local_test.sh invokes to deploy.
 #   3. lit-api-server and lit_actions (Rust) — the two long compiles; downloads
@@ -23,8 +23,10 @@ hd "Warming build at $CHIPOTLE_DIR"
 
 CONTRACTS_DIR="$CHIPOTLE_DIR/lit-api-server/blockchain/lit_node_express"
 
-hd "1/3  Contracts: npm i + hardhat compile"
-( cd "$CONTRACTS_DIR" && npm i && npx hardhat clean && npx hardhat compile )
+hd "1/3  Contracts: npm ci + hardhat compile"
+# npm ci is deterministic (installs exactly package-lock.json) — better for a
+# reproducible, offline-ready cache. Falls back to npm i if no lockfile is present.
+( cd "$CONTRACTS_DIR" && { [ -f package-lock.json ] && npm ci || npm i; } && npx hardhat clean && npx hardhat compile )
 ok "contracts compiled (solc + node_modules cached)"
 
 hd "2/3  contract_deployer (Rust)"

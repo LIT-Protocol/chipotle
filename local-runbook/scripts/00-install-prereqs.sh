@@ -73,8 +73,14 @@ install_linux() {
       x86_64|amd64)  arch="x86_64-unknown-linux-gnu" ;;
       *) die "Unsupported arch for static-web-server: $(uname -m)" ;;
     esac
-    tag="$(curl -sSL https://api.github.com/repos/static-web-server/static-web-server/releases/latest | jq -r .tag_name)"
-    [ -n "$tag" ] && [ "$tag" != null ] || die "Could not resolve latest static-web-server release tag."
+    # Pin a version for reproducible builds via SWS_VERSION (e.g. v2.44.0); default
+    # to latest. Pinning also sidesteps the GitHub API (avoids rate-limit flakes).
+    if [ -n "${SWS_VERSION:-}" ]; then
+      tag="$SWS_VERSION"
+    else
+      tag="$(curl -sSL https://api.github.com/repos/static-web-server/static-web-server/releases/latest | jq -r .tag_name)"
+    fi
+    [ -n "$tag" ] && [ "$tag" != null ] || die "Could not resolve static-web-server release tag (set SWS_VERSION to pin one)."
     url="https://github.com/static-web-server/static-web-server/releases/download/${tag}/static-web-server-${tag}-${arch}.tar.gz"
     tmp="$(mktemp -d)"
     curl -sSL "$url" -o "$tmp/sws.tar.gz" || die "Download failed: $url"
