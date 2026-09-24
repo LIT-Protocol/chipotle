@@ -144,6 +144,14 @@ reusable management sessions. Keychain sessions only authorize storage/UI operat
 and never replace a receipt. They are HttpOnly, SameSite=Strict, Secure on HTTPS and
 expire after 12 hours. Credential changes invalidate existing metadata sessions.
 
+Deleting a secret is a session operation without a receipt. It removes the registry
+entry every agent request is checked against, all signed policies and every
+ciphertext version in one transaction, then retires the derived action's execution
+grant. No action ever verifies "deleted": absence is the denial, so there is nothing
+to forge. A session holder can therefore deny service, which the operator can already
+do by withholding data; it cannot grant anything. Nothing remains for the operator to
+roll back to. An owner who kept an encrypted backup can restore the secret deliberately.
+
 ## Encryption protocol
 
 Canonical JSON sorts ASCII property names and permits only safe integer numbers.

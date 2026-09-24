@@ -91,7 +91,7 @@ If an agent's machine is compromised, the attacker can read the secrets that age
 | Standard, $10/month | 1,000 secrets | Same model. Rotations use the same slot. No automatic overage charges. |
 | Custom | More | Contact support from the app for higher storage or high-volume usage. |
 
-Cancelling never deletes your secrets or encrypted backups, and it is not revocation: enrolled actions keep working on Free. If a paid plan expires while you hold more than five secrets, storage mutations stop, but login, revocation and backups remain. Third-party provider charges (OpenAI, Slack plans, Supabase) are separate.
+Cancelling never deletes your secrets or encrypted backups, and it is not revocation: enrolled actions keep working on Free. Only you delete a secret, and **Delete** on its page does exactly that: every agent is denied on its next request, the encrypted value is removed from Keychain, and the slot is freed. If a paid plan expires while you hold more than five secrets, storage mutations stop, but login, revocation and backups remain. Third-party provider charges (OpenAI, Slack plans, Supabase) are separate.
 
 ## Built on Lit primitives
 

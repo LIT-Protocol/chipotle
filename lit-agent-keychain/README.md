@@ -34,11 +34,16 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 
 ## SDK release coordination
 
-This source prepares SDK **2.1.1** (registry latest verified as 2.0.7 before this
-change). It adds `LiveKeychain`, authenticated live discovery and configless CLI/MCP.
+This source prepares SDK **2.1.2** (main was at 2.1.1, registry latest verified as
+2.1.0 before this change). It adds `OwnerClient.deleteSecret()`: owners can delete a
+secret, which revokes every agent and removes the ciphertext in one transaction, frees
+the slot and retires the action's execution grant. No immutable action source, archive
+or catalog lock changes are part of this release.
+
+SDK 2.1.1 hardened live discovery (#707). SDK 2.1.0 added `LiveKeychain`,
+authenticated live discovery and configless CLI/MCP.
 Owners approve on the website; running clients observe changes on the next request
-without downloading configs. The legacy static API remains compatible. No immutable
-action source, archive or catalog lock changes are part of this release.
+without downloading configs. The legacy static API remains compatible.
 
 SDK 2.0.7 previously added explicit expiry preservation and guided owner onboarding.
 
@@ -75,7 +80,7 @@ Consequences, all handled by the release mechanism described in
   release still takes one signature per document (`PRE_BATCH_AUTHORITY_HASHES`).
 
 Release checks: run `npm test` and `npm run build`, publish through the normal
-maintainer release process, verify `npm view @lit-protocol/keychain@2.1.1 version`,
+maintainer release process, verify `npm view @lit-protocol/keychain@2.1.2 version`,
 then repeat the strict external TypeScript consumer and attestation-enabled Node
 smoke test from the registry artifact. Only then deploy the owner UI/API and create,
 rotate and read a secret against production. See the QA reports under `docs/` for
@@ -107,7 +112,7 @@ released plaintext or cancelling authorized in-flight operations.
   exact-object receipt.
 - X25519/HKDF-SHA256/AES-256-GCM HPKE key wrapping and response encryption; local
   AES-256-GCM payload encryption. Action signatures authenticate results as well as keys.
-- Explicit agent public-key enrollment, exact ciphertext/version scopes, disable/revoke,
+- Explicit agent public-key enrollment, exact ciphertext/version scopes, disable/revoke/delete,
   owner-approved renewal, atomic rotation, and credential replacement/recovery.
 - New secrets grant no agent access. Permissions default to 30 days; the owner may
   choose any lifetime, including no expiry. Owner credential membership is independent
@@ -201,13 +206,13 @@ state after uncertain completion; do not blindly retry writes.
 
 ### Storage entitlements and charges
 
-| State                             | Storage                                    | Execution and recovery                                                     |
-| --------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------- |
-| Free                              | Up to 5 secrets                            | Sponsored enrolled actions under fair use; backups/revocation available    |
-| Standard                          | $10/month, up to 1,000 secrets             | Same authorization model; rotations use no additional slot                 |
-| Cancelled, still in paid period   | Paid entitlement until period end          | Cancellation does not revoke agent grants                                  |
-| Paid expired, at/below Free limit | Free entitlement                           | Sponsored execution continues on Free                                      |
-| Paid expired, above Free limit    | Storage mutations blocked while over limit | Login, revocation and encrypted backups remain; no automatic data deletion |
+| State                             | Storage                                    | Execution and recovery                                                               |
+| --------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------ |
+| Free                              | Up to 5 secrets                            | Sponsored enrolled actions under fair use; backups/revocation available              |
+| Standard                          | $10/month, up to 1,000 secrets             | Same authorization model; rotations use no additional slot                           |
+| Cancelled, still in paid period   | Paid entitlement until period end          | Cancellation does not revoke agent grants                                            |
+| Paid expired, at/below Free limit | Free entitlement                           | Sponsored execution continues on Free                                                |
+| Paid expired, above Free limit    | Storage mutations blocked while over limit | Login, revocation, deletion and encrypted backups remain; no automatic data deletion |
 
 There is no hard per-user execution or dollar cap and no automatic Keychain overage
 charge. A numerical fair-use quota is not specified here; contact Support via the
