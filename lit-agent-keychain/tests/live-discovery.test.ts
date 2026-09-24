@@ -88,3 +88,37 @@ for (const field of [
     }
   });
 }
+
+test("live client reuses one Lit connection per execution key", () => {
+  const identity = Keychain.generateKey();
+  const client = new LiveKeychain(identity.privateKey, {
+    serviceUrl: "http://localhost:55441",
+    litApiUrl: "http://localhost:55442",
+  });
+  try {
+    const connection = (client as any).connection.bind(client);
+    const a = connection({ usageApiKey: "ck_a" });
+    assert.equal(connection({ usageApiKey: "ck_a" }), a);
+    assert.notEqual(connection({ usageApiKey: "ck_b" }), a);
+    assert.equal(a.usageApiKey, "ck_a");
+    // The per-call legacy client shares that connection instead of attesting anew.
+    const config = {
+      v: 2,
+      litApiUrl: "http://localhost:55442",
+      usageApiKey: "ck_a",
+      secrets: {},
+    } as any;
+    assert.equal(new Keychain(identity.privateKey, config, { lit: a }).lit, a);
+    assert.throws(
+      () =>
+        new Keychain(
+          identity.privateKey,
+          { ...config, usageApiKey: "ck_b" },
+          { lit: a },
+        ),
+      /does not match/,
+    );
+  } finally {
+    client.destroy();
+  }
+});

@@ -162,7 +162,10 @@ pub async fn discover(
     if rows.len() > 1000 {
         return Err(api::err(Status::Conflict, "discovery_limit_exceeded"));
     }
-    let mut keys = HashMap::<String, String>::new();
+    // Each secret stands alone: a vault whose execution key is missing or mid
+    // rotation, or whose authority/receipts fail to verify, is withheld from this
+    // response without hiding every other vault's approvals from the agent.
+    let mut keys = HashMap::<String, Option<String>>::new();
     let mut secrets = Vec::new();
     for row in rows {
         let bundle: registry::SecretWrite = serde_json::from_value(row).map_err(api::internal)?;
@@ -170,23 +173,38 @@ pub async fn discover(
             serde_json::from_value(bundle.manifest.document["manifest"].clone())
                 .map_err(api::internal)?;
         let Some(release) = crate::actions::release(&manifest.release) else {
-            return Err(api::denied("release"));
+            tracing::warn!("discovery skipped a secret with an unknown release");
+            continue;
         };
         let envelope = &bundle.envelope.document;
+        let (Ok(version), Ok(envelope_hash)) = (
+            number(&envelope["metadata"], "version"),
+            crypto::digest(envelope),
+        ) else {
+            tracing::warn!("discovery skipped a secret with a malformed envelope");
+            continue;
+        };
         if !active_grant(
             &bundle.policy.document,
             agent,
             &release.operation,
-            number(&envelope["metadata"], "version").map_err(api::denied)?,
-            &crypto::digest(envelope).map_err(api::denied)?,
+            version,
+            &envelope_hash,
             time::OffsetDateTime::now_utc().unix_timestamp(),
         ) {
             continue;
         }
         let authority_key =
-            crate::authority::key_for(pool, lit, &manifest.vault_id, &manifest.authority_cid)
-                .await?;
-        registry::validate_write(
+            match crate::authority::key_for(pool, lit, &manifest.vault_id, &manifest.authority_cid)
+                .await
+            {
+                Ok(key) => key,
+                Err(_) => {
+                    tracing::warn!("discovery skipped a vault whose authority key is unavailable");
+                    continue;
+                }
+            };
+        if registry::validate_write(
             &bundle,
             &manifest.vault_id,
             &authority_key,
@@ -194,30 +212,52 @@ pub async fn discover(
             false,
             false,
         )
-        .map_err(api::denied)?;
+        .is_err()
+        {
+            tracing::warn!("discovery skipped a secret whose receipts failed verification");
+            continue;
+        }
         // Only an already-provisioned execution-only key belonging to this exact
         // approved vault. Never mint an account or return bootstrap/master keys.
-        let usage_key = if let Some(key) = keys.get(&manifest.vault_id) {
-            key.clone()
-        } else {
-            let encrypted: Option<String> = sqlx::query_scalar("SELECT encrypted_key FROM kc_execution_accounts WHERE vault_id=$1 AND revoking_key IS NULL")
-                .bind(&manifest.vault_id).fetch_optional(pool.inner()).await.map_err(api::internal)?.flatten();
-            let encrypted = encrypted.ok_or_else(|| {
-                api::err(
-                    Status::ServiceUnavailable,
-                    "execution_bootstrap_unavailable",
-                )
-            })?;
-            let key = sponsorship::decrypt_key(
-                &encrypted,
-                &manifest.vault_id,
-                &cfg.usage_key_encryption_key,
-            )
-            .map_err(api::internal)?;
-            keys.insert(manifest.vault_id.clone(), key.clone());
-            key
+        let usage_key = match keys.get(&manifest.vault_id) {
+            Some(cached) => cached.clone(),
+            None => {
+                let key = execution_key(pool, cfg, &manifest.vault_id).await?;
+                if key.is_none() {
+                    tracing::warn!("discovery skipped a vault without a current execution key");
+                }
+                keys.insert(manifest.vault_id.clone(), key.clone());
+                key
+            }
+        };
+        let Some(usage_key) = usage_key else {
+            continue;
         };
         secrets.push(json!({"name":envelope["metadata"]["name"],"manifest":manifest,"actionCid":bundle.manifest.document["actionCid"],"usageApiKey":usage_key}));
     }
     Ok(Json(json!({"v":2,"secrets":secrets})))
+}
+
+/// The vault's current execution-only key, or `None` while it is missing or
+/// being rotated. Database and decryption failures are still errors: they mean
+/// the service itself is unhealthy, not that one vault is in flux.
+async fn execution_key(
+    pool: &PgPool,
+    cfg: &Config,
+    vault: &str,
+) -> Result<Option<String>, api::ApiError> {
+    let encrypted: Option<String> = sqlx::query_scalar(
+        "SELECT encrypted_key FROM kc_execution_accounts WHERE vault_id=$1 AND revoking_key IS NULL",
+    )
+    .bind(vault)
+    .fetch_optional(pool)
+    .await
+    .map_err(api::internal)?
+    .flatten();
+    encrypted
+        .map(|value| {
+            sponsorship::decrypt_key(&value, vault, &cfg.usage_key_encryption_key)
+                .map_err(api::internal)
+        })
+        .transpose()
 }

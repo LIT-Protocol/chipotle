@@ -1,6 +1,6 @@
 {
   "name": "@lit-protocol/keychain",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Owner-authorized, locally encrypted credentials for agents, with a local MCP server",
   "type": "module",
   "main": "./dist/node.js",
