@@ -296,7 +296,7 @@ function App() {
     const secretName = selected.envelope.document.metadata.name;
     if (
       !window.confirm(
-        `Export "${secretName}" in plaintext?\n\nThis decrypts the current value and saves it unencrypted as ${secretName}.json in your downloads folder. Delete that file once you have used it. For agents, use "Agent config" instead: it contains no secret value.`,
+        `Export "${secretName}" in plaintext?\n\nThis decrypts the current value and saves it unencrypted as ${secretName}.json in your downloads folder. Delete that file once you have used it. For agents, approve their public key instead; live clients need no config download.`,
       )
     )
       return;
@@ -888,7 +888,7 @@ function App() {
                             </p>
                             <pre className="terminal">
                               <code>
-                                {`${NPX_KEYCHAIN} run ./agent-identity.json ./${selected.envelope.document.metadata.name}.keychain.json -- <command>`}
+                                {`${NPX_KEYCHAIN} run ./agent-identity.json --only ${selected.envelope.document.metadata.name} -- <command>`}
                               </code>
                             </pre>
                             <p>
@@ -943,7 +943,7 @@ function App() {
                               <button
                                 className="ghost"
                                 disabled={!!busy}
-                                title="Download one agent config listing every secret in this vault that this public key is approved for"
+                                title="Optional legacy static config; live clients discover approvals automatically"
                                 onClick={() => void exportAgentConfig(g)}
                               >
                                 Download agent config
@@ -987,7 +987,7 @@ function App() {
                               setNotice(
                                 existing
                                   ? `${brief(key)} was already approved as "${existing.label}"; it is now labelled "${agentName}". Its access did not change.`
-                                  : `Approved ${agentName}. Download its Agent config and give it to the agent next to its identity file.`,
+                                  : `Approved ${agentName}. Ready to use on its next request with the live SDK, CLI or MCP client. No config download or restart needed.`,
                               );
                             });
                           }}

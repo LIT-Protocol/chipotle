@@ -1,9 +1,18 @@
-import type { Keychain, AgentConfig, AttestationPolicy } from "./dist/index.js";
+import type {
+  Keychain,
+  LiveKeychain,
+  AgentConfig,
+  AttestationPolicy,
+} from "./dist/index.js";
 /** Structural view of a Keychain so src and dist builds interoperate. */
 export type KeychainLike = {
-  readonly config: AgentConfig;
+  readonly config?: AgentConfig;
   readonly publicKey: string;
-  list(): { name: string; release: string; operation: string }[];
+  list():
+    | { name: string; id?: string; release: string; operation: string }[]
+    | Promise<
+        { name: string; id?: string; release: string; operation: string }[]
+      >;
   get(name: string): Promise<string>;
   use(name: string, input?: Record<string, unknown>): Promise<unknown>;
   stripeBalance(name: string): Promise<unknown>;
@@ -26,10 +35,12 @@ export function loadKeychain(
   options?: {
     readFile?: (file: string, encoding: "utf8") => Promise<string>;
     usageApiKey?: string;
+    serviceUrl?: string;
+    litApiUrl?: string;
     attestation?: AttestationPolicy | false;
     tlsCertificateSha256?: string;
   },
-): Promise<Keychain>;
+): Promise<Keychain | LiveKeychain>;
 export function callTool(
   keychain: KeychainLike,
   name: string,

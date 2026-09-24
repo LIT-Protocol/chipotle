@@ -44,11 +44,11 @@ as a second approved owner credential before storing anything valuable.
 
 | Situation | What to do |
 |---|---|
-| New device, approved credential available | Choose **Recover an existing vault** on the sign-in page, select your backup, then sign in with any approved credential. Confirm the restored secret list and download fresh agent configs where needed. |
+| New device, approved credential available | Choose **Recover an existing vault** on the sign-in page, select your backup, then sign in with any approved credential. Confirm the restored secret list. Live clients discover restored grants on their next request; legacy static clients may need fresh configs. |
 | Google-only owner | Sign in with the same Google account. If it is inaccessible, use Google's recovery or a previously approved alternate owner. Keychain cannot reset a Google identity. |
 | Backup lost, credential available | Sign in and make a new backup. A credential alone does not recreate lost ciphertext. |
 | All approved credentials lost | A backup alone is insufficient. Recover through the credential provider (a synced passkey, Google recovery) or an already-approved alternate credential. There is no operator reset token. |
-| Agent key lost | Generate a new identity on a trusted machine, approve its public key per secret, revoke the old key and distribute new configs. |
+| Agent key lost | Generate a new identity on a trusted machine, approve its public key per secret, revoke the old key and use the new identity locally; live discovery needs no config. |
 
 Restore never overwrites an existing secret or an existing vault's credential settings. On a conflict, compare versions rather than deleting current data to force an old restore.
 
@@ -56,9 +56,9 @@ Restore never overwrites an existing secret or an existing vault's credential se
 
 | Change | Owner steps | Effect on agents |
 |---|---|---|
-| Rotate & approve | Enter the new value on the secret's page | Existing agents move to the new version with their current expiry; downloaded configs keep working |
-| Execution (billing) key | **Replace execution key** in the subscription panel | Every agent config must be re-downloaded or its `CHIPOTLE_USAGE_API_KEY` override updated; approvals are unaffected |
-| Agent signing key | Approve the new public key, revoke the old | Distribute the new identity and config privately |
+| Rotate & approve | Enter the new value on the secret's page | Existing agents move to the new version with their current expiry; live clients discover it on the next request |
+| Execution (billing) key | Authenticated owner execution-key rotation API | Live clients retrieve the replacement on their next request; legacy static clients need a new config or override. Approvals are unaffected |
+| Agent signing key | Approve the new public key, revoke the old | Keep the new private identity on its trusted agent device; no config download |
 | Owner credential | Approve and test the replacement before removing the old one | Existing browser sessions end; download a fresh backup |
 
 Cancelling a subscription is not revocation. For suspected exposure, revoke at the upstream provider too.

@@ -7,32 +7,46 @@ Execution goes directly to Chipotle with a scoped, per-vault usage key funded by
 Keychain. That billing key does not authorize secret access by itself.
 
 ```sh
-npm install @lit-protocol/keychain@2.0.7
-npx @lit-protocol/keychain@2.0.7 init ./agent-identity.json
+npm install @lit-protocol/keychain@2.1.0
+npx @lit-protocol/keychain@2.1.0 init ./agent-identity.json
 ```
 
-Give the **public key** to the owner. In Keychain, approve it on a secret and download
-**Agent config**. Keep `agent-identity.json` private; it is created with mode 0600 and
-existing files are never overwritten. The config contains public locators and a
-**scoped billing key**. Keep both files private (mode 0600); do not commit them.
-The config contains no owner or agent signing private key. An agent approved for
-several secrets needs one file, not one per secret: the owner clicks **Config · all
-secrets** next to the agent under **Authorized agents**. `get`, `use` and `run` take a
-single config; `mcp` merges several from the same vault.
+Give only the **public key** to the owner. On **Secrets → + Add agent**, approve
+that key for selected secrets. The agent is ready on its next request: no config
+file, refresh, download or restart. Keep the identity file private (mode 0600).
+Reuse an existing identity rather than generating a new one when already approved.
+
+`LiveKeychain` uses `https://keychain.litprotocol.com` by default. Set `serviceUrl`
+(or CLI/MCP `KEYCHAIN_SERVICE_URL`) for another Keychain service. Its separately
+trusted `litApiUrl` defaults to `https://api.chipotle.litprotocol.com`; CLI/MCP
+`KEYCHAIN_LIT_API_URL` can explicitly choose another trusted Lit origin. Discovery
+cannot replace that trust anchor. Do not copy a Lit URL from an untrusted response.
+
+Every `await list()`, `get()` and `use()` authenticates afresh using a one-use,
+60-second, service-bound signed challenge and retrieves current grants. A running
+MCP server sees owner additions/removals on its next tool call. Discovery returns
+no plaintext or private keys, only approved locators and execution-only billing
+bootstrap. Lit still requires the agent signature and owner authorization.
+
+`list()` returns `id` (`vaultId/secretId`), `name`, vault/secret IDs, release,
+operation and input shape. Use `id` if names overlap across vaults; ambiguous bare
+names fail, never select the first vault. `run` also rejects ambiguous names; use
+`--only VAULT/SECRET --env VAULT/SECRET=ENV_VAR` to select and name one explicitly.
+A discovery request is capped at 1,000 candidate secrets; larger inventories fail
+explicitly, never silently truncate. Revocation means the next request; plaintext
+already received and already-authorized in-flight operations cannot be recalled.
 
 ## Stored secret → get/run
 
 In the owner UI, explicitly choose **stored secret / export**, name it `MY_SECRET`,
-enter a disposable test value, approve your agent public key and download
-`MY_SECRET.keychain.json`. Save this example as `read-secret.mjs`, beside the two
-JSON files, and run `node read-secret.mjs` from that directory after installing.
+enter a disposable test value and approve your agent public key. Save this example
+as `read-secret.mjs` beside the private identity file and run `node read-secret.mjs`.
 
 ```js
 import { readFile } from "node:fs/promises";
-import { Keychain } from "@lit-protocol/keychain";
+import { LiveKeychain } from "@lit-protocol/keychain";
 const identity = JSON.parse(await readFile("./agent-identity.json", "utf8"));
-const config = JSON.parse(await readFile("./MY_SECRET.keychain.json", "utf8"));
-const keychain = new Keychain(identity.privateKey, config);
+const keychain = new LiveKeychain(identity.privateKey);
 try {
   const secret = await keychain.get("MY_SECRET");
   // Consume secret in your trusted application here; never log it.
@@ -49,19 +63,16 @@ config download (locators plus billing key) or encrypted backup export (cipherte
 ## Connected service → use/action MCP tool
 
 Obtain a Stripe test credential, choose **Stripe balance / Use inside Lit** when
-importing it as `STRIPE_API_KEY`, approve the agent, and download its config. See
+importing it as `STRIPE_API_KEY`, approve the agent. See
 [provider setup](https://keychain.litprotocol.com/PROVIDERS.md) for credential scopes,
 all five providers and the required Supabase JSON object. Save as `balance.mjs`
 and run `node balance.mjs` from the directory containing the private JSON files:
 
 ```js
 import { readFile } from "node:fs/promises";
-import { Keychain } from "@lit-protocol/keychain";
+import { LiveKeychain } from "@lit-protocol/keychain";
 const identity = JSON.parse(await readFile("./agent-identity.json", "utf8"));
-const config = JSON.parse(
-  await readFile("./STRIPE_API_KEY.keychain.json", "utf8"),
-);
-const keychain = new Keychain(identity.privateKey, config);
+const keychain = new LiveKeychain(identity.privateKey);
 try {
   const balances = await keychain.use("STRIPE_API_KEY");
   console.log(balances); // Bounded balance result, not the credential.
@@ -75,31 +86,31 @@ receives it over TLS. `get`/`run` are not service operations. MCP uses
 `stripe_balance` with `{"name":"STRIPE_API_KEY"}`. These are setup recipes,
 not evidence that your provider account or a live service call has succeeded.
 
-`keychain.list()` reports each secret's action and input shape; `ACTIONS` exports the
-full catalog compiled into the client. `npx @lit-protocol/keychain@2.0.7 actions` prints it from the CLI and
-`npx @lit-protocol/keychain@2.0.7 use <identity> <config> <name> '<json-input>'` runs one.
+`await keychain.list()` reports each secret's action and input shape; `ACTIONS` exports the
+full catalog compiled into the client. `npx @lit-protocol/keychain@2.1.0 actions` prints it from the CLI and
+`npx @lit-protocol/keychain@2.1.0 use <identity> <name> '<json-input>'` runs one.
 
 CLI reads write the requested result to stdout. Avoid sending credential output to logs.
-`npx @lit-protocol/keychain@2.0.7 --help` prints usage and `--version` prints the
+`npx @lit-protocol/keychain@2.1.0 --help` prints usage and `--version` prints the
 installed version. Identity files with an explicit unsupported version or a public
 key inconsistent with their private key are rejected; do not hand-edit key fields.
 After `keychain.destroy()`, create a new client before calling `get`, `use` or
 `attest` again: destroyed instances fail locally.
 
 ```sh
-npx @lit-protocol/keychain@2.0.7 get ./agent-identity.json ./API_KEY.keychain.json API_KEY
+npx @lit-protocol/keychain@2.1.0 get ./agent-identity.json API_KEY
 ```
 
 For tools that need the raw credential in their environment, `run` skips stdout
-entirely. It decrypts the export-release secrets in the config, places each in the
+entirely. It discovers the currently approved export-release secrets, places each in the
 child's environment under the secret's name, hands the child your terminal, and exits
 with the child's status. The Keychain CLI itself does not print the value; a child
 program can still log or disclose it, including into model context:
 
 ```sh
-npx @lit-protocol/keychain@2.0.7 run ./agent-identity.json ./STRIPE_API_KEY.keychain.json -- stripe balance retrieve
-npx @lit-protocol/keychain@2.0.7 run ./id.json ./db.keychain.json --only DATABASE_URL -- psql
-npx @lit-protocol/keychain@2.0.7 run ./id.json ./cfg.keychain.json --env OPENAI_PROD=OPENAI_API_KEY -- python agent.py
+npx @lit-protocol/keychain@2.1.0 run ./agent-identity.json -- stripe balance retrieve
+npx @lit-protocol/keychain@2.1.0 run ./id.json --only DATABASE_URL -- psql
+npx @lit-protocol/keychain@2.1.0 run ./id.json --env OPENAI_PROD=OPENAI_API_KEY -- python agent.py
 ```
 
 `--only A,B` injects a subset; `--env SECRET=ENV_VAR` renames a variable for tools
@@ -117,9 +128,9 @@ when the command exits. A `--file` secret stays out of the environment unless `-
 names it too. Multi-line values such as PEM keys are written byte for byte.
 
 ```sh
-npx @lit-protocol/keychain@2.0.7 run ./id.json ./gcp.keychain.json --file GCP_SA=/tmp/sa.json -- \
+npx @lit-protocol/keychain@2.1.0 run ./id.json --file GCP_SA=/tmp/sa.json -- \
   env GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json gcloud storage ls
-npx @lit-protocol/keychain@2.0.7 run ./id.json ./k8s.keychain.json --file KUBECONFIG_PROD=./kubeconfig -- \
+npx @lit-protocol/keychain@2.1.0 run ./id.json --file KUBECONFIG_PROD=./kubeconfig -- \
   kubectl --kubeconfig ./kubeconfig get pods
 ```
 
@@ -127,9 +138,9 @@ If the CLI itself is killed with SIGKILL the file cannot be cleaned up; prefer a
 tmpfs path such as `/dev/shm` on Linux for anything long-lived. Unlinking does not
 guarantee erasure of bytes on disk; clean up files left after a crash yourself.
 
-Set `CHIPOTLE_USAGE_API_KEY` for a CLI billing-key override, or pass
-`{ usageApiKey }` as the SDK constructor's third argument. After the owner replaces
-the execution key, update every agent using the old key.
+Live clients retrieve the current per-vault execution billing key on every operation,
+including after rotation. `CHIPOTLE_USAGE_API_KEY` and the legacy `Keychain`
+constructor's third-argument override apply only to static configs.
 
 ## Endpoint attestation
 
@@ -160,10 +171,10 @@ is sent (verification itself fetches attestation evidence and governance state).
    automatically in the CLI/MCP paths.
 
 ```sh
-npx @lit-protocol/keychain@2.0.7 attest                 # prints the full report for the default origin
+npx @lit-protocol/keychain@2.1.0 attest                 # prints the full report for the default origin
 ```
 
-Independently compare `config.litApiUrl` with the endpoint supplied by your trusted
+Independently compare your chosen `litApiUrl` with the endpoint supplied by your trusted
 deployment operator (hosted default: `https://api.chipotle.litprotocol.com`). Do not
 accept a substitute endpoint merely because a config or API response names it.
 For a custom deployment, obtain and review its governance policy independently,
@@ -185,13 +196,13 @@ https://developer.litprotocol.com/architecture/verification/attestation.
 ## MCP server
 
 The package ships a local Model Context Protocol server over stdio. Register it
-with any MCP client in one line; pass one or more agent configs after the identity:
+with any MCP client in one line; pass only the private identity path for live discovery:
 
 ```sh
 # Claude Code
-claude mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.0.7 mcp /absolute/path/agent-identity.json /absolute/path/API_KEY.keychain.json
+claude mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.1.0 mcp /absolute/path/agent-identity.json
 # Codex CLI
-codex mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.0.7 mcp /absolute/path/agent-identity.json /absolute/path/API_KEY.keychain.json
+codex mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.1.0 mcp /absolute/path/agent-identity.json
 ```
 
 Cursor, Windsurf and similar clients take the same command in their JSON config:
@@ -203,11 +214,9 @@ Cursor, Windsurf and similar clients take the same command in their JSON config:
       "command": "npx",
       "args": [
         "-y",
-        "@lit-protocol/keychain@2.0.7",
+        "@lit-protocol/keychain@2.1.0",
         "mcp",
-        "/absolute/path/agent-identity.json",
-        "/absolute/path/API_KEY.keychain.json",
-        "/absolute/path/OTHER_SECRET.keychain.json"
+        "/absolute/path/agent-identity.json"
       ]
     }
   }
@@ -225,7 +234,8 @@ For JSON clients, use Cursor's project `.cursor/mcp.json` or user
 `~/.cursor/mcp.json`, or Windsurf's `~/.codeium/windsurf/mcp_config.json` (merge the
 `mcpServers` entry; do not replace other servers). The Claude Code/Codex commands
 above use each client's config manager; inspect its registered server after adding.
-Restart the client after edits. Absolute paths remove working-directory ambiguity.
+Restart after editing the MCP registration itself, not after owner approvals.
+Absolute paths remove working-directory ambiguity.
 
 Read-only smoke test: call `agent_public_key`, `list_actions`, then `list_secrets`.
 Compare the public key with the owner's approval and inspect operations before
@@ -234,17 +244,17 @@ Only call `get_secret` if you intend to place plaintext into the model context.
 
 - Missing file / wrong cwd: verify the absolute identity and config paths locally;
   do not upload their contents to support. Confirm the client's user can read them.
-- Duplicate secret names across configs: do not rely on selection order. Run
-  separate MCP registrations, each with an unambiguous config/name set.
-- Billing-key replacement: refresh every config or override and restart all MCP
-  processes. This is separate from secret rotation and agent signing-key rotation.
+- Duplicate names across vaults: use the qualified `id` from `list_secrets`. Never
+  rely on selection order. Legacy static configs reject conflicting names.
+- Billing-key replacement: live clients rediscover the current key automatically.
+  Legacy static clients need fresh configs or overrides and a restart.
 - A failed write can have succeeded upstream: Slack posts and Supabase inserts
   are not exactly-once. Inspect provider state before retrying; see provider recipes.
 
 Tools: `list_secrets` (names, permitted operation and input shape, no values),
 `get_secret`, one tool per catalog action (`stripe_balance`, `openai_chat`,
 `github_read_file`, `slack_post_message`, `supabase_tables`; each takes `name` and,
-where the action declares one, `input`; `list_actions` or `npx @lit-protocol/keychain@2.0.7 actions` shows
+where the action declares one, `input`; `list_actions` or `npx @lit-protocol/keychain@2.1.0 actions` shows
 the current catalog), `list_actions`, and `agent_public_key` (for the owner to
 approve). The server is
 intentionally local rather than hosted: decryption needs the agent's private
@@ -280,7 +290,7 @@ or an unsupported verification environment. Do not disable attestation to get pa
 
 | Artifact       | Shape                                                                                                    |
 | -------------- | -------------------------------------------------------------------------------------------------------- |
-| Agent identity | JSON from `npx @lit-protocol/keychain@2.0.7 init`: `{ v: 2, privateKey: <64 hex>, publicKey: <64 hex> }` |
+| Agent identity | JSON from `npx @lit-protocol/keychain@2.1.0 init`: `{ v: 2, privateKey: <64 hex>, publicKey: <64 hex> }` |
 | Agent config   | JSON `*.keychain.json`: `{ v: 2, litApiUrl, usageApiKey, secrets }`                                      |
 | Usage key      | Opaque Chipotle string (currently 44-character base64). Billing only.                                    |
 | Secret value   | Whatever `get` returns. Never log it.                                                                    |
@@ -315,3 +325,18 @@ within their signed validity window; this SDK does not promise one-time executio
 A compromised permitted agent can disclose any credential it receives.
 
 Build from this repository with `npm ci && npm run build` in `lit-agent-keychain/`.
+
+## Optional legacy / advanced static configs
+
+`Keychain(privateKey, config, options)` and explicit CLI config-file arguments
+remain supported for existing integrations. Its synchronous `list()` is a snapshot;
+new approvals require a new export. Secret reads still check current policy. The
+website's **Advanced: legacy static config → Download agent config** exports only
+successful approvals; it is not required by live clients. Legacy MCP can merge
+multiple configs from one vault, but different vault billing keys must not be merged.
+Protect those files as billing credentials. Prefer `LiveKeychain` for all new agents.
+
+Scoped execution keys fund execution, not authorization. A former agent retaining
+one can consume the vault's sponsored execution budget until the owner rotates it,
+but cannot decrypt/use a secret denied by its current honest policy. The service
+never supplies master/account-management keys or keys from an unapproved vault.

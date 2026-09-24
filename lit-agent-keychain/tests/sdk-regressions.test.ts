@@ -66,13 +66,11 @@ test("MCP merges own prototype-named secrets without prototype mutation", async 
     readFile: async (name: string) => JSON.stringify(files[name]),
   });
   try {
-    assert.deepEqual(
-      client
-        .list()
-        .map((s) => s.name)
-        .sort(),
-      ["__proto__", "constructor"],
-    );
+    assert.deepEqual((await client.list()).map((s) => s.name).sort(), [
+      "__proto__",
+      "constructor",
+    ]);
+    assert.ok("config" in client);
     assert.equal(Object.hasOwn(client.config.secrets, "__proto__"), true);
   } finally {
     client.destroy();

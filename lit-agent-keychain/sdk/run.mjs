@@ -15,10 +15,12 @@ export function parseRunArgs(args) {
   const separator = args.indexOf("--");
   if (separator === -1)
     throw new Error("run needs `--` followed by the command to execute");
-  const [identityFile, configFile, ...flags] = args.slice(0, separator);
+  const [identityFile, ...rest] = args.slice(0, separator);
+  const configFile =
+    rest[0] && !rest[0].startsWith("--") ? rest.shift() : undefined;
+  const flags = rest;
   const command = args.slice(separator + 1);
-  if (!identityFile || !configFile)
-    throw new Error("run needs <identity-file> <config-file> before `--`");
+  if (!identityFile) throw new Error("run needs <identity-file> before `--`");
   if (command.length === 0) throw new Error("run needs a command after `--`");
   let only = null;
   const rename = {};
@@ -76,7 +78,12 @@ export function parseRunArgs(args) {
  * Returns { plan: [{ name, envVar?, file? }], skipped: [name] }.
  */
 export function planInjection(list, { only, rename, files = {} }) {
-  const byName = new Map(list.map((secret) => [secret.name, secret]));
+  const byName = new Map();
+  for (const secret of list) {
+    if (byName.has(secret.name)) byName.set(secret.name, null);
+    else byName.set(secret.name, secret);
+    if (secret.id) byName.set(secret.id, secret);
+  }
   const wanted = only ?? list.map((secret) => secret.name);
   for (const name of [...Object.keys(rename), ...Object.keys(files)]) {
     if (!byName.has(name)) throw new Error(`Unknown secret "${name}"`);
@@ -89,6 +96,10 @@ export function planInjection(list, { only, rename, files = {} }) {
   const usedPaths = new Map();
   for (const name of wanted) {
     const secret = byName.get(name);
+    if (secret === null)
+      throw new Error(
+        `Secret name "${name}" is ambiguous; use vaultId/secretId and --env to choose its variable`,
+      );
     if (!secret) throw new Error(`Unknown secret "${name}"`);
     if (secret.operation !== "get") {
       if (only)
@@ -145,7 +156,7 @@ export async function runWithSecrets(
   { only, rename, files, command },
   { spawn, env, stderr, process: proc },
 ) {
-  const { plan, skipped } = planInjection(client.list(), {
+  const { plan, skipped } = planInjection(await client.list(), {
     only,
     rename,
     files,

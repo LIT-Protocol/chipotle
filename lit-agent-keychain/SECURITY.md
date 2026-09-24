@@ -33,6 +33,42 @@ lookup (a lying RPC can only cause false rejections or accept a hash the Safe ne
 whitelisted). The policy constants are compiled into the client, so the same
 "verified client release" caveat above applies.
 
+## Authenticated live discovery
+
+`POST /api/agents/challenge` issues a 60-second random challenge naming the agent's
+public key, exact configured service audience, protocol version and dedicated
+`lit-keychain/discovery/v2` domain. The client validates those fields before signing
+the canonical SHA-256 digest with its local Ed25519 key. `/api/agents/discover`
+strictly verifies possession and atomically deletes the exact unexpired challenge
+in PostgreSQL. A proof is valid for one discovery, including across replicas.
+Tampered, unknown, replayed and expired challenges fail. There is no agent session
+cookie or bearer authorization token, and no private key transport.
+
+Discovery returns only locators for current enabled, unexpired owner-signed grants
+covering the release operation and selected envelope version/hash, plus each
+approved vault's already-provisioned execution-only billing key. Manifest, envelope
+and policy receipts are verified before disclosure. No plaintext, other-agent
+labels/grant lists, owner sessions, master/bootstrap or account-management keys are
+returned. The SDK verifies bundles against its separately trusted Lit origin, which
+discovery cannot replace. Every live list/get/use discovers again. Exact
+`vaultId/secretId` IDs avoid cross-vault confusion; ambiguous names fail. The
+unchanged Lit action remains the final owner/agent authorization boundary.
+
+These billing keys are deliberately reusable, not new access authority. A former
+agent retaining one can consume sponsored execution for that vault until rotation,
+but an honest policy lookup still denies revoked secret access. Rotation is picked
+up on the next live discovery. This preserves the existing billing abuse limit
+below. Discovery never mints a grant and is not exactly-once execution.
+
+Challenges have per-minute global (10,000) and peer (600) issuance/verification
+budgets, a 60-second TTL and expiry cleanup on issuance. Global checks precede
+peer budget rows; existing budget expiry cleanup applies. JSON bodies retain the
+service's 256 KiB cap. Queries are limited to 1,001 candidates and reject above
+1,000 rather than hiding additions through truncation. Responses are `no-store`;
+agents must not log billing bootstrap responses. Discovery has the same documented
+operator-rollback trust as policy lookup. Revocation applies on the next request,
+not already received plaintext or already-authorized in-flight operations.
+
 ## Agent-side plaintext handling
 
 `get`, the `get_secret` MCP tool and `keychain run` all deliver plaintext to the

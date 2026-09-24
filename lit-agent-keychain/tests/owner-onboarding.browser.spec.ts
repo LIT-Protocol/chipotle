@@ -31,6 +31,16 @@ test("selective approval and private config handoff at desktop and mobile sizes"
     page.getByText("1 secret ready for this agent.", { exact: true }),
   ).toBeVisible();
   expect(await page.evaluate(() => (window as any).approvals)).toEqual(["TWO"]);
+  await expect(
+    page.getByRole("heading", { name: "3. Ready to use" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/No config download or agent restart is needed/),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Download agent config", exact: true }),
+  ).not.toBeVisible();
+  await page.getByText("Advanced: legacy static config").click();
   const download = page.waitForEvent("download");
   await page
     .getByRole("button", { name: "Download agent config", exact: true })
@@ -176,6 +186,16 @@ test("owner can discover Add agent immediately after sign-in in the actual app",
   await expect(
     page.getByText("1 secret ready for this agent.", { exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "3. Ready to use" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/No config download or agent restart is needed/),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Download agent config", exact: true }),
+  ).not.toBeVisible();
+  await page.getByText("Advanced: legacy static config").click();
   const download = page.waitForEvent("download");
   await page
     .getByRole("button", { name: "Download agent config", exact: true })

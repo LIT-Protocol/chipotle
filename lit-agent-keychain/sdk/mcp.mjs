@@ -12,6 +12,7 @@ import { createInterface } from "node:readline";
 import { readFileSync } from "node:fs";
 import {
   Keychain,
+  LiveKeychain,
   ACTIONS,
   ATTESTED_ORIGINS,
   shapeToJsonSchema,
@@ -31,7 +32,11 @@ const SERVER_INFO = {
 const MAX_FRAME_BYTES = 64 * 1024;
 
 const nameProperty = {
-  name: { type: "string", description: "Secret name from list_secrets" },
+  name: {
+    type: "string",
+    description:
+      "Secret name or qualified id from list_secrets; use id when names overlap",
+  },
 };
 /** One MCP tool per "use inside Lit" catalog action, so a model sees each action's input schema directly. */
 const USE_ACTIONS = Object.values(ACTIONS).filter(
@@ -118,9 +123,16 @@ const rpcError = (id, code, message) => ({
 export async function loadKeychain(
   identityFile,
   configFiles,
-  { readFile, usageApiKey, attestation, tlsCertificateSha256 } = {},
+  {
+    readFile,
+    usageApiKey,
+    attestation,
+    tlsCertificateSha256,
+    serviceUrl,
+    litApiUrl,
+  } = {},
 ) {
-  if (!identityFile || configFiles.length === 0)
+  if (!identityFile)
     throw new Error(
       "Usage: keychain mcp <identity-file> <config-file> [more-config-files]",
     );
@@ -133,6 +145,13 @@ export async function loadKeychain(
   };
   const identity = await parse(identityFile);
   assertAgentIdentity(identity);
+  if (configFiles.length === 0)
+    return new LiveKeychain(identity.privateKey, {
+      serviceUrl,
+      litApiUrl,
+      attestation,
+      tlsCertificateSha256,
+    });
   const merged = {
     v: 2,
     litApiUrl: undefined,
@@ -179,20 +198,11 @@ export async function callTool(keychain, name, args = {}) {
   const secretName = () => {
     if (typeof args?.name !== "string" || args.name.length === 0)
       throw new Error("name is required");
-    if (!Object.hasOwn(keychain.config.secrets, args.name))
-      throw new Error(
-        `Unknown secret "${args.name}". Available: ${
-          keychain
-            .list()
-            .map((s) => s.name)
-            .join(", ") || "(none)"
-        }`,
-      );
     return args.name;
   };
   switch (name) {
     case "list_secrets":
-      return text({ secrets: keychain.list() });
+      return text({ secrets: await keychain.list() });
     case "agent_public_key":
       return text({ publicKey: keychain.publicKey });
     case "get_secret":
@@ -214,7 +224,14 @@ export async function callTool(keychain, name, args = {}) {
       const action = USE_ACTIONS.find((candidate) => candidate.id === name);
       if (!action) return null;
       const secret = secretName();
-      const release = keychain.config.secrets[secret].manifest.release;
+      const matches = (await keychain.list()).filter(
+        (s) => s.name === secret || s.id === secret,
+      );
+      if (matches.length !== 1)
+        throw new Error(
+          `Unknown or ambiguous secret "${secret}"; call list_secrets`,
+        );
+      const release = matches[0].release;
       if (release !== action.id)
         throw new Error(
           `Secret "${secret}" was created with the ${release} action, not ${action.id}`,
@@ -333,20 +350,22 @@ export async function main(argv, { readFile, stdin, stdout, stderr, env }) {
   const skipAttestation = env.KEYCHAIN_SKIP_ATTESTATION === "1";
   let keychain = await loadKeychain(identityFile, configFiles, {
     readFile,
+    serviceUrl: env.KEYCHAIN_SERVICE_URL,
+    litApiUrl: env.KEYCHAIN_LIT_API_URL,
     usageApiKey: env.CHIPOTLE_USAGE_API_KEY,
     attestation: skipAttestation ? false : undefined,
   });
   if (!skipAttestation && keychain.lit.attestationPolicy) {
     // Bind the endpoint's live TLS certificate into the attestation check, then
     // attest eagerly so a misconfigured or impostor endpoint fails at startup.
-    const tlsCertificateSha256 = await peerCertificateSha256(
-      keychain.config.litApiUrl,
-    );
+    const tlsCertificateSha256 = await peerCertificateSha256(keychain.lit.url);
     keychain.destroy();
     keychain = await loadKeychain(identityFile, configFiles, {
       readFile,
+      serviceUrl: env.KEYCHAIN_SERVICE_URL,
+      litApiUrl: env.KEYCHAIN_LIT_API_URL,
       usageApiKey: env.CHIPOTLE_USAGE_API_KEY,
-      attestation: attestationPolicy(keychain.config.litApiUrl, env),
+      attestation: attestationPolicy(keychain.lit.url, env),
       tlsCertificateSha256,
     });
     const report = await keychain.attest();
@@ -355,7 +374,7 @@ export async function main(argv, { readFile, stdin, stdout, stderr, env }) {
     );
   }
   stderr.write(
-    `Lit Agent Keychain MCP: ${keychain.list().length} secret(s), agent ${keychain.publicKey}\n`,
+    `Lit Agent Keychain MCP: ${(await keychain.list()).length} secret(s), agent ${keychain.publicKey}\n`,
   );
   try {
     await serve(keychain, { input: stdin, output: stdout });
