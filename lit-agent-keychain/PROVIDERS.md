@@ -17,7 +17,7 @@ CLI argument, issue or source file.
    named catalog action, and paste the credential into the owner's secret field.
    Except Supabase, the value is a bare token, not JSON and not `Bearer ...`.
    Keep a separate secure original: this mode cannot export even to the owner.
-3. Generate an agent identity with `npx @lit-protocol/keychain@2.1.1 init ./agent-identity.json`.
+3. Generate an agent identity with `npx @lit-protocol/keychain@2.1.2 init ./agent-identity.json`.
    Approve only its public key for this secret and a short expiry. Live clients
    discover approval on the next request; no config download or restart is needed.
 4. Use the SDK `use(name, input)` or the CLI below. MCP uses the action id as tool
@@ -28,7 +28,7 @@ CLI argument, issue or source file.
    the provider if compromise is suspected. Rotate/reapprove and let live clients discover current access as described in the [owner guide](README.md#rotations-and-revocation).
 
 All actions restrict HTTPS destinations, input/output shapes and request budgets.
-Inspect `npx @lit-protocol/keychain@2.1.1 actions` for the exact catalog schema and
+Inspect `npx @lit-protocol/keychain@2.1.2 actions` for the exact catalog schema and
 limits your installed client knows. All results are bounded by 16 KiB. A denial
 is not proof of an invalid provider key: check input, provider account status,
 resource access, timeouts and size limits privately. Do not bypass attestation.
@@ -42,7 +42,7 @@ value, name it `STRIPE_API_KEY`, and select **Stripe balance**, not export. Live
 keys act on the live account, so begin in test mode.
 
 ```sh
-npx @lit-protocol/keychain@2.1.1 use ./agent-identity.json STRIPE_API_KEY
+npx @lit-protocol/keychain@2.1.2 use ./agent-identity.json STRIPE_API_KEY
 ```
 
 SDK: `await keychain.use("STRIPE_API_KEY")`. MCP: `stripe_balance` with
@@ -57,7 +57,7 @@ project has access to the chosen model and a funded budget. Store the bare `sk-�
 key as `OPENAI_API_KEY` with **OpenAI chat** selected.
 
 ```sh
-npx @lit-protocol/keychain@2.1.1 use ./agent-identity.json OPENAI_API_KEY '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Say hello"}],"maxTokens":16}'
+npx @lit-protocol/keychain@2.1.2 use ./agent-identity.json OPENAI_API_KEY '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Say hello"}],"maxTokens":16}'
 ```
 
 SDK: pass that JSON object as the second argument to `use("OPENAI_API_KEY", input)`.
@@ -75,7 +75,7 @@ read** selected. The action also accepts classic `ghp_…` tokens, but prefer na
 resource access. Replace the sample repository/path with one that token may read.
 
 ```sh
-npx @lit-protocol/keychain@2.1.1 use ./agent-identity.json GITHUB_TOKEN '{"owner":"LIT-Protocol","repo":"agent-keychain-library","path":"README.md","ref":"main"}'
+npx @lit-protocol/keychain@2.1.2 use ./agent-identity.json GITHUB_TOKEN '{"owner":"LIT-Protocol","repo":"agent-keychain-library","path":"README.md","ref":"main"}'
 ```
 
 SDK: `use("GITHUB_TOKEN", input)`; MCP: `github_read_file`. Returns `path`, `sha`,
@@ -91,7 +91,7 @@ work around channel membership. Store the bare `xoxb-…` bot token as `SLACK_BO
 with **Slack post message** selected. Replace the channel id before running:
 
 ```sh
-npx @lit-protocol/keychain@2.1.1 use ./agent-identity.json SLACK_BOT_TOKEN '{"channel":"C0123ABC","text":"Keychain test message"}'
+npx @lit-protocol/keychain@2.1.2 use ./agent-identity.json SLACK_BOT_TOKEN '{"channel":"C0123ABC","text":"Keychain test message"}'
 ```
 
 SDK: `use("SLACK_BOT_TOKEN", input)`; MCP: `slack_post_message`. Optional `threadTs`
@@ -166,7 +166,7 @@ Read input:
 ```
 
 ```sh
-npx @lit-protocol/keychain@2.1.1 use ./agent-identity.json SUPABASE_TABLE_ACCESS '{"table":"orders","operation":"select","columns":["id","status"],"filters":[{"column":"status","op":"eq","value":"open"}],"limit":5}'
+npx @lit-protocol/keychain@2.1.2 use ./agent-identity.json SUPABASE_TABLE_ACCESS '{"table":"orders","operation":"select","columns":["id","status"],"filters":[{"column":"status","op":"eq","value":"open"}],"limit":5}'
 ```
 
 SDK: `use("SUPABASE_TABLE_ACCESS", input)`; MCP: `supabase_tables`. Returns

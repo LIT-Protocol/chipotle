@@ -265,6 +265,69 @@ test(
       );
       assert.deepEqual(listed.agents, bundle.policy.document.grants);
       assert.equal(listed.agentCount, listed.agents.length);
+      // Deletion revokes every agent and drops the ciphertext in one step, frees
+      // the Free-plan slot, retires the execution grant, and the name is reusable.
+      const doomed = await c.api("/api/secrets");
+      const race = doomed.secrets.find((s: any) => s.name.startsWith("RACE_"));
+      const raceBundle: SecretBundle = await c.bundle(race.secretId);
+      await c.delegate(raceBundle, keys.publicKey, "Doomed agent");
+      const raceLocator = {
+        manifest: raceBundle.manifest.document.manifest,
+        actionCid: raceBundle.manifest.document.actionCid,
+      };
+      const raceAgent = new Keychain(keys.privateKey, {
+        v: 2,
+        litApiUrl: lit,
+        usageApiKey: c.lit.usageApiKey,
+        secrets: { [race.name]: raceLocator },
+      });
+      assert.equal(await raceAgent.get(race.name), "concurrent-secret");
+      const grantedBefore = await (
+        await original(
+          `${lit}/test/action-granted?cid=${raceLocator.actionCid}`,
+        )
+      ).json();
+      assert.equal(grantedBefore.granted, true);
+      await assert.rejects(
+        c.api(`/api/secrets/${hex(randomBytes())}`, { method: "DELETE" }),
+        /404/,
+      );
+      await c.deleteSecret(race.secretId);
+      await assert.rejects(c.deleteSecret(race.secretId), /404/);
+      await assert.rejects(
+        raceAgent.get(race.name),
+        /denied|not_authorized|403|404/i,
+      );
+      raceAgent.destroy();
+      await assert.rejects(c.bundle(race.secretId), /404/);
+      const registryAfter = await original(
+        `${api}/api/registry/secrets/${race.secretId}`,
+      );
+      assert.equal(registryAfter.status, 404);
+      assert.equal((await c.api("/api/secrets")).secrets.length, 2);
+      const grantedAfter = await (
+        await original(
+          `${lit}/test/action-granted?cid=${raceLocator.actionCid}`,
+        )
+      ).json();
+      assert.equal(grantedAfter.granted, false);
+      assert.ok(
+        (await c.api("/api/audit")).events.some(
+          (e: any) =>
+            e.event === "secret_deleted" && e.objectHash === race.secretId,
+        ),
+      );
+      assert.ok(
+        (await c.api("/api/audit")).events.some(
+          (e: any) => e.event === "action_removed",
+        ),
+      );
+      const reused = await c.create(race.name, "reused-name-after-delete");
+      assert.notEqual(
+        reused.manifest.document.manifest.secretId,
+        race.secretId,
+      );
+      assert.equal((await c.api("/api/secrets")).secrets.length, 3);
       const backup = await c.backup();
       assert.equal(backup.bundles.length, 3);
       assert.ok(!JSON.stringify(backup).includes("rotated-only-in-browser"));
