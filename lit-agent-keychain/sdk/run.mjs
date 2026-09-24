@@ -74,33 +74,52 @@ export function parseRunArgs(args) {
 /**
  * Decides where each secret goes. A secret named by --file is written to that
  * path and stays out of the environment unless --env names it too; every other
- * export-release secret becomes a variable named after it.
+ * export-release secret becomes a variable named after it. Secrets may be
+ * referred to by name (when unique across vaults) or by their vaultId/secretId
+ * id; without --only every export secret is injected and a name shared by
+ * several vaults must be renamed by id.
  * Returns { plan: [{ name, envVar?, file? }], skipped: [name] }.
  */
 export function planInjection(list, { only, rename, files = {} }) {
-  const byName = new Map();
+  const byRef = new Map();
   for (const secret of list) {
-    if (byName.has(secret.name)) byName.set(secret.name, null);
-    else byName.set(secret.name, secret);
-    if (secret.id) byName.set(secret.id, secret);
+    if (byRef.has(secret.name)) byRef.set(secret.name, null);
+    else byRef.set(secret.name, secret);
+    if (secret.id) byRef.set(secret.id, secret);
   }
-  const wanted = only ?? list.map((secret) => secret.name);
-  for (const name of [...Object.keys(rename), ...Object.keys(files)]) {
-    if (!byName.has(name)) throw new Error(`Unknown secret "${name}"`);
-    if (only && !only.includes(name))
-      throw new Error(`"${name}" is mapped but not listed under --only`);
+  const lookup = (ref) => {
+    const secret = byRef.get(ref);
+    if (secret === null)
+      throw new Error(
+        `Secret name "${ref}" is ambiguous; use vaultId/secretId and --env to choose its variable`,
+      );
+    if (!secret) throw new Error(`Unknown secret "${ref}"`);
+    return secret;
+  };
+  // The references that unambiguously mean this secret.
+  const refs = (secret) =>
+    [
+      secret.id,
+      byRef.get(secret.name) === secret ? secret.name : undefined,
+    ].filter((ref) => ref !== undefined);
+  const mapping = (table, secret) =>
+    refs(secret)
+      .map((ref) => table[ref])
+      .find((value) => value !== undefined);
+  const wanted = only
+    ? only.map((ref) => ({ ref, secret: lookup(ref) }))
+    : list.map((secret) => ({ ref: secret.id ?? secret.name, secret }));
+  for (const ref of [...Object.keys(rename), ...Object.keys(files)]) {
+    const secret = lookup(ref);
+    if (only && !wanted.some((entry) => entry.secret === secret))
+      throw new Error(`"${ref}" is mapped but not listed under --only`);
   }
   const plan = [];
   const skipped = [];
   const usedVars = new Map();
   const usedPaths = new Map();
-  for (const name of wanted) {
-    const secret = byName.get(name);
-    if (secret === null)
-      throw new Error(
-        `Secret name "${name}" is ambiguous; use vaultId/secretId and --env to choose its variable`,
-      );
-    if (!secret) throw new Error(`Unknown secret "${name}"`);
+  for (const { ref, secret } of wanted) {
+    const name = only ? ref : secret.name;
     if (secret.operation !== "get") {
       if (only)
         throw new Error(
@@ -109,27 +128,31 @@ export function planInjection(list, { only, rename, files = {} }) {
       skipped.push(name);
       continue;
     }
-    const entry = { name };
-    if (files[name] !== undefined) {
-      const path = resolve(files[name]);
+    const entry = { name: ref };
+    const file = mapping(files, secret);
+    const renamed = mapping(rename, secret);
+    if (file !== undefined) {
+      const path = resolve(file);
       const clash = usedPaths.get(path);
       if (clash !== undefined)
         throw new Error(`Secrets "${clash}" and "${name}" both map to ${path}`);
       usedPaths.set(path, name);
       entry.file = path;
     }
-    if (files[name] === undefined || rename[name] !== undefined) {
-      const envVar = rename[name] ?? name;
+    if (file === undefined || renamed !== undefined) {
+      const envVar = renamed ?? secret.name;
       if (!ENV_NAME.test(envVar))
         throw new Error(
           `Secret "${name}" is not a valid environment variable name; map it with --env ${name}=SOME_NAME or --file ${name}=PATH`,
         );
       const clash = usedVars.get(envVar);
-      if (clash !== undefined && clash !== name)
+      if (clash !== undefined && clash !== secret)
         throw new Error(
-          `Secrets "${clash}" and "${name}" both map to ${envVar}`,
+          clash.name === secret.name
+            ? `Secret name "${name}" is ambiguous across vaults; choose variables with --env ${clash.id ?? name}=A --env ${secret.id ?? name}=B or pick one with --only`
+            : `Secrets "${clash.name}" and "${name}" both map to ${envVar}`,
         );
-      usedVars.set(envVar, name);
+      usedVars.set(envVar, secret);
       entry.envVar = envVar;
     }
     plan.push(entry);

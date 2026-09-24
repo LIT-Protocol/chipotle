@@ -888,7 +888,7 @@ function App() {
                             </p>
                             <pre className="terminal">
                               <code>
-                                {`${NPX_KEYCHAIN} run ./agent-identity.json --only ${selected.envelope.document.metadata.name} -- <command>`}
+                                {`KEYCHAIN_SERVICE_URL=${window.location.origin} ${NPX_KEYCHAIN} run ./agent-identity.json --only ${selected.envelope.document.metadata.name} -- <command>`}
                               </code>
                             </pre>
                             <p>

@@ -71,6 +71,7 @@ function serviceOrigin(url: string) {
 export class LiveKeychain {
   private readonly key: Uint8Array<ArrayBuffer>;
   private destroyed = false;
+  private readonly connections = new Map<string, LitConnection>();
   readonly publicKey: string;
   readonly serviceUrl: string;
   readonly lit: LitConnection;
@@ -101,6 +102,7 @@ export class LiveKeychain {
   }
   destroy() {
     this.destroyed = true;
+    this.connections.clear();
     this.key.fill(0);
   }
   private async discover(): Promise<Locator[]> {
@@ -165,14 +167,23 @@ export class LiveKeychain {
     this.active();
     return locators;
   }
+  /**
+   * One connection per execution key, kept for the client's lifetime so the
+   * attestation and public-key lookups are done once per vault rather than
+   * once per secret per call. A vault whose key changes simply gets a new one.
+   */
   private connection(locator: Locator) {
-    return new LitConnection(
+    const cached = this.connections.get(locator.usageApiKey);
+    if (cached) return cached;
+    const connection = new LitConnection(
       this.lit.url,
       this.lit.timeoutMs,
       locator.usageApiKey,
       this.options.attestation,
       { tlsCertificateSha256: this.options.tlsCertificateSha256 },
     );
+    this.connections.set(locator.usageApiKey, connection);
+    return connection;
   }
   private async verified(locator: Locator) {
     const bundle: SecretBundle = await jsonFetch(
@@ -253,7 +264,7 @@ export class LiveKeychain {
           [name]: { manifest: locator.manifest, actionCid: locator.actionCid },
         },
       },
-      this.options,
+      { ...this.options, lit: this.connection(locator) },
     );
     try {
       return operation === "get"

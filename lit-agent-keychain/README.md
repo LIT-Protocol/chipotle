@@ -34,7 +34,7 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 
 ## SDK release coordination
 
-This source prepares SDK **2.1.0** (registry latest verified as 2.0.7 before this
+This source prepares SDK **2.1.1** (registry latest verified as 2.0.7 before this
 change). It adds `LiveKeychain`, authenticated live discovery and configless CLI/MCP.
 Owners approve on the website; running clients observe changes on the next request
 without downloading configs. The legacy static API remains compatible. No immutable
@@ -75,7 +75,7 @@ Consequences, all handled by the release mechanism described in
   release still takes one signature per document (`PRE_BATCH_AUTHORITY_HASHES`).
 
 Release checks: run `npm test` and `npm run build`, publish through the normal
-maintainer release process, verify `npm view @lit-protocol/keychain@2.1.0 version`,
+maintainer release process, verify `npm view @lit-protocol/keychain@2.1.1 version`,
 then repeat the strict external TypeScript consumer and attestation-enabled Node
 smoke test from the registry artifact. Only then deploy the owner UI/API and create,
 rotate and read a secret against production. See the QA reports under `docs/` for
