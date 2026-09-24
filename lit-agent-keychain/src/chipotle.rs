@@ -101,6 +101,18 @@ impl Chipotle {
         .await?;
         Ok(())
     }
+    /// Retires an action from a group. Chipotle's contract reverts when the CID is
+    /// not a member, so callers must treat a failure after an ambiguous earlier
+    /// success as possibly complete.
+    pub async fn remove_action(&self, group: i64, cid: &str) -> Result<()> {
+        let hashed = format!("0x{}", hex::encode(Keccak256::digest(cid.as_bytes())));
+        self.management(
+            "remove_action_from_group",
+            &json!({"group_id":group,"hashed_cid":hashed}),
+        )
+        .await?;
+        Ok(())
+    }
     fn permissions(groups: &[i64]) -> Value {
         json!({"name":"Keychain user execution","description":"Execution only; owner and agent proofs remain required","can_create_groups":false,"can_delete_groups":false,"can_create_pkps":false,"manage_ipfs_ids_in_groups":[],"add_pkp_to_groups":[],"remove_pkp_from_groups":[],"execute_in_groups":groups})
     }

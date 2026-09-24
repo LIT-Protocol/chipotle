@@ -291,6 +291,23 @@ function App() {
         } (${names.join(", ")}). It carries no secret values.`,
       );
     });
+  const remove = () => {
+    if (!selected) return;
+    const secretName = selected.envelope.document.metadata.name;
+    if (
+      !window.confirm(
+        `Delete "${secretName}"?\n\nEvery agent loses access on its next request and the encrypted value is removed from Keychain. This frees the slot. It cannot be undone unless you restore it from an encrypted backup you saved earlier.`,
+      )
+    )
+      return;
+    void work("Deleting secret…", async () => {
+      await client!.deleteSecret(selected.manifest.document.manifest.secretId);
+      setSelected(undefined);
+      setLifetimeCap(null);
+      await refresh();
+      setNotice(`Deleted ${secretName}. Agents can no longer use it.`);
+    });
+  };
   const reveal = () => {
     if (!selected) return;
     const secretName = selected.envelope.document.metadata.name;
@@ -585,8 +602,9 @@ function App() {
                   </small>
                 ) : (
                   <small>
-                    Free includes 5 secrets. Subscribe for up to 1,000. Your
-                    secrets and encrypted backups are never deleted.
+                    Free includes 5 secrets. Subscribe for up to 1,000. Deleting
+                    a secret frees its slot; nothing is removed unless you
+                    delete it.
                   </small>
                 )}
               </div>
@@ -858,6 +876,13 @@ function App() {
                             onClick={() => exportConfig(selected)}
                           >
                             Agent config
+                          </button>
+                          <button
+                            className="danger ghost"
+                            disabled={!!busy}
+                            onClick={remove}
+                          >
+                            Delete
                           </button>
                           {selected.manifest.document.manifest.release ===
                             "export" && (

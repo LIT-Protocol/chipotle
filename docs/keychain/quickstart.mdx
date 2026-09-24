@@ -7,7 +7,7 @@ You need a browser for the owner steps and Node 22+ on the agent's machine. Noth
 
 <Note>
 The examples below use the latest published `@lit-protocol/keychain`. Pin an exact version
-(`@lit-protocol/keychain@2.1.0`, for example) in anything you deploy, and check the
+(`@lit-protocol/keychain@2.1.1`, for example) in anything you deploy, and check the
 [npm page](https://www.npmjs.com/package/@lit-protocol/keychain) for release notes before upgrading.
 </Note>
 
@@ -100,6 +100,7 @@ Everything is on the secret's page in the dashboard:
 
 - **Revoke** removes one agent. The action fetches the current policy on every request, so the agent's next request is denied.
 - **Disable** switches the secret off for every agent without deleting it.
+- **Delete** revokes every agent and removes the encrypted value from Keychain in one step, freeing the slot. It cannot be undone unless you restore the secret from an encrypted backup you saved earlier.
 - **Rotate & approve** encrypts a new value and moves the existing agents to it in one signature. Live clients discover the current version on their next request.
 - **Renew permissions** sets a new expiry any number of days from now, or **Never expire** removes it so access lasts until you revoke or disable it.
 

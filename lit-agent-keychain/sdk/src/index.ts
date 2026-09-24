@@ -1019,6 +1019,16 @@ export class OwnerClient {
       bundles,
     };
   }
+  /**
+   * Deletes a secret. The registry entry every agent request is checked
+   * against, all signed policies and every ciphertext version are removed in one
+   * transaction, so the next request from any agent is denied and the slot is
+   * freed. An encrypted backup taken earlier can still restore it deliberately.
+   */
+  async deleteSecret(secretId: string) {
+    requireThat(/^[0-9a-f]{64}$/.test(secretId), "Invalid secret id");
+    await this.api(`/api/secrets/${secretId}`, { method: "DELETE" });
+  }
   async listSecrets() {
     const secrets: any[] = [];
     let after = "";

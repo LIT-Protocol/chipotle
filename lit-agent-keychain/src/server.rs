@@ -61,6 +61,7 @@ pub fn build(cfg: Config, pool: PgPool, lit: Chipotle, stripe: Stripe) -> Rocket
                 registry::bundle,
                 registry::update_policy,
                 registry::rotate,
+                registry::delete_secret,
                 registry::audit_log
             ],
         )

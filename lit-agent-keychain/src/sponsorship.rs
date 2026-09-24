@@ -154,6 +154,7 @@ async fn reconcile_locked(
         }
     }
     if !issue {
+        retire_locked(tx, lit, vault, secret_group, None).await?;
         // Bulk group replacement is capped at 10 CIDs by Chipotle's contract.
         // Incremental addition has no such cap and is idempotent. A bounded batch
         // resumes abandoned enrollments in the worker. Foreground enrollment
@@ -197,6 +198,85 @@ async fn reconcile_locked(
         .await
         .map_err(api::internal)?;
     Ok(Some(key))
+}
+/// Retires the group grants of deleted secrets, under the vault lock. Rows that
+/// were never applied on chain are simply dropped. A removal that fails is
+/// retried by the worker; after `MAX_REMOVE_ATTEMPTS` the row is abandoned, since
+/// a grant for an action whose policy and ciphertext no longer exist authorizes
+/// nothing, and the row must not occupy enrolment headroom forever. Failures
+/// never block the caller: enrolment and key issuance proceed regardless.
+const MAX_REMOVE_ATTEMPTS: i32 = 5;
+async fn retire_locked(
+    tx: &mut Transaction<'_, Postgres>,
+    lit: &Chipotle,
+    vault: &str,
+    secret_group: i64,
+    only_secret: Option<&str>,
+) -> Result<(), ApiError> {
+    sqlx::query(
+        "DELETE FROM kc_execution_actions WHERE vault_id=$1 AND removing AND NOT applied AND ($2::text IS NULL OR secret_id=$2)",
+    )
+    .bind(vault)
+    .bind(only_secret)
+    .execute(&mut **tx)
+    .await
+    .map_err(api::internal)?;
+    let pending: Vec<(String, String, i32)> = sqlx::query_as(
+        "SELECT secret_id,action_cid,remove_attempts FROM kc_execution_actions WHERE vault_id=$1 AND removing AND applied AND ($2::text IS NULL OR secret_id=$2) ORDER BY created_at,action_cid LIMIT 10",
+    )
+    .bind(vault)
+    .bind(only_secret)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(api::internal)?;
+    for (secret, cid, attempts) in pending {
+        let removed = lit.remove_action(secret_group, &cid).await.is_ok();
+        let event = if removed {
+            "action_removed"
+        } else if attempts + 1 >= MAX_REMOVE_ATTEMPTS {
+            tracing::warn!("abandoning action removal after repeated failures");
+            "action_removal_abandoned"
+        } else {
+            sqlx::query("UPDATE kc_execution_actions SET remove_attempts=remove_attempts+1 WHERE vault_id=$1 AND secret_id=$2")
+                .bind(vault).bind(&secret).execute(&mut **tx).await.map_err(api::internal)?;
+            continue;
+        };
+        sqlx::query("DELETE FROM kc_execution_actions WHERE vault_id=$1 AND secret_id=$2")
+            .bind(vault)
+            .bind(&secret)
+            .execute(&mut **tx)
+            .await
+            .map_err(api::internal)?;
+        sqlx::query("INSERT INTO kc_audit(vault_id,event,object_hash) VALUES($1,$2,$3)")
+            .bind(vault)
+            .bind(event)
+            .bind(&cid)
+            .execute(&mut **tx)
+            .await
+            .map_err(api::internal)?;
+    }
+    Ok(())
+}
+/// Foreground retirement of one deleted secret's grant. Called after the
+/// deletion itself has committed; the vault lock serializes it with enrolment.
+pub async fn retire(
+    pool: &PgPool,
+    lit: &Chipotle,
+    vault: &str,
+    secret: &str,
+) -> Result<(), ApiError> {
+    let mut tx = pool.begin().await.map_err(api::internal)?;
+    subscriptions::lock(&mut tx, vault).await?;
+    let group: Option<i64> =
+        sqlx::query_scalar("SELECT secret_group_id FROM kc_execution_accounts WHERE vault_id=$1")
+            .bind(vault)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(api::internal)?;
+    if let Some(group) = group {
+        retire_locked(&mut tx, lit, vault, group, Some(secret)).await?;
+    }
+    tx.commit().await.map_err(api::internal)
 }
 pub async fn reconcile(
     pool: &PgPool,
