@@ -39,6 +39,9 @@ export function AgentOnboarding({
   const [complete, setComplete] = useState(false);
   const [downloaded, setDownloaded] = useState(false);
   const running = useRef(false);
+  const isEligible = (s: SecretSummary) =>
+    !s.disabled && (s.expiresAt === null || s.expiresAt * 1000 > Date.now());
+  const eligibleIds = secrets.filter(isEligible).map((s) => s.secretId);
   return (
     <section
       className="detail-card agent-onboarding"
@@ -123,13 +126,38 @@ export function AgentOnboarding({
             expiry stay unchanged. Disabled or expired secrets must be enabled
             or renewed separately.
           </p>
+          <div className="button-row">
+            <button
+              type="button"
+              className="secondary"
+              disabled={
+                !eligibleIds.length ||
+                eligibleIds.every((id) => ids.includes(id))
+              }
+              onClick={() =>
+                setIds(secrets.filter(isEligible).map((s) => s.secretId))
+              }
+            >
+              Select all
+            </button>
+            <button
+              type="button"
+              className="ghost"
+              disabled={!ids.length}
+              onClick={() => setIds([])}
+            >
+              Clear selection
+            </button>
+          </div>
+          <p className="hint">
+            Select all includes only enabled, unexpired secrets. You can uncheck
+            any before approving.
+          </p>
           {secrets.length === 0 && (
             <p>Add a secret before approving an agent.</p>
           )}
           {secrets.map((s) => {
-            const unavailable =
-              s.disabled ||
-              (s.expiresAt !== null && s.expiresAt * 1000 <= Date.now());
+            const unavailable = !isEligible(s);
             return (
               <label className="agent-secret-choice" key={s.secretId}>
                 <input

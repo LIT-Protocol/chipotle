@@ -42,6 +42,47 @@ test("selective approval and private config handoff at desktop and mobile sizes"
   expect(config).not.toHaveProperty("privateKey");
   expect(JSON.stringify(config)).not.toContain("secret-value");
 });
+test("select all chooses eligible secrets without approving, and clear selection resets them", async ({
+  page,
+}) => {
+  await page.getByLabel("Agent name", { exact: true }).fill("Agent");
+  await page.getByLabel("Agent public key", { exact: true }).fill(key);
+  await expect(
+    page.getByRole("button", { name: "Clear selection", exact: true }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "Select all", exact: true }).click();
+  await expect(page.getByRole("checkbox", { name: /ONE/ })).toBeChecked();
+  await expect(page.getByRole("checkbox", { name: /TWO/ })).toBeChecked();
+  await expect(
+    page.getByRole("checkbox", { name: /DISABLED/ }),
+  ).not.toBeChecked();
+  await expect(
+    page.getByRole("checkbox", { name: /EXPIRED/ }),
+  ).not.toBeChecked();
+  expect(await page.evaluate(() => (window as any).approvals)).toEqual([]);
+  await page
+    .getByRole("button", { name: "Clear selection", exact: true })
+    .click();
+  await expect(page.getByRole("checkbox", { name: /ONE/ })).not.toBeChecked();
+  await expect(page.getByRole("checkbox", { name: /TWO/ })).not.toBeChecked();
+  await expect(
+    page.getByRole("button", { name: "Approve selected secrets" }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "Select all", exact: true }).click();
+  await page.getByRole("checkbox", { name: /TWO/ }).uncheck();
+  await page.getByRole("button", { name: "Approve selected secrets" }).click();
+  await expect(
+    page.getByText("1 secret ready for this agent.", { exact: true }),
+  ).toBeVisible();
+  expect(await page.evaluate(() => (window as any).approvals)).toEqual(["ONE"]);
+  await expect(
+    page.getByRole("button", { name: "Select all", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Clear selection", exact: true }),
+  ).toBeDisabled();
+});
+
 test("validation blocks malformed input, cancellation writes nothing", async ({
   page,
 }) => {

@@ -11,7 +11,7 @@ version: 2.0.6
    generated. The owner signs in at https://keychain.litprotocol.com with a wallet,
    passkey, or Google account. On **Secrets**, click **+ Add agent** beside **+ Add secret**.
    Enter a name and paste the 64-character public key, then select only the secrets
-   this agent needs and click **Approve selected secrets**. Nothing is selected by
+   this agent needs (or use **Select all** for enabled, unexpired secrets; **Clear selection** resets the choice) and click **Approve selected secrets**. Nothing is selected by
    default. An empty vault needs **Add secret** first; disabled/expired secrets need
    separate enabling/renewal. Never request the owner's private key or the agent's identity file.
 3. Click **Download agent config** in the approval result and send the downloaded
