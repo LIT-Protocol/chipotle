@@ -433,7 +433,7 @@ export class LitConnection {
       if (error instanceof HttpError && error.status === 401)
         throw new HttpError(
           401,
-          `${(error.detail || "execution key rejected").replace(/[.\s]+$/, "")}. The scoped execution key in this agent config is not accepted by Lit; the owner most likely replaced it in Keychain (Execution and account access). Ask them for a fresh Agent config, or set CHIPOTLE_USAGE_API_KEY`,
+          `${(error.detail || "execution key rejected").replace(/[.\s]+$/, "")}. The scoped execution key in this agent config is not accepted by Lit; ask the owner to download a fresh agent config using Download agent config next to the agent under Authorized agents. If a fresh config is still rejected, contact Keychain support. Advanced clients may override CHIPOTLE_USAGE_API_KEY`,
         );
       throw error;
     });
@@ -829,11 +829,17 @@ export class OwnerClient {
    * Re-signs the policy. `days` sets a new expiry that many days from now
    * (default 30); `null` removes the expiry so the policy lasts until the owner
    * revokes or disables it. Secrets pinned to an older release still cap
-   * lifetimes at 90 days (see `policyLifetimeCapDays`).
+   * lifetimes at 90 days (see `policyLifetimeCapDays`). `preserveExpiry` keeps
+   * the exact existing expiry (including null) and cannot be combined with `days`.
    */
   async setPolicy(
     bundle: SecretBundle,
-    changes: { grants?: Grant[]; disabled?: boolean; days?: number | null },
+    changes: {
+      grants?: Grant[];
+      disabled?: boolean;
+      days?: number | null;
+      preserveExpiry?: boolean;
+    },
   ) {
     const old = bundle.policy.document;
     const now = nowSeconds();
@@ -844,8 +850,15 @@ export class OwnerClient {
           days >= 1 &&
           Number.isSafeInteger(now + days * 86400)),
     );
+    requireThat(!(changes.preserveExpiry && changes.days !== undefined));
+    const expiresAt = changes.preserveExpiry
+      ? old.expiresAt
+      : days === null
+        ? null
+        : now + days * 86400;
+    requireThat(expiresAt === null || expiresAt > now);
     const cap = await this.policyLifetimeCapDays(bundle);
-    if (cap !== null && (days === null || days > cap))
+    if (cap !== null && (expiresAt === null || expiresAt > now + cap * 86400))
       throw new Error(
         `This secret was created under an earlier Keychain release that limits permissions to ${cap} days. Recreate the secret to choose a longer or unlimited lifetime.`,
       );
@@ -854,7 +867,7 @@ export class OwnerClient {
       epoch: old.epoch + 1,
       previousHash: digest(old),
       notBefore: now,
-      expiresAt: days === null ? null : now + days * 86400,
+      expiresAt,
       grants: changes.grants ?? old.grants,
       disabled: changes.disabled ?? old.disabled,
     });
@@ -868,7 +881,12 @@ export class OwnerClient {
     });
     return { ...bundle, policy: signed };
   }
-  async delegate(bundle: SecretBundle, publicKey: string, label: string) {
+  async delegate(
+    bundle: SecretBundle,
+    publicKey: string,
+    label: string,
+    options: { preserveExpiry?: boolean } = {},
+  ) {
     const grant: Grant = {
       agentPublicKey: publicKey,
       label,
@@ -883,6 +901,7 @@ export class OwnerClient {
       ],
     };
     return this.setPolicy(bundle, {
+      preserveExpiry: options.preserveExpiry,
       grants: [
         ...bundle.policy.document.grants.filter(
           (g) => g.agentPublicKey !== publicKey,

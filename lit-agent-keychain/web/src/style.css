@@ -1,3 +1,54 @@
+/* Owner onboarding keeps optional access explicit, including on narrow screens. */
+.agent-onboarding {
+  max-width: 800px;
+  margin-bottom: 28px;
+}
+.agent-onboarding fieldset {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 22px 0;
+}
+.agent-onboarding legend {
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.agent-onboarding .agent-secret-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.agent-onboarding .agent-secret-choice input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  margin-top: 3px;
+}
+.agent-secret-choice span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.agent-secret-choice small {
+  display: block;
+  font-weight: 400;
+  color: var(--muted);
+}
+.agent-handoff {
+  margin: 20px 0;
+  padding: 16px;
+  background: var(--shade);
+  overflow-wrap: anywhere;
+}
+.agent-handoff p {
+  margin: 12px 0;
+}
+.onboarding-error {
+  color: #a32016;
+  overflow-wrap: anywhere;
+}
+
 /* Lit Agent Keychain — visual system shared with litprotocol.com and the
    Chipotle dashboard (chipotle#673): chalk paper, charcoal ink, restrained
    burnt orange, one clear surface per view, few containers. */

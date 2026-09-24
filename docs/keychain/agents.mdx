@@ -30,7 +30,7 @@ keychain.destroy();                     // then create a new client before calli
 ```
 
 - `get` on a connected service fails with `Secret "X" was created with the <action> action; call use()`. `use` on a stored secret is the mirror mistake.
-- Pass `{ usageApiKey }` as the third constructor argument to override the config's execution key, for example after the owner replaced it.
+- Pass `{ usageApiKey }` as the third constructor argument to override the config's execution key, for example after a service-managed replacement.
 - Import by package name so Node selects the TLS-aware entry point. `dist/index.js` is the browser build and cannot bind the live TLS certificate.
 - `ACTIONS` exports the catalog compiled into the client; `describeCredential(value)` classifies a value you are unsure about: an identity or config object, the raw JSON text of either file, a private key, or a usage key.
 
@@ -92,7 +92,9 @@ The server is deliberately local rather than hosted. Decryption needs the agent'
 | Agent config | JSON `*.keychain.json`: `{ "v": 2, "litApiUrl", "usageApiKey", "secrets" }` | Private. `usageApiKey` is a Chipotle billing key, not authority. |
 | Secret value | Whatever `get` returns | Do not log, echo, or write to disk. |
 
-A per-secret **Agent config** names one secret. **Config · all secrets**, next to an agent under **Authorized agents**, names every secret in the vault that agent is approved for, which is what `keychain run --only A,B` and a single `get`/`use` config expect. The MCP server additionally merges several config files from the same vault.
+Start with **Secrets → + Add agent** after owner sign-in: paste the existing public key, name the agent, explicitly select secrets, then **Approve selected secrets**. **Download agent config** in the result includes only the successfully approved selection. No secret is selected automatically and downloading never grants access.
+
+A per-secret **Agent config** names one secret. **Download agent config**, next to an agent under **Authorized agents**, names every secret in the vault that agent is approved for, which is what `keychain run --only A,B` and a single `get`/`use` config expect. The MCP server additionally merges several config files from the same vault.
 
 `usageApiKey` is an opaque string minted by Chipotle (currently 44 characters of base64). It pays for execution and cannot read a secret without the agent identity and an owner grant. There are no setup tokens, management bearer tokens or server-minted grants in Keychain. Never ask an owner for a private key or Google token. The SDK and CLI reject an identity passed as a config, a config passed as an identity, and a private key passed as a usage key, each with a message naming the mistake.
 

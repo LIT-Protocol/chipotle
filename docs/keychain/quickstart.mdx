@@ -7,7 +7,7 @@ You need a browser for the owner steps and Node 22+ on the agent's machine. Noth
 
 <Note>
 The examples below use the latest published `@lit-protocol/keychain`. Pin an exact version
-(`@lit-protocol/keychain@2.0.6`, for example) in anything you deploy, and check the
+(`@lit-protocol/keychain@2.0.7`, for example) in anything you deploy, and check the
 [npm page](https://www.npmjs.com/package/@lit-protocol/keychain) for release notes before upgrading.
 </Note>
 
@@ -31,12 +31,14 @@ This writes a mode-0600 file containing an Ed25519 key pair and prints its `publ
     Choose **Add secret**, then either **Store a secret** (the agent receives the value) or **Connect a service** (the agent runs one reviewed action and never sees the key). Name it in `UPPER_SNAKE_CASE`, for example `OPENAI_API_KEY`, and paste the value. It is encrypted in your browser before upload.
   </Step>
   <Step title="Approve the agent">
-    Open the secret, paste the agent's public key under **Authorized agents**, give it a name and click **Approve agent**. One wallet prompt or passkey touch signs the policy. Permissions default to 30 days; you can pick any length or remove the expiry.
+    On **Secrets**, click **+ Add agent** next to **+ Add secret**. Paste your existing agent's 64-character public key, give it a name, and select only the secrets it needs. Nothing is selected automatically. Use **Select all** to select enabled, unexpired secrets, or **Clear selection** to reset the selection. You can uncheck individual secrets before continuing. Click **Approve selected secrets** and complete each owner approval. Existing agents and expiry dates stay unchanged; disabled or expired secrets must be enabled or renewed on their own pages first. Never upload an identity file or private key. New secret permissions default to 30 days; **Renew permissions** lets you change that separately.
   </Step>
   <Step title="Download the agent config">
-    Click **Agent config** to download `OPENAI_API_KEY.keychain.json`. It contains public locators plus a scoped execution key that pays for Lit execution. It is not a backup and holds no secret value, but keep it private.
+    Click **Download agent config** in the approval result. The agent-named file contains only the successfully approved selection: public locators plus a scoped execution key that pays for Lit execution. It is not a backup and holds no secret value, but keep it private. For the commands below, rename it to `OPENAI_API_KEY.keychain.json`, or use its actual filename.
 
-    An agent approved for several secrets needs only one file: click **Config · all secrets** next to its name under **Authorized agents** to download a config naming every secret in the vault that key may use. The `keychain run`, `get` and `use` commands take one config; the MCP server also accepts several.
+    If an approval fails partway through, earlier approvals remain saved. **Retry remaining approvals** checks current access before continuing. Closing does not revoke saved access. To remove access, open each secret and use **Revoke**.
+
+    An agent approved for several secrets needs only one file: click **Download agent config** next to its name under **Authorized agents** to download a config naming every secret in the vault that key may use. The `keychain run`, `get` and `use` commands take one config; the MCP server also accepts several.
   </Step>
 </Steps>
 
