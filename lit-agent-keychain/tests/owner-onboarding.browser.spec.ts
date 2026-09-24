@@ -149,6 +149,10 @@ test("owner can discover Add agent immediately after sign-in in the actual app",
   await expect(
     page.getByRole("heading", { name: "Secrets", exact: true }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Agents", exact: true }),
+  ).toBeVisible();
   const add = page.getByRole("button", { name: "+ Add agent", exact: true });
   await expect(add).toBeVisible();
   await expect(page.getByText("Execution and account access")).toHaveCount(0);
@@ -205,12 +209,28 @@ test("owner can discover Add agent immediately after sign-in in the actual app",
   );
   await page.getByRole("button", { name: "Done", exact: true }).click();
   await expect(add).toBeFocused();
-  await page.getByRole("button", { name: /ONE.*1 agent/ }).click();
+  // The Agents page inverts the Secrets listing: the agent row leads to its secrets.
+  await page.getByRole("button", { name: /Existing agent.*1 secret/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "Existing agent", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Accessible secrets", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".agent-row").getByText("ONE")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Revoke", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Download agent config", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "+ Grant secrets", exact: true }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "Secrets", exact: true }).click();
+  await page.getByRole("button", { name: /ONE.*1 agent/ }).click();
+  await expect(
+    page.getByRole("button", { name: "Revoke", exact: true }),
   ).toBeVisible();
   expect(errors).toEqual([]);
 });

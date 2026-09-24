@@ -43,6 +43,7 @@ export const ownerClient = () => ({
       disabled: false,
       expiresAt: null,
       agentCount: b.policy.document.grants.length,
+      agents: b.policy.document.grants,
     })),
   bundle: async (id: string) => bundles[id],
   policyLifetimeCapDays: async () => null,

@@ -20,8 +20,13 @@ export function AgentOnboarding({
   onApproved,
   onDownload,
   onBusyChange,
+  initialName = "",
+  initialKey = "",
 }: {
   onBusyChange?: (busy: boolean) => void;
+  /** Prefilled from the Agents page to grant an existing agent more secrets. */
+  initialName?: string;
+  initialKey?: string;
   client: AgentApprovalClient;
   secrets: SecretSummary[];
   onClose: () => void;
@@ -29,8 +34,9 @@ export function AgentOnboarding({
   onApproved: () => Promise<void>;
   onDownload: (label: string, bundles: SecretBundle[]) => void;
 }) {
-  const [name, setName] = useState("");
-  const [key, setKey] = useState("");
+  const [name, setName] = useState(initialName);
+  const [key, setKey] = useState(initialKey);
+  const existing = !!initialKey;
   const [ids, setIds] = useState<string[]>([]);
   const [approved, setApproved] = useState<SecretBundle[]>([]);
   const [error, setError] = useState("");
@@ -48,11 +54,12 @@ export function AgentOnboarding({
       aria-labelledby="add-agent-title"
     >
       <h2 id="add-agent-title" tabIndex={-1}>
-        Add agent
+        {existing ? `Grant secrets to ${initialName}` : "Add agent"}
       </h2>
       <p>
-        Already have an agent public key? Add it here, choose what it can use,
-        and it can discover approved secrets on its next request.
+        {existing
+          ? "Choose more secrets for this agent. It discovers new approvals on its next request."
+          : "Already have an agent public key? Add it here, choose what it can use, and it can discover approved secrets on its next request."}
       </p>
       <form
         onSubmit={async (e) => {
@@ -87,12 +94,12 @@ export function AgentOnboarding({
           }
         }}
       >
-        <fieldset disabled={busy || attempted}>
+        <fieldset disabled={busy || attempted || existing}>
           <legend>1. Identify your agent</legend>
           <label>
             Agent name
             <input
-              autoFocus
+              autoFocus={!existing}
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
@@ -154,7 +161,11 @@ export function AgentOnboarding({
             any before approving.
           </p>
           {secrets.length === 0 && (
-            <p>Add a secret before approving an agent.</p>
+            <p>
+              {existing
+                ? "This agent already has access to every secret."
+                : "Add a secret before approving an agent."}
+            </p>
           )}
           {secrets.map((s) => {
             const unavailable = !isEligible(s);
@@ -270,7 +281,7 @@ export function AgentOnboarding({
                 : "Approve selected secrets"}
             </button>
           )}
-          {secrets.length === 0 && (
+          {secrets.length === 0 && !existing && (
             <button type="button" onClick={onAddSecret}>
               Add secret
             </button>
@@ -286,8 +297,8 @@ export function AgentOnboarding({
         </div>
         {attempted && (
           <p className="hint">
-            Closing does not undo saved approvals. Use Revoke on each secret's
-            page to remove access.
+            Closing does not undo saved approvals. Use Revoke on the agent's
+            page or on each secret's page to remove access.
           </p>
         )}
       </form>

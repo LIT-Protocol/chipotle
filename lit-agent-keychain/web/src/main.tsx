@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import { createRoot } from "react-dom/client";
 import {
   WagmiProvider,
@@ -86,6 +92,12 @@ async function readFile(file: File) {
   return JSON.parse(await file.text());
 }
 const brief = (s: string) => s.slice(0, 8) + "…" + s.slice(-6);
+type AgentSummary = {
+  key: string;
+  label: string;
+  labels: string[];
+  secrets: any[];
+};
 /** Short label for a secret's action: how agents may use it. */
 const actionLabel = (release: string) =>
   release === "export"
@@ -163,12 +175,15 @@ function App() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [tab, setTab] = useState<"secrets" | "recovery" | "activity">(
-    "secrets",
-  );
+  const [tab, setTab] = useState<
+    "secrets" | "agents" | "recovery" | "activity"
+  >("secrets");
   const [events, setEvents] = useState<any[]>([]);
   const [creating, setCreating] = useState(false);
-  const [addingAgent, setAddingAgent] = useState(false);
+  const [addingAgent, setAddingAgent] = useState<
+    false | { name?: string; key?: string }
+  >(false);
+  const [selectedAgent, setSelectedAgent] = useState("");
   const addAgentButton = useRef<HTMLButtonElement>(null);
   const [agentKey, setAgentKey] = useState("");
   const [agentName, setAgentName] = useState("");
@@ -241,6 +256,40 @@ function App() {
   };
   const atLimit =
     !!billing && secrets.length >= billing.subscription.secretLimit;
+  /** The Secrets listing inverted: every approved public key with the secrets it may use.
+   *  Labels are per secret, so one key may carry several; the first is the display name. */
+  const agents = useMemo(() => {
+    const byKey = new Map<string, AgentSummary>();
+    for (const s of secrets)
+      for (const g of (s.agents ?? []) as Grant[]) {
+        let a = byKey.get(g.agentPublicKey);
+        if (!a) {
+          a = {
+            key: g.agentPublicKey,
+            label: g.label,
+            labels: [],
+            secrets: [],
+          };
+          byKey.set(g.agentPublicKey, a);
+        }
+        if (!a.labels.includes(g.label)) a.labels.push(g.label);
+        a.secrets.push(s);
+      }
+    return [...byKey.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }, [secrets]);
+  const agent = agents.find((a) => a.key === selectedAgent);
+  const revokeFromSecret = (agentPublicKey: string, secretId: string) =>
+    work("Revoking agent…", async () => {
+      const bundle = await client!.bundle(secretId);
+      const updated = await client!.setPolicy(bundle, {
+        grants: bundle.policy.document.grants.filter(
+          (g) => g.agentPublicKey !== agentPublicKey,
+        ),
+      });
+      if (selected?.manifest.document.manifest.secretId === secretId)
+        setSelected(updated);
+      await refresh();
+    });
   const locatorOf = (bundle: SecretBundle) => ({
     manifest: bundle.manifest.document.manifest,
     actionCid: bundle.manifest.document.actionCid,
@@ -262,7 +311,7 @@ function App() {
   };
   /** One config listing every secret this agent is approved for, so `keychain run`
    *  and `get`/`use` need a single file (the MCP server can also merge several). */
-  const exportAgentConfig = (agent: Grant) =>
+  const exportAgentConfig = (agent: Pick<Grant, "agentPublicKey" | "label">) =>
     work("Collecting this agent's secrets…", async () => {
       const approved: AgentConfig["secrets"] = {};
       for (const s of secrets) {
@@ -366,6 +415,7 @@ function App() {
                   setClient(undefined);
                   setTab("secrets");
                   setAddingAgent(false);
+                  setSelectedAgent("");
                   setSelected(undefined);
                   setSecrets([]);
                   setBilling(undefined);
@@ -529,26 +579,30 @@ function App() {
               </div>
             </div>
             <nav aria-label="Vault">
-              {(["secrets", "recovery", "activity"] as const).map((t) => (
-                <button
-                  key={t}
-                  disabled={!!busy}
-                  className={tab === t ? "active" : ""}
-                  onClick={() => {
-                    setTab(t);
-                    if (t === "activity")
-                      void work("Loading activity…", async () =>
-                        setEvents((await client.api("/api/audit")).events),
-                      );
-                  }}
-                >
-                  {t === "secrets"
-                    ? "Secrets"
-                    : t === "recovery"
-                      ? "Recovery & backups"
-                      : "Activity"}
-                </button>
-              ))}
+              {(["secrets", "agents", "recovery", "activity"] as const).map(
+                (t) => (
+                  <button
+                    key={t}
+                    disabled={!!busy}
+                    className={tab === t ? "active" : ""}
+                    onClick={() => {
+                      setTab(t);
+                      if (t === "activity")
+                        void work("Loading activity…", async () =>
+                          setEvents((await client.api("/api/audit")).events),
+                        );
+                    }}
+                  >
+                    {t === "secrets"
+                      ? "Secrets"
+                      : t === "agents"
+                        ? "Agents"
+                        : t === "recovery"
+                          ? "Recovery & backups"
+                          : "Activity"}
+                  </button>
+                ),
+              )}
             </nav>
             <p className="aside-note">
               Permissions are verified in Lit Actions. Revocation freshness is
@@ -659,17 +713,6 @@ function App() {
                   </div>
                   <div className="button-row">
                     <button
-                      ref={addAgentButton}
-                      disabled={!!busy}
-                      onClick={() => {
-                        setAddingAgent(true);
-                        setCreating(false);
-                      }}
-                    >
-                      + Add agent
-                    </button>
-                    <button
-                      className="secondary"
                       disabled={!!busy || !billing || atLimit}
                       title={
                         atLimit
@@ -678,7 +721,6 @@ function App() {
                       }
                       onClick={() => {
                         setCreating(true);
-                        setAddingAgent(false);
                         setSelected(undefined);
                       }}
                     >
@@ -686,37 +728,7 @@ function App() {
                     </button>
                   </div>
                 </div>
-                {addingAgent && (
-                  <AgentOnboarding
-                    client={client}
-                    secrets={secrets}
-                    onBusyChange={(active) =>
-                      setBusy(active ? "Approving selected secrets…" : "")
-                    }
-                    onClose={() => {
-                      setAddingAgent(false);
-                      addAgentButton.current?.focus();
-                    }}
-                    onAddSecret={() => {
-                      setAddingAgent(false);
-                      setCreating(true);
-                      setSelected(undefined);
-                    }}
-                    onApproved={async () => {
-                      setSelected(undefined);
-                      await refresh();
-                    }}
-                    onDownload={(label, bundles) =>
-                      downloadAgentConfig(
-                        label,
-                        bundles,
-                        LIT_URL,
-                        client.lit.usageApiKey,
-                      )
-                    }
-                  />
-                )}
-                <div className="secret-layout" hidden={addingAgent}>
+                <div className="secret-layout">
                   <section className="secret-list">
                     {secrets.length === 0 && (
                       <div className="empty">
@@ -1119,6 +1131,252 @@ function App() {
                         <p>
                           Inspect permissions, approve an agent, or rotate its
                           credential.
+                        </p>
+                      </div>
+                    )}
+                  </section>
+                </div>
+              </>
+            )}
+            {tab === "agents" && (
+              <>
+                <div className="page-heading">
+                  <div>
+                    <p className="eyebrow">AGENT ACCESS</p>
+                    <h1>Agents</h1>
+                    <p>
+                      Every approved public key and the secrets it may use.
+                      Approve only what each agent needs.
+                    </p>
+                  </div>
+                  <div className="button-row">
+                    <button
+                      ref={addAgentButton}
+                      disabled={!!busy}
+                      onClick={() => setAddingAgent({})}
+                    >
+                      + Add agent
+                    </button>
+                  </div>
+                </div>
+                {addingAgent && (
+                  <AgentOnboarding
+                    client={client}
+                    secrets={
+                      addingAgent.key
+                        ? secrets.filter(
+                            (s) =>
+                              !((s.agents ?? []) as Grant[]).some(
+                                (g) => g.agentPublicKey === addingAgent.key,
+                              ),
+                          )
+                        : secrets
+                    }
+                    initialName={addingAgent.name}
+                    initialKey={addingAgent.key}
+                    onBusyChange={(active) =>
+                      setBusy(active ? "Approving selected secrets…" : "")
+                    }
+                    onClose={() => {
+                      setAddingAgent(false);
+                      addAgentButton.current?.focus();
+                    }}
+                    onAddSecret={() => {
+                      setAddingAgent(false);
+                      setTab("secrets");
+                      setCreating(true);
+                      setSelected(undefined);
+                    }}
+                    onApproved={async () => {
+                      setSelected(undefined);
+                      await refresh();
+                    }}
+                    onDownload={(label, bundles) =>
+                      downloadAgentConfig(
+                        label,
+                        bundles,
+                        LIT_URL,
+                        client.lit.usageApiKey,
+                      )
+                    }
+                  />
+                )}
+                <div className="secret-layout" hidden={!!addingAgent}>
+                  <section className="secret-list" aria-label="Agents">
+                    {agents.length === 0 && (
+                      <div className="empty">
+                        <h3>No agents yet</h3>
+                        <p>
+                          {secrets.length === 0
+                            ? "Add a secret, then approve an agent’s public key."
+                            : "Approve an agent’s public key to give it access to your secrets."}
+                        </p>
+                      </div>
+                    )}
+                    {agents.map((a) => (
+                      <button
+                        className={
+                          "secret-row " +
+                          (a.key === selectedAgent ? "selected" : "")
+                        }
+                        key={a.key}
+                        onClick={() => setSelectedAgent(a.key)}
+                      >
+                        <span className="secret-icon agent">◎</span>
+                        <span>
+                          <strong>{a.label}</strong>
+                          <small>
+                            <code>{brief(a.key)}</code>
+                            {a.labels.length > 1 &&
+                              ` · also ${a.labels.slice(1).join(", ")}`}
+                          </small>
+                        </span>
+                        <span className="status">
+                          {a.secrets.length === 1
+                            ? "1 secret"
+                            : a.secrets.length + " secrets"}
+                        </span>
+                      </button>
+                    ))}
+                  </section>
+                  <section className="detail-card">
+                    {agent ? (
+                      <>
+                        <p className="eyebrow">
+                          AGENT · ED25519 PUBLIC KEY · PRIVATE KEY STAYS ON ITS
+                          DEVICE
+                        </p>
+                        <h2>{agent.label}</h2>
+                        <code className="wrap">{agent.key}</code>
+                        {agent.labels.length > 1 && (
+                          <p className="hint">
+                            Also approved as {agent.labels.slice(1).join(", ")}{" "}
+                            on some secrets.
+                          </p>
+                        )}
+                        <div className="button-row">
+                          <button
+                            disabled={
+                              !!busy || agent.secrets.length >= secrets.length
+                            }
+                            title={
+                              agent.secrets.length >= secrets.length
+                                ? "This agent already has access to every secret"
+                                : undefined
+                            }
+                            onClick={() =>
+                              setAddingAgent({
+                                name: agent.label,
+                                key: agent.key,
+                              })
+                            }
+                          >
+                            + Grant secrets
+                          </button>
+                          <button
+                            className="ghost"
+                            disabled={!!busy}
+                            title="Optional legacy static config; live clients discover approvals automatically"
+                            onClick={() =>
+                              void exportAgentConfig({
+                                agentPublicKey: agent.key,
+                                label: agent.label,
+                              })
+                            }
+                          >
+                            Download agent config
+                          </button>
+                          <button
+                            className="danger ghost"
+                            disabled={!!busy}
+                            onClick={() => {
+                              if (
+                                !window.confirm(
+                                  `Revoke ${agent.label} from all ${agent.secrets.length} secret${
+                                    agent.secrets.length === 1 ? "" : "s"
+                                  }?\n\nEach secret needs its own owner approval. Values it already received cannot be recalled.`,
+                                )
+                              )
+                                return;
+                              const key = agent.key;
+                              const ids = agent.secrets.map((s) => s.secretId);
+                              void work("Revoking agent…", async () => {
+                                try {
+                                  for (const id of ids) {
+                                    const bundle = await client.bundle(id);
+                                    await client.setPolicy(bundle, {
+                                      grants:
+                                        bundle.policy.document.grants.filter(
+                                          (g) => g.agentPublicKey !== key,
+                                        ),
+                                    });
+                                  }
+                                  setSelectedAgent("");
+                                  setSelected(undefined);
+                                } finally {
+                                  await refresh();
+                                }
+                              });
+                            }}
+                          >
+                            Revoke all
+                          </button>
+                        </div>
+                        <hr />
+                        <h3>Accessible secrets</h3>
+                        {agent.secrets.map((s) => (
+                          <div className="agent-row" key={s.secretId}>
+                            <span>
+                              <strong>{s.name}</strong>
+                              <small className="muted">
+                                {" "}
+                                · {actionLabel(s.release)} · v{s.version}
+                                {s.disabled
+                                  ? " · Disabled"
+                                  : s.expiresAt !== null &&
+                                      s.expiresAt * 1000 <= Date.now()
+                                    ? " · Expired"
+                                    : s.expiresAt === null
+                                      ? " · No expiry"
+                                      : ` · Expires ${new Date(
+                                          s.expiresAt * 1000,
+                                        ).toLocaleDateString()}`}
+                              </small>
+                            </span>
+                            <span className="row-actions">
+                              <button
+                                className="ghost"
+                                disabled={!!busy}
+                                onClick={() => {
+                                  setTab("secrets");
+                                  void pick(s.secretId);
+                                }}
+                              >
+                                Open secret
+                              </button>
+                              <button
+                                className="danger ghost"
+                                disabled={!!busy}
+                                onClick={() =>
+                                  void revokeFromSecret(agent.key, s.secretId)
+                                }
+                              >
+                                Revoke
+                              </button>
+                            </span>
+                          </div>
+                        ))}
+                        <p className="hint">
+                          Revocations apply on the agent's next request. Values
+                          it already received cannot be recalled.
+                        </p>
+                      </>
+                    ) : (
+                      <div className="empty">
+                        <h3>Select an agent</h3>
+                        <p>
+                          See which secrets it can use, grant more, or revoke
+                          access.
                         </p>
                       </div>
                     )}

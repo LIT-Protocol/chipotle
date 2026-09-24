@@ -680,6 +680,12 @@ nav button.active {
 .secret-icon.service {
   color: var(--orange);
 }
+.secret-icon.agent {
+  font-size: 15px;
+}
+.secret-row small code {
+  font-size: 10px;
+}
 .status {
   font-size: 11px;
   color: var(--muted);
@@ -1111,7 +1117,7 @@ footer.site-footer {
   }
   nav {
     flex-direction: row;
-    overflow-x: auto;
+    flex-wrap: wrap;
     gap: 4px;
   }
   nav button {

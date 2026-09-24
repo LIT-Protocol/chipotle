@@ -257,7 +257,14 @@ test(
         ),
       );
       assert.equal(attempts.filter((r) => r.status === "fulfilled").length, 2);
-      assert.equal((await c.api("/api/secrets")).secrets.length, 3);
+      const listing = (await c.api("/api/secrets")).secrets;
+      assert.equal(listing.length, 3);
+      // The Agents page groups by these; they are the policy's grants verbatim.
+      const listed = listing.find(
+        (s: any) => s.secretId === bundle.manifest.document.manifest.secretId,
+      );
+      assert.deepEqual(listed.agents, bundle.policy.document.grants);
+      assert.equal(listed.agentCount, listed.agents.length);
       const backup = await c.backup();
       assert.equal(backup.bundles.length, 3);
       assert.ok(!JSON.stringify(backup).includes("rotated-only-in-browser"));

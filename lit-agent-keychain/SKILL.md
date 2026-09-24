@@ -9,7 +9,7 @@ version: 2.1.1
 1. Generate an agent identity on the agent device with `npx @lit-protocol/keychain@2.1.1 init identity.json`.
 2. Give only its public key to the owner; reuse an existing identity if one was already
    generated. The owner signs in at https://keychain.litprotocol.com with a wallet,
-   passkey, or Google account. On **Secrets**, click **+ Add agent** beside **+ Add secret**.
+   passkey, or Google account. On **Agents**, click **+ Add agent**.
    Enter a name and paste the 64-character public key, then select only the secrets
    this agent needs (or use **Select all** for enabled, unexpired secrets; **Clear selection** resets the choice) and click **Approve selected secrets**. Nothing is selected by
    default. An empty vault needs **Add secret** first; disabled/expired secrets need
