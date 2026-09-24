@@ -7,8 +7,8 @@ Execution goes directly to Chipotle with a scoped, per-vault usage key funded by
 Keychain. That billing key does not authorize secret access by itself.
 
 ```sh
-npm install @lit-protocol/keychain@2.0.6
-npx @lit-protocol/keychain@2.0.6 init ./agent-identity.json
+npm install @lit-protocol/keychain@2.0.7
+npx @lit-protocol/keychain@2.0.7 init ./agent-identity.json
 ```
 
 Give the **public key** to the owner. In Keychain, approve it on a secret and download
@@ -76,18 +76,18 @@ receives it over TLS. `get`/`run` are not service operations. MCP uses
 not evidence that your provider account or a live service call has succeeded.
 
 `keychain.list()` reports each secret's action and input shape; `ACTIONS` exports the
-full catalog compiled into the client. `npx @lit-protocol/keychain@2.0.6 actions` prints it from the CLI and
-`npx @lit-protocol/keychain@2.0.6 use <identity> <config> <name> '<json-input>'` runs one.
+full catalog compiled into the client. `npx @lit-protocol/keychain@2.0.7 actions` prints it from the CLI and
+`npx @lit-protocol/keychain@2.0.7 use <identity> <config> <name> '<json-input>'` runs one.
 
 CLI reads write the requested result to stdout. Avoid sending credential output to logs.
-`npx @lit-protocol/keychain@2.0.6 --help` prints usage and `--version` prints the
+`npx @lit-protocol/keychain@2.0.7 --help` prints usage and `--version` prints the
 installed version. Identity files with an explicit unsupported version or a public
 key inconsistent with their private key are rejected; do not hand-edit key fields.
 After `keychain.destroy()`, create a new client before calling `get`, `use` or
 `attest` again: destroyed instances fail locally.
 
 ```sh
-npx @lit-protocol/keychain@2.0.6 get ./agent-identity.json ./API_KEY.keychain.json API_KEY
+npx @lit-protocol/keychain@2.0.7 get ./agent-identity.json ./API_KEY.keychain.json API_KEY
 ```
 
 For tools that need the raw credential in their environment, `run` skips stdout
@@ -97,9 +97,9 @@ with the child's status. The Keychain CLI itself does not print the value; a chi
 program can still log or disclose it, including into model context:
 
 ```sh
-npx @lit-protocol/keychain@2.0.6 run ./agent-identity.json ./STRIPE_API_KEY.keychain.json -- stripe balance retrieve
-npx @lit-protocol/keychain@2.0.6 run ./id.json ./db.keychain.json --only DATABASE_URL -- psql
-npx @lit-protocol/keychain@2.0.6 run ./id.json ./cfg.keychain.json --env OPENAI_PROD=OPENAI_API_KEY -- python agent.py
+npx @lit-protocol/keychain@2.0.7 run ./agent-identity.json ./STRIPE_API_KEY.keychain.json -- stripe balance retrieve
+npx @lit-protocol/keychain@2.0.7 run ./id.json ./db.keychain.json --only DATABASE_URL -- psql
+npx @lit-protocol/keychain@2.0.7 run ./id.json ./cfg.keychain.json --env OPENAI_PROD=OPENAI_API_KEY -- python agent.py
 ```
 
 `--only A,B` injects a subset; `--env SECRET=ENV_VAR` renames a variable for tools
@@ -117,9 +117,9 @@ when the command exits. A `--file` secret stays out of the environment unless `-
 names it too. Multi-line values such as PEM keys are written byte for byte.
 
 ```sh
-npx @lit-protocol/keychain@2.0.6 run ./id.json ./gcp.keychain.json --file GCP_SA=/tmp/sa.json -- \
+npx @lit-protocol/keychain@2.0.7 run ./id.json ./gcp.keychain.json --file GCP_SA=/tmp/sa.json -- \
   env GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json gcloud storage ls
-npx @lit-protocol/keychain@2.0.6 run ./id.json ./k8s.keychain.json --file KUBECONFIG_PROD=./kubeconfig -- \
+npx @lit-protocol/keychain@2.0.7 run ./id.json ./k8s.keychain.json --file KUBECONFIG_PROD=./kubeconfig -- \
   kubectl --kubeconfig ./kubeconfig get pods
 ```
 
@@ -160,7 +160,7 @@ is sent (verification itself fetches attestation evidence and governance state).
    automatically in the CLI/MCP paths.
 
 ```sh
-npx @lit-protocol/keychain@2.0.6 attest                 # prints the full report for the default origin
+npx @lit-protocol/keychain@2.0.7 attest                 # prints the full report for the default origin
 ```
 
 Independently compare `config.litApiUrl` with the endpoint supplied by your trusted
@@ -189,9 +189,9 @@ with any MCP client in one line; pass one or more agent configs after the identi
 
 ```sh
 # Claude Code
-claude mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.0.6 mcp /absolute/path/agent-identity.json /absolute/path/API_KEY.keychain.json
+claude mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.0.7 mcp /absolute/path/agent-identity.json /absolute/path/API_KEY.keychain.json
 # Codex CLI
-codex mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.0.6 mcp /absolute/path/agent-identity.json /absolute/path/API_KEY.keychain.json
+codex mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.0.7 mcp /absolute/path/agent-identity.json /absolute/path/API_KEY.keychain.json
 ```
 
 Cursor, Windsurf and similar clients take the same command in their JSON config:
@@ -203,7 +203,7 @@ Cursor, Windsurf and similar clients take the same command in their JSON config:
       "command": "npx",
       "args": [
         "-y",
-        "@lit-protocol/keychain@2.0.6",
+        "@lit-protocol/keychain@2.0.7",
         "mcp",
         "/absolute/path/agent-identity.json",
         "/absolute/path/API_KEY.keychain.json",
@@ -244,7 +244,7 @@ Only call `get_secret` if you intend to place plaintext into the model context.
 Tools: `list_secrets` (names, permitted operation and input shape, no values),
 `get_secret`, one tool per catalog action (`stripe_balance`, `openai_chat`,
 `github_read_file`, `slack_post_message`, `supabase_tables`; each takes `name` and,
-where the action declares one, `input`; `list_actions` or `npx @lit-protocol/keychain@2.0.6 actions` shows
+where the action declares one, `input`; `list_actions` or `npx @lit-protocol/keychain@2.0.7 actions` shows
 the current catalog), `list_actions`, and `agent_public_key` (for the owner to
 approve). The server is
 intentionally local rather than hosted: decryption needs the agent's private
@@ -280,7 +280,7 @@ or an unsupported verification environment. Do not disable attestation to get pa
 
 | Artifact       | Shape                                                                                                    |
 | -------------- | -------------------------------------------------------------------------------------------------------- |
-| Agent identity | JSON from `npx @lit-protocol/keychain@2.0.6 init`: `{ v: 2, privateKey: <64 hex>, publicKey: <64 hex> }` |
+| Agent identity | JSON from `npx @lit-protocol/keychain@2.0.7 init`: `{ v: 2, privateKey: <64 hex>, publicKey: <64 hex> }` |
 | Agent config   | JSON `*.keychain.json`: `{ v: 2, litApiUrl, usageApiKey, secrets }`                                      |
 | Usage key      | Opaque Chipotle string (currently 44-character base64). Billing only.                                    |
 | Secret value   | Whatever `get` returns. Never log it.                                                                    |

@@ -33,7 +33,13 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 
 ## SDK release coordination
 
-This source prepares SDK 2.0.6 and pins the hosted examples to that version. 2.0.6 is
+This source prepares SDK 2.0.7 and pins the hosted examples to that version. 2.0.7
+adds explicit expiry preservation when rotating and reapproving agents, and clearer
+401 guidance for expired owner sessions. It is an ordinary SDK patch with no
+immutable action template changes; existing agents on 2.0.6 keep working. The owner
+UI also gains the guided onboarding flow and select-all permission controls.
+
+2.0.6 was
 an ordinary SDK release with no template change: clearer client-side messages
 (`use()` on a stored secret, an identity object passed where the private key string
 belongs), `describeCredential` accepting the raw JSON text of an identity or config
@@ -66,7 +72,7 @@ Consequences, all handled by the release mechanism described in
   release still takes one signature per document (`PRE_BATCH_AUTHORITY_HASHES`).
 
 Release checks: run `npm test` and `npm run build`, publish through the normal
-maintainer release process, verify `npm view @lit-protocol/keychain@2.0.6 version`,
+maintainer release process, verify `npm view @lit-protocol/keychain@2.0.7 version`,
 then repeat the strict external TypeScript consumer and attestation-enabled Node
 smoke test from the registry artifact. Only then deploy the owner UI/API and create,
 rotate and read a secret against production. See the QA reports under `docs/` for
