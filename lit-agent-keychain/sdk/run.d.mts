@@ -8,7 +8,7 @@ export type ChildLike = {
 
 export interface RunOptions {
   identityFile: string;
-  configFile: string;
+  configFile?: string;
   /** Secret names to inject; null injects every export-release secret. */
   only: string[] | null;
   /** Secret name to environment variable name. */
@@ -27,14 +27,16 @@ export interface InjectionPlan {
 export function parseRunArgs(args: string[]): RunOptions;
 
 export function planInjection(
-  list: { name: string; operation: string }[],
+  list: { name: string; id?: string; operation: string }[],
   options: Pick<RunOptions, "only" | "rename"> &
     Partial<Pick<RunOptions, "files">>,
 ): InjectionPlan;
 
 export function runWithSecrets(
   client: {
-    list(): { name: string; operation: string }[];
+    list():
+      | { name: string; id?: string; operation: string }[]
+      | Promise<{ name: string; id?: string; operation: string }[]>;
     get(name: string): Promise<string>;
     destroy(): void;
   },

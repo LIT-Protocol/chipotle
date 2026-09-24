@@ -15,22 +15,29 @@ npx @lit-protocol/keychain init ./agent-identity.json     # prints publicKey; sh
 npx @lit-protocol/keychain --help
 ```
 
-## SDK
+## Live SDK (2.1.0)
+
+Agents need only their existing private identity and a stable service URL. No config
+file is required. Each operation discovers current approvals; website changes are
+visible on the next request without a client restart.
+
 
 ```js
-import { Keychain } from "@lit-protocol/keychain";
-const keychain = new Keychain(identity.privateKey, config);
+import { LiveKeychain } from "@lit-protocol/keychain";
+const keychain = new LiveKeychain(identity.privateKey);
 
 await keychain.list();                  // each secret's action and input shape, no values
 await keychain.get("MY_SECRET");        // stored secret: plaintext for this process
 await keychain.use("STRIPE_API_KEY");   // connected service: bounded result, never the key
 await keychain.use("OPENAI_API_KEY", { model: "gpt-4o-mini", messages: [...] });
-await keychain.attest();                // full attestation report for config.litApiUrl
+await keychain.attest();                // full attestation report for the separately trusted Lit origin
 keychain.destroy();                     // then create a new client before calling again
 ```
 
 - `get` on a connected service fails with `Secret "X" was created with the <action> action; call use()`. `use` on a stored secret is the mirror mistake.
-- Pass `{ usageApiKey }` as the third constructor argument to override the config's execution key, for example after a service-managed replacement.
+- Each operation discovers current approvals with a one-use signed challenge. Set `serviceUrl` for a custom service; `litApiUrl` is an independent trust decision.
+- `list()` returns a stable `id` (`vaultId/secretId`) as well as `name`. Duplicate names across vaults fail; use the ID rather than guessing.
+- `Keychain(privateKey, config)` remains a legacy static API; its list does not discover additions.
 - Import by package name so Node selects the TLS-aware entry point. `dist/index.js` is the browser build and cannot bind the live TLS certificate.
 - `ACTIONS` exports the catalog compiled into the client; `describeCredential(value)` classifies a value you are unsure about: an identity or config object, the raw JSON text of either file, a private key, or a usage key.
 
@@ -39,24 +46,25 @@ keychain.destroy();                     // then create a new client before calli
 | Command | What it does |
 |---|---|
 | `init <identity>` | Generate an Ed25519 identity (mode 0600, never overwrites). |
-| `get <identity> <config> <NAME>` | Print a stored secret to stdout. Avoid piping it into logs. |
-| `use <identity> <config> <NAME> ['<json-input>']` | Run a connected service's action and print the bounded result. |
-| `run <identity> <config> [--only A,B] [--env S=VAR] [--file S=PATH] -- <command>` | Put stored secrets in a child's environment (or a mode-0600 file) and exec the command. Prints nothing. |
+| `list <identity>` | Discover current approvals and IDs, without values. |
+| `get <identity> [legacy-config] <NAME>` | Print a stored secret to stdout. Avoid piping it into logs. |
+| `use <identity> [legacy-config] <NAME> ['<json-input>']` | Run a connected service's action and print the bounded result. |
+| `run <identity> [legacy-config] [--only A,B] [--env S=VAR] [--file S=PATH] -- <command>` | Put stored secrets in a child's environment (or a mode-0600 file) and exec the command. Prints nothing. |
 | `actions` | Print the catalog of connected-service actions this client knows. |
 | `attest [url]` | Print the attestation report for the default or given Lit origin. |
-| `mcp <identity> <config> [more configs]` | Start the local MCP server over stdio. |
+| `mcp <identity> [legacy-config] [more legacy configs]` | Start the local MCP server over stdio. |
 
 `run` is a handoff to a tool you trust, not a sandbox: the child inherits the environment and can still log or disclose the value. With `--file`, SIGKILL can leave the file behind and unlinking does not guarantee erasure; prefer a tmpfs path such as `/dev/shm` for anything long-lived.
 
-Set `CHIPOTLE_USAGE_API_KEY` to override the config's execution key and `KEYCHAIN_BASE_RPC_URL` to pin your own Base RPC for the on-chain attestation step.
+Set `KEYCHAIN_SERVICE_URL` for a custom Keychain service and `KEYCHAIN_LIT_API_URL` for a separately trusted Lit endpoint. The service cannot choose that endpoint. `KEYCHAIN_BASE_RPC_URL` pins your Base RPC. `CHIPOTLE_USAGE_API_KEY` overrides billing only in legacy static-config mode.
 
 ## MCP server
 
 ```sh
 # Claude Code
-claude mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp /absolute/path/agent-identity.json /absolute/path/API_KEY.keychain.json
+claude mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp /absolute/path/agent-identity.json
 # Codex CLI
-codex mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp /absolute/path/agent-identity.json /absolute/path/API_KEY.keychain.json
+codex mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp /absolute/path/agent-identity.json
 ```
 
 Cursor, Windsurf and similar clients take the same command in their JSON config:
@@ -70,15 +78,14 @@ Cursor, Windsurf and similar clients take the same command in their JSON config:
         "-y",
         "@lit-protocol/keychain",
         "mcp",
-        "/absolute/path/agent-identity.json",
-        "/absolute/path/API_KEY.keychain.json"
+        "/absolute/path/agent-identity.json"
       ]
     }
   }
 }
 ```
 
-Pass one or more configs after the identity. Paths must be absolute and readable by the client's user, and Node 22+ must be on that client's PATH.
+Pass only the identity for live discovery. Owner website changes appear on the next tool call without restarting MCP. The path must be absolute and readable by the client's user, and Node 22+ must be on that client's PATH.
 
 **Tools:** `agent_public_key` (for the owner to approve), `list_actions`, `list_secrets` (names, permitted operation and input shape, no values), `get_secret`, and one tool per catalog action (`stripe_balance`, `openai_chat`, `github_read_file`, `slack_post_message`, `supabase_tables`), each taking `name` and, where the action declares one, `input`.
 
@@ -92,13 +99,16 @@ The server is deliberately local rather than hosted. Decryption needs the agent'
 | Agent config | JSON `*.keychain.json`: `{ "v": 2, "litApiUrl", "usageApiKey", "secrets" }` | Private. `usageApiKey` is a Chipotle billing key, not authority. |
 | Secret value | Whatever `get` returns | Do not log, echo, or write to disk. |
 
-Start with **Secrets → + Add agent** after owner sign-in: paste the existing public key, name the agent, explicitly select secrets, then **Approve selected secrets**. **Download agent config** in the result includes only the successfully approved selection. No secret is selected automatically and downloading never grants access.
+Start with **Secrets → + Add agent** after owner sign-in: paste the existing public key, name the agent, explicitly select secrets, then **Approve selected secrets**. **Ready to use** confirms the successful approvals. No secret is selected automatically. No config transfer or restart is needed for live clients.
 
-A per-secret **Agent config** names one secret. **Download agent config**, next to an agent under **Authorized agents**, names every secret in the vault that agent is approved for, which is what `keychain run --only A,B` and a single `get`/`use` config expect. The MCP server additionally merges several config files from the same vault.
+For legacy clients only, **Advanced: legacy static config → Download agent config** remains available. A per-secret **Agent config** names one secret. **Download agent config**, next to an agent under **Authorized agents**, names every secret in the vault that agent is approved for, which is what `keychain run --only A,B` and a single `get`/`use` config expect. The MCP server additionally merges several config files from the same vault.
 
 `usageApiKey` is an opaque string minted by Chipotle (currently 44 characters of base64). It pays for execution and cannot read a secret without the agent identity and an owner grant. There are no setup tokens, management bearer tokens or server-minted grants in Keychain. Never ask an owner for a private key or Google token. The SDK and CLI reject an identity passed as a config, a config passed as an identity, and a private key passed as a usage key, each with a message naming the mistake.
 
 ## When a request is refused
+
+Live discovery excludes revoked, disabled, expired and stale-version approvals. An unknown secret may mean no current approval: ask the owner to approve or renew your existing public key, not send a config. Discovery is bounded to 1,000 candidate secrets and explicitly fails above that limit.
+
 
 The enclave answers every failure with the same bare `access_denied`, so nothing about the policy or the upstream service leaks. Before spending an execution, the client checks the signed policy it already fetched and explains what it can see. Every such message starts with `Access denied:` and tells you who can fix it.
 

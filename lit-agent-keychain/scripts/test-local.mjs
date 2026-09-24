@@ -102,6 +102,7 @@ try {
     "tsx",
     "--test",
     "tests/api.test.ts",
+    "tests/live-discovery-api.test.ts",
     "tests/billing-api.test.ts",
   ]);
   await run("cargo", ["+1.91", "test", "--locked"]);

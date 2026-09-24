@@ -20,7 +20,8 @@ sequenceDiagram
     Lit-->>Owner: Signed receipt for each exact object
     Owner->>API: Ciphertext + signed receipts
     API-->>Owner: Per-vault execution-only Chipotle usage key
-    Owner-->>Agent: Scoped execution key + public secret config
+    Agent->>API: One-use, audience-bound Ed25519 discovery proof
+    API-->>Agent: Current approved locators + execution-only billing bootstrap
     Agent->>Lit: Signed request + scoped usage key, directly through Chipotle
     Lit->>API: Fetch selected signed policy
     Lit->>Lit: Verify owner receipt, agent proof, scope, expiry, ciphertext
@@ -33,11 +34,13 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 
 ## SDK release coordination
 
-This source prepares SDK 2.0.7 and pins the hosted examples to that version. 2.0.7
-adds explicit expiry preservation when rotating and reapproving agents, and clearer
-401 guidance for expired owner sessions. It is an ordinary SDK patch with no
-immutable action template changes; existing agents on 2.0.6 keep working. The owner
-UI also gains the guided onboarding flow and select-all permission controls.
+This source prepares SDK **2.1.0** (registry latest verified as 2.0.7 before this
+change). It adds `LiveKeychain`, authenticated live discovery and configless CLI/MCP.
+Owners approve on the website; running clients observe changes on the next request
+without downloading configs. The legacy static API remains compatible. No immutable
+action source, archive or catalog lock changes are part of this release.
+
+SDK 2.0.7 previously added explicit expiry preservation and guided owner onboarding.
 
 2.0.6 was
 an ordinary SDK release with no template change: clearer client-side messages
@@ -72,11 +75,26 @@ Consequences, all handled by the release mechanism described in
   release still takes one signature per document (`PRE_BATCH_AUTHORITY_HASHES`).
 
 Release checks: run `npm test` and `npm run build`, publish through the normal
-maintainer release process, verify `npm view @lit-protocol/keychain@2.0.7 version`,
+maintainer release process, verify `npm view @lit-protocol/keychain@2.1.0 version`,
 then repeat the strict external TypeScript consumer and attestation-enabled Node
 smoke test from the registry artifact. Only then deploy the owner UI/API and create,
 rotate and read a secret against production. See the QA reports under `docs/` for
 actual production coverage and remaining provider/auth/billing tests.
+
+## Live agent discovery
+
+Use `new LiveKeychain(identity.privateKey)` or `keychain mcp identity.json`.
+`KEYCHAIN_SERVICE_URL` / SDK `serviceUrl` selects a stable Keychain origin; the Lit
+origin is a separate local trust setting. `list`, `get` and `use` fetch current
+owner-approved grants on every call. Use returned `vaultId/secretId` IDs where names
+collide. Legacy static configs remain optional. See [SDK guide](sdk/README.md).
+
+The migration adds one-use discovery challenges. Per-minute global (10,000) and
+peer (600) budgets bound requests and storage; expired challenges are removed on
+issuance. Discovery rejects over 1,000 candidates, never silently truncates.
+Deploy the migration/API before pointing live clients at the service; old clients
+keep working. Immediate revocation means the next request, not recalling already
+released plaintext or cancelling authorized in-flight operations.
 
 ## Features
 

@@ -16,6 +16,11 @@ import {
   type Shape,
 } from "@lit-protocol/agent-keychain-library/schema";
 export { shapeToJsonSchema };
+export {
+  LiveKeychain,
+  type LiveKeychainOptions,
+  type LiveSecretInfo,
+} from "./live.ts";
 import {
   authoritySchema,
   manifestSchema,
@@ -105,6 +110,7 @@ export type {
   Credentials,
 };
 export const DEFAULT_LIT_API_URL = "https://api.chipotle.litprotocol.com";
+export const DEFAULT_KEYCHAIN_SERVICE_URL = "https://keychain.litprotocol.com";
 /**
  * The action catalog compiled into this client: every release id an owner can
  * choose for a secret, with the single operation it permits and, for "use inside

@@ -52,7 +52,7 @@ export function AgentOnboarding({
       </h2>
       <p>
         Already have an agent public key? Add it here, choose what it can use,
-        then give the config file back to your agent.
+        and it can discover approved secrets on its next request.
       </p>
       <form
         onSubmit={async (e) => {
@@ -205,7 +205,7 @@ export function AgentOnboarding({
         {busy && <p role="status">Waiting for owner approval…</p>}
         {approved.length > 0 && (
           <div className="agent-handoff" role="status">
-            <h3>3. Download agent config</h3>
+            <h3>3. Ready to use</h3>
             <p>
               {approved.length} secret{approved.length === 1 ? "" : "s"} ready
               for this agent.
@@ -218,31 +218,45 @@ export function AgentOnboarding({
               ))}
             </ul>
             <p>
-              The config contains only these secret locators and a scoped
-              execution key, not secret values. Keep it private and send it to
-              your agent alongside its existing identity file. Downloading does
-              not grant additional access.
+              No config download or agent restart is needed with the live SDK,
+              CLI or MCP client. Your agent keeps its existing private identity
+              and connects to this Keychain service. New approvals and
+              revocations apply on its next request; already received values
+              cannot be recalled.
             </p>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                try {
-                  onDownload(name, approved);
-                  setDownloaded(true);
-                } catch (e) {
-                  setError(e instanceof Error ? e.message : "Download failed");
-                }
-              }}
-            >
-              Download agent config
-            </button>
-            {downloaded && (
+            <pre>
+              <code>{`KEYCHAIN_SERVICE_URL=${window.location.origin} keychain list ./agent-identity.json`}</code>
+            </pre>
+            <details>
+              <summary>Advanced: legacy static config</summary>
               <p>
-                Config downloaded. Give this file to your agent; keep its
-                private identity on the agent's device.
+                For older clients only. This snapshot contains scoped billing
+                credentials, not secret values. Keep it private. Legacy clients
+                need another export to discover newly added secrets.
               </p>
-            )}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  try {
+                    onDownload(name, approved);
+                    setDownloaded(true);
+                  } catch (e) {
+                    setError(
+                      e instanceof Error ? e.message : "Download failed",
+                    );
+                  }
+                }}
+              >
+                Download agent config
+              </button>
+              {downloaded && (
+                <p>
+                  Legacy config downloaded. Keep it and the agent identity
+                  private.
+                </p>
+              )}
+            </details>
           </div>
         )}
         <div className="button-row">

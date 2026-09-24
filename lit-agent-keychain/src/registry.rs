@@ -188,7 +188,7 @@ pub struct SecretWrite {
     pub envelope: Signed,
     pub policy: Signed,
 }
-struct Validated {
+pub(crate) struct Validated {
     manifest: Manifest,
     cid: String,
     name: String,
@@ -197,7 +197,7 @@ struct Validated {
 }
 /// `current_only` requires the newest release of the action (new secrets); restores
 /// and rotations accept any archived release the secret was created under.
-fn validate_write(
+pub(crate) fn validate_write(
     body: &SecretWrite,
     vault: &str,
     key: &str,
