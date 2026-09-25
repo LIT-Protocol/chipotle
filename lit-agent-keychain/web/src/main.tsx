@@ -62,7 +62,7 @@ import {
 } from "./Landing.tsx";
 import { NPX_KEYCHAIN } from "./version.ts";
 import { AddSecret, ActionDocs } from "./AddSecret.tsx";
-import { AgentOnboarding, AgentPicker } from "./AgentOnboarding.tsx";
+import { AgentOnboarding } from "./AgentOnboarding.tsx";
 import { downloadAgentConfig } from "./agent-config.ts";
 import "@rainbow-me/rainbowkit/styles.css";
 import "./style.css";
@@ -194,6 +194,8 @@ function App() {
   const addAgentButton = useRef<HTMLButtonElement>(null);
   const [agentKey, setAgentKey] = useState("");
   const [agentName, setAgentName] = useState("");
+  // Approved-elsewhere agents ticked for the selected secret.
+  const [agentPicks, setAgentPicks] = useState<string[]>([]);
   const [rotation, setRotation] = useState("");
   const [days, setDays] = useState(30);
   // 90 for secrets pinned to an older release that still caps lifetimes; null = owner's choice.
@@ -370,6 +372,7 @@ function App() {
       setSelected(bundle);
       setCreating(false);
       setRotation("");
+      setAgentPicks([]);
     });
   const savePolicy = async (changes: {
     grants?: Grant[];
@@ -1152,6 +1155,116 @@ function App() {
                             </span>
                           </div>
                         ))}
+                        {(() => {
+                          const candidates = agents.filter(
+                            (a) =>
+                              !selected.policy.document.grants.some(
+                                (g) => g.agentPublicKey === a.key,
+                              ),
+                          );
+                          if (candidates.length === 0) return null;
+                          const picked = agentPicks.filter((k) =>
+                            candidates.some((a) => a.key === k),
+                          );
+                          return (
+                            <fieldset
+                              className="agent-checklist"
+                              disabled={!!busy}
+                            >
+                              <legend>Approve your other agents</legend>
+                              <p className="hint">
+                                Agents already approved elsewhere in this vault.
+                                Each approval needs one owner signature.
+                              </p>
+                              <div className="button-row">
+                                <button
+                                  type="button"
+                                  className="secondary"
+                                  disabled={picked.length === candidates.length}
+                                  onClick={() =>
+                                    setAgentPicks(candidates.map((a) => a.key))
+                                  }
+                                >
+                                  Select all
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ghost"
+                                  disabled={picked.length === 0}
+                                  onClick={() => setAgentPicks([])}
+                                >
+                                  Clear selection
+                                </button>
+                              </div>
+                              {candidates.map((a) => (
+                                <label
+                                  className="agent-secret-choice"
+                                  key={a.key}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={picked.includes(a.key)}
+                                    onChange={(e) =>
+                                      setAgentPicks(
+                                        e.target.checked
+                                          ? [...picked, a.key]
+                                          : picked.filter((k) => k !== a.key),
+                                      )
+                                    }
+                                  />
+                                  <span>
+                                    <strong>{a.label}</strong>
+                                    <small>
+                                      <code>{brief(a.key)}</code> ·{" "}
+                                      {a.secrets.length === 1
+                                        ? "1 secret"
+                                        : `${a.secrets.length} secrets`}
+                                    </small>
+                                  </span>
+                                </label>
+                              ))}
+                              <button
+                                type="button"
+                                disabled={picked.length === 0}
+                                onClick={() => {
+                                  const chosen = candidates.filter((a) =>
+                                    picked.includes(a.key),
+                                  );
+                                  void work("Approving agents…", async () => {
+                                    let bundle = selected;
+                                    const done: string[] = [];
+                                    try {
+                                      for (const a of chosen) {
+                                        bundle = await client.delegate(
+                                          bundle,
+                                          a.key,
+                                          a.label,
+                                        );
+                                        done.push(a.label);
+                                        setAgentPicks((p) =>
+                                          p.filter((k) => k !== a.key),
+                                        );
+                                      }
+                                    } finally {
+                                      setSelected(bundle);
+                                      await refresh();
+                                      if (done.length)
+                                        setNotice(
+                                          `Approved ${done.join(", ")}. Ready on their next request; no config download or restart needed.`,
+                                        );
+                                    }
+                                  });
+                                }}
+                              >
+                                {picked.length === 0
+                                  ? "Approve selected agents"
+                                  : `Approve ${picked.length} selected agent${
+                                      picked.length === 1 ? "" : "s"
+                                    }`}
+                              </button>
+                            </fieldset>
+                          );
+                        })()}
                         <form
                           onSubmit={(e) => {
                             e.preventDefault();
@@ -1175,19 +1288,7 @@ function App() {
                             });
                           }}
                         >
-                          <AgentPicker
-                            agents={agents.filter(
-                              (a) =>
-                                !selected.policy.document.grants.some(
-                                  (g) => g.agentPublicKey === a.key,
-                                ),
-                            )}
-                            selectedKey={agentKey.trim().toLowerCase()}
-                            onPick={(a) => {
-                              setAgentName(a.label);
-                              setAgentKey(a.key);
-                            }}
-                          />
+                          <p className="form-title">Approve a new agent</p>
                           <label>
                             Agent name
                             <input

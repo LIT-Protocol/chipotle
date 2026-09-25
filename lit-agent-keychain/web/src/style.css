@@ -13,14 +13,38 @@
   font-weight: 600;
   margin-bottom: 12px;
 }
-.agent-onboarding .agent-secret-choice {
+.agent-checklist {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px 18px 18px;
+  margin: 0 0 22px;
+}
+.agent-checklist legend {
+  font-weight: 500;
+  font-size: 13px;
+  padding: 0 6px;
+}
+.agent-checklist .button-row {
+  margin: 8px 0 4px;
+}
+.agent-checklist > button {
+  margin-top: 14px;
+}
+.form-title {
+  font-weight: 500;
+  font-size: 13px;
+  margin: 0 0 4px;
+}
+.agent-onboarding .agent-secret-choice,
+.agent-checklist .agent-secret-choice {
   display: flex;
   align-items: flex-start;
   gap: 12px;
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
 }
-.agent-onboarding .agent-secret-choice input {
+.agent-onboarding .agent-secret-choice input,
+.agent-checklist .agent-secret-choice input {
   width: 18px;
   height: 18px;
   flex: 0 0 18px;
