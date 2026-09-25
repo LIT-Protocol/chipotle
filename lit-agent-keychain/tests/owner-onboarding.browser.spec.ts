@@ -258,6 +258,16 @@ test("owner can discover Add agent immediately after sign-in in the actual app",
   await expect(
     page.getByRole("group", { name: "Approve your other agents" }),
   ).toHaveCount(0);
+  // A known key keeps its name: agents are identified by key, never by label.
+  await page.getByLabel("Agent public key", { exact: true }).fill(key);
+  const nameField = page.getByLabel("Agent name", { exact: true });
+  await expect(nameField).toHaveValue("Existing agent");
+  await expect(nameField).toHaveAttribute("readonly", "");
+  await expect(
+    page.getByText(/This key is already approved as Existing agent/),
+  ).toBeVisible();
+  await page.getByLabel("Agent public key", { exact: true }).fill("");
+  await expect(nameField).not.toHaveAttribute("readonly", "");
   await page.getByRole("button", { name: "Agents", exact: true }).click();
   await page.getByRole("button", { name: /Existing agent.*2 secrets/ }).click();
   await expect(

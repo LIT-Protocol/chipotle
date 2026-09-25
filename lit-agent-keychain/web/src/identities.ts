@@ -213,10 +213,10 @@ export function googleSession(network: string) {
     publicKey: agentPublicKey(privateKey),
     nonce: randomId(),
     issuedAt: now,
-    // The pinned authority action caps a Google approval session at 15 minutes
-    // (protocol/identity.ts, bundled into the template; raising it is a release).
-    // Use nearly all of it; expiry renews in-app without closing the vault.
-    expiresAt: now + 840,
+    // Google ID tokens live one hour and the authority action requires
+    // expiresAt <= token exp (cap 3600 in protocol/identity.ts), so leave a
+    // margin for the sign-in popup. Expiry renews in-app without closing the vault.
+    expiresAt: now + 3000,
     scope: "authorize",
   };
   return {

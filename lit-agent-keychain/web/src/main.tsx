@@ -747,7 +747,7 @@ function App() {
                 <div>
                   <strong>Approve with Google again</strong>
                   <p className="muted">
-                    Your vault stays open. Google approvals last about fifteen
+                    Your vault stays open. Google approvals last about fifty
                     minutes; sign in with Google once more to keep making
                     changes.
                   </p>
@@ -1269,36 +1269,59 @@ function App() {
                           onSubmit={(e) => {
                             e.preventDefault();
                             const key = agentKey.trim().toLowerCase();
+                            // Agents are identified by key: a key the vault already
+                            // knows keeps its name, so one agent never appears twice.
+                            const known = agents.find((a) => a.key === key);
+                            const label = known ? known.label : agentName;
                             const existing =
                               selected.policy.document.grants.find(
                                 (g) => g.agentPublicKey === key,
                               );
                             void work("Approving agent…", async () => {
                               setSelected(
-                                await client.delegate(selected, key, agentName),
+                                await client.delegate(selected, key, label),
                               );
                               setAgentKey("");
                               setAgentName("");
                               await refresh();
                               setNotice(
                                 existing
-                                  ? `${brief(key)} was already approved as "${existing.label}"; it is now labelled "${agentName}". Its access did not change.`
-                                  : `Approved ${agentName}. Ready to use on its next request with the live SDK, CLI or MCP client. No config download or restart needed.`,
+                                  ? `${label} (${brief(key)}) already had access to this secret. Nothing changed.`
+                                  : `Approved ${label}. Ready to use on its next request with the live SDK, CLI or MCP client. No config download or restart needed.`,
                               );
                             });
                           }}
                         >
                           <p className="form-title">Approve a new agent</p>
-                          <label>
-                            Agent name
-                            <input
-                              value={agentName}
-                              onChange={(e) => setAgentName(e.target.value)}
-                              required
-                              maxLength={128}
-                              placeholder="Research assistant"
-                            />
-                          </label>
+                          {(() => {
+                            const known = agents.find(
+                              (a) => a.key === agentKey.trim().toLowerCase(),
+                            );
+                            return (
+                              <>
+                                <label>
+                                  Agent name
+                                  <input
+                                    value={known ? known.label : agentName}
+                                    onChange={(e) =>
+                                      setAgentName(e.target.value)
+                                    }
+                                    readOnly={!!known}
+                                    required
+                                    maxLength={128}
+                                    placeholder="Research assistant"
+                                  />
+                                </label>
+                                {known && (
+                                  <p className="hint">
+                                    This key is already approved as{" "}
+                                    {known.label}. Agents are identified by
+                                    their key, so the name is kept.
+                                  </p>
+                                )}
+                              </>
+                            );
+                          })()}
                           <label>
                             Agent public key
                             <input

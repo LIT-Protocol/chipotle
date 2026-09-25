@@ -75,6 +75,11 @@ export function AgentOnboarding({
   const [name, setName] = useState(initialName);
   const [key, setKey] = useState(initialKey);
   const existing = !!initialKey;
+  // Agents are identified by key: a key the vault already knows keeps its name.
+  const known = existing
+    ? undefined
+    : knownAgents.find((a) => a.key === key.trim().toLowerCase());
+  const label = known ? known.label : name;
   const [ids, setIds] = useState<string[]>([]);
   const [approved, setApproved] = useState<SecretBundle[]>([]);
   const [error, setError] = useState("");
@@ -109,7 +114,7 @@ export function AgentOnboarding({
           setError("");
           setAttempted(true);
           try {
-            const result = await approveAgentSecrets(client, key, name, ids);
+            const result = await approveAgentSecrets(client, key, label, ids);
             setApproved(result.approved);
             setError(result.error || "");
             setComplete(!result.error);
@@ -148,13 +153,20 @@ export function AgentOnboarding({
             Agent name
             <input
               autoFocus={!existing}
-              value={name}
+              value={label}
               onChange={(e) => setName(e.target.value)}
+              readOnly={!!known}
               required
               maxLength={128}
               placeholder="Research assistant"
             />
           </label>
+          {known && (
+            <p className="hint">
+              This key is already approved as {known.label}. Agents are
+              identified by their key, so the name is kept.
+            </p>
+          )}
           <label>
             Agent public key
             <input
@@ -298,7 +310,7 @@ export function AgentOnboarding({
                 disabled={busy}
                 onClick={() => {
                   try {
-                    onDownload(name, approved);
+                    onDownload(label, approved);
                     setDownloaded(true);
                   } catch (e) {
                     setError(
@@ -321,7 +333,7 @@ export function AgentOnboarding({
         <div className="button-row">
           {!complete && (
             <button
-              disabled={busy || !ids.length || !name.trim() || !key}
+              disabled={busy || !ids.length || !label.trim() || !key}
               type="submit"
             >
               {attempted
