@@ -42,6 +42,9 @@ const env = {
   ROCKET_ADDRESS: "127.0.0.1",
   WEB_DIR: "web/dist",
   HOURLY_IP_EXECUTION_LIMIT: "10000",
+  // Surface mock Lit failures in CI logs; a swallowed error there shows up to
+  // the tests only as an opaque 502 lit_unavailable (issue #649).
+  KEYCHAIN_ADAPTER_DEBUG: "1",
 };
 function start(command, args) {
   const child = spawn(command, args, { cwd: root, env, stdio: "inherit" });

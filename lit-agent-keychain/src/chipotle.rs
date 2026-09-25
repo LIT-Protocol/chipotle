@@ -29,6 +29,29 @@ impl Chipotle {
                 .build(),
         })
     }
+    /// A short, upstream-free description of why a Lit call failed. Only reqwest
+    /// error classes and this module's own literal messages are ever logged;
+    /// upstream bodies and action logs never are.
+    fn cause(e: &anyhow::Error) -> String {
+        match e.downcast_ref::<reqwest::Error>() {
+            Some(e) if e.is_timeout() => "timeout".into(),
+            Some(e) if e.is_connect() => "connect".into(),
+            Some(e) if e.is_body() || e.is_decode() => "body".into(),
+            Some(_) => "transport".into(),
+            None => e.to_string(),
+        }
+    }
+    /// Transport-level failures where the request may never have reached Lit.
+    fn transient(e: &anyhow::Error) -> bool {
+        e.downcast_ref::<reqwest::Error>()
+            .is_some_and(|e| e.is_timeout() || e.is_connect() || e.is_request())
+    }
+    fn observe<T>(op: &'static str, result: Result<T>) -> Result<T> {
+        if let Err(e) = &result {
+            tracing::warn!(op, cause = %Self::cause(e), "lit request failed");
+        }
+        result
+    }
     async fn body(response: reqwest::Response) -> Result<Value> {
         if !response.status().is_success() {
             bail!("Lit request failed ({})", response.status().as_u16());
@@ -50,19 +73,33 @@ impl Chipotle {
         if let Some(key) = self.keys.get(cid).await {
             return Ok(key);
         }
-        let body = self
-            .execute(crate::actions::PUBLIC_KEY, &json!({"cid":cid}))
-            .await?;
-        let key = body
-            .get("public_key")
-            .and_then(Value::as_str)
-            .context("missing public key")?
-            .to_owned();
-        k256::PublicKey::from_sec1_bytes(&hex::decode(key.trim_start_matches("0x"))?)?;
+        // A key lookup is a pure read, so one retry after a transport failure
+        // (connection reset, timeout) is safe and keeps a single hiccup from
+        // surfacing as `lit_unavailable`.
+        let params = json!({"cid":cid});
+        let body = match self.execute(crate::actions::PUBLIC_KEY, &params).await {
+            Err(e) if Self::transient(&e) => {
+                self.execute(crate::actions::PUBLIC_KEY, &params).await?
+            }
+            result => result?,
+        };
+        let parse = || -> Result<String> {
+            let key = body
+                .get("public_key")
+                .and_then(Value::as_str)
+                .context("missing public key")?
+                .to_owned();
+            k256::PublicKey::from_sec1_bytes(&hex::decode(key.trim_start_matches("0x"))?)?;
+            Ok(key)
+        };
+        let key = Self::observe("public_key", parse())?;
         self.keys.insert(cid.into(), key.clone()).await;
         Ok(key)
     }
     async fn management(&self, path: &str, body: &Value) -> Result<Value> {
+        Self::observe("management", self.management_inner(path, body).await)
+    }
+    async fn management_inner(&self, path: &str, body: &Value) -> Result<Value> {
         let result = Self::body(
             self.http
                 .post(format!("{}/core/v1/{path}", self.base))
@@ -173,6 +210,9 @@ impl Chipotle {
         bail!("usage key revocation unconfirmed")
     }
     pub async fn execute(&self, code: &str, params: &Value) -> Result<Value> {
+        Self::observe("execute", self.execute_inner(code, params).await)
+    }
+    async fn execute_inner(&self, code: &str, params: &Value) -> Result<Value> {
         let body = Self::body(
             self.http
                 .post(format!("{}/core/v1/lit_action", self.base))
