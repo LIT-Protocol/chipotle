@@ -77,10 +77,12 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
     page.getByRole("heading", { name: "Test Stripe Checkout" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Pay $10", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Use an existing passkey", exact: true })
-    .click();
+  // The redirect back is a full page load: the 30-day session resumes the vault
+  // without a second passkey prompt.
   await expect(page.getByText("Access paid through")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Secrets", exact: true }),
+  ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "+ Add secret" }),
   ).toBeEnabled();
@@ -190,7 +192,20 @@ test("passkey onboarding encrypts locally, enrolls an agent, and revokes it", as
     fullPage: true,
   });
   expect(requests.every((body) => !body.includes(stripeFixture))).toBeTruthy();
+  // A refresh keeps the vault open: no passkey prompt, secrets still listed.
+  await page.reload();
+  await expect(
+    page.getByRole("button").filter({ hasText: "BROWSER_SECRET" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Use an existing passkey", exact: true }),
+  ).toHaveCount(0);
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  // Sign-out ends the session on both sides; a refresh stays signed out.
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Use an existing passkey", exact: true }),
+  ).toBeEnabled();
   await page
     .getByRole("button", { name: "Use an existing passkey", exact: true })
     .click();

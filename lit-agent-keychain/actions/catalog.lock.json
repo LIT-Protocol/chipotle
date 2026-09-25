@@ -1,7 +1,7 @@
 {
   "v": 1,
   "templates": {
-    "authority": "a20d9c63fa350b19ac37a1395ad68b8d144225e1317974446726e5894e0ebb79",
+    "authority": "8cdf5f5e17d162a5ffd99568b275096f2c3cc9e903e9f9198b8e578398571022",
     "export": "a32f9c8cfc40ec1504fddd33903990b7494a27076133e2f04165fc2d13200164",
     "github_read_file": "9024d9e1eef9bfe1c992fcbca150d02f09c01bcf9710711cc5cfa093451d00ef",
     "openai_chat": "8ac76ea76dee97ec933b81fcefae2c0f6fd7b480822682a9d8ce624130fd27a2",

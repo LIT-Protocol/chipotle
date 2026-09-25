@@ -13,14 +13,38 @@
   font-weight: 600;
   margin-bottom: 12px;
 }
-.agent-onboarding .agent-secret-choice {
+.agent-checklist {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px 18px 18px;
+  margin: 0 0 22px;
+}
+.agent-checklist legend {
+  font-weight: 500;
+  font-size: 13px;
+  padding: 0 6px;
+}
+.agent-checklist .button-row {
+  margin: 8px 0 4px;
+}
+.agent-checklist > button {
+  margin-top: 14px;
+}
+.form-title {
+  font-weight: 500;
+  font-size: 13px;
+  margin: 0 0 4px;
+}
+.agent-onboarding .agent-secret-choice,
+.agent-checklist .agent-secret-choice {
   display: flex;
   align-items: flex-start;
   gap: 12px;
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
 }
-.agent-onboarding .agent-secret-choice input {
+.agent-onboarding .agent-secret-choice input,
+.agent-checklist .agent-secret-choice input {
   width: 18px;
   height: 18px;
   flex: 0 0 18px;
@@ -613,6 +637,22 @@ nav button.active {
   font-size: 12px;
 }
 
+.reauth-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 18px 20px;
+  margin-bottom: 24px;
+  border: 1px solid var(--orange);
+  border-radius: var(--radius);
+  background: var(--white);
+}
+.reauth-panel p {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+}
 /* Secrets */
 .secret-layout {
   display: grid;
@@ -679,6 +719,12 @@ nav button.active {
 }
 .secret-icon.service {
   color: var(--orange);
+}
+.secret-icon.agent {
+  font-size: 15px;
+}
+.secret-row small code {
+  font-size: 10px;
 }
 .status {
   font-size: 11px;
@@ -1111,7 +1157,7 @@ footer.site-footer {
   }
   nav {
     flex-direction: row;
-    overflow-x: auto;
+    flex-wrap: wrap;
     gap: 4px;
   }
   nav button {

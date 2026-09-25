@@ -129,7 +129,7 @@ export async function verifyOwnerProof(
       session.network === authority.network &&
         session.registry === authority.registry,
     );
-    verifyWindow(session.issuedAt, session.expiresAt, now, 900);
+    verifyWindow(session.issuedAt, session.expiresAt, now, 3600);
     requireThat(challenge.expiresAt <= session.expiresAt);
     requireThat(typeof proof.token === "string" && proof.token.length <= 8192);
     const jwks = await jsonFetch(

@@ -149,6 +149,10 @@ test("owner can discover Add agent immediately after sign-in in the actual app",
   await expect(
     page.getByRole("heading", { name: "Secrets", exact: true }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Agents", exact: true }),
+  ).toBeVisible();
   const add = page.getByRole("button", { name: "+ Add agent", exact: true });
   await expect(add).toBeVisible();
   await expect(page.getByText("Execution and account access")).toHaveCount(0);
@@ -205,13 +209,70 @@ test("owner can discover Add agent immediately after sign-in in the actual app",
   );
   await page.getByRole("button", { name: "Done", exact: true }).click();
   await expect(add).toBeFocused();
-  await page.getByRole("button", { name: /ONE.*1 agent/ }).click();
+  // The Agents page inverts the Secrets listing: the agent row leads to its secrets.
+  await page.getByRole("button", { name: /Existing agent.*1 secret/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "Existing agent", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Accessible secrets", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".agent-row").getByText("ONE")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Revoke", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Download agent config", exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "+ Grant secrets", exact: true }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "Secrets", exact: true }).click();
+  await page.getByRole("button", { name: /ONE.*1 agent/ }).click();
+  await expect(
+    page.getByRole("button", { name: "Revoke", exact: true }),
+  ).toBeVisible();
+  // An agent approved elsewhere is offered as a checklist instead of asking
+  // for its key again; it disappears once approved for this secret.
+  await expect(
+    page.getByRole("group", { name: "Approve your other agents" }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: /TWO/ }).click();
+  const checklist = page.getByRole("group", {
+    name: "Approve your other agents",
+  });
+  await expect(checklist).toBeVisible();
+  const approveSelected = checklist.getByRole("button", {
+    name: /Approve .*selected agent/,
+  });
+  await expect(approveSelected).toBeDisabled();
+  await checklist.getByRole("button", { name: "Select all" }).click();
+  await expect(
+    checklist.getByRole("checkbox", { name: /Existing agent/ }),
+  ).toBeChecked();
+  await expect(approveSelected).toHaveText("Approve 1 selected agent");
+  await approveSelected.click();
+  await expect(
+    page.getByRole("button", { name: /TWO.*1 agent/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("group", { name: "Approve your other agents" }),
+  ).toHaveCount(0);
+  // A known key keeps its name: agents are identified by key, never by label.
+  await page.getByLabel("Agent public key", { exact: true }).fill(key);
+  const nameField = page.getByLabel("Agent name", { exact: true });
+  await expect(nameField).toHaveValue("Existing agent");
+  await expect(nameField).toHaveAttribute("readonly", "");
+  await expect(
+    page.getByText(/This key is already approved as Existing agent/),
+  ).toBeVisible();
+  await page.getByLabel("Agent public key", { exact: true }).fill("");
+  await expect(nameField).not.toHaveAttribute("readonly", "");
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
+  await page.getByRole("button", { name: /Existing agent.*2 secrets/ }).click();
+  await expect(
+    page.getByRole("button", { name: "+ Grant secrets", exact: true }),
+  ).toBeDisabled();
   expect(errors).toEqual([]);
 });
 

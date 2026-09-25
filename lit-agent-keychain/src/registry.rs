@@ -382,7 +382,7 @@ pub async fn list(session: Session, after: Option<&str>, pool: &State<PgPool>) -
     if after.is_some_and(|cursor| !valid_hex(cursor, 32)) {
         return Err(api::err(Status::BadRequest, "invalid_cursor"));
     }
-    let mut rows:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('secretId',s.id,'name',s.name,'actionCid',s.action_cid,'version',s.current_version,'release',s.manifest->'document'->'manifest'->'release','disabled',p.signed->'document'->'disabled','expiresAt',p.signed->'document'->'expiresAt','agentCount',jsonb_array_length(p.signed->'document'->'grants')) FROM kc_secrets s JOIN kc_registry r ON r.scope='secret:'||s.id JOIN kc_policies p ON p.hash=r.policy_hash WHERE s.vault_id=$1 AND s.id>$2 ORDER BY s.id LIMIT 201")
+    let mut rows:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('secretId',s.id,'name',s.name,'actionCid',s.action_cid,'version',s.current_version,'release',s.manifest->'document'->'manifest'->'release','disabled',p.signed->'document'->'disabled','expiresAt',p.signed->'document'->'expiresAt','agentCount',jsonb_array_length(p.signed->'document'->'grants'),'agents',p.signed->'document'->'grants') FROM kc_secrets s JOIN kc_registry r ON r.scope='secret:'||s.id JOIN kc_policies p ON p.hash=r.policy_hash WHERE s.vault_id=$1 AND s.id>$2 ORDER BY s.id LIMIT 201")
         .bind(&session.vault_id).bind(after.unwrap_or("")).fetch_all(pool.inner()).await.map_err(api::internal)?;
     let next = if rows.len() > 200 {
         rows.pop();

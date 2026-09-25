@@ -9,7 +9,7 @@ Everything in Keychain hinges on who can authorize an agent. The Lit action rele
 
 <Tabs>
   <Tab title="Google">
-    Your browser first generates a fresh Ed25519 session key that lives only in memory and expires after ten minutes. A hash of that public key and a random value is passed to Google as the OpenID nonce, so the ID token Google returns is bound to this specific session key.
+    Your browser first generates a fresh Ed25519 session key that lives only in memory and expires after about fifty minutes, within the lifetime of the Google ID token. When it expires, the vault stays open and Keychain asks you to approve with Google again before the next change. A hash of that public key and a random value is passed to Google as the OpenID nonce, so the ID token Google returns is bound to this specific session key.
 
     When you approve something, your browser signs that exact object with the session key and sends the signature together with the Google ID token to an immutable Lit Action running inside a hardware enclave. The action fetches Google's public keys, verifies the token's signature, issuer, audience, subject, expiry and nonce, and only then signs a durable receipt for that object. Keychain stores the receipt. It never stores your Google token, and the token cannot mint new receipts after it expires.
 

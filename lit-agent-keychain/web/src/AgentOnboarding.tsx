@@ -5,6 +5,41 @@ import {
   type AgentApprovalClient,
 } from "./agent-onboarding.ts";
 
+export type KnownAgent = { key: string; label: string };
+/** Reuse an already approved agent instead of asking it for its key again. */
+export function AgentPicker({
+  agents,
+  selectedKey,
+  onPick,
+}: {
+  agents: KnownAgent[];
+  selectedKey: string;
+  onPick: (agent: KnownAgent) => void;
+}) {
+  if (agents.length === 0) return null;
+  const current = agents.some((a) => a.key === selectedKey) ? selectedKey : "";
+  return (
+    <label>
+      Approved agent
+      <select
+        value={current}
+        onChange={(e) => {
+          const picked = agents.find((a) => a.key === e.target.value);
+          if (picked) onPick(picked);
+        }}
+      >
+        <option value="">
+          Choose an approved agent, or enter a new one below
+        </option>
+        {agents.map((a) => (
+          <option key={a.key} value={a.key}>
+            {a.label} · {a.key.slice(0, 8)}…{a.key.slice(-6)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
 type SecretSummary = {
   secretId: string;
   name: string;
@@ -20,8 +55,16 @@ export function AgentOnboarding({
   onApproved,
   onDownload,
   onBusyChange,
+  initialName = "",
+  initialKey = "",
+  knownAgents = [],
 }: {
+  /** Agents already approved somewhere in the vault, offered as a shortcut. */
+  knownAgents?: KnownAgent[];
   onBusyChange?: (busy: boolean) => void;
+  /** Prefilled from the Agents page to grant an existing agent more secrets. */
+  initialName?: string;
+  initialKey?: string;
   client: AgentApprovalClient;
   secrets: SecretSummary[];
   onClose: () => void;
@@ -29,8 +72,14 @@ export function AgentOnboarding({
   onApproved: () => Promise<void>;
   onDownload: (label: string, bundles: SecretBundle[]) => void;
 }) {
-  const [name, setName] = useState("");
-  const [key, setKey] = useState("");
+  const [name, setName] = useState(initialName);
+  const [key, setKey] = useState(initialKey);
+  const existing = !!initialKey;
+  // Agents are identified by key: a key the vault already knows keeps its name.
+  const known = existing
+    ? undefined
+    : knownAgents.find((a) => a.key === key.trim().toLowerCase());
+  const label = known ? known.label : name;
   const [ids, setIds] = useState<string[]>([]);
   const [approved, setApproved] = useState<SecretBundle[]>([]);
   const [error, setError] = useState("");
@@ -48,11 +97,12 @@ export function AgentOnboarding({
       aria-labelledby="add-agent-title"
     >
       <h2 id="add-agent-title" tabIndex={-1}>
-        Add agent
+        {existing ? `Grant secrets to ${initialName}` : "Add agent"}
       </h2>
       <p>
-        Already have an agent public key? Add it here, choose what it can use,
-        and it can discover approved secrets on its next request.
+        {existing
+          ? "Choose more secrets for this agent. It discovers new approvals on its next request."
+          : "Already have an agent public key? Add it here, choose what it can use, and it can discover approved secrets on its next request."}
       </p>
       <form
         onSubmit={async (e) => {
@@ -64,7 +114,7 @@ export function AgentOnboarding({
           setError("");
           setAttempted(true);
           try {
-            const result = await approveAgentSecrets(client, key, name, ids);
+            const result = await approveAgentSecrets(client, key, label, ids);
             setApproved(result.approved);
             setError(result.error || "");
             setComplete(!result.error);
@@ -87,19 +137,36 @@ export function AgentOnboarding({
           }
         }}
       >
-        <fieldset disabled={busy || attempted}>
+        <fieldset disabled={busy || attempted || existing}>
           <legend>1. Identify your agent</legend>
+          {!existing && (
+            <AgentPicker
+              agents={knownAgents}
+              selectedKey={key.trim().toLowerCase()}
+              onPick={(a) => {
+                setName(a.label);
+                setKey(a.key);
+              }}
+            />
+          )}
           <label>
             Agent name
             <input
-              autoFocus
-              value={name}
+              autoFocus={!existing}
+              value={label}
               onChange={(e) => setName(e.target.value)}
+              readOnly={!!known}
               required
               maxLength={128}
               placeholder="Research assistant"
             />
           </label>
+          {known && (
+            <p className="hint">
+              This key is already approved as {known.label}. Agents are
+              identified by their key, so the name is kept.
+            </p>
+          )}
           <label>
             Agent public key
             <input
@@ -154,7 +221,11 @@ export function AgentOnboarding({
             any before approving.
           </p>
           {secrets.length === 0 && (
-            <p>Add a secret before approving an agent.</p>
+            <p>
+              {existing
+                ? "This agent already has access to every secret."
+                : "Add a secret before approving an agent."}
+            </p>
           )}
           {secrets.map((s) => {
             const unavailable = !isEligible(s);
@@ -239,7 +310,7 @@ export function AgentOnboarding({
                 disabled={busy}
                 onClick={() => {
                   try {
-                    onDownload(name, approved);
+                    onDownload(label, approved);
                     setDownloaded(true);
                   } catch (e) {
                     setError(
@@ -262,7 +333,7 @@ export function AgentOnboarding({
         <div className="button-row">
           {!complete && (
             <button
-              disabled={busy || !ids.length || !name.trim() || !key}
+              disabled={busy || !ids.length || !label.trim() || !key}
               type="submit"
             >
               {attempted
@@ -270,7 +341,7 @@ export function AgentOnboarding({
                 : "Approve selected secrets"}
             </button>
           )}
-          {secrets.length === 0 && (
+          {secrets.length === 0 && !existing && (
             <button type="button" onClick={onAddSecret}>
               Add secret
             </button>
@@ -286,8 +357,8 @@ export function AgentOnboarding({
         </div>
         {attempted && (
           <p className="hint">
-            Closing does not undo saved approvals. Use Revoke on each secret's
-            page to remove access.
+            Closing does not undo saved approvals. Use Revoke on the agent's
+            page or on each secret's page to remove access.
           </p>
         )}
       </form>
