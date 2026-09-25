@@ -613,6 +613,22 @@ nav button.active {
   font-size: 12px;
 }
 
+.reauth-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 18px 20px;
+  margin-bottom: 24px;
+  border: 1px solid var(--orange);
+  border-radius: var(--radius);
+  background: var(--white);
+}
+.reauth-panel p {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+}
 /* Secrets */
 .secret-layout {
   display: grid;

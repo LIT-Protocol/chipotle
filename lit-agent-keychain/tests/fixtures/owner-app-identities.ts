@@ -8,6 +8,12 @@ export const walletIdentity = () => ({ owner });
 export const googleSession = () => {
   throw new Error("Google is not used by this fixture");
 };
+export const passkeyIdentity = () => ({ owner, signer: async () => ({}) });
+export class GoogleSessionExpired extends Error {}
+export const saveSession = () => {};
+export const loadSession = () => null;
+export const clearSession = () => {};
+export const sessionAlive = async () => false;
 const bundles: Record<string, SecretBundle> = Object.fromEntries(
   ["ONE", "TWO"].map((name) => [
     name,

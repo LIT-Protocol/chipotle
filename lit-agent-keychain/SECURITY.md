@@ -142,7 +142,7 @@ the same plan headroom as signed enrolment. An old ID token cannot mint new rece
 expiry. Durable ciphertext/permission receipts survive token expiration; they are not
 reusable management sessions. Keychain sessions only authorize storage/UI operations
 and never replace a receipt. They are HttpOnly, SameSite=Strict, Secure on HTTPS and
-expire after 12 hours. Credential changes invalidate existing metadata sessions.
+expire after 30 days (persistent cookie; a page refresh keeps the vault open). Credential changes invalidate existing metadata sessions.
 
 Deleting a secret is a session operation without a receipt. It removes the registry
 entry every agent request is checked against, all signed policies and every

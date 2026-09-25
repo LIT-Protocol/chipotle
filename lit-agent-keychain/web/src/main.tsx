@@ -34,8 +34,9 @@ import {
   type Grant,
   type SecretBundle,
   type AgentConfig,
+  type OwnerSigner,
 } from "../../sdk/src/index.ts";
-import { jsonFetch } from "../../protocol/client-http.ts";
+import { jsonFetch, HttpError } from "../../protocol/client-http.ts";
 import { ownerSchema, type Owner } from "../../protocol/schema.ts";
 import {
   ownerClient,
@@ -43,6 +44,12 @@ import {
   createPasskey,
   discoverPasskey,
   googleSession,
+  passkeyIdentity,
+  saveSession,
+  loadSession,
+  clearSession,
+  sessionAlive,
+  GoogleSessionExpired,
   LIT_URL,
   type Identity,
 } from "./identities.ts";
@@ -55,7 +62,7 @@ import {
 } from "./Landing.tsx";
 import { NPX_KEYCHAIN } from "./version.ts";
 import { AddSecret, ActionDocs } from "./AddSecret.tsx";
-import { AgentOnboarding } from "./AgentOnboarding.tsx";
+import { AgentOnboarding, AgentPicker } from "./AgentOnboarding.tsx";
 import { downloadAgentConfig } from "./agent-config.ts";
 import "@rainbow-me/rainbowkit/styles.css";
 import "./style.css";
@@ -193,14 +200,33 @@ function App() {
   const [lifetimeCap, setLifetimeCap] = useState<number | null>(null);
   const [recoveryOwners, setRecoveryOwners] = useState<Owner[]>([]);
   const [newWallet, setNewWallet] = useState("");
+  // The signer behind the open vault. Swappable so an expired Google approval
+  // session, or a wallet reconnected after a refresh, renews without sign-out.
+  const signerRef = useRef<OwnerSigner>();
+  const [reauth, setReauth] = useState(false);
   const { address } = useAccount();
   const { signTypedDataAsync } = useSignTypedData();
+  const wallet = useRef({ address, signTypedDataAsync });
+  wallet.current = { address, signTypedDataAsync };
   const { disconnect } = useDisconnect();
   useEffect(() => {
     jsonFetch("/api/config")
       .then(setSettings)
       .catch(() => setError("Unable to connect to Keychain."));
   }, []);
+  const signOutLocally = () => {
+    clearSession();
+    if (client) client.lit.usageApiKey = undefined;
+    signerRef.current = undefined;
+    setReauth(false);
+    setClient(undefined);
+    setTab("secrets");
+    setAddingAgent(false);
+    setSelectedAgent("");
+    setSelected(undefined);
+    setSecrets([]);
+    setBilling(undefined);
+  };
   const work = async (label: string, operation: () => Promise<void>) => {
     if (busy) return;
     setBusy(label);
@@ -209,11 +235,112 @@ function App() {
     try {
       await operation();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Operation failed");
+      if (e instanceof HttpError && e.status === 401 && client) {
+        signOutLocally();
+        setNotice("Your session expired. Sign in again.");
+      } else if (e instanceof GoogleSessionExpired) {
+        setReauth(true);
+        setError(e.message);
+      } else setError(e instanceof Error ? e.message : "Operation failed");
     } finally {
       setBusy("");
     }
   };
+  /** Build the vault client around a swappable signer and remember which
+   *  credential opened it, so a refresh can resume the server session. */
+  const openClient = (identity: Identity, authority?: Authority) => {
+    signerRef.current = identity.signer;
+    setReauth(false);
+    const c = ownerClient(
+      {
+        owner: identity.owner,
+        signer: (challenge) => {
+          const signer = signerRef.current;
+          if (!signer) throw new GoogleSessionExpired();
+          return signer(challenge);
+        },
+      },
+      settings.network,
+      authority || recovery,
+    );
+    c.progress = setBusy;
+    saveSession(identity.owner, c.authority);
+    return c;
+  };
+  /** Signer for a credential remembered from a previous sign-in. Google has no
+   *  durable proof, so it stays empty until the owner approves with Google again. */
+  const restoredSigner = (owner: Owner): OwnerSigner | undefined => {
+    if (owner.kind === "passkey") return passkeyIdentity(owner).signer;
+    if (owner.kind === "wallet")
+      return (challenge) => {
+        const w = wallet.current;
+        if (!w.address || w.address.toLowerCase() !== owner.address)
+          throw new Error(
+            `Connect the wallet ${brief(owner.address)} to approve changes.`,
+          );
+        return walletIdentity(w.address, w.signTypedDataAsync as any).signer(
+          challenge,
+        );
+      };
+    return undefined;
+  };
+  // Resume an open vault after a refresh: the server session cookie is the proof;
+  // the stored descriptors only say which vault and credential to rebuild.
+  useEffect(() => {
+    if (!settings || client) return;
+    const stored = loadSession();
+    if (!stored) return;
+    let cancelled = false;
+    void (async () => {
+      setBusy("Resuming your vault…");
+      try {
+        if (!(await sessionAlive(stored))) {
+          clearSession();
+          if (!cancelled) setNotice("Your session expired. Sign in again.");
+          return;
+        }
+        signerRef.current = restoredSigner(stored.owner);
+        setReauth(false);
+        const c = ownerClient(
+          {
+            owner: stored.owner,
+            signer: (challenge) => {
+              const signer = signerRef.current;
+              if (!signer) throw new GoogleSessionExpired();
+              return signer(challenge);
+            },
+          },
+          settings.network,
+          stored.authority,
+        );
+        c.progress = setBusy;
+        const { usageApiKey } = await c.api("/api/execution-key", {
+          method: "POST",
+        });
+        c.lit.usageApiKey = usageApiKey;
+        if (cancelled) return;
+        setClient(c);
+        await refresh(c);
+        const policy = await c.getCredentials();
+        setRecoveryOwners(policy?.document.owners || [c.authority.owner]);
+      } catch (e) {
+        if (cancelled) return;
+        clearSession();
+        setClient(undefined);
+        setError(
+          e instanceof Error
+            ? `Could not resume your vault: ${e.message}`
+            : "Could not resume your vault. Sign in again.",
+        );
+      } finally {
+        if (!cancelled) setBusy("");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings]);
   const refresh = async (c = client) => {
     if (c) {
       const [stored, billing] = await Promise.all([
@@ -226,8 +353,7 @@ function App() {
   };
   const signIn = async (identity: Identity, authority?: Authority) =>
     work("Verifying owner authorization…", async () => {
-      const c = ownerClient(identity, settings.network, authority || recovery);
-      c.progress = setBusy;
+      const c = openClient(identity, authority);
       await c.login();
       setBusy("Loading your vault…");
       setClient(c);
@@ -428,14 +554,7 @@ function App() {
               onClick={() =>
                 work("Signing out…", async () => {
                   await fetch("/auth/logout", { method: "POST" });
-                  client.lit.usageApiKey = undefined;
-                  setClient(undefined);
-                  setTab("secrets");
-                  setAddingAgent(false);
-                  setSelectedAgent("");
-                  setSelected(undefined);
-                  setSecrets([]);
-                  setBilling(undefined);
+                  signOutLocally();
                   disconnect();
                 })
               }
@@ -506,12 +625,7 @@ function App() {
                   onClick={() =>
                     work("Creating a passkey…", async () => {
                       const identity = await createPasskey("My Keychain");
-                      const c = ownerClient(
-                        identity,
-                        settings.network,
-                        recovery,
-                      );
-                      c.progress = setBusy;
+                      const c = openClient(identity);
                       await c.login();
                       setBusy("Loading your vault…");
                       setClient(c);
@@ -529,14 +643,12 @@ function App() {
                   onClick={() =>
                     work("Finding your passkey…", async () => {
                       const found = await discoverPasskey(recovery);
-                      const c = ownerClient(
+                      // An explicitly loaded backup selects the vault, even if lookup
+                      // finds an empty duplicate rooted at the recovery credential.
+                      const c = openClient(
                         found.identity,
-                        settings.network,
-                        // An explicitly loaded backup selects the vault, even if lookup
-                        // finds an empty duplicate rooted at the recovery credential.
                         recovery || found.authority,
                       );
-                      c.progress = setBusy;
                       await c.login();
                       setBusy("Loading your vault…");
                       setClient(c);
@@ -627,6 +739,40 @@ function App() {
             </p>
           </aside>
           <main className="dashboard">
+            {reauth && client.authority.owner.kind === "google" && (
+              <section className="reauth-panel" role="alert">
+                <div>
+                  <strong>Approve with Google again</strong>
+                  <p className="muted">
+                    Your vault stays open. Google approvals last about fifteen
+                    minutes; sign in with Google once more to keep making
+                    changes.
+                  </p>
+                </div>
+                {settings?.googleClientId && (
+                  <GoogleButton
+                    clientId={settings.googleClientId}
+                    network={settings.network}
+                    onIdentity={(identity) => {
+                      if (
+                        JSON.stringify(identity.owner) !==
+                        JSON.stringify(client.authority.owner)
+                      ) {
+                        setError(
+                          "That Google account does not own this vault. Sign in with the account you used before.",
+                        );
+                        return;
+                      }
+                      signerRef.current = identity.signer;
+                      setReauth(false);
+                      setError("");
+                      setNotice("Google approval renewed. Retry your change.");
+                    }}
+                    onError={setError}
+                  />
+                )}
+              </section>
+            )}
             <section className="billing-panel" aria-label="Subscription">
               <div>
                 <strong>
@@ -1029,6 +1175,19 @@ function App() {
                             });
                           }}
                         >
+                          <AgentPicker
+                            agents={agents.filter(
+                              (a) =>
+                                !selected.policy.document.grants.some(
+                                  (g) => g.agentPublicKey === a.key,
+                                ),
+                            )}
+                            selectedKey={agentKey.trim().toLowerCase()}
+                            onPick={(a) => {
+                              setAgentName(a.label);
+                              setAgentKey(a.key);
+                            }}
+                          />
                           <label>
                             Agent name
                             <input
@@ -1199,6 +1358,7 @@ function App() {
                     }
                     initialName={addingAgent.name}
                     initialKey={addingAgent.key}
+                    knownAgents={agents}
                     onBusyChange={(active) =>
                       setBusy(active ? "Approving selected secrets…" : "")
                     }

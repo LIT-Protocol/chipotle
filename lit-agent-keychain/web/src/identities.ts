@@ -20,6 +20,46 @@ import {
 } from "../../protocol/crypto.ts";
 import { jsonFetch } from "../../protocol/client-http.ts";
 export type Identity = { owner: Owner; signer: OwnerSigner };
+/** Thrown by a signer whose Google approval session has lapsed; the vault stays
+ *  open and the app asks for a fresh Google approval before retrying. */
+export class GoogleSessionExpired extends Error {
+  constructor() {
+    super("Google approval session expired. Approve with Google again.");
+    this.name = "GoogleSessionExpired";
+  }
+}
+/** Public descriptors only: which credential signed in and the vault it opened.
+ *  The server session cookie is the actual proof; this lets a refresh rebuild the
+ *  client without a new sign-in. Private keys and Google tokens are never stored. */
+const SESSION_KEY = "keychain.session";
+export type StoredSession = { v: 2; owner: Owner; authority: Authority };
+export function saveSession(owner: Owner, authority: Authority) {
+  const session: StoredSession = { v: 2, owner, authority };
+  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+}
+export function loadSession(): StoredSession | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed?.v !== 2 || !parsed.owner || !parsed.authority) return null;
+    return parsed as StoredSession;
+  } catch {
+    return null;
+  }
+}
+export function clearSession() {
+  localStorage.removeItem(SESSION_KEY);
+}
+/** Whether the server still honours the session cookie for the stored vault. */
+export async function sessionAlive(session: StoredSession): Promise<boolean> {
+  try {
+    const me = await jsonFetch("/api/me", { credentials: "include" });
+    return me?.vaultId === digest(session.authority);
+  } catch {
+    return false;
+  }
+}
 export const LIT_URL =
   import.meta.env.VITE_LIT_API_URL || "https://api.chipotle.litprotocol.com";
 export function authorityFor(owner: Owner, network: string): Authority {
@@ -173,7 +213,10 @@ export function googleSession(network: string) {
     publicKey: agentPublicKey(privateKey),
     nonce: randomId(),
     issuedAt: now,
-    expiresAt: now + 600,
+    // The pinned authority action caps a Google approval session at 15 minutes
+    // (protocol/identity.ts, bundled into the template; raising it is a release).
+    // Use nearly all of it; expiry renews in-app without closing the vault.
+    expiresAt: now + 840,
     scope: "authorize",
   };
   return {
@@ -190,7 +233,7 @@ export function googleSession(network: string) {
         owner,
         signer: async (challenge) => {
           if (challenge.expiresAt > session.expiresAt)
-            throw new Error("Google approval session expired. Sign in again.");
+            throw new GoogleSessionExpired();
           return {
             kind: "google",
             owner,

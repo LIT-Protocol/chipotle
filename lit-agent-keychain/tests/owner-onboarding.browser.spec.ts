@@ -232,6 +232,32 @@ test("owner can discover Add agent immediately after sign-in in the actual app",
   await expect(
     page.getByRole("button", { name: "Revoke", exact: true }),
   ).toBeVisible();
+  // An agent approved elsewhere is offered as a dropdown instead of asking
+  // for its key again; it disappears once approved for this secret.
+  await expect(
+    page.getByRole("combobox", { name: /Approved agent/ }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: /TWO/ }).click();
+  await page.getByRole("combobox", { name: /Approved agent/ }).selectOption({
+    label: `Existing agent · ${key.slice(0, 8)}…${key.slice(-6)}`,
+  });
+  await expect(page.getByLabel("Agent name", { exact: true })).toHaveValue(
+    "Existing agent",
+  );
+  await expect(
+    page.getByLabel("Agent public key", { exact: true }),
+  ).toHaveValue(key);
+  await page
+    .getByRole("button", { name: "Approve agent", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: /TWO.*1 agent/ }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
+  await page.getByRole("button", { name: /Existing agent.*2 secrets/ }).click();
+  await expect(
+    page.getByRole("button", { name: "+ Grant secrets", exact: true }),
+  ).toBeDisabled();
   expect(errors).toEqual([]);
 });
 

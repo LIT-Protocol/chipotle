@@ -5,6 +5,41 @@ import {
   type AgentApprovalClient,
 } from "./agent-onboarding.ts";
 
+export type KnownAgent = { key: string; label: string };
+/** Reuse an already approved agent instead of asking it for its key again. */
+export function AgentPicker({
+  agents,
+  selectedKey,
+  onPick,
+}: {
+  agents: KnownAgent[];
+  selectedKey: string;
+  onPick: (agent: KnownAgent) => void;
+}) {
+  if (agents.length === 0) return null;
+  const current = agents.some((a) => a.key === selectedKey) ? selectedKey : "";
+  return (
+    <label>
+      Approved agent
+      <select
+        value={current}
+        onChange={(e) => {
+          const picked = agents.find((a) => a.key === e.target.value);
+          if (picked) onPick(picked);
+        }}
+      >
+        <option value="">
+          Choose an approved agent, or enter a new one below
+        </option>
+        {agents.map((a) => (
+          <option key={a.key} value={a.key}>
+            {a.label} · {a.key.slice(0, 8)}…{a.key.slice(-6)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
 type SecretSummary = {
   secretId: string;
   name: string;
@@ -22,7 +57,10 @@ export function AgentOnboarding({
   onBusyChange,
   initialName = "",
   initialKey = "",
+  knownAgents = [],
 }: {
+  /** Agents already approved somewhere in the vault, offered as a shortcut. */
+  knownAgents?: KnownAgent[];
   onBusyChange?: (busy: boolean) => void;
   /** Prefilled from the Agents page to grant an existing agent more secrets. */
   initialName?: string;
@@ -96,6 +134,16 @@ export function AgentOnboarding({
       >
         <fieldset disabled={busy || attempted || existing}>
           <legend>1. Identify your agent</legend>
+          {!existing && (
+            <AgentPicker
+              agents={knownAgents}
+              selectedKey={key.trim().toLowerCase()}
+              onPick={(a) => {
+                setName(a.label);
+                setKey(a.key);
+              }}
+            />
+          )}
           <label>
             Agent name
             <input
