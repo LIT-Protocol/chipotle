@@ -260,7 +260,11 @@ See [BILLING.md](BILLING.md) for Stripe setup and the custom-plan operator comma
 
 Google-only sign-in requires `GOOGLE_CLIENT_ID` and the frontend origin registered
 on that Google OAuth client. Its callback uses Google Identity Services' nonce
-parameter. Google session keys and ID tokens remain in browser memory and expire.
+parameter. Fresh Google login creates a Lit-signed 30-day device approval, persisted with its
+session key in localStorage and cleared on sign-out. Reloading restores approvals
+without a Google prompt. Secrets pinned to older authority releases still need a
+recent Google sign-in; their original token/session proof lasts 10 minutes. Google
+ID tokens are retained locally for that legacy path, never in the database.
 `VITE_WALLETCONNECT_PROJECT_ID` enables WalletConnect options at build time; injected
 wallets work without it. ERC-1271/6492 contract wallets are not supported in this release.
 

@@ -44,6 +44,7 @@ import {
   createPasskey,
   discoverPasskey,
   googleSession,
+  restoreGoogleIdentity,
   passkeyIdentity,
   saveSession,
   loadSession,
@@ -126,20 +127,23 @@ function GoogleButton({
   const callbacks = useRef({ onIdentity, onError });
   callbacks.current = { onIdentity, onError };
   useEffect(() => {
-    const session = googleSession(network);
+    let session = googleSession(network);
     let active = true;
     const init = () => {
       const google = (window as any).google;
       if (!active || !google || !ref.current) return;
+      // An earlier popup may still be completing; its callback retains its key.
+      session = googleSession(network);
+      const pending = session;
       google.accounts.id.initialize({
         client_id: clientId,
-        nonce: session.nonce,
+        nonce: pending.nonce,
         auto_select: false,
         callback: (response: { credential: string }) => {
           try {
             if (active)
               callbacks.current.onIdentity(
-                session.identity(response.credential, clientId),
+                pending.identity(response.credential, clientId),
               );
           } catch {
             callbacks.current.onError(
@@ -165,9 +169,13 @@ function GoogleButton({
         callbacks.current.onError("Unable to load Google sign-in");
       document.head.appendChild(script);
     }
-    // The selected identity owns its in-memory session until sign-out. Never persist the token/key.
+    // Keep the nonce window fresh if the sign-in page is left open.
+    const refresh = window.setInterval(init, 4 * 60 * 1000);
+    // identity() copies the selected key; this pending nonce owns only its copy.
     return () => {
       active = false;
+      window.clearInterval(refresh);
+      session.destroy();
     };
   }, [clientId, network]);
   return <div ref={ref} className="google-button" />;
@@ -256,10 +264,10 @@ function App() {
     const c = ownerClient(
       {
         owner: identity.owner,
-        signer: (challenge) => {
+        signer: (challenge, authorityRelease) => {
           const signer = signerRef.current;
           if (!signer) throw new GoogleSessionExpired();
-          return signer(challenge);
+          return signer(challenge, authorityRelease);
         },
       },
       settings.network,
@@ -269,8 +277,7 @@ function App() {
     saveSession(identity.owner, c.authority);
     return c;
   };
-  /** Signer for a credential remembered from a previous sign-in. Google has no
-   *  durable proof, so it stays empty until the owner approves with Google again. */
+  /** Restore the selected credential, including a Google device approval. */
   const restoredSigner = (owner: Owner): OwnerSigner | undefined => {
     if (owner.kind === "passkey") return passkeyIdentity(owner).signer;
     if (owner.kind === "wallet")
@@ -284,7 +291,7 @@ function App() {
           challenge,
         );
       };
-    return undefined;
+    return restoreGoogleIdentity(owner, settings.network)?.signer;
   };
   // Resume an open vault after a refresh: the server session cookie is the proof;
   // the stored descriptors only say which vault and credential to rebuild.
@@ -306,10 +313,10 @@ function App() {
         const c = ownerClient(
           {
             owner: stored.owner,
-            signer: (challenge) => {
+            signer: (challenge, authorityRelease) => {
               const signer = signerRef.current;
               if (!signer) throw new GoogleSessionExpired();
-              return signer(challenge);
+              return signer(challenge, authorityRelease);
             },
           },
           settings.network,
@@ -357,6 +364,7 @@ function App() {
     work("Verifying owner authorization…", async () => {
       const c = openClient(identity, authority);
       await c.login();
+      identity.remember?.(c.googleApproval);
       setBusy("Loading your vault…");
       setClient(c);
       await c.api("/api/billing/refresh", { method: "POST" });
@@ -747,9 +755,8 @@ function App() {
                 <div>
                   <strong>Approve with Google again</strong>
                   <p className="muted">
-                    Your vault stays open. Google approvals last about fifty
-                    minutes; sign in with Google once more to keep making
-                    changes.
+                    Sign in again to approve this change. Device approvals last
+                    30 days; older secrets require a recent Google sign-in.
                   </p>
                 </div>
                 {settings?.googleClientId && (
@@ -766,10 +773,15 @@ function App() {
                         );
                         return;
                       }
-                      signerRef.current = identity.signer;
-                      setReauth(false);
-                      setError("");
-                      setNotice("Google approval renewed. Retry your change.");
+                      void work("Renewing Google approval…", async () => {
+                        signerRef.current = identity.signer;
+                        await client.login();
+                        identity.remember?.(client.googleApproval);
+                        setReauth(false);
+                        setNotice(
+                          "Google approval renewed. Retry your change.",
+                        );
+                      });
                     }}
                     onError={setError}
                   />

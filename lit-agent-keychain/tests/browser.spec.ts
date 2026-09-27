@@ -260,7 +260,38 @@ test("Google-only sign-in verifies a nonce-bound JWT without a wallet or passkey
   await expect(
     page.getByRole("heading", { name: "GOOGLE_SECRET", exact: true }),
   ).toBeVisible();
+  // Restore the durable approval without needing the short-lived Google token.
+  await page.evaluate(() => {
+    const device = JSON.parse(
+      localStorage.getItem("keychain.google-approval")!,
+    );
+    if (!device.issued) throw new Error("No durable device approval");
+    device.token = "expired-token-unavailable";
+    localStorage.setItem("keychain.google-approval", JSON.stringify(device));
+  });
+  await page.reload();
+  await page.getByRole("button").filter({ hasText: "GOOGLE_SECRET" }).click();
+  const agent = Keychain.generateKey();
+  await page
+    .getByLabel("Agent name", { exact: true })
+    .fill("Google device agent");
+  await page
+    .getByLabel("Agent public key", { exact: true })
+    .fill(agent.publicKey);
+  await page
+    .getByRole("button", { name: "Approve agent", exact: true })
+    .click();
+  await expect(
+    page.getByText("Google device agent", { exact: true }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => localStorage.getItem("keychain.google-approval") === null,
+      ),
+    )
+    .toBe(true);
   await page
     .getByRole("button", { name: "Continue with Google", exact: true })
     .click();

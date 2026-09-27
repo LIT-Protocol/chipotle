@@ -123,8 +123,18 @@ complete after its authorization window if already started.
 - Google: fixed Google JWKS HTTPS URL, RS256, issuer, exact audience/subject, expiry,
   issued time, optional authorized-party check and nonce binding. A 10-minute client
   session's Ed25519 public key, random nonce, scope, network, registry and lifetime
-  are hashed into the Google nonce. Each object approval proves session-key possession.
-  Google account issuance/recovery is accepted custody. Email is not the identity.
+  are hashed into the Google nonce. A successful fresh Google login also issues a
+  domain-separated device approval signed by that exact authority release. It binds
+  the owner, vault and session key, with an expiry 30 days after the nonce session
+  began. Each approval proves session-key possession and rechecks owner membership.
+  A device approval cannot renew itself or extend its expiry. It needs no Google
+  JWKS fetch after issuance, so Google token expiry/key rotation do not end it.
+  The browser persists the device key, approval and original token in localStorage;
+  sign-out clears them. Access to that browser storage confers the remaining device
+  authority. Google account issuance/recovery is accepted custody. Email is not the identity.
+  Archived authorities retain their original checks and receive the 10-minute
+  Google proof (compatible with their 15-minute maximum); after that window the UI
+  requests fresh Google sign-in for older secrets. Existing secrets are not migrated.
 
 The immutable authorization action signs a domain-separated receipt for an exact
 object while the owner proof is valid. An owner proof covers either one document or a
@@ -138,9 +148,10 @@ batch (or vice versa), changes the signed digest and is refused. To fetch a new
 secret's encryption key before its manifest is approved, the API lets the signed-in
 owner enrol the derived action unsigned (`/api/actions/prepare`); enrolment only
 permits the vault's own billing key to run the vault's own action and is bounded by
-the same plan headroom as signed enrolment. An old ID token cannot mint new receipts after
-expiry. Durable ciphertext/permission receipts survive token expiration; they are not
-reusable management sessions. Keychain sessions only authorize storage/UI operations
+the same plan headroom as signed enrolment. An old ID token cannot mint a new device approval after
+expiry. An existing device approval can authorize exact-object receipts until its
+own signed expiry. Durable ciphertext/permission receipts survive these expirations;
+they are not reusable management sessions. Keychain sessions only authorize storage/UI operations
 and never replace a receipt. They are HttpOnly, SameSite=Strict, Secure on HTTPS and
 expire after 30 days (persistent cookie; a page refresh keeps the vault open). Credential changes invalidate existing metadata sessions.
 
