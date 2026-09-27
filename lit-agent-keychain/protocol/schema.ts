@@ -1,3 +1,5 @@
+import type { GoogleApproval } from "./google-approval.ts";
+export type { GoogleApproval } from "./google-approval.ts";
 import { z } from "zod";
 import {
   releaseIdSchema,
@@ -222,6 +224,7 @@ export const googleSessionSchema = z.strictObject({
   scope: z.literal("authorize"),
 });
 export type GoogleSession = z.infer<typeof googleSessionSchema>;
+export const GOOGLE_APPROVAL_LIFETIME = 30 * 86400;
 export type OwnerProof =
   | {
       kind: "wallet";
@@ -242,6 +245,7 @@ export type OwnerProof =
       owner: Extract<Owner, { kind: "google" }>;
       challenge: Challenge;
       token: string;
+      approval?: GoogleApproval;
       session: GoogleSession;
       signature: string;
     };

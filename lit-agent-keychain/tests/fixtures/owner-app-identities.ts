@@ -69,3 +69,5 @@ export const ownerClient = () => ({
     return bundles[id];
   },
 });
+
+export const restoreGoogleIdentity = () => undefined;

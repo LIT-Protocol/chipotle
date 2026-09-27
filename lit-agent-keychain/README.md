@@ -34,11 +34,17 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 
 ## SDK release coordination
 
-This source prepares SDK **2.2.0** (main was at 2.1.1, registry latest verified as
-2.1.0 before this change). It adds `OwnerClient.deleteSecret()`: owners can delete a
-secret, which revokes every agent and removes the ciphertext in one transaction, frees
-the slot and retires the action's execution grant. No immutable action source, archive
-or catalog lock changes are part of this release.
+This source prepares SDK **2.2.1** (registry latest verified as 2.2.0). It adds
+Lit-signed Google device approvals lasting 30 days, with local persistence across
+page reloads, and fixes short-lived Google proofs for archived authorities. This is
+a template release: the catalog lock and archived templates include new versions.
+Existing secrets keep their pinned releases and require recent Google reapproval;
+agent clients need this SDK version to recognize secrets created under the new release.
+Publish the SDK before deploying the owner UI/API.
+
+SDK 2.2.0 added `OwnerClient.deleteSecret()`: owners can delete a secret, which
+revokes every agent and removes the ciphertext in one transaction, frees the slot
+and retires the action's execution grant.
 
 SDK 2.1.1 hardened live discovery (#707). SDK 2.1.0 added `LiveKeychain`,
 authenticated live discovery and configless CLI/MCP.
@@ -80,7 +86,7 @@ Consequences, all handled by the release mechanism described in
   release still takes one signature per document (`PRE_BATCH_AUTHORITY_HASHES`).
 
 Release checks: run `npm test` and `npm run build`, publish through the normal
-maintainer release process, verify `npm view @lit-protocol/keychain@2.2.0 version`,
+maintainer release process, verify `npm view @lit-protocol/keychain@2.2.1 version`,
 then repeat the strict external TypeScript consumer and attestation-enabled Node
 smoke test from the registry artifact. Only then deploy the owner UI/API and create,
 rotate and read a secret against production. See the QA reports under `docs/` for
@@ -260,7 +266,11 @@ See [BILLING.md](BILLING.md) for Stripe setup and the custom-plan operator comma
 
 Google-only sign-in requires `GOOGLE_CLIENT_ID` and the frontend origin registered
 on that Google OAuth client. Its callback uses Google Identity Services' nonce
-parameter. Google session keys and ID tokens remain in browser memory and expire.
+parameter. Fresh Google login creates a Lit-signed 30-day device approval, persisted with its
+session key in localStorage and cleared on sign-out. Reloading restores approvals
+without a Google prompt. Secrets pinned to older authority releases still need a
+recent Google sign-in; their original token/session proof lasts 10 minutes. Google
+ID tokens are retained locally for that legacy path, never in the database.
 `VITE_WALLETCONNECT_PROJECT_ID` enables WalletConnect options at build time; injected
 wallets work without it. ERC-1271/6492 contract wallets are not supported in this release.
 

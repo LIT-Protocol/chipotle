@@ -1,4 +1,12 @@
-import type { Owner, GoogleSession, Authority } from "../../protocol/schema.ts";
+import { parseGoogleApproval } from "../../protocol/google-approval.ts";
+import {
+  googleSessionSchema,
+  ownerSchema,
+  type GoogleApproval,
+  type Owner,
+  type GoogleSession,
+  type Authority,
+} from "../../protocol/schema.ts";
 import {
   OwnerClient,
   LitConnection,
@@ -19,7 +27,14 @@ import {
   nowSeconds,
 } from "../../protocol/crypto.ts";
 import { jsonFetch } from "../../protocol/client-http.ts";
-export type Identity = { owner: Owner; signer: OwnerSigner };
+export type Identity = {
+  owner: Owner;
+  signer: OwnerSigner;
+  remember?: (issued?: {
+    approval: GoogleApproval;
+    authorityRelease: string;
+  }) => void;
+};
 /** Thrown by a signer whose Google approval session has lapsed; the vault stays
  *  open and the app asks for a fresh Google approval before retrying. */
 export class GoogleSessionExpired extends Error {
@@ -30,7 +45,7 @@ export class GoogleSessionExpired extends Error {
 }
 /** Public descriptors only: which credential signed in and the vault it opened.
  *  The server session cookie is the actual proof; this lets a refresh rebuild the
- *  client without a new sign-in. Private keys and Google tokens are never stored. */
+ *  client without a new sign-in. Google device approvals are stored separately. */
 const SESSION_KEY = "keychain.session";
 export type StoredSession = { v: 2; owner: Owner; authority: Authority };
 export function saveSession(owner: Owner, authority: Authority) {
@@ -50,6 +65,7 @@ export function loadSession(): StoredSession | null {
 }
 export function clearSession() {
   localStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem(GOOGLE_KEY);
 }
 /** Whether the server still honours the session cookie for the stored vault. */
 export async function sessionAlive(session: StoredSession): Promise<boolean> {
@@ -202,6 +218,93 @@ export async function discoverPasskey(recovery?: Authority): Promise<{
   localStorage.setItem("keychain.passkey", JSON.stringify(owner));
   return { identity: passkeyIdentity(owner), authority: result.authority };
 }
+const GOOGLE_KEY = "keychain.google-approval";
+type GoogleDevice = {
+  owner: Extract<Owner, { kind: "google" }>;
+  session: GoogleSession;
+  token: string;
+  privateKey: string;
+  issued?: { approval: GoogleApproval; authorityRelease: string };
+};
+function googleIdentity(device: GoogleDevice): Identity {
+  const privateKey = unhex(device.privateKey);
+  return {
+    owner: device.owner,
+    remember(issued) {
+      if (issued) {
+        if (
+          digest(issued.approval.payload.owner) !== digest(device.owner) ||
+          issued.approval.payload.session.publicKey !== device.session.publicKey
+        )
+          throw new Error("Google approval identity mismatch");
+        device.issued = issued;
+      }
+      localStorage.setItem(GOOGLE_KEY, JSON.stringify(device));
+    },
+    signer: async (challenge, authorityRelease) => {
+      const issued =
+        device.issued?.authorityRelease === authorityRelease
+          ? device.issued
+          : undefined;
+      const session = issued?.approval.payload.session ?? device.session;
+      if (challenge.expiresAt > session.expiresAt)
+        throw new GoogleSessionExpired();
+      return {
+        kind: "google",
+        owner: device.owner,
+        challenge,
+        session,
+        token: issued ? "" : device.token,
+        ...(issued ? { approval: issued.approval } : {}),
+        signature: signAgent(challenge, privateKey),
+      };
+    },
+  };
+}
+export function restoreGoogleIdentity(
+  owner: Owner,
+  network: string,
+): Identity | undefined {
+  try {
+    const raw = localStorage.getItem(GOOGLE_KEY);
+    if (!raw) return;
+    const device: GoogleDevice = JSON.parse(raw);
+    const storedOwner = ownerSchema.parse(device.owner);
+    const session = googleSessionSchema.parse(device.session);
+    if (
+      storedOwner.kind !== "google" ||
+      digest(storedOwner) !== digest(owner) ||
+      session.network !== network ||
+      session.registry !== location.origin ||
+      !/^[0-9a-f]{64}$/.test(device.privateKey) ||
+      agentPublicKey(unhex(device.privateKey)) !== session.publicKey ||
+      typeof device.token !== "string" ||
+      device.token.length > 8192
+    )
+      return;
+    if (device.issued) {
+      const approval = parseGoogleApproval(device.issued.approval);
+      const approved = approval.payload.session;
+      if (
+        digest(approval.payload.owner) !== digest(owner) ||
+        approved.network !== network ||
+        approved.registry !== location.origin ||
+        approved.publicKey !== session.publicKey ||
+        typeof device.issued.authorityRelease !== "string"
+      )
+        return;
+      if (approved.expiresAt <= nowSeconds()) {
+        localStorage.removeItem(GOOGLE_KEY);
+        return;
+      }
+    } else if (session.expiresAt <= nowSeconds()) return;
+    // Local storage isn't trusted as authorization: Lit verifies the certificate,
+    // exact lifetime, owner membership and a new challenge signature every time.
+    return googleIdentity(device);
+  } catch {
+    return;
+  }
+}
 export function googleSession(network: string) {
   const privateKey = randomBytes();
   const now = nowSeconds();
@@ -213,37 +316,30 @@ export function googleSession(network: string) {
     publicKey: agentPublicKey(privateKey),
     nonce: randomId(),
     issuedAt: now,
-    // Google ID tokens live one hour and the authority action requires
-    // expiresAt <= token exp (cap 3600 in protocol/identity.ts), so leave a
-    // margin for the sign-in popup. Expiry renews in-app without closing the vault.
-    expiresAt: now + 3000,
+    // Historical immutable authorities cap Google proofs at 15 minutes.
+    // A fresh login exchanges this proof for a separate 30-day device approval.
+    expiresAt: now + 600,
     scope: "authorize",
   };
   return {
     session,
     nonce: b64u(unhex(digest(session))),
     identity(token: string, clientId: string): Identity {
-      // Decoding selects the claimed subject; the action independently verifies
-      // Google's signature, audience, expiry, subject, and the session nonce.
       const claims = JSON.parse(
         new TextDecoder().decode(unb64u(token.split(".")[1], 8192)),
       );
-      const owner: Owner = { kind: "google", subject: claims.sub, clientId };
-      return {
+      const owner = ownerSchema.parse({
+        kind: "google",
+        subject: claims.sub,
+        clientId,
+      });
+      if (owner.kind !== "google") throw new Error("Invalid Google owner");
+      return googleIdentity({
         owner,
-        signer: async (challenge) => {
-          if (challenge.expiresAt > session.expiresAt)
-            throw new GoogleSessionExpired();
-          return {
-            kind: "google",
-            owner,
-            challenge,
-            session,
-            token,
-            signature: signAgent(challenge, privateKey),
-          };
-        },
-      };
+        session,
+        token,
+        privateKey: hex(privateKey),
+      });
     },
     destroy() {
       privateKey.fill(0);
