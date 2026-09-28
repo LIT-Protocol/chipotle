@@ -1203,3 +1203,15 @@ footer.site-footer {
     padding: 16px;
   }
 }
+
+.agent-connection {
+  margin: 1rem 0;
+  min-width: 0;
+}
+.agent-connection pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-connection code {
+  overflow-wrap: anywhere;
+}

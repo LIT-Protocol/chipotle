@@ -213,7 +213,11 @@ test("onboarding public instructions use discoverable labels, not removed contro
     const text = await readFile(new URL(`../${path}`, import.meta.url), "utf8");
     assert.match(text, /Add agent/);
     assert.match(text, /Approve selected secrets/);
-    assert.match(text, /Download agent config/);
+    assert.match(text, /Connect to a session/);
+    assert.doesNotMatch(
+      text,
+      /Download agent config|Advanced: legacy static config/,
+    );
     assert.doesNotMatch(
       text,
       /Config · all secrets|Execution and account access/,

@@ -76,10 +76,7 @@ A **stored secret** is for anything an agent needs to hold itself. A **connected
 
 ## What the agent holds
 
-Exactly two files, both JSON and self-describing:
-
-- **Agent identity**: an Ed25519 key pair the agent generates locally with `keychain init`. Only the public key is ever shared.
-- **Agent config** (`NAME.keychain.json`): downloaded from Keychain after you approve the agent. It lists the approved secrets and includes a scoped execution key that pays for Lit execution. That key is a billing credential; it cannot read a secret without the agent's private key and your signed approval.
+The agent keeps its **agent identity**: an Ed25519 key pair generated locally with `keychain init`. Only the public key is shared. The live client discovers current approved secrets and scoped execution credentials from the server on each request; there is no config file to download. The execution key pays for Lit execution but cannot read a secret without the agent’s private key and your signed approval.
 
 If an agent's machine is compromised, the attacker can read the secrets that agent was approved for until you revoke it, exactly as with any credential on a compromised host. Revoke from the dashboard, replace the execution key, and prefer connected services for keys that should never be returned to an agent.
 

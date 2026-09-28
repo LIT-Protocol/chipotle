@@ -1,10 +1,12 @@
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+const skill = await readFile(new URL("../SKILL.md", import.meta.url), "utf8");
+const packageVersion = /^version: (.+)$/m.exec(skill)![1];
 const key = "ab".repeat(32);
 test.beforeEach(async ({ page }) => {
   await page.goto("/fixtures/owner-onboarding.html");
 });
-test("selective approval and private config handoff at desktop and mobile sizes", async ({
+test("selective approval and live session connection at desktop and mobile sizes", async ({
   page,
 }) => {
   await expect(page.getByRole("heading", { name: "Add agent" })).toBeVisible();
@@ -39,18 +41,80 @@ test("selective approval and private config handoff at desktop and mobile sizes"
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Download agent config", exact: true }),
-  ).not.toBeVisible();
-  await page.getByText("Advanced: legacy static config").click();
-  const download = page.waitForEvent("download");
+  ).toHaveCount(0);
   await page
-    .getByRole("button", { name: "Download agent config", exact: true })
+    .getByRole("button", { name: "Connect to a session", exact: true })
     .click();
-  const file = await download;
-  expect(file.suggestedFilename()).toBe("Muse-test.keychain.json");
-  const config = JSON.parse(await readFile((await file.path())!, "utf8"));
-  expect(Object.keys(config.secrets)).toEqual(["TWO"]);
-  expect(config).not.toHaveProperty("privateKey");
-  expect(JSON.stringify(config)).not.toContain("secret-value");
+  const panel = page.getByRole("region", {
+    name: "Connect Muse test to a session",
+  });
+  await expect(panel).toContainText(key);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          (window as any).copied = text;
+        },
+      },
+    });
+  });
+  for (const label of [
+    "Agent prompt",
+    "Claude Code",
+    "Codex",
+    "Cursor / Windsurf",
+    "SDK",
+  ]) {
+    await panel
+      .getByRole("button", { name: `Copy ${label}`, exact: true })
+      .click();
+    await expect(panel.getByRole("status")).toHaveText(`Copied ${label}`);
+    const copied = await page.evaluate(() => (window as any).copied);
+    expect(copied).toContain(`@lit-protocol/keychain@${packageVersion}`);
+    expect(copied).toContain("http://127.0.0.1:55449");
+    expect(copied).not.toContain("fixture-execution-key");
+    expect(copied).not.toContain(".keychain.json");
+    if (label === "Agent prompt") {
+      expect(copied).toContain('"Muse test"');
+      expect(copied).toContain(key);
+      expect(copied).toContain("https://keychain.litprotocol.com/SKILL.md");
+      expect(copied).toContain("verify its public key matches");
+    } else if (label === "Cursor / Windsurf") {
+      const server = JSON.parse(copied).mcpServers["lit-keychain"];
+      expect(server.args).toEqual([
+        "-y",
+        `@lit-protocol/keychain@${packageVersion}`,
+        "mcp",
+        "/absolute/path/agent-identity.json",
+      ]);
+      expect(server.env.KEYCHAIN_SERVICE_URL).toBe("http://127.0.0.1:55449");
+    }
+  }
+  for (const width of [320, 390, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async () => {
+          throw new Error("Clipboard denied");
+        },
+      },
+    });
+  });
+  await panel
+    .getByRole("button", { name: "Copy Agent prompt", exact: true })
+    .click();
+  await expect(panel.getByRole("status")).toContainText(
+    "Select and copy the text below",
+  );
 });
 test("select all chooses eligible secrets without approving, and clear selection resets them", async ({
   page,
@@ -198,15 +262,13 @@ test("owner can discover Add agent immediately after sign-in in the actual app",
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Download agent config", exact: true }),
-  ).not.toBeVisible();
-  await page.getByText("Advanced: legacy static config").click();
-  const download = page.waitForEvent("download");
+  ).toHaveCount(0);
   await page
-    .getByRole("button", { name: "Download agent config", exact: true })
+    .getByRole("button", { name: "Connect to a session", exact: true })
     .click();
-  expect((await download).suggestedFilename()).toBe(
-    "Existing-agent.keychain.json",
-  );
+  await expect(
+    page.getByRole("region", { name: "Connect Existing agent to a session" }),
+  ).toContainText(key);
   await page.getByRole("button", { name: "Done", exact: true }).click();
   await expect(add).toBeFocused();
   // The Agents page inverts the Secrets listing: the agent row leads to its secrets.
@@ -223,12 +285,23 @@ test("owner can discover Add agent immediately after sign-in in the actual app",
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Download agent config", exact: true }),
-  ).toBeVisible();
+  ).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Connect to a session", exact: true })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Connect Existing agent to a session" }),
+  ).toContainText(key);
   await expect(
     page.getByRole("button", { name: "+ Grant secrets", exact: true }),
   ).toBeEnabled();
   await page.getByRole("button", { name: "Secrets", exact: true }).click();
   await page.getByRole("button", { name: /ONE.*1 agent/ }).click();
+  await expect(
+    page.getByRole("button", {
+      name: /^(Download agent config|Agent config)$/,
+    }),
+  ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Revoke", exact: true }),
   ).toBeVisible();

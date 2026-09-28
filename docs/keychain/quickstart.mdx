@@ -7,7 +7,7 @@ You need a browser for the owner steps and Node 22+ on the agent's machine. Noth
 
 <Note>
 The examples below use the latest published `@lit-protocol/keychain`. Pin an exact version
-(`@lit-protocol/keychain@2.2.1`, for example) in anything you deploy, and check the
+(`@lit-protocol/keychain@2.2.2`, for example) in anything you deploy, and check the
 [npm page](https://www.npmjs.com/package/@lit-protocol/keychain) for release notes before upgrading.
 </Note>
 
@@ -40,8 +40,9 @@ This writes a mode-0600 file containing an Ed25519 key pair and prints its `publ
     remain saved; **Retry remaining approvals** checks access before continuing.
     Closing does not revoke access. Use **Revoke** on each secret to remove it.
 
-    **Advanced: legacy static config → Download agent config** is optional for old
-    integrations; it is not the live-client setup path.
+    Choose **Connect to a session** to copy an agent prompt or MCP/SDK setup. Use the
+    existing identity on the agent’s machine and verify its public key matches the
+    approved agent. Config downloads have been removed.
   </Step>
 </Steps>
 

@@ -1,4 +1,5 @@
 import React, { useRef, useState } from "react";
+import { AgentConnection } from "./AgentConnection.tsx";
 import type { SecretBundle } from "../../sdk/src/index.ts";
 import {
   approveAgentSecrets,
@@ -53,7 +54,6 @@ export function AgentOnboarding({
   onClose,
   onAddSecret,
   onApproved,
-  onDownload,
   onBusyChange,
   initialName = "",
   initialKey = "",
@@ -70,7 +70,6 @@ export function AgentOnboarding({
   onClose: () => void;
   onAddSecret: () => void;
   onApproved: () => Promise<void>;
-  onDownload: (label: string, bundles: SecretBundle[]) => void;
 }) {
   const [name, setName] = useState(initialName);
   const [key, setKey] = useState(initialKey);
@@ -86,7 +85,6 @@ export function AgentOnboarding({
   const [busy, setBusy] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [complete, setComplete] = useState(false);
-  const [downloaded, setDownloaded] = useState(false);
   const running = useRef(false);
   const isEligible = (s: SecretSummary) =>
     !s.disabled && (s.expiresAt === null || s.expiresAt * 1000 > Date.now());
@@ -295,39 +293,10 @@ export function AgentOnboarding({
               revocations apply on its next request; already received values
               cannot be recalled.
             </p>
-            <pre>
-              <code>{`KEYCHAIN_SERVICE_URL=${window.location.origin} keychain list ./agent-identity.json`}</code>
-            </pre>
-            <details>
-              <summary>Advanced: legacy static config</summary>
-              <p>
-                For older clients only. This snapshot contains scoped billing
-                credentials, not secret values. Keep it private. Legacy clients
-                need another export to discover newly added secrets.
-              </p>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  try {
-                    onDownload(label, approved);
-                    setDownloaded(true);
-                  } catch (e) {
-                    setError(
-                      e instanceof Error ? e.message : "Download failed",
-                    );
-                  }
-                }}
-              >
-                Download agent config
-              </button>
-              {downloaded && (
-                <p>
-                  Legacy config downloaded. Keep it and the agent identity
-                  private.
-                </p>
-              )}
-            </details>
+            <AgentConnection
+              name={label}
+              publicKey={key.trim().toLowerCase()}
+            />
           </div>
         )}
         <div className="button-row">

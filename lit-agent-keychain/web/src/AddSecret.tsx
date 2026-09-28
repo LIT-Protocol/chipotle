@@ -124,7 +124,7 @@ export function ActionDocs({
     (inputExample ? `, ${snippetJson(inputExample)}` : "") +
     ");";
   const cli =
-    `${NPX_KEYCHAIN} use ./agent-identity.json ./${name}.keychain.json ${name}` +
+    `${NPX_KEYCHAIN} use ./agent-identity.json ${name}` +
     (inputExample ? ` '${JSON.stringify(inputExample)}'` : "");
   const inputs = action.input ? fieldRows(action.input) : [];
   const outputs = fieldRows(action.output);

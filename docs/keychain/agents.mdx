@@ -91,17 +91,16 @@ Pass only the identity for live discovery. Owner website changes appear on the n
 
 The server is deliberately local rather than hosted. Decryption needs the agent's private identity, and a remote endpoint would hand that key and every plaintext to whoever runs it, which the Keychain trust boundary forbids. Tool results enter the model context like any other tool output, so approve agents only for the secrets they need.
 
-## The three artifacts
+## What stays on the agent’s machine
 
 | Artifact | Shape | Sensitivity |
 |---|---|---|
 | Agent identity | JSON `{ "v": 2, "privateKey": <64 hex>, "publicKey": <64 hex> }` | Private. Only `publicKey` is ever shared. |
-| Agent config | JSON `*.keychain.json`: `{ "v": 2, "litApiUrl", "usageApiKey", "secrets" }` | Private. `usageApiKey` is a Chipotle billing key, not authority. |
 | Secret value | Whatever `get` returns | Do not log, echo, or write to disk. |
 
 Start with **Agents → + Add agent** after owner sign-in (the **Agents** page lists every approved key with the secrets it can use; **+ Grant secrets** and **Revoke** live there too): paste the existing public key, name the agent, explicitly select secrets, then **Approve selected secrets**. **Ready to use** confirms the successful approvals. No secret is selected automatically. No config transfer or restart is needed for live clients.
 
-For legacy clients only, **Advanced: legacy static config → Download agent config** remains available. A per-secret **Agent config** names one secret. **Download agent config**, on the agent's page under **Agents** or next to it under a secret's **Authorized agents**, names every secret in the vault that agent is approved for, which is what `keychain run --only A,B` and a single `get`/`use` config expect. The MCP server additionally merges several config files from the same vault.
+Choose **Connect to a session** on the agent detail page or the **Ready to use** confirmation. Copy the agent prompt into the intended session, or choose Claude Code, Codex, Cursor/Windsurf JSON, or the SDK snippet. Replace the identity path with the existing file on the agent’s machine and verify its public key matches the approved agent. The website only knows the public key; it never needs the identity file. Config downloads have been removed. Live clients discover current approvals and billing credentials on each request.
 
 `usageApiKey` is an opaque string minted by Chipotle (currently 44 characters of base64). It pays for execution and cannot read a secret without the agent identity and an owner grant. There are no setup tokens, management bearer tokens or server-minted grants in Keychain. Never ask an owner for a private key or Google token. The SDK and CLI reject an identity passed as a config, a config passed as an identity, and a private key passed as a usage key, each with a message naming the mistake.
 

@@ -207,9 +207,13 @@ test("a 401 from Lit directs owners to config download without removed controls"
         assert.equal(error.status, 401);
         assert.match(
           error.message,
-          /Request failed \(401\): API key not recognized — it does not resolve to any account\. The scoped execution key in this agent config is not accepted by Lit; ask the owner to download a fresh agent config/,
+          /Request failed \(401\): API key not recognized — it does not resolve to any account\. The scoped execution key is not accepted by Lit/,
         );
-        assert.match(error.message, /Download agent config/);
+        assert.match(error.message, /Use LiveKeychain/);
+        assert.doesNotMatch(
+          error.message,
+          /download a fresh agent config|Download agent config/,
+        );
         assert.doesNotMatch(error.message, /Execution and account access/);
         return true;
       },

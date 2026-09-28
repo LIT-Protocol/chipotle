@@ -250,7 +250,7 @@ bytes are pinned in `actions/catalog.lock.json`; deprecated actions stay restora
 
 The master management key and wildcard bootstrap execution key stay server-side.
 Per-vault execution-only usage keys are intentionally returned to authenticated owners
-and included in agent configs. They are encrypted in the DB with AES-256-GCM, a separate
+and returned through authenticated live discovery. They are encrypted in the DB with AES-256-GCM, a separate
 operator-held key, random nonces and vault-bound AAD. The operator can recover those
 billing keys, but they do not grant owner/agent authority or decrypt secrets by themselves.
 Protect exported configs as billing credentials. Rotation persists pending revocation

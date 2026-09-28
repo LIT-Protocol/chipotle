@@ -238,7 +238,7 @@ export function assertAgentIdentity(
     }
   }
 }
-/** Validates the agent config downloaded from Keychain (*.keychain.json). */
+/** Validates an existing legacy static agent config (*.keychain.json). */
 export function assertAgentConfig(
   config: unknown,
 ): asserts config is AgentConfig {
@@ -444,7 +444,7 @@ export class LitConnection {
       if (error instanceof HttpError && error.status === 401)
         throw new HttpError(
           401,
-          `${(error.detail || "execution key rejected").replace(/[.\s]+$/, "")}. The scoped execution key in this agent config is not accepted by Lit; ask the owner to download a fresh agent config using Download agent config next to the agent under Authorized agents. If a fresh config is still rejected, contact Keychain support. Advanced clients may override CHIPOTLE_USAGE_API_KEY`,
+          `${(error.detail || "execution key rejected").replace(/[.\s]+$/, "")}. The scoped execution key is not accepted by Lit. Use LiveKeychain or the CLI/MCP with only your existing identity file to discover current approvals and execution credentials. If live discovery still returns a rejected key, contact Keychain support. Legacy static clients may override CHIPOTLE_USAGE_API_KEY`,
         );
       throw error;
     });
