@@ -1,3 +1,4 @@
+import { parseGoogleApproval } from "../../protocol/google-approval.ts";
 import {
   actionCid,
   actionSource,
@@ -23,6 +24,7 @@ export {
 } from "./live.ts";
 import {
   authoritySchema,
+  type GoogleApproval,
   manifestSchema,
   manifestDocumentSchema,
   envelopeSchema,
@@ -129,7 +131,10 @@ export const availableActions = (tier?: ActionDefinition["tier"]) =>
   Object.values(ACTIONS).filter(
     (d) => !d.deprecated && (tier === undefined || d.tier === tier),
   );
-export type OwnerSigner = (challenge: Challenge) => Promise<OwnerProof>;
+export type OwnerSigner = (
+  challenge: Challenge,
+  authorityRelease?: string,
+) => Promise<OwnerProof>;
 export type SecretBundle = {
   manifest: Signed<Extract<Document, { kind: "manifest" }>>;
   envelope: Signed<Envelope>;
@@ -537,6 +542,7 @@ export class OwnerClient {
    * and tests can pin an earlier archived release here.
    */
   readonly authorityRelease: string | undefined;
+  googleApproval?: { approval: GoogleApproval; authorityRelease: string };
   async api(path: string, init: RequestInit = {}) {
     return jsonFetch(
       this.authority.registry + path,
@@ -618,7 +624,7 @@ export class OwnerClient {
       issuedAt: now,
       expiresAt: now + 120,
     };
-    const proof = await this.signer(challenge);
+    const proof = await this.signer(challenge, template.hash);
     const response = await this.lit.execute(
       this.authority,
       { documents, proof },
@@ -657,12 +663,21 @@ export class OwnerClient {
       issuedAt: now,
       expiresAt: now + 120,
     };
-    const proof = await this.signer(challenge);
+    const proof = await this.signer(challenge, template.hash);
     const response = await this.lit.execute(
       this.authority,
       { document, proof },
       template,
     );
+    if (document.kind === "login") {
+      this.googleApproval =
+        response.googleApproval === undefined
+          ? undefined
+          : {
+              approval: parseGoogleApproval(response.googleApproval),
+              authorityRelease: template.hash,
+            };
+    }
     return { document, receipt: receiptSchema.parse(response.receipt) };
   }
   async login() {
@@ -719,6 +734,17 @@ export class OwnerClient {
         ),
         this.vaultId,
       );
+      if (this.googleApproval) {
+        const { approval } = this.googleApproval;
+        requireThat(approval.payload.vaultId === this.vaultId);
+        verifyAction(
+          approval.payload,
+          approval.signature,
+          await this.lit.publicKey(
+            await actionCid(this.authority, template.code),
+          ),
+        );
+      }
     } catch (error) {
       this.lit.usageApiKey = undefined;
       await this.api("/auth/logout", { method: "POST" }).catch(() => {});

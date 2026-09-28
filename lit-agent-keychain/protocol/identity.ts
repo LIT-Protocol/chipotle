@@ -1,3 +1,4 @@
+import { parseGoogleApproval } from "./google-approval.ts";
 import { p256 } from "@noble/curves/nist.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { createLocalJWKSet, jwtVerify } from "jose";
@@ -5,6 +6,7 @@ import { recoverTypedDataAddress } from "viem";
 import {
   challengeSchema,
   googleSessionSchema,
+  GOOGLE_APPROVAL_LIFETIME,
   ownerSchema,
   type Authority,
   type Challenge,
@@ -19,6 +21,7 @@ import {
   utf8,
   requireThat,
   verifyAgent,
+  verifyAction,
 } from "./crypto.ts";
 import { jsonFetch } from "./http.ts";
 
@@ -68,6 +71,7 @@ export async function verifyOwnerProof(
   proof: OwnerProof,
   object: { kind: string },
   now: number,
+  approvalPublicKey?: string,
 ) {
   const owner = ownerSchema.parse(proof.owner);
   requireThat(owner.kind === proof.kind);
@@ -129,6 +133,25 @@ export async function verifyOwnerProof(
       session.network === authority.network &&
         session.registry === authority.registry,
     );
+    if (proof.approval !== undefined) {
+      requireThat(typeof approvalPublicKey === "string");
+      const approval = parseGoogleApproval(proof.approval);
+      verifyAction(approval.payload, approval.signature, approvalPublicKey!);
+      requireThat(
+        approval.payload.vaultId === digest(authority) &&
+          sameOwner(approval.payload.owner, owner) &&
+          digest(approval.payload.session) === digest(session),
+      );
+      verifyWindow(
+        session.issuedAt,
+        session.expiresAt,
+        now,
+        GOOGLE_APPROVAL_LIFETIME,
+      );
+      requireThat(challenge.expiresAt <= session.expiresAt);
+      verifyAgent(challenge, proof.signature, session.publicKey);
+      return owner;
+    }
     verifyWindow(session.issuedAt, session.expiresAt, now, 3600);
     requireThat(challenge.expiresAt <= session.expiresAt);
     requireThat(typeof proof.token === "string" && proof.token.length <= 8192);

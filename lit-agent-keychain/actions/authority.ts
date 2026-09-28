@@ -1,6 +1,8 @@
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import {
   authoritySchema,
+  GOOGLE_APPROVAL_LIFETIME,
+  type GoogleApproval,
   batchSchema,
   credentialsSchema,
   documentSchema,
@@ -16,6 +18,7 @@ import {
   requireThat,
   verifyReceipt,
   makeReceipt,
+  signAction,
   nowSeconds,
 } from "../protocol/crypto.ts";
 import { jsonFetch } from "../protocol/http.ts";
@@ -59,13 +62,21 @@ export async function run(
       signedObject = document;
     }
     requireThat(documents.every((d) => d.vaultId === vaultId));
+    // A durable approval is accepted only under this exact authority's key.
+    if (params.proof.kind === "google" && params.proof.approval !== undefined) {
+      privateKey = unhex(
+        (await Lit.Actions.getLitActionPrivateKey()).replace(/^0x/, ""),
+      );
+      publicKey = hex(secp256k1.getPublicKey(privateKey));
+    }
     const signer = await verifyOwnerProof(
       authority,
       params.proof,
       signedObject,
       now,
+      publicKey,
     );
-    privateKey = unhex(
+    privateKey ??= unhex(
       (await Lit.Actions.getLitActionPrivateKey()).replace(/^0x/, ""),
     );
     publicKey = hex(secp256k1.getPublicKey(privateKey));
@@ -114,9 +125,34 @@ export async function run(
     const receipts = documents.map((document) =>
       makeReceipt(document, privateKey!, issuedAt),
     );
+    // Only a fresh Google login may mint a device approval. Using a certificate
+    // never renews its lifetime, and membership is still checked on every use.
+    let googleApproval: GoogleApproval | undefined;
+    if (
+      params.proof.kind === "google" &&
+      params.proof.approval === undefined &&
+      documents.length === 1 &&
+      documents[0].kind === "login"
+    ) {
+      const payload: GoogleApproval["payload"] = {
+        v: 2,
+        domain: "lit-keychain/google-approval/v2",
+        vaultId,
+        owner: signer,
+        session: {
+          ...params.proof.session,
+          expiresAt: params.proof.session.issuedAt + GOOGLE_APPROVAL_LIFETIME,
+        },
+      };
+      googleApproval = { payload, signature: signAction(payload, privateKey) };
+    }
     return params.documents !== undefined
       ? { ok: true, receipts }
-      : { ok: true, receipt: receipts[0] };
+      : {
+          ok: true,
+          receipt: receipts[0],
+          ...(googleApproval ? { googleApproval } : {}),
+        };
   } catch {
     return { ok: false, error: "authorization_denied" };
   } finally {

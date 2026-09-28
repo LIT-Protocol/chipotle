@@ -39,6 +39,7 @@ export const json = (value: unknown, status = 200) =>
     headers: { "content-type": "application/json" },
   });
 export class Harness {
+  now?: number;
   registry = new Map<string, any>();
   extraFetch: typeof fetch | undefined;
   calls: { url: string; init?: RequestInit }[] = [];
@@ -57,7 +58,16 @@ export class Harness {
     return this.runCode(actionSource(manifest), cid, params);
   }
   async runCode(code: string, cid: string, params: unknown) {
+    const clock = this.now;
     const context = vm.createContext({
+      Date:
+        clock === undefined
+          ? Date
+          : class extends Date {
+              static now() {
+                return clock * 1000;
+              }
+            },
       crypto: webcrypto,
       fetch: this.fetch,
       TextEncoder,
