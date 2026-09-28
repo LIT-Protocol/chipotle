@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AgentOnboarding } from "../../web/src/AgentOnboarding.tsx";
-import { downloadAgentConfig } from "../../web/src/agent-config.ts";
 import "../../web/src/style.css";
 import type { SecretBundle } from "../../sdk/src/index.ts";
 const summaries = ["ONE", "TWO", "DISABLED", "EXPIRED"].map((name) => ({
@@ -60,14 +59,6 @@ function Fixture() {
           onClose={() => setMessage("Closed onboarding")}
           onAddSecret={() => setMessage("Adding secret")}
           onApproved={async () => {}}
-          onDownload={(name, approved) =>
-            downloadAgentConfig(
-              name,
-              approved,
-              "https://lit.invalid",
-              "fixture-execution-key",
-            )
-          }
         />
       )}
     </main>

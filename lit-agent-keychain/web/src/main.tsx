@@ -33,7 +33,6 @@ import {
   type Authority,
   type Grant,
   type SecretBundle,
-  type AgentConfig,
   type OwnerSigner,
 } from "../../sdk/src/index.ts";
 import { jsonFetch, HttpError } from "../../protocol/client-http.ts";
@@ -64,7 +63,7 @@ import {
 import { NPX_KEYCHAIN } from "./version.ts";
 import { AddSecret, ActionDocs } from "./AddSecret.tsx";
 import { AgentOnboarding } from "./AgentOnboarding.tsx";
-import { downloadAgentConfig } from "./agent-config.ts";
+import { AgentConnection } from "./AgentConnection.tsx";
 import "@rainbow-me/rainbowkit/styles.css";
 import {
   TwoFactorLogin,
@@ -463,56 +462,6 @@ function App() {
       if (selected?.manifest.document.manifest.secretId === secretId)
         setSelected(updated);
       await refresh();
-    });
-  const locatorOf = (bundle: SecretBundle) => ({
-    manifest: bundle.manifest.document.manifest,
-    actionCid: bundle.manifest.document.actionCid,
-  });
-  const agentConfig = (secrets: AgentConfig["secrets"]): AgentConfig => ({
-    v: 2,
-    litApiUrl: LIT_URL,
-    usageApiKey: client!.lit.usageApiKey,
-    secrets,
-  });
-  const exportConfig = (bundle: SecretBundle) => {
-    const name = bundle.envelope.document.metadata.name;
-    const file = `${name}.keychain.json`;
-    download(file, agentConfig({ [name]: locatorOf(bundle) }));
-    setError("");
-    setNotice(
-      `Downloaded ${file}. It names this secret and carries the execution key, no secret value; give it to the agent next to its identity file.`,
-    );
-  };
-  /** One config listing every secret this agent is approved for, so `keychain run`
-   *  and `get`/`use` need a single file (the MCP server can also merge several). */
-  const exportAgentConfig = (agent: Pick<Grant, "agentPublicKey" | "label">) =>
-    work("Collecting this agent's secrets…", async () => {
-      const approved: AgentConfig["secrets"] = {};
-      for (const s of secrets) {
-        const bundle: SecretBundle =
-          selected &&
-          selected.manifest.document.manifest.secretId === s.secretId
-            ? selected
-            : await client!.bundle(s.secretId);
-        if (
-          !bundle.policy.document.grants.some(
-            (g) => g.agentPublicKey === agent.agentPublicKey,
-          )
-        )
-          continue;
-        approved[bundle.envelope.document.metadata.name] = locatorOf(bundle);
-      }
-      const names = Object.keys(approved);
-      const file = `${
-        agent.label.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") ||
-        "agent"
-      }.keychain.json`;
-      download(file, agentConfig(approved));
-      setNotice(
-        `Downloaded ${file} for ${agent.label}: ${names.length} secret${
-          names.length === 1 ? "" : "s"
-        } (${names.join(", ")}). It carries no secret values.`,
-      );
     });
   const remove = () => {
     if (!selected) return;
@@ -1083,12 +1032,6 @@ function App() {
                               : "Disable"}
                           </button>
                           <button
-                            className="ghost"
-                            onClick={() => exportConfig(selected)}
-                          >
-                            Agent config
-                          </button>
-                          <button
                             className="danger ghost"
                             disabled={!!busy}
                             onClick={remove}
@@ -1176,14 +1119,6 @@ function App() {
                               <code>{brief(g.agentPublicKey)}</code>
                             </span>
                             <span className="row-actions">
-                              <button
-                                className="ghost"
-                                disabled={!!busy}
-                                title="Optional legacy static config; live clients discover approvals automatically"
-                                onClick={() => void exportAgentConfig(g)}
-                              >
-                                Download agent config
-                              </button>
                               <button
                                 className="danger ghost"
                                 disabled={!!busy}
@@ -1550,14 +1485,6 @@ function App() {
                       setSelected(undefined);
                       await refresh();
                     }}
-                    onDownload={(label, bundles) =>
-                      downloadAgentConfig(
-                        label,
-                        bundles,
-                        LIT_URL,
-                        client.lit.usageApiKey,
-                      )
-                    }
                   />
                 )}
                 <div className="secret-layout" hidden={!!addingAgent}>
@@ -1613,8 +1540,14 @@ function App() {
                             on some secrets.
                           </p>
                         )}
+                        <AgentConnection
+                          key={agent.key}
+                          name={agent.label}
+                          publicKey={agent.key}
+                        />
                         <div className="button-row">
                           <button
+                            className="secondary"
                             disabled={
                               !!busy || agent.secrets.length >= secrets.length
                             }
@@ -1631,19 +1564,6 @@ function App() {
                             }
                           >
                             + Grant secrets
-                          </button>
-                          <button
-                            className="ghost"
-                            disabled={!!busy}
-                            title="Optional legacy static config; live clients discover approvals automatically"
-                            onClick={() =>
-                              void exportAgentConfig({
-                                agentPublicKey: agent.key,
-                                label: agent.label,
-                              })
-                            }
-                          >
-                            Download agent config
                           </button>
                           <button
                             className="danger ghost"
