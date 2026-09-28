@@ -34,9 +34,13 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 
 ## SDK release coordination
 
-This source prepares SDK **2.2.2**. It updates SDK error guidance and documentation
-to use live discovery after removing agent-config downloads from the website.
-This is an SDK-only patch; no action templates or catalog locks change.
+This source prepares SDK **2.2.3**. It adds authenticator-app 2FA enrollment,
+recovery-code management, and the owner client's second-factor login callback.
+The accompanying owner UI/API enforce hosted-login 2FA; no action templates or
+catalog locks change.
+
+SDK 2.2.2 updated error guidance and documentation to use live discovery after
+removing agent-config downloads from the website.
 
 SDK 2.2.1 added
 Lit-signed Google device approvals lasting 30 days, with local persistence across
@@ -92,7 +96,7 @@ Consequences, all handled by the release mechanism described in
   release still takes one signature per document (`PRE_BATCH_AUTHORITY_HASHES`).
 
 Release checks: run `npm test` and `npm run build`, publish through the normal
-maintainer release process, verify `npm view @lit-protocol/keychain@2.2.2 version`,
+maintainer release process, verify `npm view @lit-protocol/keychain@2.2.3 version`,
 then repeat the strict external TypeScript consumer and attestation-enabled Node
 smoke test from the registry artifact. Only then deploy the owner UI/API and create,
 rotate and read a secret against production. See the QA reports under `docs/` for
