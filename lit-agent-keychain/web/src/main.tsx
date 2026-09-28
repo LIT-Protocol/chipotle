@@ -58,7 +58,6 @@ import {
   Brand,
   Intro,
   LandingFooter,
-  LitMark,
   KEYCHAIN_DOCS_URL,
 } from "./Landing.tsx";
 import { NPX_KEYCHAIN } from "./version.ts";
@@ -710,9 +709,6 @@ function App() {
         <div className="workspace">
           <aside>
             <div className="account">
-              <span className="account-mark" aria-hidden="true">
-                <LitMark />
-              </span>
               <div>
                 <strong>Your vault</strong>
                 <code>{brief(client.vaultId)}</code>
