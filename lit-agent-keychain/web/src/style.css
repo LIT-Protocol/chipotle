@@ -1203,3 +1203,63 @@ footer.site-footer {
     padding: 16px;
   }
 }
+
+/* Authentication secrets stay in this view, never in a remote QR service. */
+.two-factor-dialog {
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  box-sizing: border-box;
+  border: 1px solid #ddd;
+  border-radius: 16px;
+  padding: 24px;
+  color: #222;
+  background: #fff;
+}
+.two-factor-dialog::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+.two-factor-dialog input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.totp-qr {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 16px 0;
+}
+.totp-secret {
+  display: block;
+  overflow-wrap: anywhere;
+  margin: 12px 0;
+}
+.recovery-codes {
+  padding: 16px;
+  margin: 16px 0;
+  background: #f5f5f5;
+  border-radius: 12px;
+}
+.recovery-codes ul {
+  list-style: none;
+  padding: 0;
+}
+.recovery-codes li {
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.recovery-codes .check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.recovery-codes .check input {
+  width: auto;
+}
+
+.recovery-methods > form {
+  margin: 24px 0 12px;
+}
+.recovery-methods > h3 {
+  margin-top: 24px;
+}

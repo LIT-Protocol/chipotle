@@ -18,10 +18,11 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 
-const COOKIE: &str = "kc_session";
+pub(crate) const COOKIE: &str = "kc_session";
 #[derive(Clone)]
 pub struct Session {
     pub vault_id: String,
+    pub token_hash: String,
 }
 #[rocket::async_trait]
 impl<'r> FromRequest<'r> for Session {
@@ -43,7 +44,10 @@ impl<'r> FromRequest<'r> for Session {
         .fetch_optional(pool)
         .await
         {
-            Ok(Some(vault_id)) => Outcome::Success(Session { vault_id }),
+            Ok(Some(vault_id)) => Outcome::Success(Session {
+                vault_id,
+                token_hash: crypto::hash_bytes(cookie.value().as_bytes()),
+            }),
             Ok(None) => Outcome::Error((Status::Unauthorized, ())),
             Err(_) => Outcome::Error((Status::ServiceUnavailable, ())),
         }
@@ -131,8 +135,13 @@ pub async fn login(
         return Err(api::err(Status::Forbidden, "login_expired"));
     }
     let mut tx = pool.begin().await.map_err(api::internal)?;
+    // Serialize login with 2FA enrollment and credential changes. Every route
+    // issuing a session must make the 2FA decision under this same vault lock.
+    sqlx::query("INSERT INTO kc_vaults(id,authority,authority_cid) VALUES($1,$2,$3) ON CONFLICT(id) DO NOTHING")
+        .bind(&vault_id).bind(serde_json::to_value(&body.authority).map_err(api::invalid)?).bind(&cid).execute(&mut *tx).await.map_err(api::internal)?;
+    crate::registry::lock_vault(&mut tx, &vault_id).await?;
     let deleted = sqlx::query(
-        "DELETE FROM kc_challenges WHERE challenge=$1 AND vault_id=$2 AND expires_at>now()",
+        "DELETE FROM kc_challenges WHERE challenge=$1 AND vault_id=$2 AND expires_at>now() AND purpose='login'",
     )
     .bind(field(doc, "challenge").map_err(api::invalid)?)
     .bind(&vault_id)
@@ -142,30 +151,45 @@ pub async fn login(
     if deleted.rows_affected() != 1 {
         return Err(api::err(Status::Forbidden, "challenge_used_or_expired"));
     }
-    sqlx::query("INSERT INTO kc_vaults(id,authority,authority_cid) VALUES($1,$2,$3) ON CONFLICT(id) DO NOTHING")
-        .bind(&vault_id).bind(serde_json::to_value(&body.authority).map_err(api::invalid)?).bind(&cid).execute(&mut *tx).await.map_err(api::internal)?;
     crate::authority::ensure_granted(&mut tx, lit, &vault_id, &cid).await?;
+    if crate::two_factor::enabled(&mut tx, &vault_id).await? {
+        let token = crypto::random_token();
+        sqlx::query("INSERT INTO kc_two_factor_logins(token_hash,vault_id,expires_at) VALUES($1,$2,now()+interval '5 minutes')")
+            .bind(crypto::hash_bytes(token.as_bytes())).bind(&vault_id)
+            .execute(&mut *tx).await.map_err(api::internal)?;
+        tx.commit().await.map_err(api::internal)?;
+        // No session, metadata or execution key is issued after only one factor.
+        return Ok(Json(json!({"twoFactorRequired":true,"token":token})));
+    }
+    let token = issue_session(&mut tx, &vault_id).await?;
+    tx.commit().await.map_err(api::internal)?;
+    set_cookie(cookies, cfg, token);
+    Ok(Json(json!({"vaultId":vault_id,"authority":body.authority})))
+}
+pub(crate) async fn issue_session(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    vault: &str,
+) -> Result<String, ApiError> {
     let token = crypto::random_token();
     sqlx::query("INSERT INTO kc_sessions(token_hash,vault_id,expires_at) VALUES($1,$2,now()+interval '30 days')")
-        .bind(crypto::hash_bytes(token.as_bytes())).bind(&vault_id).execute(&mut *tx).await.map_err(api::internal)?;
+        .bind(crypto::hash_bytes(token.as_bytes())).bind(vault).execute(&mut **tx).await.map_err(api::internal)?;
     sqlx::query("INSERT INTO kc_audit(vault_id,event) VALUES($1,'login')")
-        .bind(&vault_id)
-        .execute(&mut *tx)
+        .bind(vault)
+        .execute(&mut **tx)
         .await
         .map_err(api::internal)?;
-    tx.commit().await.map_err(api::internal)?;
+    Ok(token)
+}
+pub(crate) fn set_cookie(cookies: &CookieJar<'_>, cfg: &Config, token: String) {
     cookies.add(
         Cookie::build((COOKIE, token))
             .http_only(true)
             .secure(cfg.secure_cookies)
             .same_site(SameSite::Strict)
             .path("/")
-            // Persistent so a refresh or reopened browser keeps the vault open;
-            // the DB row is the real lifetime and logout/credential changes delete it.
             .max_age(time::Duration::days(30))
             .build(),
     );
-    Ok(Json(json!({"vaultId":vault_id,"authority":body.authority})))
 }
 #[get("/api/me")]
 pub async fn me(session: Session, pool: &State<PgPool>) -> ApiResult<Value> {

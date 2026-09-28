@@ -69,6 +69,47 @@ agents must not log billing bootstrap responses. Discovery has the same document
 operator-rollback trust as policy lookup. Revocation applies on the next request,
 not already received plaintext or already-authorized in-flight operations.
 
+## Authenticator-app two-factor login
+
+Optional RFC 6238 TOTP (SHA-1, six digits, 30-second steps, one step of clock
+skew) gates **hosted Keychain login** for every approved owner method. A first
+factor produces only a hashed, single-use, five-minute pending token; no session
+or execution key is returned until the second factor succeeds. Authenticator
+steps cannot be reused. Verification is serialized under the vault lock, and
+failed attempts are limited across sessions and pending tokens (10 per vault per
+five-minute budget window, plus an IP limit).
+
+Enrollment requires a fresh Lit owner receipt for a server nonce bound to the
+current session and setup operation. The pending enrollment expires after ten
+minutes and is activated only after a valid code. Disabling 2FA or replacing
+recovery codes requires another operation-bound owner receipt and a current
+TOTP or unused recovery code. Enabling, disabling, and regenerating codes revoke
+other browser sessions and outstanding login/setup challenges. Credential changes
+also invalidate pending login/setup challenges. Successful changes and recovery
+code consumption are audited in their database transaction.
+
+TOTP seeds are application login credentials, separate from user-stored vault
+secrets. The API necessarily returns the seed once during setup and verifies
+codes server-side. Seeds are encrypted at rest with AES-256-GCM, vault-bound AAD,
+and a key derived by HMAC-SHA-256 from `USAGE_KEY_ENCRYPTION_KEY` with the label
+`lit-keychain/totp-encryption/v1`; this key is distinct from the usage-key cipher
+key. QR codes are rendered locally. Ten random 128-bit recovery codes are shown
+once, stored only as domain- and vault-bound SHA-256 hashes, and atomically
+consumed. Logs and audit entries contain neither seeds nor codes. Security
+responses use `Cache-Control: no-store`.
+
+This is an additional **server-enforced login control**, not a change to Lit's
+immutable owner authorization or existing secret releases. It does not revoke
+agent grants, add a second factor to direct Lit execution, protect against a
+compromised Keychain operator, or require codes again on each request in an
+existing authenticated session. A code alone cannot sign in without an approved
+owner method. Recovery owner methods do not bypass 2FA. Loss of both the
+authenticator and all recovery codes locks out hosted login; there is no automatic
+email or owner-only bypass. Encrypted vault exports intentionally exclude seeds
+and recovery codes. A complete server database restore must also retain the 2FA
+records and encryption key; a vault-only restore after complete DB loss does not
+restore hosted-login 2FA settings.
+
 ## Agent-side plaintext handling
 
 `get`, the `get_secret` MCP tool and `keychain run` all deliver plaintext to the

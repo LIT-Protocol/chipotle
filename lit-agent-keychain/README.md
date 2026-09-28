@@ -364,3 +364,29 @@ key derivation, external Google issuance, and Stripe billing. It never calls pro
 
 Agent examples: [sdk/README.md](sdk/README.md). Security/operational limits:
 [SECURITY.md](SECURITY.md). Review findings: [ADVERSARIAL_REVIEW.md](ADVERSARIAL_REVIEW.md).
+
+## Security & sign-in
+
+The **Security & sign-in** page manages approved owner methods (passkeys,
+wallets, and Google accounts), authenticator-app 2FA, and encrypted vault backups.
+Each owner method can sign in independently; when 2FA is enabled, every method
+also needs a code from the authenticator or a single-use recovery code.
+
+To enable 2FA, approve setup with the current owner, scan the QR code (or enter
+the setup key), verify a six-digit code, and save the ten recovery codes outside
+this vault. Other browser sessions are signed out. Disabling 2FA and replacing
+recovery codes require owner approval plus a code; replacing codes invalidates
+the old set. Keep a fresh vault backup after changing owner methods, especially
+for signing in with a recovery wallet or Google account on a new device.
+
+2FA protects hosted login, not direct Lit owner authorization or existing agent
+grants. Authenticator and recovery codes are not included in vault backups. See
+[the security contract](SECURITY.md#authenticator-app-two-factor-login) for the
+trust boundary and recovery behavior. Existing vaults have 2FA off until enrolled;
+the database migration runs on server startup and uses the existing
+`USAGE_KEY_ENCRYPTION_KEY` with a separate derived encryption key.
+
+SDK owner clients can set `client.secondFactor = async (verify) => { ... }` to
+prompt for a code and call `await verify(code)`. Resolve only after verification
+succeeds, retry incorrect codes within the callback, or reject to cancel. A client
+without this callback cannot log in to a vault that requires 2FA.
