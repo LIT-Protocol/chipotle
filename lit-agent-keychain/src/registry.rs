@@ -9,7 +9,7 @@ use crate::{
     models::{field, number, valid_hex, Authority, Manifest, Signed},
 };
 use anyhow::{bail, Result};
-use rocket::{get, http::Status, post, put, serde::json::Json, State};
+use rocket::{delete, get, http::Status, post, put, serde::json::Json, State};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::{PgPool, Postgres, Transaction};
@@ -188,7 +188,7 @@ pub struct SecretWrite {
     pub envelope: Signed,
     pub policy: Signed,
 }
-struct Validated {
+pub(crate) struct Validated {
     manifest: Manifest,
     cid: String,
     name: String,
@@ -197,7 +197,7 @@ struct Validated {
 }
 /// `current_only` requires the newest release of the action (new secrets); restores
 /// and rotations accept any archived release the secret was created under.
-fn validate_write(
+pub(crate) fn validate_write(
     body: &SecretWrite,
     vault: &str,
     key: &str,
@@ -382,7 +382,7 @@ pub async fn list(session: Session, after: Option<&str>, pool: &State<PgPool>) -
     if after.is_some_and(|cursor| !valid_hex(cursor, 32)) {
         return Err(api::err(Status::BadRequest, "invalid_cursor"));
     }
-    let mut rows:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('secretId',s.id,'name',s.name,'actionCid',s.action_cid,'version',s.current_version,'release',s.manifest->'document'->'manifest'->'release','disabled',p.signed->'document'->'disabled','expiresAt',p.signed->'document'->'expiresAt','agentCount',jsonb_array_length(p.signed->'document'->'grants')) FROM kc_secrets s JOIN kc_registry r ON r.scope='secret:'||s.id JOIN kc_policies p ON p.hash=r.policy_hash WHERE s.vault_id=$1 AND s.id>$2 ORDER BY s.id LIMIT 201")
+    let mut rows:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('secretId',s.id,'name',s.name,'actionCid',s.action_cid,'version',s.current_version,'release',s.manifest->'document'->'manifest'->'release','disabled',p.signed->'document'->'disabled','expiresAt',p.signed->'document'->'expiresAt','agentCount',jsonb_array_length(p.signed->'document'->'grants'),'agents',p.signed->'document'->'grants') FROM kc_secrets s JOIN kc_registry r ON r.scope='secret:'||s.id JOIN kc_policies p ON p.hash=r.policy_hash WHERE s.vault_id=$1 AND s.id>$2 ORDER BY s.id LIMIT 201")
         .bind(&session.vault_id).bind(after.unwrap_or("")).fetch_all(pool.inner()).await.map_err(api::internal)?;
     let next = if rows.len() > 200 {
         rows.pop();
@@ -439,6 +439,75 @@ pub async fn update_policy(
     )
     .await?;
     tx.commit().await.map_err(api::internal)?;
+    Ok(Json(json!({"ok":true})))
+}
+/// Deletes a secret: its selected policy and every earlier one, the registry entry
+/// the derived action consults, and all ciphertext versions go in one transaction,
+/// so the next agent request is denied and nothing remains to serve or roll back.
+/// The action's execution grant is retired afterwards and the slot is freed.
+///
+/// A session suffices. Deletion grants nothing: it is the same outcome an operator
+/// can always produce by withholding data, and it needs no receipt because no
+/// action ever verifies "deleted" — absence is the denial. An owner who keeps an
+/// encrypted backup can restore the secret deliberately later.
+#[delete("/api/secrets/<secret>")]
+pub async fn delete_secret(
+    _origin: SameOrigin,
+    session: Session,
+    secret: &str,
+    pool: &State<PgPool>,
+    lit: &State<Chipotle>,
+) -> ApiResult<Value> {
+    if !valid_hex(secret, 32) {
+        return Err(api::err(Status::BadRequest, "invalid_id"));
+    }
+    let mut tx = pool.begin().await.map_err(api::internal)?;
+    lock_vault(&mut tx, &session.vault_id).await?;
+    let owned: Option<String> =
+        sqlx::query_scalar("SELECT id FROM kc_secrets WHERE id=$1 AND vault_id=$2 FOR UPDATE")
+            .bind(secret)
+            .bind(&session.vault_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(api::internal)?;
+    if owned.is_none() {
+        return Err(api::err(Status::NotFound, "not_found"));
+    }
+    let scope = format!("secret:{secret}");
+    sqlx::query("DELETE FROM kc_registry WHERE scope=$1 AND vault_id=$2")
+        .bind(&scope)
+        .bind(&session.vault_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(api::internal)?;
+    sqlx::query("DELETE FROM kc_policies WHERE scope=$1 AND vault_id=$2")
+        .bind(&scope)
+        .bind(&session.vault_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(api::internal)?;
+    // Envelopes cascade.
+    sqlx::query("DELETE FROM kc_secrets WHERE id=$1 AND vault_id=$2")
+        .bind(secret)
+        .bind(&session.vault_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(api::internal)?;
+    sqlx::query("UPDATE kc_execution_actions SET removing=true WHERE vault_id=$1 AND secret_id=$2")
+        .bind(&session.vault_id)
+        .bind(secret)
+        .execute(&mut *tx)
+        .await
+        .map_err(api::internal)?;
+    audit(&mut tx, &session.vault_id, "secret_deleted", secret).await?;
+    tx.commit().await.map_err(api::internal)?;
+    // Best effort now; the worker finishes it if Chipotle is unavailable.
+    if crate::sponsorship::retire(pool, lit, &session.vault_id, secret)
+        .await
+        .is_err()
+    {
+        tracing::warn!("deferred execution grant retirement");
+    }
     Ok(Json(json!({"ok":true})))
 }
 #[post("/api/secrets/<secret>/rotate", format = "json", data = "<body>")]

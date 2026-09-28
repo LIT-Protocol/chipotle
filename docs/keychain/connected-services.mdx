@@ -33,13 +33,13 @@ The dashboard's **Connect a service** wizard renders the same manifest: what the
   <Step title="Add it in Keychain">
     Choose **Add secret**, then **Connect a service**, pick the action and paste the credential. Except for Supabase, the value is the bare token, not JSON and not `Bearer …`. The action id becomes part of the secret's encryption key, so the choice is permanent; to do something else with the same credential, add it again as a different connected service.
   </Step>
-  <Step title="Approve the agent and download its config">
-    Same as a stored secret: approve the agent's public key with a short expiry, then download the config.
+  <Step title="Approve the agent">
+    Same as a stored secret: approve the agent's existing public key. The agent discovers approved services on its next request; no config download is needed.
   </Step>
   <Step title="Call it">
     ```sh
-    npx @lit-protocol/keychain use ./agent-identity.json ./STRIPE_API_KEY.keychain.json STRIPE_API_KEY
-    npx @lit-protocol/keychain use ./agent-identity.json ./OPENAI_API_KEY.keychain.json OPENAI_API_KEY \
+    npx @lit-protocol/keychain use ./agent-identity.json STRIPE_API_KEY
+    npx @lit-protocol/keychain use ./agent-identity.json OPENAI_API_KEY \
       '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Say hello"}],"maxTokens":16}'
     ```
 

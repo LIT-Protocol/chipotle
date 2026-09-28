@@ -47,7 +47,23 @@ Before execution requests to the configured production origin, the SDK, CLI and 
 4. Confirm on Base that the compose hash and OS image are whitelisted in the governance contracts controlled by the Lit Safe multisig.
 5. In Node, bind the live TLS certificate to the enclave through the ingress evidence quote.
 
-Any failure throws an `Attestation:` error and no request is sent. Unknown origins, such as a local test adapter, are not attested, which is not the same as passing attestation: verify `config.litApiUrl` independently and pin custom deployments explicitly. Browsers run steps 1 to 4 only. The general mechanism is described in [Attestation](/architecture/verification/attestation).
+Any failure throws an `Attestation:` error and no request is sent. Unknown origins, such as a local test adapter, are not attested, which is not the same as passing attestation: verify the locally configured `litApiUrl` independently and pin custom deployments explicitly. Browsers run steps 1 to 4 only. The general mechanism is described in [Attestation](/architecture/verification/attestation).
+
+## Live discovery and billing bootstrap
+
+Agents prove possession of their local Ed25519 key using a domain-separated,
+service-audience-bound, 60-second one-use challenge. The server atomically consumes
+it and returns only current approved locators and each approved vault's scoped
+execution-only billing key, never plaintext, private keys or management credentials.
+Every live list/get/use refreshes discovery; no config file or restart is needed.
+The SDK verifies signed bundles against its independently trusted Lit endpoint.
+Duplicate names require qualified vaultId/secretId IDs. Discovery is bounded to
+1,000 candidate secrets and fails explicitly rather than truncating.
+
+The billing key is reusable billing, not secret authority: a former approved agent
+retaining it can consume sponsored execution until rotation, but cannot bypass an
+honest current policy check. Lit still verifies owner authorization and the agent's
+signed request. The documented operator-rollback trust remains unchanged.
 
 ## Revocation and its limits
 

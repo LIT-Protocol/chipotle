@@ -334,7 +334,8 @@ test("`keychain run` parses its arguments and refuses anything it cannot inject"
   );
   assert.throws(() => parseRunArgs(["id", "cfg", "echo"]), /`--`/);
   assert.throws(() => parseRunArgs(["id", "cfg", "--"]), /command after/);
-  assert.throws(() => parseRunArgs(["id", "--", "echo"]), /identity-file/);
+  assert.equal(parseRunArgs(["id", "--", "echo"]).configFile, undefined);
+  assert.throws(() => parseRunArgs(["--", "echo"]), /identity-file/);
   assert.throws(
     () => parseRunArgs(["id", "cfg", "--env", "A=1BAD", "--", "x"]),
     /not a valid environment variable/,

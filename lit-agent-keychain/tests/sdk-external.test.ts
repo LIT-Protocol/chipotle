@@ -40,9 +40,12 @@ test("packed SDK works in an isolated strict TypeScript, Node and browser consum
       ],
       { cwd: dir, stdio: "pipe" },
     );
-    const consumer = `import { Keychain, ACTIONS, shapeToJsonSchema, type AgentConfig, type Shape, type ActionDefinition } from '@lit-protocol/keychain';
+    const consumer = `import { Keychain, LiveKeychain, ACTIONS, shapeToJsonSchema, type AgentConfig, type LiveSecretInfo, type Shape, type ActionDefinition } from '@lit-protocol/keychain';
 const config: AgentConfig = { v: 2, litApiUrl: 'http://localhost:8000', secrets: {} };
 const client = new Keychain(Keychain.generateKey().privateKey, config);
+const live = new LiveKeychain(Keychain.generateKey().privateKey);
+const inventory: Promise<LiveSecretInfo[]> = live.list();
+live.destroy();
 const definition: ActionDefinition = ACTIONS.export;
 const shape: Shape = { type: 'string', maxLength: 64 };
 shapeToJsonSchema(shape);

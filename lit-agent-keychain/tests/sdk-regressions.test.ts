@@ -66,13 +66,11 @@ test("MCP merges own prototype-named secrets without prototype mutation", async 
     readFile: async (name: string) => JSON.stringify(files[name]),
   });
   try {
-    assert.deepEqual(
-      client
-        .list()
-        .map((s) => s.name)
-        .sort(),
-      ["__proto__", "constructor"],
-    );
+    assert.deepEqual((await client.list()).map((s) => s.name).sort(), [
+      "__proto__",
+      "constructor",
+    ]);
+    assert.ok("config" in client);
     assert.equal(Object.hasOwn(client.config.secrets, "__proto__"), true);
   } finally {
     client.destroy();
@@ -178,7 +176,7 @@ test("use() on a stored secret names the secret and points at get()/run", async 
   }
 });
 
-test("a 401 from Lit explains that the execution key was probably replaced", async () => {
+test("a 401 from Lit directs owners to config download without removed controls", async () => {
   const { createServer } = await import("node:http");
   const server = createServer((_req, res) => {
     res.statusCode = 401;
@@ -209,9 +207,14 @@ test("a 401 from Lit explains that the execution key was probably replaced", asy
         assert.equal(error.status, 401);
         assert.match(
           error.message,
-          /Request failed \(401\): API key not recognized — it does not resolve to any account\. The scoped execution key in this agent config is not accepted by Lit; the owner most likely replaced it/,
+          /Request failed \(401\): API key not recognized — it does not resolve to any account\. The scoped execution key is not accepted by Lit/,
         );
-        assert.match(error.message, /fresh Agent config/);
+        assert.match(error.message, /Use LiveKeychain/);
+        assert.doesNotMatch(
+          error.message,
+          /download a fresh agent config|Download agent config/,
+        );
+        assert.doesNotMatch(error.message, /Execution and account access/);
         return true;
       },
     );

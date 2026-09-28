@@ -18,6 +18,9 @@ See README.md and SECURITY.md for the protocol and its explicit trust boundary.
   execution-only usage keys are deliberately returned to owners/agents and stored
   encrypted with a separate vault-bound AEAD key. They provide billing, not authority.
 - Free is 5 stored secrets; Standard is $10/month for 1,000. Rotations consume no extra slot.
+  Owners may delete a secret at any time: registry entry, policies and all ciphertext go
+  in one transaction, the slot is freed and the execution grant is retired. Never
+  restrict deletion to a plan or retain ciphertext the owner asked to remove.
   Custom plans require explicit operator settings. No automatic overage charges.
   Direct Chipotle usage has no hard per-user spending cap (accepted launch limit).
 - Owner verification is pinned in an immutable authorization action. Receipts bind

@@ -1,3 +1,4 @@
+import { parseGoogleApproval } from "../../protocol/google-approval.ts";
 import {
   actionCid,
   actionSource,
@@ -16,8 +17,14 @@ import {
   type Shape,
 } from "@lit-protocol/agent-keychain-library/schema";
 export { shapeToJsonSchema };
+export {
+  LiveKeychain,
+  type LiveKeychainOptions,
+  type LiveSecretInfo,
+} from "./live.ts";
 import {
   authoritySchema,
+  type GoogleApproval,
   manifestSchema,
   manifestDocumentSchema,
   envelopeSchema,
@@ -105,6 +112,7 @@ export type {
   Credentials,
 };
 export const DEFAULT_LIT_API_URL = "https://api.chipotle.litprotocol.com";
+export const DEFAULT_KEYCHAIN_SERVICE_URL = "https://keychain.litprotocol.com";
 /**
  * The action catalog compiled into this client: every release id an owner can
  * choose for a secret, with the single operation it permits and, for "use inside
@@ -123,7 +131,10 @@ export const availableActions = (tier?: ActionDefinition["tier"]) =>
   Object.values(ACTIONS).filter(
     (d) => !d.deprecated && (tier === undefined || d.tier === tier),
   );
-export type OwnerSigner = (challenge: Challenge) => Promise<OwnerProof>;
+export type OwnerSigner = (
+  challenge: Challenge,
+  authorityRelease?: string,
+) => Promise<OwnerProof>;
 export type SecretBundle = {
   manifest: Signed<Extract<Document, { kind: "manifest" }>>;
   envelope: Signed<Envelope>;
@@ -227,7 +238,7 @@ export function assertAgentIdentity(
     }
   }
 }
-/** Validates the agent config downloaded from Keychain (*.keychain.json). */
+/** Validates an existing legacy static agent config (*.keychain.json). */
 export function assertAgentConfig(
   config: unknown,
 ): asserts config is AgentConfig {
@@ -433,7 +444,7 @@ export class LitConnection {
       if (error instanceof HttpError && error.status === 401)
         throw new HttpError(
           401,
-          `${(error.detail || "execution key rejected").replace(/[.\s]+$/, "")}. The scoped execution key in this agent config is not accepted by Lit; the owner most likely replaced it in Keychain (Execution and account access). Ask them for a fresh Agent config, or set CHIPOTLE_USAGE_API_KEY`,
+          `${(error.detail || "execution key rejected").replace(/[.\s]+$/, "")}. The scoped execution key is not accepted by Lit. Use LiveKeychain or the CLI/MCP with only your existing identity file to discover current approvals and execution credentials. If live discovery still returns a rejected key, contact Keychain support. Legacy static clients may override CHIPOTLE_USAGE_API_KEY`,
         );
       throw error;
     });
@@ -531,6 +542,7 @@ export class OwnerClient {
    * and tests can pin an earlier archived release here.
    */
   readonly authorityRelease: string | undefined;
+  googleApproval?: { approval: GoogleApproval; authorityRelease: string };
   async api(path: string, init: RequestInit = {}) {
     return jsonFetch(
       this.authority.registry + path,
@@ -612,7 +624,7 @@ export class OwnerClient {
       issuedAt: now,
       expiresAt: now + 120,
     };
-    const proof = await this.signer(challenge);
+    const proof = await this.signer(challenge, template.hash);
     const response = await this.lit.execute(
       this.authority,
       { documents, proof },
@@ -651,12 +663,21 @@ export class OwnerClient {
       issuedAt: now,
       expiresAt: now + 120,
     };
-    const proof = await this.signer(challenge);
+    const proof = await this.signer(challenge, template.hash);
     const response = await this.lit.execute(
       this.authority,
       { document, proof },
       template,
     );
+    if (document.kind === "login") {
+      this.googleApproval =
+        response.googleApproval === undefined
+          ? undefined
+          : {
+              approval: parseGoogleApproval(response.googleApproval),
+              authorityRelease: template.hash,
+            };
+    }
     return { document, receipt: receiptSchema.parse(response.receipt) };
   }
   async login() {
@@ -713,6 +734,17 @@ export class OwnerClient {
         ),
         this.vaultId,
       );
+      if (this.googleApproval) {
+        const { approval } = this.googleApproval;
+        requireThat(approval.payload.vaultId === this.vaultId);
+        verifyAction(
+          approval.payload,
+          approval.signature,
+          await this.lit.publicKey(
+            await actionCid(this.authority, template.code),
+          ),
+        );
+      }
     } catch (error) {
       this.lit.usageApiKey = undefined;
       await this.api("/auth/logout", { method: "POST" }).catch(() => {});
@@ -829,11 +861,17 @@ export class OwnerClient {
    * Re-signs the policy. `days` sets a new expiry that many days from now
    * (default 30); `null` removes the expiry so the policy lasts until the owner
    * revokes or disables it. Secrets pinned to an older release still cap
-   * lifetimes at 90 days (see `policyLifetimeCapDays`).
+   * lifetimes at 90 days (see `policyLifetimeCapDays`). `preserveExpiry` keeps
+   * the exact existing expiry (including null) and cannot be combined with `days`.
    */
   async setPolicy(
     bundle: SecretBundle,
-    changes: { grants?: Grant[]; disabled?: boolean; days?: number | null },
+    changes: {
+      grants?: Grant[];
+      disabled?: boolean;
+      days?: number | null;
+      preserveExpiry?: boolean;
+    },
   ) {
     const old = bundle.policy.document;
     const now = nowSeconds();
@@ -844,8 +882,15 @@ export class OwnerClient {
           days >= 1 &&
           Number.isSafeInteger(now + days * 86400)),
     );
+    requireThat(!(changes.preserveExpiry && changes.days !== undefined));
+    const expiresAt = changes.preserveExpiry
+      ? old.expiresAt
+      : days === null
+        ? null
+        : now + days * 86400;
+    requireThat(expiresAt === null || expiresAt > now);
     const cap = await this.policyLifetimeCapDays(bundle);
-    if (cap !== null && (days === null || days > cap))
+    if (cap !== null && (expiresAt === null || expiresAt > now + cap * 86400))
       throw new Error(
         `This secret was created under an earlier Keychain release that limits permissions to ${cap} days. Recreate the secret to choose a longer or unlimited lifetime.`,
       );
@@ -854,7 +899,7 @@ export class OwnerClient {
       epoch: old.epoch + 1,
       previousHash: digest(old),
       notBefore: now,
-      expiresAt: days === null ? null : now + days * 86400,
+      expiresAt,
       grants: changes.grants ?? old.grants,
       disabled: changes.disabled ?? old.disabled,
     });
@@ -868,7 +913,12 @@ export class OwnerClient {
     });
     return { ...bundle, policy: signed };
   }
-  async delegate(bundle: SecretBundle, publicKey: string, label: string) {
+  async delegate(
+    bundle: SecretBundle,
+    publicKey: string,
+    label: string,
+    options: { preserveExpiry?: boolean } = {},
+  ) {
     const grant: Grant = {
       agentPublicKey: publicKey,
       label,
@@ -883,6 +933,7 @@ export class OwnerClient {
       ],
     };
     return this.setPolicy(bundle, {
+      preserveExpiry: options.preserveExpiry,
       grants: [
         ...bundle.policy.document.grants.filter(
           (g) => g.agentPublicKey !== publicKey,
@@ -993,6 +1044,16 @@ export class OwnerClient {
       credentials: await this.getCredentials(),
       bundles,
     };
+  }
+  /**
+   * Deletes a secret. The registry entry every agent request is checked
+   * against, all signed policies and every ciphertext version are removed in one
+   * transaction, so the next request from any agent is denied and the slot is
+   * freed. An encrypted backup taken earlier can still restore it deliberately.
+   */
+  async deleteSecret(secretId: string) {
+    requireThat(/^[0-9a-f]{64}$/.test(secretId), "Invalid secret id");
+    await this.api(`/api/secrets/${secretId}`, { method: "DELETE" });
   }
   async listSecrets() {
     const secrets: any[] = [];
@@ -1178,6 +1239,11 @@ export class Keychain {
       usageApiKey?: string;
       attestation?: AttestationOption;
       tlsCertificateSha256?: string;
+      /**
+       * Reuse an attested connection whose usage key already matches this
+       * config, instead of attesting a fresh one. Used by the live client.
+       */
+      lit?: LitConnection;
     } = {},
   ) {
     requireThat(
@@ -1192,13 +1258,23 @@ export class Keychain {
       assertUsageApiKey(options.usageApiKey);
     this.key = unhex(privateKey);
     this.publicKey = agentPublicKey(this.key);
-    this.lit = new LitConnection(
-      config.litApiUrl,
-      options.timeoutMs,
-      options.usageApiKey ?? config.usageApiKey,
-      options.attestation,
-      { tlsCertificateSha256: options.tlsCertificateSha256 },
-    );
+    const usageApiKey = options.usageApiKey ?? config.usageApiKey;
+    if (options.lit) {
+      requireThat(
+        options.lit.url === origin(config.litApiUrl) &&
+          options.lit.usageApiKey === usageApiKey,
+        "Shared Lit connection does not match this agent config",
+      );
+      this.lit = options.lit;
+    } else {
+      this.lit = new LitConnection(
+        config.litApiUrl,
+        options.timeoutMs,
+        usageApiKey,
+        options.attestation,
+        { tlsCertificateSha256: options.tlsCertificateSha256 },
+      );
+    }
   }
   /** Attests the Lit endpoint now instead of lazily on the first read. */
   attest() {

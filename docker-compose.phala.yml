@@ -129,6 +129,9 @@ services:
       # internal cache-invalidation endpoint (/internal/invalidate_balance_cache).
       # Must match the value set on lit-payments (Railway env var of the same name).
       LIT_INTERNAL_SHARED_SECRET: ${LIT_INTERNAL_SHARED_SECRET}
+      # Shared gateway IPs turn the per-IP new-account limit into a global cap.
+      # Next/prod opt out via encrypted envs; other deployments stay enabled.
+      NEW_ACCOUNT_RATE_LIMIT_ENABLED: "${NEW_ACCOUNT_RATE_LIMIT_ENABLED:-true}"
       # gVisor any-language runner gate (CPL-359, CPL-361). Rendered per-deploy:
       # testing/manual deploys substitute "true"; the production workflow
       # substitutes "false" (see deploy-staging.yml / deploy-prod-1-propose.yml /

@@ -146,7 +146,7 @@ pub async fn login(
         .bind(&vault_id).bind(serde_json::to_value(&body.authority).map_err(api::invalid)?).bind(&cid).execute(&mut *tx).await.map_err(api::internal)?;
     crate::authority::ensure_granted(&mut tx, lit, &vault_id, &cid).await?;
     let token = crypto::random_token();
-    sqlx::query("INSERT INTO kc_sessions(token_hash,vault_id,expires_at) VALUES($1,$2,now()+interval '12 hours')")
+    sqlx::query("INSERT INTO kc_sessions(token_hash,vault_id,expires_at) VALUES($1,$2,now()+interval '30 days')")
         .bind(crypto::hash_bytes(token.as_bytes())).bind(&vault_id).execute(&mut *tx).await.map_err(api::internal)?;
     sqlx::query("INSERT INTO kc_audit(vault_id,event) VALUES($1,'login')")
         .bind(&vault_id)
@@ -160,6 +160,9 @@ pub async fn login(
             .secure(cfg.secure_cookies)
             .same_site(SameSite::Strict)
             .path("/")
+            // Persistent so a refresh or reopened browser keeps the vault open;
+            // the DB row is the real lifetime and logout/credential changes delete it.
+            .max_age(time::Duration::days(30))
             .build(),
     );
     Ok(Json(json!({"vaultId":vault_id,"authority":body.authority})))

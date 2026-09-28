@@ -39,6 +39,15 @@ const server = http.createServer(async (req, res) => {
       res.end("{}");
       return;
     }
+    if (url.pathname === "/test/action-granted") {
+      const hash = keccak256(toHex(url.searchParams.get("cid") || ""));
+      res.end(
+        JSON.stringify({
+          granted: [...groups.values()].some((group) => group.has(hash)),
+        }),
+      );
+      return;
+    }
     if (url.pathname === "/core/v1/list_api_keys") {
       if (req.headers["x-api-key"] !== "local-master-only") {
         res.writeHead(403);
@@ -76,6 +85,7 @@ const server = http.createServer(async (req, res) => {
       "add_group",
       "update_group",
       "add_action_to_group",
+      "remove_action_from_group",
       "update_usage_api_key",
       "add_usage_api_key",
       "remove_usage_api_key",
@@ -123,6 +133,12 @@ const server = http.createServer(async (req, res) => {
         const group = groups.get(body.group_id);
         if (!group) throw new Error("Invalid group");
         group.add(keccak256(toHex(body.action_ipfs_cid)));
+      }
+      if (url.pathname.endsWith("/remove_action_from_group")) {
+        // The contract reverts when the action is not a member of the group.
+        const group = groups.get(body.group_id);
+        if (!group || !group.delete(String(body.hashed_cid).toLowerCase()))
+          throw new Error("ActionDoesNotExist");
       }
       if (
         url.pathname.endsWith("/add_usage_api_key") ||

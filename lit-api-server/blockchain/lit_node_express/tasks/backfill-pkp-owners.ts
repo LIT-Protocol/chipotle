@@ -1,3 +1,7 @@
+// Historical migration tool: dry-run remains usable after backfillPkpOwners
+// is removed. Writes require the migration selector; finish and verify each
+// target before upgrading it.
+
 import { task } from "hardhat/config";
 import { ethers } from "ethers";
 

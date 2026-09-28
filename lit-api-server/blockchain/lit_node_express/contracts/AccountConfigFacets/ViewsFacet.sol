@@ -171,14 +171,26 @@ contract ViewsFacet {
         // that owner, the local pkpData entry is a stale pre-fix hijack
         // registration — fail closed instead of leaking the victim's path.
         // owner == 0 means a pre-migration wallet not yet backfilled: fall
-        // through so signing keeps working until backfillPkpOwners runs.
+        // through for deployments that have not migrated. Completed bindings
+        // survive removal of the historical backfill entry point.
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        uint256 resolvedMaster = s.allApiKeyHashesToMaster[apiKeyHash];
         uint256 owner = s.pkpIdToOwnerMaster[walletAddress];
         if (owner != 0) {
-            uint256 resolvedMaster = s.allApiKeyHashesToMaster[apiKeyHash];
             if (owner != resolvedMaster) {
                 revert AppStorage.InvalidRequest("PKP owned by another account");
             }
+        }
+        // Path-aliasing defense (companion to the pkpId binding above). The pkpId
+        // binding only protects the address label; the key is derived from the
+        // path. If a resolving account is not the path's first owner, this is a
+        // stale pre-fix aliasing registration pointing at someone else's key —
+        // fail closed instead of releasing it. owner == 0 means a pre-migration
+        // path not yet backfilled. Keep the legacy fallback for deployments that
+        // have not migrated; completed bindings survive removal of the backfill.
+        uint256 pathOwner = s.pathToOwnerMaster[derivation];
+        if (pathOwner != 0 && pathOwner != resolvedMaster) {
+            revert AppStorage.InvalidRequest("derivation path owned by another account");
         }
         return derivation;
     }
@@ -190,6 +202,19 @@ contract ViewsFacet {
     function getPkpOwnerMaster(address pkpId) public view returns (uint256) {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         return s.pkpIdToOwnerMaster[pkpId];
+    }
+
+    /// @notice Return the master apiKeyHash that first registered a derivationPath,
+    ///         or 0 if the path has never been bound (pre-migration wallet or never
+    ///         registered).
+    /// @dev Companion to getPkpOwnerMaster. The binding survives
+    ///      removeWalletDerivation by design; used to audit the path first-owner
+    ///      rule and the backfillPathOwners migration.
+    function getPathOwnerMaster(
+        uint256 derivationPath
+    ) public view returns (uint256) {
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        return s.pathToOwnerMaster[derivationPath];
     }
 
     function listApiKeys(
@@ -426,6 +451,22 @@ contract ViewsFacet {
         return account;
     }
 
+    /// @notice Returns true when a usage API key's on-chain expiration has passed.
+    /// @dev The `expiration` field is stored on-chain and surfaced to users as a
+    ///      real access-control deadline, so every authorization path must honor
+    ///      it. An expiration of 0 is the "never expires" sentinel (a key created
+    ///      without an explicit deadline); any non-zero value in the past
+    ///      de-authorizes the key. Reads `block.timestamp`, so this must only be
+    ///      called from view functions that already tolerate miner timestamp
+    ///      drift (seconds-level, irrelevant at day-scale expirations).
+    function _isExpired(
+        AppStorage.UsageApiKey storage usageApiKey
+    ) internal view returns (bool) {
+        return
+            usageApiKey.expiration != 0 &&
+            block.timestamp >= usageApiKey.expiration;
+    }
+
     function canExecuteAction(
         uint256 apiKeyHash,
         uint256 cidHash
@@ -455,6 +496,11 @@ contract ViewsFacet {
         AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[
             apiKeyHash
         ];
+
+        // An expired usage key authorizes nothing, regardless of its scopes.
+        if (_isExpired(usageApiKey)) {
+            return false;
+        }
 
         //  wildcard scenario
         if (usageApiKey.executeInGroups.contains(0)) {
@@ -531,6 +577,10 @@ contract ViewsFacet {
             apiKeyHash
         ];
 
+        if (_isExpired(usageApiKey)) {
+            return false; // expired key authorizes nothing
+        }
+
         if (usageApiKey.executeInGroups.contains(0)) {
             return true; // wildcard: can execute in any group
         }
@@ -560,6 +610,10 @@ contract ViewsFacet {
         AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[
             apiKeyHash
         ];
+
+        if (_isExpired(usageApiKey)) {
+            return false; // expired key authorizes nothing
+        }
 
         if (usageApiKey.executeInGroups.contains(0)) {
             return true; // wildcard
@@ -594,6 +648,10 @@ contract ViewsFacet {
         AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[
             apiKeyHash
         ];
+
+        if (_isExpired(usageApiKey)) {
+            return (false, false); // expired key authorizes nothing
+        }
 
         if (usageApiKey.executeInGroups.contains(0)) {
             return (true, true); // wildcard: both trivially true
