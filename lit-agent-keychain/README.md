@@ -43,7 +43,9 @@ or catalog lock changes are part of this release.
 SDK 2.1.1 hardened live discovery (#707). SDK 2.1.0 added `LiveKeychain`,
 authenticated live discovery and configless CLI/MCP.
 Owners approve on the website; running clients observe changes on the next request
-without downloading configs. The legacy static API remains compatible.
+without downloading configs. Use **Connect to a session** on the agent page or approval confirmation for setup
+using the existing local identity. Agent config downloads have been removed.
+The static SDK API remains compatible with existing integrations.
 
 SDK 2.0.7 previously added explicit expiry preservation and guided owner onboarding.
 
@@ -51,7 +53,7 @@ SDK 2.0.7 previously added explicit expiry preservation and guided owner onboard
 an ordinary SDK release with no template change: clearer client-side messages
 (`use()` on a stored secret, an identity object passed where the private key string
 belongs), `describeCredential` accepting the raw JSON text of an identity or config
-file, and the owner UI's per-agent **Download agent config** download. Existing agents
+file. Existing agents
 on 2.0.5 keep working. The notes below describe the previous, template-changing
 release and still apply to secrets pinned to it.
 
@@ -145,9 +147,8 @@ released plaintext or cancelling authorized in-flight operations.
 For agent installation and the separate stored-secret (`get`/`run`) and connected-service
 (`use`) paths, see [SDK quickstarts](sdk/README.md). For provider credentials and
 exact inputs, see [provider recipes](PROVIDERS.md). An **export action** releases a
-raw secret to an approved agent; **Agent config** downloads public locators plus a
-billing key; **encrypted backup export** saves ciphertext/policies. These are not
-interchangeable operations.
+raw secret to an approved agent; **encrypted backup export** saves ciphertext/policies.
+Agents discover their current permissions and execution credentials from the server.
 
 ### Prepare recovery while you still have access
 
@@ -166,7 +167,7 @@ interchangeable operations.
   on the sign-in page, select your encrypted backup, then sign with an owner
   credential approved for that vault. Use the original deployment/origin for
   passkeys; a newly created passkey is not the old credential. Confirm the restored
-  secret list and permissions, and download fresh agent configs where necessary.
+  secret list and permissions; live clients discover restored approvals on their next request.
 - **Google-only owner:** sign in with the same Google account, not simply the same
   email spelling on a different account. If inaccessible, use Google's recovery
   or a previously approved alternate owner; Keychain cannot reset Google identity.
@@ -188,14 +189,14 @@ physical-passkey or provider recovery test. See [security limits](SECURITY.md).
 
 ### Rotations and revocation
 
-| Change                                 | Owner steps                                                                                                 | Agent/config consequence                                                                                                 |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Secret value (without approval update) | Issue a replacement at the provider; rotate the secret; reapprove intended agents for the new exact version | Old version grants alone do not cover the new version                                                                    |
-| Rotate & approve                       | Use the combined dashboard action to rotate and move existing agents to the new version                     | No separate reapproval is needed; existing downloaded configs can resolve the new version immediately                    |
-| Execution/billing key                  | Replace execution key in the owner dashboard                                                                | Update every agent config or `CHIPOTLE_USAGE_API_KEY` override, then restart MCP; identity/secret approvals are separate |
-| Agent signing key                      | Generate a new identity, approve new public key, revoke old grants                                          | Never overwrite a working identity without a recovery plan; distribute new identity/config privately                     |
-| Immutable action release               | Keep old release available; reimport original credential into the new action and approve explicitly         | A config edit cannot migrate ciphertext; strict-mode backup cannot supply plaintext                                      |
-| Owner credential                       | Approve/test replacement before revoking old credential                                                     | Download a fresh encrypted backup; existing metadata sessions are invalidated                                            |
+| Change                                 | Owner steps                                                                                                 | Agent consequence                                                                                                                             |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Secret value (without approval update) | Issue a replacement at the provider; rotate the secret; reapprove intended agents for the new exact version | Old version grants alone do not cover the new version                                                                                         |
+| Rotate & approve                       | Use the combined dashboard action to rotate and move existing agents to the new version                     | No separate reapproval is needed; live clients discover the new version on their next request                                                 |
+| Execution/billing key                  | Replace execution key in the owner dashboard                                                                | Live clients discover the replacement on their next request; migrate static clients to live discovery. Identity/secret approvals are separate |
+| Agent signing key                      | Generate a new identity, approve new public key, revoke old grants                                          | Never overwrite a working identity without a recovery plan; keep the new identity on the agent’s device                                       |
+| Immutable action release               | Keep old release available; reimport original credential into the new action and approve explicitly         | Changing client settings cannot migrate ciphertext; strict-mode backup cannot supply plaintext                                                |
+| Owner credential                       | Approve/test replacement before revoking old credential                                                     | Download a fresh encrypted backup; existing metadata sessions are invalidated                                                                 |
 
 For suspected exposure, revoke at the upstream provider too. With honest storage,
 revocation applies to subsequent policy lookups; in-flight calls may finish and

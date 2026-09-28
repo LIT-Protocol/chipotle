@@ -44,7 +44,7 @@ as a second approved owner credential before storing anything valuable.
 
 | Situation | What to do |
 |---|---|
-| New device, approved credential available | Choose **Recover an existing vault** on the sign-in page, select your backup, then sign in with any approved credential. Confirm the restored secret list. Live clients discover restored grants on their next request; legacy static clients may need fresh configs. |
+| New device, approved credential available | Choose **Recover an existing vault** on the sign-in page, select your backup, then sign in with any approved credential. Confirm the restored secret list. Live clients discover restored grants on their next request. |
 | Google-only owner | Sign in with the same Google account. If it is inaccessible, use Google's recovery or a previously approved alternate owner. Keychain cannot reset a Google identity. |
 | Backup lost, credential available | Sign in and make a new backup. A credential alone does not recreate lost ciphertext. |
 | All approved credentials lost | A backup alone is insufficient. Recover through the credential provider (a synced passkey, Google recovery) or an already-approved alternate credential. There is no operator reset token. |
@@ -57,7 +57,7 @@ Restore never overwrites an existing secret or an existing vault's credential se
 | Change | Owner steps | Effect on agents |
 |---|---|---|
 | Rotate & approve | Enter the new value on the secret's page | Existing agents move to the new version with their current expiry; live clients discover it on the next request |
-| Execution (billing) key | Authenticated owner execution-key rotation API | Live clients retrieve the replacement on their next request; legacy static clients need a new config or override. Approvals are unaffected |
+| Execution (billing) key | Authenticated owner execution-key rotation API | Live clients retrieve the replacement on their next request; migrate static clients to live discovery. Approvals are unaffected |
 | Agent signing key | Approve the new public key, revoke the old | Keep the new private identity on its trusted agent device; no config download |
 | Owner credential | Approve and test the replacement before removing the old one | Existing browser sessions end; download a fresh backup |
 

@@ -58,8 +58,8 @@ try {
 ```
 
 `get` returns plaintext to this process; `get_secret` returns it into model context.
-For a trusted child tool prefer `run` below. The export **action** is not an Agent
-config download (locators plus billing key) or encrypted backup export (ciphertext).
+For a trusted child tool prefer `run` below. The export **action** releases a secret
+value; encrypted backup export saves ciphertext.
 
 ## Connected service → use/action MCP tool
 
@@ -327,15 +327,16 @@ A compromised permitted agent can disclose any credential it receives.
 
 Build from this repository with `npm ci && npm run build` in `lit-agent-keychain/`.
 
-## Optional legacy / advanced static configs
+## Migrating existing static clients
 
-`Keychain(privateKey, config, options)` and explicit CLI config-file arguments
-remain supported for existing integrations. Its synchronous `list()` is a snapshot;
-new approvals require a new export. Secret reads still check current policy. The
-website's **Advanced: legacy static config → Download agent config** exports only
-successful approvals; it is not required by live clients. Legacy MCP can merge
-multiple configs from one vault, but different vault billing keys must not be merged.
-Protect those files as billing credentials. Prefer `LiveKeychain` for all new agents.
+The website no longer exports agent configs. Use `LiveKeychain(identity.privateKey)`
+or pass only the existing identity file to CLI/MCP commands. These clients discover
+current approvals and billing credentials on each request, without config transfers
+or restarts after permission changes.
+
+`Keychain(privateKey, config, options)` and explicit CLI config-file arguments remain
+compatible with existing integrations, but their inventory is a static snapshot.
+Secret reads still check current policy. Migrate these integrations to live discovery.
 
 Scoped execution keys fund execution, not authorization. A former agent retaining
 one can consume the vault's sponsored execution budget until the owner rotates it,

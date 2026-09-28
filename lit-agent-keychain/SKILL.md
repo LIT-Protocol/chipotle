@@ -58,8 +58,8 @@ the chosen Lit origin independently and explicitly pin custom deployments (SDK R
 
 Live discovery omits revoked, disabled, expired or stale-version approvals. `Unknown
 secret` means no current approval (or a wrong name); call `list()` and ask the owner
-to approve/renew the existing public key, not download a file. Static `Keychain`
-clients remain supported with **Advanced: legacy static config → Download agent config**.
+to approve/renew the existing public key, not download a file. Use **Connect to a session** on the agent page or the **Ready to use** confirmation
+to get a prompt or setup snippets for the existing identity. Config downloads have been removed.
 
 Discovery is key-possession metadata/billing authentication, not owner authority.
 The scoped billing key is reusable for billing only; a retained old key can spend
@@ -85,14 +85,13 @@ see, and the message tells you who can fix it:
 
 ## Know what you are holding
 
-Live clients need only an identity file. The optional legacy config is a snapshot
-and is not used by live discovery. Never confuse these artifacts with secret values.
+Agents need only their existing local identity file. Current approvals are discovered
+from the server on every request. Never confuse the identity with secret values.
 
-| Artifact       | Shape                                                                       | Sensitivity                                                      |
-| -------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Agent identity | JSON `{ "v": 2, "privateKey": <64 hex>, "publicKey": <64 hex> }`            | Private. Only `publicKey` is ever shared.                        |
-| Agent config   | JSON `*.keychain.json`: `{ "v": 2, "litApiUrl", "usageApiKey", "secrets" }` | Private. `usageApiKey` is a Chipotle billing key, not authority. |
-| Secret value   | Whatever `get` returns                                                      | Do not log, echo, or write to disk.                              |
+| Artifact       | Shape                                                            | Sensitivity                               |
+| -------------- | ---------------------------------------------------------------- | ----------------------------------------- |
+| Agent identity | JSON `{ "v": 2, "privateKey": <64 hex>, "publicKey": <64 hex> }` | Private. Only `publicKey` is ever shared. |
+| Secret value   | Whatever `get` returns                                           | Do not log, echo, or write to disk.       |
 
 `usageApiKey` is an opaque string minted by Chipotle (currently base64 of 32 random
 bytes, 44 characters ending in `=`). It pays for execution and cannot read a secret
