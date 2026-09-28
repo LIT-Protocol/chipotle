@@ -30,6 +30,8 @@ pub fn build(cfg: Config, pool: PgPool, lit: Chipotle, stripe: Stripe) -> Rocket
             "/",
             routes![
                 health,
+                crate::discovery::challenge,
+                crate::discovery::discover,
                 config,
                 index,
                 auth::challenge,
@@ -59,6 +61,7 @@ pub fn build(cfg: Config, pool: PgPool, lit: Chipotle, stripe: Stripe) -> Rocket
                 registry::bundle,
                 registry::update_policy,
                 registry::rotate,
+                registry::delete_secret,
                 registry::audit_log
             ],
         )

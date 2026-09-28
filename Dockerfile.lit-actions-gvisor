@@ -64,23 +64,32 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         libssl3 \
         curl \
+        zstd \
     && rm -rf /var/lib/apt/lists/*
 
-# Install runsc (gVisor). The default is the mutable `release/latest`; the
-# download is integrity-checked against that release's own sha512 sums, and the
-# outer image digest (captured at deploy time) still pins the exact bytes that
-# shipped. For byte-reproducible rebuilds, override GVISOR_RELEASE with a
-# specific tag (e.g. release/20250203.0) — pin a release validated inside the
-# TDX CVM before production.
-ARG GVISOR_RELEASE=release/latest
+# Install runsc (gVisor). Since release/20260907 gVisor no longer publishes a
+# standalone `runsc` binary: each release ships `gvisor.tar.{zstd,bz2}` holding
+# runsc plus a `gvisor-bin/` directory of sidecar binaries (gvisor_sentry,
+# checkpointgofer, ...) that runsc locates RELATIVE TO ITS OWN PATH. Extract both
+# into the same directory or runsc falls back to embedded copies (deprecated,
+# stops working after 2026-10) or tries to download them at runtime — which
+# must never happen inside the CVM. The download is integrity-checked against
+# the release's own sha512 sum, and the outer image digest (captured at deploy
+# time) pins the exact bytes that shipped.
+#
+# Pinned to a specific tag for byte-reproducible rebuilds; bump deliberately
+# and validate the new release inside the TDX CVM (staging) before production.
+ARG GVISOR_RELEASE=release/20260914.0
 RUN set -eux; \
     arch="$(uname -m)"; \
     url="https://storage.googleapis.com/gvisor/releases/${GVISOR_RELEASE}/${arch}"; \
-    curl -fsSL "${url}/runsc" -o /usr/local/bin/runsc; \
-    curl -fsSL "${url}/runsc.sha512" -o /tmp/runsc.sha512; \
-    (cd /usr/local/bin && sha512sum -c /tmp/runsc.sha512); \
+    curl -fsSL "${url}/gvisor.tar.zstd" -o /tmp/gvisor.tar.zstd; \
+    curl -fsSL "${url}/gvisor.tar.zstd.sha512" -o /tmp/gvisor.tar.zstd.sha512; \
+    (cd /tmp && sha512sum -c gvisor.tar.zstd.sha512); \
+    tar --zstd -xf /tmp/gvisor.tar.zstd -C /usr/local/bin runsc gvisor-bin; \
+    rm -f /tmp/gvisor.tar.zstd /tmp/gvisor.tar.zstd.sha512; \
     chmod 0755 /usr/local/bin/runsc; \
-    rm -f /tmp/runsc.sha512; \
+    test -x /usr/local/bin/gvisor-bin/gvisor_sentry; \
     runsc --version
 
 COPY --from=builder /build/lit-actions/target/release/lit_actions_gvisor /usr/local/bin/

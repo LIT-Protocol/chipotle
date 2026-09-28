@@ -7,6 +7,7 @@ pub mod chipotle;
 pub mod config;
 pub mod crypto;
 pub mod db;
+pub mod discovery;
 pub mod models;
 pub mod registry;
 pub mod server;

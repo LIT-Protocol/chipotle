@@ -289,7 +289,7 @@ jobs:
           # the current replica default below.
           CVM_NAME="${{ inputs.phala_cvm_name }}"
           if [ -z "$CVM_NAME" ]; then
-            CVM_NAME="chipotle-prod-rep-r68r6"
+            CVM_NAME="chipotle-prod-rep-08tv3"
           fi
           echo "Target prod CVM: $CVM_NAME"
           echo "cvm_name=$CVM_NAME" >> "$GITHUB_OUTPUT"
@@ -298,6 +298,9 @@ jobs:
           # the list of allowed environment variable keys. The actual secret
           # values are encrypted client-side in a separate step and sent
           # during the Phase 2 commit call.
+          # Provision must update allowed_envs too, matching Phase 2's
+          # update_env_vars=true. Otherwise Phala hashes the old key list
+          # here, then changes the manifest (and hash) when committing.
           COMPOSE_CONTENT=$(cat docker-compose.deploy.yml)
           PROVISION_FILE=$(mktemp)
           trap 'rm -f "$PROVISION_FILE"' EXIT
@@ -306,6 +309,7 @@ jobs:
             '{
               name: "",
               docker_compose_file: $dc,
+              update_env_vars: true,
               allowed_envs: [
                 "STRIPE_SECRET_KEY",
                 "STRIPE_PUBLISHABLE_KEY",
@@ -317,7 +321,8 @@ jobs:
                 "CERTBOT_AWS_SECRET_ACCESS_KEY",
                 "CERTBOT_AWS_ROLE_ARN",
                 "CERTBOT_AWS_REGION",
-                "LIT_INTERNAL_SHARED_SECRET"
+                "LIT_INTERNAL_SHARED_SECRET",
+                "NEW_ACCOUNT_RATE_LIMIT_ENABLED"
               ]
             }' > "$PROVISION_FILE"
           echo "Request payload size: $(wc -c < "$PROVISION_FILE") bytes"
@@ -457,6 +462,8 @@ jobs:
               { key: "CERTBOT_AWS_ROLE_ARN", value: process.env.CERTBOT_AWS_ROLE_ARN },
               { key: "CERTBOT_AWS_REGION", value: process.env.CERTBOT_AWS_REGION },
               { key: "LIT_INTERNAL_SHARED_SECRET", value: process.env.LIT_INTERNAL_SHARED_SECRET },
+              // Shared gateway IP makes the per-IP new-account limit a global cap.
+              { key: "NEW_ACCOUNT_RATE_LIMIT_ENABLED", value: "false" },
             ];
             const pubkey = process.env.ENCRYPT_PUBKEY;
             encryptEnvVars(envs, pubkey).then(hex => process.stdout.write(hex));

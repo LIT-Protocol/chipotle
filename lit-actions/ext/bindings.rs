@@ -287,8 +287,22 @@ fn default_proxied_fetch_method() -> String {
 }
 
 /// Split `scheme://user:pass@host:port` into (`scheme://host:port`, Some((user, pass))).
-/// Userinfo is taken up to the last `@` before the host; the user/pass split is
-/// on the first `:`. Returns no credentials when there is no userinfo.
+/// Returns no credentials when there is no userinfo.
+///
+/// Parsing goes through `reqwest::Url` — the same url-crate WHATWG parser the
+/// egress guard (`egress::connect_target_forbidden_ip`) and `reqwest::Proxy`
+/// itself use — so the host we rebuild the proxy for is byte-for-byte the host
+/// the guard validated. A hand-rolled last-`@` split diverged from the guard
+/// (WHATWG ends the authority at the first `/ ? #`, a raw split does not) and let
+/// `http://a/b@10.0.0.1:8888/` validate as host `a` yet connect to `10.0.0.1`, an
+/// SSRF into the enclave's internal address space (issue #13). We drop userinfo,
+/// path, query, and fragment and rebuild `scheme://host[:port]` from the parsed
+/// authority so the connect target cannot drift from the guarded one.
+///
+/// Scheme-less proxies (no `://`) are passed through unchanged: the guard and
+/// reqwest both prepend `http://` before parsing, so that path has no divergence
+/// to close. A string that fails to parse is likewise returned unchanged so
+/// `reqwest::Proxy::all` surfaces the error itself.
 ///
 /// User and pass are percent-decoded: per RFC 3986 the userinfo component is
 /// percent-encoded, and proxy providers (Webshare, Bright Data, ...) hand out
@@ -300,18 +314,32 @@ fn default_proxied_fetch_method() -> String {
 fn split_proxy_credentials(proxy_url: &str) -> (String, Option<(String, String)>) {
     use percent_encoding::percent_decode_str;
 
-    let Some((scheme, rest)) = proxy_url.split_once("://") else {
+    if !proxy_url.contains("://") {
+        return (proxy_url.to_string(), None);
+    }
+    let Ok(url) = reqwest::Url::parse(proxy_url) else {
         return (proxy_url.to_string(), None);
     };
-    let Some((userinfo, hostport)) = rest.rsplit_once('@') else {
+    let Some(host) = url.host_str() else {
         return (proxy_url.to_string(), None);
     };
-    let decode = |s: &str| percent_decode_str(s).decode_utf8_lossy().into_owned();
-    let (user, pass) = match userinfo.split_once(':') {
-        Some((u, p)) => (decode(u), decode(p)),
-        None => (decode(userinfo), String::new()),
+
+    // Rebuild the authority the guard checked, dropping userinfo / path / query /
+    // fragment. `host_str` keeps IPv6 hosts bracketed, so `[::1]:8888` round-trips
+    // to a valid proxy URL.
+    let base_url = match url.port() {
+        Some(port) => format!("{}://{host}:{port}", url.scheme()),
+        None => format!("{}://{host}", url.scheme()),
     };
-    (format!("{scheme}://{hostport}"), Some((user, pass)))
+
+    let credentials = if url.username().is_empty() && url.password().is_none() {
+        None
+    } else {
+        let decode = |s: &str| percent_decode_str(s).decode_utf8_lossy().into_owned();
+        Some((decode(url.username()), decode(url.password().unwrap_or(""))))
+    };
+
+    (base_url, credentials)
 }
 
 #[derive(serde::Serialize)]
@@ -665,9 +693,19 @@ mod proxied_fetch_tests {
 
     #[test]
     fn user_without_colon_gets_empty_password() {
+        // `:443` is the https default port, which WHATWG normalization drops from
+        // the rebuilt authority; `reqwest::Proxy` connects to the same host:port
+        // either way.
         let (url, creds) = split_proxy_credentials("https://tokenonly@proxy.example:443");
-        assert_eq!(url, "https://proxy.example:443");
+        assert_eq!(url, "https://proxy.example");
         assert_eq!(creds, Some(("tokenonly".to_string(), String::new())));
+    }
+
+    #[test]
+    fn non_default_port_is_preserved() {
+        let (url, creds) = split_proxy_credentials("http://proxy.example:8080");
+        assert_eq!(url, "http://proxy.example:8080");
+        assert_eq!(creds, None);
     }
 
     #[test]
@@ -686,11 +724,34 @@ mod proxied_fetch_tests {
 
     #[test]
     fn password_containing_at_sign_splits_on_last_at() {
-        // userinfo is taken up to the LAST `@`, so a literal `@` mid-password
-        // (when not percent-encoded) still leaves the real host intact.
+        // WHATWG userinfo runs up to the LAST `@` in the authority, so a literal
+        // `@` mid-password (when not percent-encoded) still leaves the real host
+        // intact — same host the egress guard sees.
         let (url, creds) = split_proxy_credentials("http://u:p@ss@proxy.example:8080");
         assert_eq!(url, "http://proxy.example:8080");
         assert_eq!(creds, Some(("u".to_string(), "p@ss".to_string())));
+    }
+
+    #[test]
+    fn authority_ends_at_path_query_fragment_not_first_at() {
+        // Regression for the SSRF in issue #13. The egress guard parses the proxy
+        // with `reqwest::Url` (WHATWG: the authority ends at the first `/ ? #`),
+        // so it sees host `a` and lets these through. The old hand-rolled split
+        // took everything after the first/last `@` as the host and connected to
+        // the internal IP hidden in the path/query/fragment. The rebuilt base_url
+        // must now match the guard's host `a`, never the post-`@` internal IP.
+        for proxy in [
+            "http://a/b@10.0.0.1:8888/",
+            "http://a?x@10.0.0.1:8888/",
+            "http://a#x@127.0.0.1:8888/",
+        ] {
+            let (url, creds) = split_proxy_credentials(proxy);
+            assert_eq!(
+                url, "http://a",
+                "{proxy} must rebuild to the guarded host `a`, not the internal IP after `@`"
+            );
+            assert_eq!(creds, None, "{proxy} carries no real userinfo");
+        }
     }
 
     #[test]

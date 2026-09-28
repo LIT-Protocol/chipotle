@@ -16,7 +16,7 @@ runsc sandbox
    • shared read-only base rootfs + per-exec in-memory overlay (--overlay2)
    • bundle mounted read-only at /action, tmpfs at /tmp
    • fixed entrypoint: `bash /startup/startup.sh` (per-exec, read-only)
-   • per-exec op socket bind-mounted at /run/lit/ops.sock (--host-uds=all)
+   • per-exec op socket bind-mounted at /run/lit/ops.sock (--host-uds=open)
    • preinstalled `lit` CLI exposes the ops to user code in any language
 ```
 
@@ -143,9 +143,10 @@ v1 billing stays flat per-second via the unchanged `UpdateResourceUsage` path.
 
 ### runsc notes (spike-validated 2026-07-01 on Phala TDX dev CVMs)
 
-- `--host-uds=all` is required or the sandbox can't reach the op socket. The
-  socket exposed is **per-sandbox** (fresh tempdir per execution), never a
-  shared one.
+- `--host-uds=open` is required or the sandbox can't reach the op socket.
+  `open` is connect-only; the guest never creates host sockets, so we do not
+  grant the broader `all`. The socket exposed is **per-sandbox** (fresh 0700
+  tempdir per execution), never a shared one.
 - Nested in a container, each sandbox needs a **delegated leaf cgroup**
   (`linux.cgroupsPath = lit-sandboxes/<exec-id>`) or runsc hits cgroup-v2
   `subtree_control: EBUSY`. `--ignore-cgroups` sidesteps it for dev/tests at

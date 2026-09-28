@@ -7,9 +7,17 @@
 #   main → lit-api-server/NodeConfig.main.toml
 #   next → lit-api-server/NodeConfig.next.toml
 #
+# After the cut, verify-diamond-facets compares every on-chain facet against
+# the freshly compiled artifacts (same check the prod flow runs in
+# manual_contract-upgrade-prod-2-verify.yml).
+#
+# If the upgrade adds a migration entry point (e.g. #690 backfillPathOwners),
+# run its backfill workflow right after this one completes.
+#
 # Required secrets:
 #   CONTRACT_DEPLOYER_SECRET_SEPOLIA - deployer wallet private key (Base Sepolia)
 #   PHALA_DSTACKAPP_PRIVATE_KEY    - deployer wallet private key (Base Mainnet)
+#   BASE_CHAIN_RPC                 - RPC endpoint for Base
 
 name: Contract Upgrade
 
@@ -109,3 +117,12 @@ jobs:
             --secret="$DEPLOYER_KEY" \
             --address="$ADDRESS" \
             --rpc-url="$RPC_URL"
+
+      - name: Verify diamond facets match source code
+        working-directory: lit-api-server/blockchain/lit_node_express
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_CHAIN_RPC }}
+        run: |
+          npx hardhat verify-diamond-facets \
+            --network "${{ steps.config.outputs.network }}" \
+            --diamond "${{ steps.config.outputs.address }}"

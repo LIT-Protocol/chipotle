@@ -13,15 +13,17 @@ const [command, ...args] = process.argv.slice(2);
 const usage =
   "Usage:\n" +
   "  keychain init <identity-file>\n" +
-  "  keychain get <identity-file> <config-file> <secret-name>\n" +
-  "  keychain use <identity-file> <config-file> <secret-name> [json-input]\n" +
-  "  keychain run <identity-file> <config-file> [--only A,B] [--env SECRET=ENV_VAR]... [--file SECRET=PATH]... -- <command> [args...]\n" +
+  "  keychain list <identity-file>\n" +
+  "  keychain get <identity-file> [config-file] <secret-name-or-id>\n" +
+  "  keychain use <identity-file> [config-file] <secret-name> [json-input]\n" +
+  "  keychain run <identity-file> [config-file] [--only A,B] [--env SECRET=ENV_VAR]... [--file SECRET=PATH]... -- <command> [args...]\n" +
   "  keychain actions\n" +
-  "  keychain mcp <identity-file> <config-file> [more-config-files]\n" +
+  "  keychain mcp <identity-file> [config-file] [more-config-files]\n" +
   "  keychain attest [lit-api-url]\n" +
   "\n" +
   "identity-file: JSON from `keychain init` ({ v, privateKey, publicKey }); keep private.\n" +
-  "config-file:   *.keychain.json downloaded from Keychain ({ v, litApiUrl, usageApiKey, secrets }).\n" +
+  "config-file: optional legacy snapshot. Omit for live discovery; KEYCHAIN_SERVICE_URL selects the service.\n" +
+  "KEYCHAIN_LIT_API_URL selects a separately trusted Lit endpoint; discovery cannot change it.\n" +
   "use runs the secret's catalog action inside Lit (never revealing the value); actions lists the catalog.\n" +
   "run decrypts export-release secrets into the command's environment (named after each secret) and\n" +
   "  exits with its status; nothing is printed. --only picks secrets, --env renames a variable, --file writes\n" +
@@ -93,6 +95,38 @@ try {
       );
     }
   } else if (
+    (command === "list" && args.length === 1) ||
+    (["get", "stripe-balance"].includes(command) && args.length === 2) ||
+    (command === "use" &&
+      (args.length === 2 || (args.length === 3 && args[2].startsWith("{"))))
+  ) {
+    const { LiveKeychain, DEFAULT_LIT_API_URL } =
+      await import("@lit-protocol/keychain");
+    const identity = await readJson(args[0]);
+    assertAgentIdentity(identity);
+    const litApiUrl = process.env.KEYCHAIN_LIT_API_URL ?? DEFAULT_LIT_API_URL;
+    const client = new LiveKeychain(identity.privateKey, {
+      serviceUrl: process.env.KEYCHAIN_SERVICE_URL,
+      litApiUrl,
+      ...(await attestationOptions(litApiUrl)),
+    });
+    try {
+      const result =
+        command === "list"
+          ? await client.list()
+          : command === "get"
+            ? await client.get(args[1])
+            : await client.use(
+                args[1],
+                args[2] === undefined ? undefined : JSON.parse(args[2]),
+              );
+      process.stdout.write(
+        (typeof result === "string" ? result : JSON.stringify(result)) + "\n",
+      );
+    } finally {
+      client.destroy();
+    }
+  } else if (
     (["get", "stripe-balance"].includes(command) && args.length === 3) ||
     (command === "use" && (args.length === 3 || args.length === 4))
   ) {
@@ -129,12 +163,26 @@ try {
     const options = parseRunArgs(args);
     const identity = await readJson(options.identityFile);
     assertAgentIdentity(identity);
-    const config = await readJson(options.configFile);
-    assertAgentConfig(config);
-    const client = new Keychain(identity.privateKey, config, {
-      usageApiKey: process.env.CHIPOTLE_USAGE_API_KEY,
-      ...(await attestationOptions(config.litApiUrl)),
-    });
+    const { LiveKeychain, DEFAULT_LIT_API_URL } =
+      await import("@lit-protocol/keychain");
+    const config = options.configFile
+      ? await readJson(options.configFile)
+      : undefined;
+    if (config) assertAgentConfig(config);
+    const litApiUrl =
+      config?.litApiUrl ??
+      process.env.KEYCHAIN_LIT_API_URL ??
+      DEFAULT_LIT_API_URL;
+    const client = config
+      ? new Keychain(identity.privateKey, config, {
+          usageApiKey: process.env.CHIPOTLE_USAGE_API_KEY,
+          ...(await attestationOptions(litApiUrl)),
+        })
+      : new LiveKeychain(identity.privateKey, {
+          serviceUrl: process.env.KEYCHAIN_SERVICE_URL,
+          litApiUrl,
+          ...(await attestationOptions(litApiUrl)),
+        });
     try {
       process.exitCode = await runWithSecrets(client, options, {
         spawn,
@@ -155,7 +203,7 @@ try {
       tlsCertificateSha256: await peerCertificateSha256(url),
     });
     process.stdout.write(JSON.stringify(report, null, 2) + "\n");
-  } else if (command === "mcp" && args.length >= 2) {
+  } else if (command === "mcp" && args.length >= 1) {
     const { main } = await import("./mcp.mjs");
     await main(args, {
       readFile,

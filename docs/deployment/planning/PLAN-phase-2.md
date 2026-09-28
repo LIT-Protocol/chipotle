@@ -1,6 +1,6 @@
 # Phase 2: Verifier Crate
 
-**Parent**: [PLAN.md](PLAN.md) | **Requirements**: [requirements.md](requirements.md)
+**Parent**: [PLAN.md](/deployment/planning/PLAN) | **Requirements**: [requirements.md](/deployment/planning/requirements)
 
 ## Goal
 
@@ -85,4 +85,4 @@ Build `verify-cvm` based on [dstack-verifier](https://github.com/Dstack-TEE/dsta
 
 ## Next Phase
 
-→ [PLAN-phase-3.md](PLAN-phase-3.md) (Verification Automation)
+→ [PLAN-phase-3.md](/deployment/planning/PLAN-phase-3) (Verification Automation)

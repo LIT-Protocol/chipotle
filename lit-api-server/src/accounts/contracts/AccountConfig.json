@@ -456,6 +456,44 @@
       "anonymous": false,
       "inputs": [
         {
+          "indexed": false,
+          "internalType": "string",
+          "name": "key",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "value",
+          "type": "string"
+        }
+      ],
+      "name": "NodeConfigurationSet",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "derivationPath",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "masterHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "PathOwnerBackfilled",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
           "indexed": true,
           "internalType": "uint256",
           "name": "apiKeyHash",
@@ -712,24 +750,6 @@
         }
       ],
       "name": "addPkpToGroup",
-      "outputs": [],
-      "stateMutability": "nonpayable",
-      "type": "function"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "address[]",
-          "name": "pkpIds",
-          "type": "address[]"
-        },
-        {
-          "internalType": "uint256[]",
-          "name": "masterHashes",
-          "type": "uint256[]"
-        }
-      ],
-      "name": "backfillPkpOwners",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
@@ -1490,6 +1510,25 @@
           "internalType": "address",
           "name": "",
           "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "derivationPath",
+          "type": "uint256"
+        }
+      ],
+      "name": "getPathOwnerMaster",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
         }
       ],
       "stateMutability": "view",

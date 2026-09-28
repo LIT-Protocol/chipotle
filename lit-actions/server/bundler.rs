@@ -93,10 +93,11 @@ pub(crate) async fn bundle_user_code(
 /// Resolve a user-facing entry-point import specifier to an absolute CDN URL.
 fn resolve_entry_specifier(spec: &str) -> Result<String> {
     if spec.starts_with("https://") {
-        if !CdnModuleLoader::is_allowed_cdn(spec) {
-            bail!("URL {spec} is not on the allowed jsDelivr npm CDN");
-        }
-        return Ok(spec.to_string());
+        // Normalize before validating: a raw prefix check on `spec` accepts a
+        // traversal URL like `.../npm/zod@3.22.4/../../gh/evil/x.js`, which the
+        // URL parser (and jsDelivr) later collapse to the mutable /gh/ backend.
+        return CdnModuleLoader::normalize_allowed_cdn_url(spec)
+            .ok_or_else(|| anyhow!("URL {spec} is not on the allowed jsDelivr npm CDN"));
     }
     CdnModuleLoader::parse_npm_specifier(spec)
         .ok_or_else(|| anyhow!("cannot resolve specifier {spec}"))
@@ -121,10 +122,10 @@ fn resolve_dep_specifier(base_url: &str, spec: &str) -> Result<String> {
         return Ok(s);
     }
     if spec.starts_with("https://") {
-        if !CdnModuleLoader::is_allowed_cdn(spec) {
-            bail!("URL {spec} is not on the allowed jsDelivr npm CDN");
-        }
-        return Ok(spec.to_string());
+        // Normalize before validating (see `resolve_entry_specifier`): a raw
+        // prefix check would let a `..`-traversal URL through to /gh/.
+        return CdnModuleLoader::normalize_allowed_cdn_url(spec)
+            .ok_or_else(|| anyhow!("URL {spec} is not on the allowed jsDelivr npm CDN"));
     }
     CdnModuleLoader::parse_npm_specifier(spec)
         .ok_or_else(|| anyhow!("cannot parse specifier {spec} (from {base_url})"))
@@ -675,6 +676,40 @@ mod tests {
     fn resolve_entry_specifier_rejects_other_cdn() {
         let err = resolve_entry_specifier("https://evil.example.com/foo.js").unwrap_err();
         assert!(format!("{err:#}").contains("jsDelivr"));
+    }
+
+    /// A full jsDelivr URL whose `..` segments escape /npm/ into the mutable
+    /// /gh/ backend must be rejected. The raw string starts with the allowed
+    /// `/npm/` prefix, so this only fails if the specifier is normalized before
+    /// the allowlist check (the CDN import allowlist bypass, GH #14).
+    #[test]
+    fn resolve_entry_specifier_rejects_traversal_to_gh() {
+        let err = resolve_entry_specifier(
+            "https://cdn.jsdelivr.net/npm/zod@3.22.4/../../gh/jquery/jquery@main/src/core.js",
+        )
+        .unwrap_err();
+        assert!(format!("{err:#}").contains("jsDelivr"));
+    }
+
+    #[test]
+    fn resolve_dep_specifier_https_traversal_to_gh_rejected() {
+        let base = "https://cdn.jsdelivr.net/npm/pkg@1.0.0/+esm";
+        let err = resolve_dep_specifier(
+            base,
+            "https://cdn.jsdelivr.net/npm/zod@3.22.4/../../gh/evil/repo@main/x.js",
+        )
+        .unwrap_err();
+        assert!(format!("{err:#}").contains("jsDelivr"));
+    }
+
+    /// A full jsDelivr /npm/ URL with `..` that stays inside /npm/ after
+    /// normalization is still accepted, and is returned normalized.
+    #[test]
+    fn resolve_entry_specifier_normalizes_traversal_inside_npm() {
+        let url =
+            resolve_entry_specifier("https://cdn.jsdelivr.net/npm/pkg@1.0.0/dist/../index.js")
+                .unwrap();
+        assert_eq!(url, "https://cdn.jsdelivr.net/npm/pkg@1.0.0/index.js");
     }
 
     #[test]

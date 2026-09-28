@@ -7,7 +7,7 @@ You need a browser for the owner steps and Node 22+ on the agent's machine. Noth
 
 <Note>
 The examples below use the latest published `@lit-protocol/keychain`. Pin an exact version
-(`@lit-protocol/keychain@2.0.6`, for example) in anything you deploy, and check the
+(`@lit-protocol/keychain@2.2.2`, for example) in anything you deploy, and check the
 [npm page](https://www.npmjs.com/package/@lit-protocol/keychain) for release notes before upgrading.
 </Note>
 
@@ -31,16 +31,25 @@ This writes a mode-0600 file containing an Ed25519 key pair and prints its `publ
     Choose **Add secret**, then either **Store a secret** (the agent receives the value) or **Connect a service** (the agent runs one reviewed action and never sees the key). Name it in `UPPER_SNAKE_CASE`, for example `OPENAI_API_KEY`, and paste the value. It is encrypted in your browser before upload.
   </Step>
   <Step title="Approve the agent">
-    Open the secret, paste the agent's public key under **Authorized agents**, give it a name and click **Approve agent**. One wallet prompt or passkey touch signs the policy. Permissions default to 30 days; you can pick any length or remove the expiry.
+    On **Agents**, click **+ Add agent** (add secrets first on **Secrets** if the vault is empty). Paste your existing agent's 64-character public key, give it a name, and select only the secrets it needs. Nothing is selected automatically. Use **Select all** to select enabled, unexpired secrets, or **Clear selection** to reset the selection. You can uncheck individual secrets before continuing. Click **Approve selected secrets** and complete each owner approval. Existing agents and expiry dates stay unchanged; disabled or expired secrets must be enabled or renewed on their own pages first. Never upload an identity file or private key. New secret permissions default to 30 days; **Renew permissions** lets you change that separately.
   </Step>
-  <Step title="Download the agent config">
-    Click **Agent config** to download `OPENAI_API_KEY.keychain.json`. It contains public locators plus a scoped execution key that pays for Lit execution. It is not a backup and holds no secret value, but keep it private.
+  <Step title="Ready to use">
+    No config download or agent restart is needed. The agent uses its existing private
+    identity and the stable Keychain service URL. Approvals become available on its
+    next list/read/use request. If signing fails partway through, earlier approvals
+    remain saved; **Retry remaining approvals** checks access before continuing.
+    Closing does not revoke access. Use **Revoke** on each secret to remove it.
 
-    An agent approved for several secrets needs only one file: click **Config · all secrets** next to its name under **Authorized agents** to download a config naming every secret in the vault that key may use. The `keychain run`, `get` and `use` commands take one config; the MCP server also accepts several.
+    Choose **Connect to a session** to copy an agent prompt or MCP/SDK setup. Use the
+    existing identity on the agent’s machine and verify its public key matches the
+    approved agent. Config downloads have been removed.
   </Step>
 </Steps>
 
-Give the config file to the agent alongside its identity. Keep both files out of version control.
+Keep the private identity file on the agent device and out of version control.
+For a different service set `KEYCHAIN_SERVICE_URL` (SDK `serviceUrl`); the default
+is `https://keychain.litprotocol.com`. The trusted Lit endpoint is independently
+configured, never supplied by discovery.
 
 ## 3. Read the secret
 
@@ -52,11 +61,10 @@ Give the config file to the agent alongside its identity. Keep both files out of
 
     ```js
     import { readFile } from "node:fs/promises";
-    import { Keychain } from "@lit-protocol/keychain";
+    import { LiveKeychain } from "@lit-protocol/keychain";
 
     const identity = JSON.parse(await readFile("./agent-identity.json", "utf8"));
-    const config = JSON.parse(await readFile("./OPENAI_API_KEY.keychain.json", "utf8"));
-    const keychain = new Keychain(identity.privateKey, config);
+    const keychain = new LiveKeychain(identity.privateKey);
     try {
       const secret = await keychain.get("OPENAI_API_KEY");
       // Use it in your trusted application here. Never log it.
@@ -69,7 +77,7 @@ Give the config file to the agent alongside its identity. Keep both files out of
     `run` decrypts the secret and places it in a child process's environment under its own name. The CLI itself prints nothing.
 
     ```sh
-    npx @lit-protocol/keychain run ./agent-identity.json ./OPENAI_API_KEY.keychain.json -- python agent.py
+    npx @lit-protocol/keychain run ./agent-identity.json -- python agent.py
     ```
 
     Prefer `run` over `get` whenever a tool, not your code, needs the value. `--env SECRET=VAR` renames a variable, `--only A,B` selects secrets, and `--file SECRET=PATH` writes a mode-0600 file that is removed when the command exits, for tools that only read credentials from a path.
@@ -78,7 +86,7 @@ Give the config file to the agent alongside its identity. Keep both files out of
     The package ships a local stdio MCP server. Register it with absolute paths:
 
     ```sh
-    claude mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp /absolute/path/agent-identity.json /absolute/path/OPENAI_API_KEY.keychain.json
+    claude mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp /absolute/path/agent-identity.json
     ```
 
     Codex takes the same command after `codex mcp add lit-keychain --`. JSON clients (Cursor, Windsurf) take it as `command: "npx"` with the same arguments. Start with the `agent_public_key`, `list_actions` and `list_secrets` tools; `get_secret` puts plaintext into model context, so call it only when you mean to.
@@ -93,7 +101,8 @@ Everything is on the secret's page in the dashboard:
 
 - **Revoke** removes one agent. The action fetches the current policy on every request, so the agent's next request is denied.
 - **Disable** switches the secret off for every agent without deleting it.
-- **Rotate & approve** encrypts a new value and moves the existing agents to it in one signature. Downloaded configs keep working.
+- **Delete** revokes every agent and removes the encrypted value from Keychain in one step, freeing the slot. It cannot be undone unless you restore the secret from an encrypted backup you saved earlier.
+- **Rotate & approve** encrypts a new value and moves the existing agents to it in one signature. Live clients discover the current version on their next request.
 - **Renew permissions** sets a new expiry any number of days from now, or **Never expire** removes it so access lasts until you revoke or disable it.
 
 If you suspect a credential leaked, also revoke it at the provider. Revocation cannot recall plaintext an agent already received.

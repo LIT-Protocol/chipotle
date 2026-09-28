@@ -20,7 +20,8 @@ sequenceDiagram
     Lit-->>Owner: Signed receipt for each exact object
     Owner->>API: Ciphertext + signed receipts
     API-->>Owner: Per-vault execution-only Chipotle usage key
-    Owner-->>Agent: Scoped execution key + public secret config
+    Agent->>API: One-use, audience-bound Ed25519 discovery proof
+    API-->>Agent: Current approved locators + execution-only billing bootstrap
     Agent->>Lit: Signed request + scoped usage key, directly through Chipotle
     Lit->>API: Fetch selected signed policy
     Lit->>Lit: Verify owner receipt, agent proof, scope, expiry, ciphertext
@@ -33,11 +34,36 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 
 ## SDK release coordination
 
-This source prepares SDK 2.0.6 and pins the hosted examples to that version. 2.0.6 is
+This source prepares SDK **2.2.2**. It updates SDK error guidance and documentation
+to use live discovery after removing agent-config downloads from the website.
+This is an SDK-only patch; no action templates or catalog locks change.
+
+SDK 2.2.1 added
+Lit-signed Google device approvals lasting 30 days, with local persistence across
+page reloads, and fixed short-lived Google proofs for archived authorities. It was
+a template release: the catalog lock and archived templates include new versions.
+Existing secrets keep their pinned releases and require recent Google reapproval;
+agent clients need this SDK version to recognize secrets created under the new release.
+Publish the SDK before deploying the owner UI/API.
+
+SDK 2.2.0 added `OwnerClient.deleteSecret()`: owners can delete a secret, which
+revokes every agent and removes the ciphertext in one transaction, frees the slot
+and retires the action's execution grant.
+
+SDK 2.1.1 hardened live discovery (#707). SDK 2.1.0 added `LiveKeychain`,
+authenticated live discovery and configless CLI/MCP.
+Owners approve on the website; running clients observe changes on the next request
+without downloading configs. Use **Connect to a session** on the agent page or approval confirmation for setup
+using the existing local identity. Agent config downloads have been removed.
+The static SDK API remains compatible with existing integrations.
+
+SDK 2.0.7 previously added explicit expiry preservation and guided owner onboarding.
+
+2.0.6 was
 an ordinary SDK release with no template change: clearer client-side messages
 (`use()` on a stored secret, an identity object passed where the private key string
 belongs), `describeCredential` accepting the raw JSON text of an identity or config
-file, and the owner UI's per-agent **Config · all secrets** download. Existing agents
+file. Existing agents
 on 2.0.5 keep working. The notes below describe the previous, template-changing
 release and still apply to secrets pinned to it.
 
@@ -66,11 +92,26 @@ Consequences, all handled by the release mechanism described in
   release still takes one signature per document (`PRE_BATCH_AUTHORITY_HASHES`).
 
 Release checks: run `npm test` and `npm run build`, publish through the normal
-maintainer release process, verify `npm view @lit-protocol/keychain@2.0.6 version`,
+maintainer release process, verify `npm view @lit-protocol/keychain@2.2.2 version`,
 then repeat the strict external TypeScript consumer and attestation-enabled Node
 smoke test from the registry artifact. Only then deploy the owner UI/API and create,
 rotate and read a secret against production. See the QA reports under `docs/` for
 actual production coverage and remaining provider/auth/billing tests.
+
+## Live agent discovery
+
+Use `new LiveKeychain(identity.privateKey)` or `keychain mcp identity.json`.
+`KEYCHAIN_SERVICE_URL` / SDK `serviceUrl` selects a stable Keychain origin; the Lit
+origin is a separate local trust setting. `list`, `get` and `use` fetch current
+owner-approved grants on every call. Use returned `vaultId/secretId` IDs where names
+collide. Legacy static configs remain optional. See [SDK guide](sdk/README.md).
+
+The migration adds one-use discovery challenges. Per-minute global (10,000) and
+peer (600) budgets bound requests and storage; expired challenges are removed on
+issuance. Discovery rejects over 1,000 candidates, never silently truncates.
+Deploy the migration/API before pointing live clients at the service; old clients
+keep working. Immediate revocation means the next request, not recalling already
+released plaintext or cancelling authorized in-flight operations.
 
 ## Features
 
@@ -83,7 +124,7 @@ actual production coverage and remaining provider/auth/billing tests.
   exact-object receipt.
 - X25519/HKDF-SHA256/AES-256-GCM HPKE key wrapping and response encryption; local
   AES-256-GCM payload encryption. Action signatures authenticate results as well as keys.
-- Explicit agent public-key enrollment, exact ciphertext/version scopes, disable/revoke,
+- Explicit agent public-key enrollment, exact ciphertext/version scopes, disable/revoke/delete,
   owner-approved renewal, atomic rotation, and credential replacement/recovery.
 - New secrets grant no agent access. Permissions default to 30 days; the owner may
   choose any lifetime, including no expiry. Owner credential membership is independent
@@ -116,9 +157,8 @@ actual production coverage and remaining provider/auth/billing tests.
 For agent installation and the separate stored-secret (`get`/`run`) and connected-service
 (`use`) paths, see [SDK quickstarts](sdk/README.md). For provider credentials and
 exact inputs, see [provider recipes](PROVIDERS.md). An **export action** releases a
-raw secret to an approved agent; **Agent config** downloads public locators plus a
-billing key; **encrypted backup export** saves ciphertext/policies. These are not
-interchangeable operations.
+raw secret to an approved agent; **encrypted backup export** saves ciphertext/policies.
+Agents discover their current permissions and execution credentials from the server.
 
 ### Prepare recovery while you still have access
 
@@ -137,7 +177,7 @@ interchangeable operations.
   on the sign-in page, select your encrypted backup, then sign with an owner
   credential approved for that vault. Use the original deployment/origin for
   passkeys; a newly created passkey is not the old credential. Confirm the restored
-  secret list and permissions, and download fresh agent configs where necessary.
+  secret list and permissions; live clients discover restored approvals on their next request.
 - **Google-only owner:** sign in with the same Google account, not simply the same
   email spelling on a different account. If inaccessible, use Google's recovery
   or a previously approved alternate owner; Keychain cannot reset Google identity.
@@ -159,14 +199,14 @@ physical-passkey or provider recovery test. See [security limits](SECURITY.md).
 
 ### Rotations and revocation
 
-| Change                                 | Owner steps                                                                                                 | Agent/config consequence                                                                                                 |
-| -------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Secret value (without approval update) | Issue a replacement at the provider; rotate the secret; reapprove intended agents for the new exact version | Old version grants alone do not cover the new version                                                                    |
-| Rotate & approve                       | Use the combined dashboard action to rotate and move existing agents to the new version                     | No separate reapproval is needed; existing downloaded configs can resolve the new version immediately                    |
-| Execution/billing key                  | Replace execution key in the owner dashboard                                                                | Update every agent config or `CHIPOTLE_USAGE_API_KEY` override, then restart MCP; identity/secret approvals are separate |
-| Agent signing key                      | Generate a new identity, approve new public key, revoke old grants                                          | Never overwrite a working identity without a recovery plan; distribute new identity/config privately                     |
-| Immutable action release               | Keep old release available; reimport original credential into the new action and approve explicitly         | A config edit cannot migrate ciphertext; strict-mode backup cannot supply plaintext                                      |
-| Owner credential                       | Approve/test replacement before revoking old credential                                                     | Download a fresh encrypted backup; existing metadata sessions are invalidated                                            |
+| Change                                 | Owner steps                                                                                                 | Agent consequence                                                                                                                             |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Secret value (without approval update) | Issue a replacement at the provider; rotate the secret; reapprove intended agents for the new exact version | Old version grants alone do not cover the new version                                                                                         |
+| Rotate & approve                       | Use the combined dashboard action to rotate and move existing agents to the new version                     | No separate reapproval is needed; live clients discover the new version on their next request                                                 |
+| Execution/billing key                  | Replace execution key in the owner dashboard                                                                | Live clients discover the replacement on their next request; migrate static clients to live discovery. Identity/secret approvals are separate |
+| Agent signing key                      | Generate a new identity, approve new public key, revoke old grants                                          | Never overwrite a working identity without a recovery plan; keep the new identity on the agent’s device                                       |
+| Immutable action release               | Keep old release available; reimport original credential into the new action and approve explicitly         | Changing client settings cannot migrate ciphertext; strict-mode backup cannot supply plaintext                                                |
+| Owner credential                       | Approve/test replacement before revoking old credential                                                     | Download a fresh encrypted backup; existing metadata sessions are invalidated                                                                 |
 
 For suspected exposure, revoke at the upstream provider too. With honest storage,
 revocation applies to subsequent policy lookups; in-flight calls may finish and
@@ -177,13 +217,13 @@ state after uncertain completion; do not blindly retry writes.
 
 ### Storage entitlements and charges
 
-| State                             | Storage                                    | Execution and recovery                                                     |
-| --------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------- |
-| Free                              | Up to 5 secrets                            | Sponsored enrolled actions under fair use; backups/revocation available    |
-| Standard                          | $10/month, up to 1,000 secrets             | Same authorization model; rotations use no additional slot                 |
-| Cancelled, still in paid period   | Paid entitlement until period end          | Cancellation does not revoke agent grants                                  |
-| Paid expired, at/below Free limit | Free entitlement                           | Sponsored execution continues on Free                                      |
-| Paid expired, above Free limit    | Storage mutations blocked while over limit | Login, revocation and encrypted backups remain; no automatic data deletion |
+| State                             | Storage                                    | Execution and recovery                                                               |
+| --------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------ |
+| Free                              | Up to 5 secrets                            | Sponsored enrolled actions under fair use; backups/revocation available              |
+| Standard                          | $10/month, up to 1,000 secrets             | Same authorization model; rotations use no additional slot                           |
+| Cancelled, still in paid period   | Paid entitlement until period end          | Cancellation does not revoke agent grants                                            |
+| Paid expired, at/below Free limit | Free entitlement                           | Sponsored execution continues on Free                                                |
+| Paid expired, above Free limit    | Storage mutations blocked while over limit | Login, revocation, deletion and encrypted backups remain; no automatic data deletion |
 
 There is no hard per-user execution or dollar cap and no automatic Keychain overage
 charge. A numerical fair-use quota is not specified here; contact Support via the
@@ -231,7 +271,11 @@ See [BILLING.md](BILLING.md) for Stripe setup and the custom-plan operator comma
 
 Google-only sign-in requires `GOOGLE_CLIENT_ID` and the frontend origin registered
 on that Google OAuth client. Its callback uses Google Identity Services' nonce
-parameter. Google session keys and ID tokens remain in browser memory and expire.
+parameter. Fresh Google login creates a Lit-signed 30-day device approval, persisted with its
+session key in localStorage and cleared on sign-out. Reloading restores approvals
+without a Google prompt. Secrets pinned to older authority releases still need a
+recent Google sign-in; their original token/session proof lasts 10 minutes. Google
+ID tokens are retained locally for that legacy path, never in the database.
 `VITE_WALLETCONNECT_PROJECT_ID` enables WalletConnect options at build time; injected
 wallets work without it. ERC-1271/6492 contract wallets are not supported in this release.
 

@@ -1,25 +1,34 @@
 ---
 name: lit-agent-keychain
 description: Use Lit Agent Keychain for owner-approved agent access to encrypted credentials.
-version: 2.0.6
+version: 2.2.2
 ---
 
 # Lit Agent Keychain
 
-1. Generate an agent identity on the agent device with `npx @lit-protocol/keychain@2.0.6 init identity.json`.
-2. Give only its public key to the owner. The owner signs in with a wallet, passkey,
-   or Google account, encrypts a secret locally, and explicitly approves that key.
-3. Download the **Agent config** (public locators plus a scoped billing key). When one
-   agent is approved for several secrets, the owner clicks **Config · all secrets** next to
-   the agent's name instead, for a single config naming all of them; `run`, `get` and `use`
-   take one config file, `mcp` takes several. Use `@lit-protocol/keychain` with the local
-   private identity. `get(name)` decrypts a recipient-encrypted result;
-   `use(name, input)` runs the secret's catalog action (Stripe balance, OpenAI chat,
-   GitHub file read, Slack message, Supabase table query, …) inside Lit without
-   returning its credential to the agent; the provider receives it over TLS.
-   `list()` tells you which applies to each secret and the input shape it takes.
+1. Generate an agent identity on the agent device with `npx @lit-protocol/keychain@2.2.2 init identity.json`.
+2. Give only its public key to the owner; reuse an existing identity if one was already
+   generated. The owner signs in at https://keychain.litprotocol.com with a wallet,
+   passkey, or Google account. On **Agents**, click **+ Add agent**.
+   Enter a name and paste the 64-character public key, then select only the secrets
+   this agent needs (or use **Select all** for enabled, unexpired secrets; **Clear selection** resets the choice) and click **Approve selected secrets**. Nothing is selected by
+   default. An empty vault needs **Add secret** first; disabled/expired secrets need
+   separate enabling/renewal. Never request the owner's private key or the agent's identity file.
+3. The completion says **Ready to use**. Do not ask the owner for a config download.
+   Use `new LiveKeychain(identity.privateKey)` from `@lit-protocol/keychain` or
+   `npx @lit-protocol/keychain@2.2.2 list identity.json`. The existing private identity
+   stays local. `get(name)` returns an encrypted-to-agent stored secret; `use(name,
+input)` runs the connected service inside Lit. `await list()` shows current
+   approvals, operation/input shape and a stable `vaultId/secretId` ID.
+   All three operations fetch fresh owner approvals. A running MCP client needs no
+   restart when the website adds/revokes secrets. Partial approvals remain usable;
+   **Retry remaining approvals** resumes the rest. No export is necessary.
+   `KEYCHAIN_SERVICE_URL` selects a different service (default keychain.litprotocol.com).
+   The trusted Lit origin is configured independently (`KEYCHAIN_LIT_API_URL`, default
+   api.chipotle.litprotocol.com), never taken from discovery. Duplicate names across
+   vaults are ambiguous: pass the qualified ID instead, never guess which vault.
 4. For a tool that needs the raw value in its environment, prefer
-   `npx @lit-protocol/keychain@2.0.6 run identity.json CONFIG.keychain.json -- <command>` over `get`. It
+   `npx @lit-protocol/keychain@2.2.2 run identity.json -- <command>` over `get`. It
    injects each export-release secret as an environment variable named after the
    secret. The Keychain CLI itself does not print it; a child program can still
    log or disclose it, including into model context. This is not a sandbox.
@@ -29,11 +38,11 @@ version: 2.0.6
 5. Or expose it to an MCP client in one line. The server runs locally, next to the
    identity file, and offers `list_secrets`, `get_secret`, one tool per catalog
    action (`stripe_balance`, `openai_chat`, `github_read_file`, `slack_post_message`,
-   `supabase_tables`; `npx @lit-protocol/keychain@2.0.6 actions` prints the current list), `list_actions` and
+   `supabase_tables`; `npx @lit-protocol/keychain@2.2.2 actions` prints the current list), `list_actions` and
    `agent_public_key`:
 
    ```sh
-   claude mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.0.6 mcp /absolute/path/agent-identity.json /absolute/path/API_KEY.keychain.json
+   claude mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.2.2 mcp /absolute/path/agent-identity.json
    ```
 
 Before execution requests to configured/pinned production origins, the SDK attests the Lit endpoint: it verifies the Intel
@@ -43,9 +52,21 @@ binds the live TLS certificate to the enclave. The on-chain check rotates throug
 public Base RPC endpoints, which rate limit bursts; set `KEYCHAIN_BASE_RPC_URL` to
 pin your own. Never set `attestation: false` or `KEYCHAIN_SKIP_ATTESTATION=1`
 outside local development. Unknown origins are not automatically attested; verify
-`config.litApiUrl` independently and explicitly pin custom deployments (SDK README).
+the chosen Lit origin independently and explicitly pin custom deployments (SDK README).
 
 ## When a request is refused
+
+Live discovery omits revoked, disabled, expired or stale-version approvals. `Unknown
+secret` means no current approval (or a wrong name); call `list()` and ask the owner
+to approve/renew the existing public key, not download a file. Use **Connect to a session** on the agent page or the **Ready to use** confirmation
+to get a prompt or setup snippets for the existing identity. Config downloads have been removed.
+
+Discovery is key-possession metadata/billing authentication, not owner authority.
+The scoped billing key is reusable for billing only; a retained old key can spend
+sponsored execution until rotated but does not bypass Lit policy checks.
+Revocation applies on the next request; it cannot retract plaintext or cancel a
+previously authorized operation already running. Discovery is capped at 1,000
+candidate secrets and fails explicitly if exceeded.
 
 The enclave answers every failure with the same bare denial so that nothing about
 the policy or the upstream service leaks. The client therefore explains what it can
@@ -64,14 +85,13 @@ see, and the message tells you who can fix it:
 
 ## Know what you are holding
 
-There are exactly three artifacts. Two are JSON files and self-describing; only the
-secret value itself is a bare string. Never store one in the other's place.
+Agents need only their existing local identity file. Current approvals are discovered
+from the server on every request. Never confuse the identity with secret values.
 
-| Artifact       | Shape                                                                       | Sensitivity                                                      |
-| -------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Agent identity | JSON `{ "v": 2, "privateKey": <64 hex>, "publicKey": <64 hex> }`            | Private. Only `publicKey` is ever shared.                        |
-| Agent config   | JSON `*.keychain.json`: `{ "v": 2, "litApiUrl", "usageApiKey", "secrets" }` | Private. `usageApiKey` is a Chipotle billing key, not authority. |
-| Secret value   | Whatever `get` returns                                                      | Do not log, echo, or write to disk.                              |
+| Artifact       | Shape                                                            | Sensitivity                               |
+| -------------- | ---------------------------------------------------------------- | ----------------------------------------- |
+| Agent identity | JSON `{ "v": 2, "privateKey": <64 hex>, "publicKey": <64 hex> }` | Private. Only `publicKey` is ever shared. |
+| Secret value   | Whatever `get` returns                                           | Do not log, echo, or write to disk.       |
 
 `usageApiKey` is an opaque string minted by Chipotle (currently base64 of 32 random
 bytes, 44 characters ending in `=`). It pays for execution and cannot read a secret
@@ -85,7 +105,7 @@ Never request an owner's private key or Google token, and never ask the backend 
 mint a grant. There are no setup bearer tokens or managed per-tenant PKP vaults.
 Agent identity and Lit execution billing are separate. Keep identity and config files private
 and avoid logging credentials returned by `get` or the CLI. When you only need a
-credential for one command, use `npx @lit-protocol/keychain@2.0.6 run` to avoid CLI printing; the child
+credential for one command, use `npx @lit-protocol/keychain@2.2.2 run` to avoid CLI printing; the child
 can still disclose it. `get_secret` returns plaintext into model context. With
 `--file`, SIGKILL may leave plaintext behind and unlink does not guarantee erasure.
 
