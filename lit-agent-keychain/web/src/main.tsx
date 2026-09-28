@@ -54,12 +54,7 @@ import {
   LIT_URL,
   type Identity,
 } from "./identities.ts";
-import {
-  Brand,
-  Intro,
-  LandingFooter,
-  KEYCHAIN_DOCS_URL,
-} from "./Landing.tsx";
+import { Brand, Intro, LandingFooter, KEYCHAIN_DOCS_URL } from "./Landing.tsx";
 import { NPX_KEYCHAIN } from "./version.ts";
 import { AddSecret, ActionDocs } from "./AddSecret.tsx";
 import { AgentOnboarding } from "./AgentOnboarding.tsx";
