@@ -239,6 +239,17 @@
       "type": "error"
     },
     {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "usageApiKeyHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "UsageApiKeyExpired",
+      "type": "error"
+    },
+    {
       "anonymous": false,
       "inputs": [
         {
