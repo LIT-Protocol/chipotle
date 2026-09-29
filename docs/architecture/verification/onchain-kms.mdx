@@ -13,7 +13,7 @@ Without on-chain KMS, a TEE provider's backend decides which CVMs get keys. That
 
 - **No central authority.** A smart contract is the only thing that can authorize key release. Phala's backend does not sign transactions on Lit's behalf.
 - **Public, auditable governance.** Every code-version whitelist change is a Base transaction. Anyone can read the history on Basescan.
-- **Multi-party control.** The contract owner is a Safe multisig of Lit signers — no single party (including Lit) can change the whitelist alone.
+- **Multi-party control.** Each governing contract is owned by a Safe multisig — no single party can change a whitelist alone. Lit's `DstackApp` (compose-hash whitelist) is owned by a Lit-signer Safe; the shared Phala KMS contract (OS-image / KMS whitelist) is owned by a separate Phala-controlled Safe.
 
 For the canonical design, see [Phala: Understanding On-Chain KMS](https://docs.phala.com/phala-cloud/key-management/understanding-onchain-kms) and [Cloud vs On-Chain KMS](https://docs.phala.com/phala-cloud/key-management/cloud-vs-onchain-kms).
 
@@ -29,7 +29,7 @@ A shared Phala contract that maintains the registry of KMS nodes, approved dstac
 |---|---|
 | `allowedOsImages(bytes32)` | Whitelist of dstack OS image measurements (firmware + kernel + initrd hashes). The CVM's MRTD / RTMR0–2 must match a whitelisted image or boot is refused. |
 | `kmsAllowedAggregatedMrs(bytes32)` | Whitelist of KMS instance measurements. Pins the CVM to a specific trusted KMS. |
-| `owner()` | The Safe multisig that controls the whitelists. |
+| `owner()` | A Phala-controlled Safe multisig ([`0x3926…a663`](https://basescan.org/address/0x3926658a072F82BAEa5e5a15e1Fed8a776F4a663), 2-of-3) — **not** the Lit Safe. Because this is a shared Phala contract, Lit does not control the OS-image / KMS whitelist. |
 
 ### DstackApp — [`0x3F91…05FfC`](https://basescan.org/address/0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC)
 
@@ -45,7 +45,7 @@ curl -sf https://api.chipotle.litprotocol.com/info \
 |---|---|
 | `allowedComposeHashes(bytes32)` | Whitelist of `app-compose.json` SHA-256 hashes. The TEE's RTMR3 must record a compose hash present here, or the KMS will not release keys. |
 | `allowedDeviceIds(bytes32)` | Whitelist of approved hardware device identifiers. |
-| `owner()` | The Safe multisig — only this address can add or remove compose hashes and device IDs. |
+| `owner()` | The Lit Safe multisig ([`0xF688…1098`](https://basescan.org/address/0xF688411c0FFc300cAb33EB1dA651DBb3E6891098)) — only this address can add or remove compose hashes and device IDs. |
 
 ## How key release is gated
 

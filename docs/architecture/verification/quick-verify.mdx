@@ -65,7 +65,7 @@ For the full end-to-end verification — including replaying the RTMR3 event log
 
 ## On-chain governance you can audit
 
-Three smart contracts on Base together define what Lit Chipotle is allowed to do. All three are administered by a Safe multisig — no single party can change them.
+Smart contracts on Base together define what Lit Chipotle is allowed to do. Lit's own governance contracts are administered by a Lit-controlled Safe multisig — no single party can change them. The Phala KMS contract is a shared Phala-operated contract governed by a separate Phala-controlled Safe.
 
 <CardGroup cols={2}>
   <Card
@@ -80,14 +80,14 @@ Three smart contracts on Base together define what Lit Chipotle is allowed to do
     icon="key"
     href="https://basescan.org/address/0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C"
   >
-    `0x2f83…Ba9C` — whitelists allowed dstack OS images and KMS instance measurements. Gatekeeps key release to the CVM.
+    `0x2f83…Ba9C` — whitelists allowed dstack OS images and KMS instance measurements. Gatekeeps key release to the CVM. This is a shared Phala-operated contract, governed by a separate Phala-controlled Safe ([`0x3926…a663`](https://basescan.org/address/0x3926658a072F82BAEa5e5a15e1Fed8a776F4a663)), not the Lit Safe below.
   </Card>
   <Card
     title="Safe Multisig"
     icon="users"
     href="https://basescan.org/address/0xF688411c0FFc300cAb33EB1dA651DBb3E6891098"
   >
-    `0xF688…1098` — owns both contracts above. Any deployment or config change requires multiple Lit signers.
+    `0xF688…1098` — Lit's governance Safe. Owns the DstackApp contract above (and Lit's AccountConfig). Any Lit deployment or config change requires multiple Lit signers.
   </Card>
   <Card
     title="On-Chain KMS Deep Dive"

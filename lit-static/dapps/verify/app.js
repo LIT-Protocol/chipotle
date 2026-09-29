@@ -20,7 +20,10 @@ const DEFAULTS = {
   appId: '0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC',
 };
 
-// Reference contracts on Base, all administered by the Lit Safe multisig.
+// Reference contracts on Base. The per-app DstackApp contract (compose-hash
+// whitelist) is administered by the Lit Safe multisig below. The shared Phala
+// KMS contract (OS-image / KMS whitelist) is owned by a separate Phala-controlled
+// Safe (0x3926658a072F82BAEa5e5a15e1Fed8a776F4a663), not the Lit Safe.
 const CONTRACTS = {
   kms: '0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C',
   safe: '0xF688411c0FFc300cAb33EB1dA651DBb3E6891098',
