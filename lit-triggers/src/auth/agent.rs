@@ -53,16 +53,19 @@ pub fn validate_agent_token_hash(token_hash: &str) -> Result<()> {
 /// Bind `token_hash` to `user_id` with an expiry.
 ///
 /// The `ON CONFLICT` clause is deliberately guarded with
-/// `WHERE agent_access_tokens.user_id = EXCLUDED.user_id`: an existing binding is
-/// only ever refreshed for the user who already owns it. A conflicting hash owned
-/// by a different user is left untouched (no `user_id` move, no `revoked_at`
-/// clear), which is what closes the cross-account rebind primitive.
+/// `WHERE agent_access_tokens.user_id = EXCLUDED.user_id AND revoked_at IS NULL`:
+/// an existing binding is only ever refreshed for the user who already owns it and
+/// only while it is still active. A conflicting hash owned by a different user, or
+/// one that has already been revoked, is left untouched (no `user_id` move, no
+/// `revoked_at` clear). This closes both the cross-account rebind primitive and the
+/// revoked-token resurrection primitive — a leaked raw token can never be un-revoked
+/// and rebound by whoever replays it.
 ///
 /// The caller must have validated that whoever is being bound both (a) had the
 /// pairing approved by the account owner and (b) proved possession of the raw
 /// token preimage — see [`super::pairing::complete`].
-/// Returns the number of rows written. `0` means a conflicting hash is already
-/// owned by a *different* user (the guarded `ON CONFLICT` was a no-op) — the
+/// Returns the number of rows written. `0` means the conflicting hash is owned by a
+/// *different* user or has been revoked (the guarded `ON CONFLICT` was a no-op) — the
 /// caller must not treat that as a successful bind.
 pub async fn bind_token(
     pool: &PgPool,
@@ -82,9 +85,9 @@ pub async fn bind_token(
          VALUES ($1, $2, $3, $4)
          ON CONFLICT (token_hash) DO UPDATE
            SET label = EXCLUDED.label,
-               expires_at = EXCLUDED.expires_at,
-               revoked_at = NULL
-         WHERE agent_access_tokens.user_id = EXCLUDED.user_id",
+               expires_at = EXCLUDED.expires_at
+         WHERE agent_access_tokens.user_id = EXCLUDED.user_id
+           AND agent_access_tokens.revoked_at IS NULL",
     )
     .bind(token_hash)
     .bind(user_id)
