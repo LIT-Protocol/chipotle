@@ -18,6 +18,12 @@ impl Client {
         // NOTE: Do not log `op` here — response variants (GetPrivateKeyResponse,
         // GetLitActionPrivateKeyResponse, AesDecryptResponse) carry secret material.
         self.state.ops_count += 1;
+        // Identity for CID-derived key material and PKP-wallet authorization.
+        // On the gVisor binary lane this reflects the code that actually runs
+        // (bundle checksum bound to any request-supplied startup script), so an
+        // override script cannot obtain the audited bundle's key or reuse its
+        // wallet authorizations. See #75 (F1b) / #600.
+        let key_id = self.action_key_id().to_string();
         let op_type = match &op {
             UnionResponse::SetResponse(_) => "SetResponse",
             UnionResponse::Print(_) => "Print",
@@ -72,7 +78,7 @@ impl Client {
                 if !op_code_helpers::can_use_wallet_in_action_cached(
                     &mut self.state,
                     &self.api_key,
-                    &self.ipfs_id,
+                    &key_id,
                     &pkp_id,
                 )
                 .await?
@@ -95,7 +101,7 @@ impl Client {
                 if !op_code_helpers::can_use_wallet_in_action_cached(
                     &mut self.state,
                     &self.api_key,
-                    &self.ipfs_id,
+                    &key_id,
                     &pkp_id,
                 )
                 .await?
@@ -119,7 +125,7 @@ impl Client {
                 if !op_code_helpers::can_use_wallet_in_action_cached(
                     &mut self.state,
                     &self.api_key,
-                    &self.ipfs_id,
+                    &key_id,
                     &pkp_id,
                 )
                 .await?
@@ -133,10 +139,9 @@ impl Client {
             }
             UnionResponse::GetLitActionPrivateKey(GetLitActionPrivateKeyRequest {}) => {
                 self.check_get_keys_limit()?;
-                let secret =
-                    op_code_helpers::private_keys::get_lit_action_private_key(&self.ipfs_id)
-                        .await
-                        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                let secret = op_code_helpers::private_keys::get_lit_action_private_key(&key_id)
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
                 GetLitActionPrivateKeyResponse { secret }.into()
             }
             UnionResponse::GetLitActionPublicKey(GetLitActionPublicKeyRequest { ipfs_id }) => {
