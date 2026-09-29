@@ -509,21 +509,6 @@ aside {
   margin: 0 10px 32px;
   min-width: 0;
 }
-.account-mark {
-  flex: none;
-  width: 32px;
-  height: 32px;
-  background: var(--shade);
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  display: grid;
-  place-items: center;
-  color: var(--orange);
-}
-.account-mark svg {
-  width: 18px;
-  height: 14px;
-}
 .account strong {
   display: block;
   font-size: 12px;
