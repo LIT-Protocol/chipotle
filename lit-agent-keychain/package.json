@@ -26,6 +26,7 @@
     "@tanstack/react-query": "5.102.8",
     "ipfs-unixfs-importer": "16.1.5",
     "jose": "6.2.12",
+    "qrcode": "1.5.4",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "viem": "2.56.3",
@@ -35,6 +36,7 @@
   "devDependencies": {
     "@playwright/test": "1.58.2",
     "@types/node": "22.19.15",
+    "@types/qrcode": "1.5.6",
     "@types/react": "18.3.31",
     "@types/react-dom": "18.3.7",
     "@vitejs/plugin-react": "5.1.4",

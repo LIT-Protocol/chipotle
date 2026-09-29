@@ -59,6 +59,11 @@ import { AddSecret, ActionDocs } from "./AddSecret.tsx";
 import { AgentOnboarding } from "./AgentOnboarding.tsx";
 import { AgentConnection } from "./AgentConnection.tsx";
 import "@rainbow-me/rainbowkit/styles.css";
+import {
+  TwoFactorLogin,
+  TwoFactorSettings,
+  type TwoFactorPrompt,
+} from "./TwoFactor.tsx";
 import "./style.css";
 
 const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
@@ -183,6 +188,25 @@ function App() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [twoFactorPrompt, setTwoFactorPrompt] = useState<TwoFactorPrompt>();
+  const requestSecondFactor = useCallback(
+    (verify: (code: string) => Promise<void>) =>
+      new Promise<void>((resolve, reject) => {
+        setTwoFactorPrompt({
+          verify: async (code) => {
+            await verify(code);
+            setTwoFactorPrompt(undefined);
+            resolve();
+          },
+          cancel: () => {
+            setTwoFactorPrompt(undefined);
+            clearSession();
+            reject(new Error("Sign-in cancelled."));
+          },
+        });
+      }),
+    [],
+  );
   const [tab, setTab] = useState<
     "secrets" | "agents" | "recovery" | "activity"
   >("secrets");
@@ -267,6 +291,7 @@ function App() {
       authority || recovery,
     );
     c.progress = setBusy;
+    c.secondFactor = requestSecondFactor;
     saveSession(identity.owner, c.authority);
     return c;
   };
@@ -316,6 +341,7 @@ function App() {
           stored.authority,
         );
         c.progress = setBusy;
+        c.secondFactor = requestSecondFactor;
         const { usageApiKey } = await c.api("/api/execution-key", {
           method: "POST",
         });
@@ -366,6 +392,17 @@ function App() {
       setRecoveryOwners(policy?.document.owners || [c.authority.owner]);
       setNotice("Signed in. Owner approvals stay on this device.");
     });
+  const changeOwners = async (owners: Owner[], message: string) => {
+    const unique = new Set(owners.map((owner) => digest(owner)));
+    if (unique.size !== owners.length)
+      throw new Error("That sign-in method is already approved.");
+    if (owners.length > 8)
+      throw new Error("A vault supports up to eight sign-in methods.");
+    await client!.updateCredentials(owners);
+    setRecovery(client!.authority);
+    signOutLocally();
+    setNotice(message + " Sign in again, then download a fresh vault backup.");
+  };
   const pick = (id: string) =>
     work("Checking secret…", async () => {
       const bundle = await client!.bundle(id);
@@ -537,6 +574,7 @@ function App() {
           {notice}
         </div>
       )}
+      {twoFactorPrompt && <TwoFactorLogin prompt={twoFactorPrompt} />}
       {!client ? (
         <>
           <main className="login-layout">
@@ -678,7 +716,7 @@ function App() {
                       : t === "agents"
                         ? "Agents"
                         : t === "recovery"
-                          ? "Recovery & backups"
+                          ? "Security & sign-in"
                           : "Activity"}
                   </button>
                 ),
@@ -1621,20 +1659,131 @@ function App() {
                 <div className="page-heading">
                   <div>
                     <p className="eyebrow">OWNER CONTROL</p>
-                    <h1>Recovery & backups</h1>
+                    <h1>Security & sign-in</h1>
                     <p>
-                      Back up ciphertext and keep another way to approve access.
+                      Manage your sign-in methods, require 2FA, and prepare for
+                      recovery.
                     </p>
                   </div>
                 </div>
+                <TwoFactorSettings client={client} busy={!!busy} work={work} />
+                <section className="detail-card wide recovery-methods">
+                  <h2>Sign-in & recovery methods</h2>
+                  <p>
+                    Each method can sign in to this vault. When 2FA is on, all
+                    methods also require an authenticator or recovery code.
+                    Changes require your current owner’s approval and end
+                    existing browser sessions. Keep a vault backup so you can
+                    select this vault when signing in with a recovery wallet or
+                    Google account.
+                  </p>
+                  {recoveryOwners.map((o, i) => (
+                    <div className="agent-row" key={digest(o)}>
+                      <span>
+                        <strong>{o.kind}</strong>
+                        <code>
+                          {o.kind === "wallet"
+                            ? brief(o.address)
+                            : o.kind === "google"
+                              ? "Google account"
+                              : brief(o.credentialId)}
+                        </code>
+                      </span>
+                      <button
+                        className="danger ghost"
+                        disabled={recoveryOwners.length <= 1 || !!busy}
+                        onClick={() =>
+                          void work(
+                            "Replacing owner credentials…",
+                            async () => {
+                              await changeOwners(
+                                recoveryOwners.filter((_, n) => n !== i),
+                                "Sign-in method removed.",
+                              );
+                            },
+                          )
+                        }
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void work("Adding recovery wallet…", async () => {
+                        const owner = ownerSchema.parse({
+                          kind: "wallet",
+                          address: newWallet.toLowerCase(),
+                        });
+                        await changeOwners(
+                          [...recoveryOwners, owner],
+                          "Recovery wallet added.",
+                        );
+                      });
+                    }}
+                  >
+                    <label>
+                      Recovery wallet address
+                      <input
+                        value={newWallet}
+                        onChange={(e) => setNewWallet(e.target.value)}
+                        required
+                        pattern="0x[0-9a-fA-F]{40}"
+                      />
+                    </label>
+                    <button disabled={!!busy}>Approve recovery wallet</button>
+                  </form>
+                  <button
+                    className="secondary"
+                    disabled={!!busy}
+                    onClick={() =>
+                      void work("Creating recovery passkey…", async () => {
+                        const identity =
+                          await createPasskey("Keychain recovery");
+                        await changeOwners(
+                          [...recoveryOwners, identity.owner],
+                          "Recovery passkey added.",
+                        );
+                      })
+                    }
+                  >
+                    Add recovery passkey
+                  </button>
+                  {settings?.googleClientId && (
+                    <>
+                      <h3>Add a Google account</h3>
+                      <p>
+                        Choose the Google account you want to approve as another
+                        sign-in method.
+                      </p>
+                      <GoogleButton
+                        clientId={settings.googleClientId}
+                        network={settings.network}
+                        onIdentity={(identity) =>
+                          void work(
+                            "Approving Google sign-in method…",
+                            async () => {
+                              await changeOwners(
+                                [...recoveryOwners, identity.owner],
+                                "Google sign-in method added.",
+                              );
+                            },
+                          )
+                        }
+                        onError={setError}
+                      />
+                    </>
+                  )}
+                </section>
                 <section className="detail-card wide">
                   <h2>Back up this vault</h2>
                   <p>
-                    One file with everything needed to recover this vault on a
-                    new device: your encrypted secrets, their signed policies,
-                    and the vault identity. It cannot be read without an
-                    approved sign-in method. Download a fresh copy after adding
-                    secrets or changing credentials.
+                    One file with your vault data for recovery on a new device:
+                    your encrypted secrets, their signed policies, and the vault
+                    identity. It cannot be read without an approved sign-in
+                    method. Download a fresh copy after adding secrets or
+                    changing credentials.
                   </p>
                   <button
                     disabled={!!busy}
@@ -1664,94 +1813,6 @@ function App() {
                       }}
                     />
                   </label>
-                </section>
-                <section className="detail-card wide">
-                  <h2>Approved owner credentials</h2>
-                  <p>
-                    Changes require your current owner’s approval and end
-                    existing browser sessions. Download a fresh backup before
-                    changing credentials.
-                  </p>
-                  {recoveryOwners.map((o, i) => (
-                    <div className="agent-row" key={digest(o)}>
-                      <span>
-                        <strong>{o.kind}</strong>
-                        <code>
-                          {o.kind === "wallet"
-                            ? brief(o.address)
-                            : o.kind === "google"
-                              ? "Google account"
-                              : brief(o.credentialId)}
-                        </code>
-                      </span>
-                      <button
-                        className="danger ghost"
-                        disabled={recoveryOwners.length <= 1 || !!busy}
-                        onClick={() =>
-                          void work(
-                            "Replacing owner credentials…",
-                            async () => {
-                              await client.updateCredentials(
-                                recoveryOwners.filter((_, n) => n !== i),
-                              );
-                              setClient(undefined);
-                              setNotice(
-                                "Credentials updated. Sign in again with an approved credential.",
-                              );
-                            },
-                          )
-                        }
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      void work("Adding recovery wallet…", async () => {
-                        const owner = ownerSchema.parse({
-                          kind: "wallet",
-                          address: newWallet.toLowerCase(),
-                        });
-                        await client.updateCredentials([
-                          ...recoveryOwners,
-                          owner,
-                        ]);
-                        setClient(undefined);
-                        setNotice("Recovery wallet added. Sign in again.");
-                      });
-                    }}
-                  >
-                    <label>
-                      Recovery wallet address
-                      <input
-                        value={newWallet}
-                        onChange={(e) => setNewWallet(e.target.value)}
-                        required
-                        pattern="0x[0-9a-fA-F]{40}"
-                      />
-                    </label>
-                    <button disabled={!!busy}>Approve recovery wallet</button>
-                  </form>
-                  <button
-                    className="secondary"
-                    disabled={!!busy}
-                    onClick={() =>
-                      void work("Creating recovery passkey…", async () => {
-                        const identity =
-                          await createPasskey("Keychain recovery");
-                        await client.updateCredentials([
-                          ...recoveryOwners,
-                          identity.owner,
-                        ]);
-                        setClient(undefined);
-                        setNotice("Recovery passkey added. Sign in again.");
-                      })
-                    }
-                  >
-                    Add recovery passkey
-                  </button>
                 </section>
               </>
             )}

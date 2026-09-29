@@ -29,6 +29,8 @@ async fn main() -> anyhow::Result<()> {
             for query in [
                 "DELETE FROM kc_sessions WHERE expires_at<now()",
                 "DELETE FROM kc_challenges WHERE expires_at<now()",
+                "DELETE FROM kc_two_factor_logins WHERE expires_at<now()",
+                "DELETE FROM kc_two_factor_setup WHERE expires_at<now()",
                 "DELETE FROM kc_budgets WHERE expires_at<now()",
             ] {
                 if sqlx::query(query).execute(&cleanup_pool).await.is_err() {

@@ -389,3 +389,117 @@ test("RainbowKit injected wallet connects and signs an EIP-712 owner proof", asy
   }
   await page.setViewportSize({ width: 1280, height: 900 });
 });
+
+test("authenticator setup, recovery login and disabling 2FA", async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(180000);
+  const { authenticatorCode } = await import("./totp-fixture.ts");
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("WebAuthn.enable");
+  await cdp.send("WebAuthn.addVirtualAuthenticator", {
+    options: {
+      protocol: "ctap2",
+      transport: "internal",
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
+  });
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Create a passkey", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Security & sign-in", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Sign-in & recovery methods" }),
+  ).toBeVisible();
+  await expect(page.getByText("Not enabled", { exact: true })).toBeVisible();
+  await page
+    .locator(".two-factor-card")
+    .screenshot({ path: "../.context/keychain/two-factor-off-desktop.png" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page
+    .locator(".two-factor-card")
+    .screenshot({ path: "../.context/keychain/two-factor-off-mobile.png" });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.getByRole("button", { name: "Set up authenticator app" }).click();
+  await expect(
+    page.getByRole("img", { name: "Scan with your authenticator app" }),
+  ).toBeVisible();
+  await page.getByText("Can’t scan the code?").click();
+  const secret = (await page.locator(".totp-secret").textContent())!;
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page
+    .getByLabel("Authenticator code", { exact: true })
+    .fill(authenticatorCode(secret));
+  await page.getByRole("button", { name: "Verify & enable 2FA" }).click();
+  await expect(page.locator(".recovery-codes li")).toHaveCount(10);
+  const codes = await page.locator(".recovery-codes li code").allTextContents();
+  await expect(page.getByText("Enabled", { exact: true })).toBeVisible();
+  expect(codes).toHaveLength(10);
+  await expect(
+    page.getByRole("button", { name: "Done", exact: true }),
+  ).toBeDisabled();
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download recovery codes" }).click();
+  expect((await downloadPromise).suggestedFilename()).toBe(
+    "keychain-recovery-codes.txt",
+  );
+  await page.getByLabel("I saved my recovery codes").check();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Use an existing passkey", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", {
+    name: "Two-factor authentication",
+  });
+  await expect(dialog).toBeVisible();
+  // No authenticated page or metadata session before the code is verified.
+  expect((await context.request.get("/api/me")).status()).toBe(401);
+  await dialog
+    .getByRole("button", { name: "Use a recovery code", exact: true })
+    .click();
+  await dialog
+    .getByLabel("Recovery code", { exact: true })
+    .fill("not-a-recovery-code");
+  await dialog.getByRole("button", { name: "Verify & sign in" }).click();
+  await expect(dialog.getByRole("alert")).toContainText(
+    "incorrect or already used",
+  );
+  await dialog.getByLabel("Recovery code", { exact: true }).fill(codes[0]);
+  await dialog.getByRole("button", { name: "Verify & sign in" }).click();
+  await expect(dialog).not.toBeVisible();
+  await page
+    .getByRole("button", { name: "Security & sign-in", exact: true })
+    .click();
+  await expect(page.getByText(/9 recovery codes remaining/)).toBeVisible();
+  await page.screenshot({
+    path: "../.context/keychain/security-mobile.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.screenshot({
+    path: "../.context/keychain/security-desktop.png",
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "Turn off 2FA", exact: true }).click();
+  await page.getByLabel("Authenticator or recovery code").fill(codes[1]);
+  await page.getByRole("button", { name: "Confirm turn off 2FA" }).click();
+  await expect(
+    page.getByRole("button", { name: "Set up authenticator app" }),
+  ).toBeVisible();
+  expect(errors).toEqual([]);
+});
