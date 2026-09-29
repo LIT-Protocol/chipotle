@@ -1,5 +1,5 @@
 use crate::dstack::v1::get_client_key;
-use crate::utils::{parse_with_hash::pkp_id_to_h160, u256_to_derviation_path};
+use crate::utils::{parse_with_hash::pkp_id_to_h160, u256_to_derivation_path};
 use alloy::signers::local::PrivateKeySigner;
 
 pub mod account_management;
@@ -8,7 +8,7 @@ pub mod core_features;
 pub mod eip712;
 pub mod v1;
 
-pub async fn pkp_id_to_derviation_path(api_key: &str, pkp_id: &str) -> Result<String, String> {
+pub async fn pkp_id_to_derivation_path(api_key: &str, pkp_id: &str) -> Result<String, String> {
     let wallet_address = pkp_id_to_h160(pkp_id)
         .map_err(|e| format!("Error converting PKP ID to EVM address: {:?}", e))?;
     let derivation_u256 =
@@ -17,7 +17,7 @@ pub async fn pkp_id_to_derviation_path(api_key: &str, pkp_id: &str) -> Result<St
             Err(e) => return Err(format!("Error getting wallet derivation: {:?}", e)),
         };
 
-    let derivation_path = u256_to_derviation_path(derivation_u256);
+    let derivation_path = u256_to_derivation_path(derivation_u256);
     Ok(derivation_path)
 }
 
@@ -42,7 +42,7 @@ pub async fn pkp_id_to_derviation_path(api_key: &str, pkp_id: &str) -> Result<St
 pub async fn get_verified_client_key(api_key: &str, pkp_id: &str) -> Result<[u8; 32], String> {
     let expected_address = pkp_id_to_h160(pkp_id)
         .map_err(|e| format!("Error converting PKP ID to EVM address: {:?}", e))?;
-    let derivation_path = pkp_id_to_derviation_path(api_key, pkp_id).await?;
+    let derivation_path = pkp_id_to_derivation_path(api_key, pkp_id).await?;
     let secret = get_client_key(&derivation_path).await?;
 
     let signer = PrivateKeySigner::from_slice(&secret)
