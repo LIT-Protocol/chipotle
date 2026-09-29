@@ -41,4 +41,14 @@ ALTER TABLE agent_access_tokens
 -- silently rebound. Any of them could be attacker-planted, so invalidate them
 -- all and force re-pairing through the hardened flow. Agents re-authorize
 -- automatically on their next 401 (see SKILL.md).
-UPDATE agent_access_tokens SET revoked_at = now() WHERE revoked_at IS NULL;
+--
+-- DELETE (not `UPDATE ... SET revoked_at = now()`): the hardened `bind_token`
+-- upsert only refreshes a conflicting row `WHERE user_id = EXCLUDED.user_id AND
+-- revoked_at IS NULL` and never clears `revoked_at`, so a row left in the
+-- revoked state here could never be rebound — the automatic re-pair on the next
+-- 401 would hit the surviving revoked row, update zero rows, and 403 forever.
+-- Removing the rows outright lets an owner-approved re-pair INSERT a fresh
+-- binding for the same token, while a genuinely revoked (still-present) token
+-- stays unresurrectable — the leaked-token-rebind protection this migration and
+-- #79 add is preserved.
+DELETE FROM agent_access_tokens;

@@ -23,7 +23,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use alloy::dyn_abi::TypedData;
-use alloy::primitives::{Address, B256, Bytes, FixedBytes, Signature, U256, keccak256};
+use alloy::primitives::{Address, B256, Bytes, FixedBytes, Signature, U256};
 use alloy::sol;
 use moka::future::Cache;
 
@@ -65,7 +65,7 @@ const ERC1271_CALL_TIMEOUT_SECS: u64 = 5;
 /// ±5-minute window on `issuedAt`. This bounds how long any single signature
 /// stays acceptable at all; within that window the single-use cache
 /// (`USED_SIGNATURES`, see [`verify_eip712_signature_allow_contract_wallet_single_use`])
-/// is the actual anti-replay: each verified `(digest, signature)` on the mint
+/// is the actual anti-replay: each verified `digest` on the mint
 /// endpoints can be consumed only once. A captured signature can no longer be
 /// replayed to mint many keys — the second use is rejected until the timestamp
 /// window itself expires it.
@@ -91,10 +91,13 @@ const REPLAY_CACHE_TTL: Duration = Duration::from_secs((2 * TIMESTAMP_SKEW_SECON
 /// keys.
 const REPLAY_CACHE_MAX_ENTRIES: u64 = 1_000_000;
 
-/// Process-local single-use signature cache for the mint endpoints. Keyed by
-/// `keccak256(digest || signature)` — the EIP-712 digest already commits to the
-/// full typed data (domain, message, and the primaryType via its type hash), so
-/// a given key can only ever correspond to one signed message for one flow.
+/// Process-local single-use signature cache for the mint endpoints. Keyed by the
+/// EIP-712 `digest` — it already commits to the full typed data (domain, message,
+/// and the primaryType via its type hash), so a given key can only ever
+/// correspond to one signed message for one flow. Keying on the digest rather
+/// than the signature bytes means every valid encoding of the same authorization
+/// (ECDSA malleability, EIP-1271 multi-encoding) collapses to one key and is
+/// rejected on re-presentation.
 ///
 /// Scope caveat: this is per-replica. In a multi-replica deployment a signature
 /// replayed against a *different* replica within the validity window is not
@@ -374,7 +377,7 @@ pub(crate) async fn verify_eip712_signature_allow_contract_wallet_single_use(
 ) -> Result<Address, ApiStatus> {
     let prepared = prepare_verification(typed_data_json, signature_hex, expected_primary_type)?;
     let address = verify_prepared_allow_contract_wallet(&prepared).await?;
-    reject_if_replayed(prepared.digest, &prepared.signature).await?;
+    reject_if_replayed(prepared.digest).await?;
     Ok(address)
 }
 
@@ -411,22 +414,28 @@ async fn verify_prepared_allow_contract_wallet(
     ))
 }
 
-/// Record a verified `(digest, signature)` as used, rejecting it if it has been
-/// used before within its validity window. Keyed by `keccak256(digest ||
-/// signature)`.
+/// Record a verified EIP-712 `digest` as used, rejecting it if it has been used
+/// before within its validity window. Keyed by the `digest` alone.
+///
+/// The key is deliberately the digest, **not** `(digest, signature)`: the EIP-712
+/// digest already uniquely commits to the full typed data (domain, message, and
+/// primaryType), so it is the true replay identity. Folding signature bytes into
+/// the key would reopen the replay it is meant to close, because a single
+/// authorization can be presented with more than one valid signature encoding
+/// over the same digest — ECDSA is malleable (`(r, s, v)` and `(r, n-s, v^1)`
+/// both recover the same signer, and k256 recovery does not reject high-s), and
+/// EIP-1271 contract wallets may accept several encodings for one digest. Each
+/// such variant would hash to a different `(digest, signature)` key and slip
+/// through. Keying on the digest alone rejects every re-presentation of the same
+/// authorization regardless of how the signature is encoded.
 ///
 /// `entry(..).or_insert(())` is atomic first-writer-wins: for concurrent
-/// requests carrying the same signature, moka runs the initializer exactly once
+/// requests carrying the same digest, moka runs the initializer exactly once
 /// and only that caller observes `is_fresh() == true`. Every other concurrent
 /// (or later) caller sees `false` and is rejected, so a replay cannot slip
 /// through a check-then-insert race.
-async fn reject_if_replayed(digest: B256, signature: &[u8]) -> Result<(), ApiStatus> {
-    let mut buf = Vec::with_capacity(32 + signature.len());
-    buf.extend_from_slice(digest.as_slice());
-    buf.extend_from_slice(signature);
-    let key = keccak256(&buf);
-
-    let entry = USED_SIGNATURES.entry(key).or_insert(()).await;
+async fn reject_if_replayed(digest: B256) -> Result<(), ApiStatus> {
+    let entry = USED_SIGNATURES.entry(digest).or_insert(()).await;
     if entry.is_fresh() {
         Ok(())
     } else {
@@ -1489,8 +1498,8 @@ mod tests {
     }
 
     /// Two distinct valid signatures (different signers) are independent — the
-    /// dedup keys on the specific `(digest, signature)`, not on the endpoint,
-    /// so legitimate concurrent mints from different wallets all succeed.
+    /// dedup keys on the specific `digest`, not on the endpoint, so legitimate
+    /// concurrent mints from different wallets all succeed.
     #[tokio::test]
     async fn single_use_allows_distinct_signatures() {
         let chain_id = ensure_test_chain_id();
