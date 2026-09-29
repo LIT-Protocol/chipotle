@@ -4,9 +4,10 @@
 # Usage:
 #   STRIPE_SECRET_KEY=sk_live_...  \
 #   STRIPE_PUBLISHABLE_KEY=pk_live_...  \
-#   ./scripts/stripe_report.sh [--days N] [--out PATH] [--csv-only]
+#   ./scripts/stripe_report.sh [--days N] [--out PATH] [--csv-only] [--csv-stdout]
 #
-# Defaults: --days 30, --out ./stripe-report (writes .csv and .html).
+# Defaults: --days 14, --out ./stripe-report (writes .csv and .html).
+# Use --csv-stdout to pipe CSV directly to a consumer without creating files.
 #
 # Requires `cargo` on PATH. Runs the release build for speed.
 

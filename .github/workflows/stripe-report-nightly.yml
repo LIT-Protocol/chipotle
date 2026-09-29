@@ -62,30 +62,14 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Generate usage report (CSV)
+      # Stream the report through memory only; do not persist customer data.
+      - name: Generate usage report and post digest to Slack
         env:
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
-        run: |
-          bash scripts/stripe_report.sh \
-            --days "$DAYS" \
-            --csv-only \
-            --out "${{ github.workspace }}/stripe-report"
-
-      - name: Post digest to Slack
-        env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        shell: bash
         run: |
-          node scripts/stripe-report-slack.mjs \
-            "${{ github.workspace }}/stripe-report.csv" \
-            --days "$DAYS"
-
-      # Keep the raw CSV around for 30 days for ad-hoc digging.
-      - name: Upload CSV artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: stripe-report-csv
-          path: ${{ github.workspace }}/stripe-report.csv
-          if-no-files-found: ignore
-          retention-days: 30
+          set -euo pipefail
+          bash scripts/stripe_report.sh --days "$DAYS" --csv-stdout |
+            node scripts/stripe-report-slack.mjs - --days "$DAYS"
