@@ -148,9 +148,26 @@ export function TwoFactorSettings({ client, busy, work }: Props) {
       }
     });
   return (
-    <section className="detail-card wide" aria-labelledby="totp-heading">
-      <h2 id="totp-heading">Two-factor authentication</h2>
-      <p>
+    <section
+      className="detail-card wide two-factor-card"
+      aria-labelledby="totp-heading"
+    >
+      <div className="two-factor-heading">
+        <h2 id="totp-heading">Two-factor authentication</h2>
+        {status && (
+          <span
+            className={`two-factor-status${status.enabled ? " is-enabled" : ""}`}
+          >
+            <span className="two-factor-status-dot" aria-hidden="true" />
+            {status.enabled
+              ? "Enabled"
+              : setup
+                ? "Setup in progress"
+                : "Not enabled"}
+          </span>
+        )}
+      </div>
+      <p className="two-factor-description">
         Require a code from your authenticator app every time you sign in, with
         any of your approved sign-in methods.
       </p>
@@ -170,10 +187,7 @@ export function TwoFactorSettings({ client, busy, work }: Props) {
       )}
       {!status && !loadError && <p role="status">Loading security settings…</p>}
       {status && (
-        <>
-          <p>
-            <strong>{status.enabled ? "On · Required at login" : "Off"}</strong>
-          </p>
+        <div className="two-factor-content">
           {!status.enabled && !setup && (
             <button
               disabled={busy}
@@ -428,12 +442,14 @@ export function TwoFactorSettings({ client, busy, work }: Props) {
               )}
             </>
           )}
-          <p className="hint">
-            This protects Keychain sign-in. Your approved agents continue
-            working. Authenticator keys and recovery codes are not included in
-            vault backups.
-          </p>
-        </>
+        </div>
+      )}
+      {status && (
+        <p className="hint two-factor-note">
+          This protects Keychain sign-in. Your approved agents continue working.
+          Authenticator keys and recovery codes are not included in vault
+          backups.
+        </p>
       )}
     </section>
   );
