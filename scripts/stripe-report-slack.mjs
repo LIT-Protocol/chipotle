@@ -8,8 +8,9 @@
 //
 // Usage:
 //   SLACK_WEBHOOK_URL=https://hooks.slack.com/...  \
-//   node scripts/stripe-report-slack.mjs <report.csv> [--days N] [--top N] [--dry-run]
+//   node scripts/stripe-report-slack.mjs <report.csv|-> [--days N] [--top N] [--dry-run]
 //
+// Use - to read CSV from stdin without saving a report file.
 // --dry-run prints the payload to stdout instead of posting (no webhook needed).
 
 import { readFileSync } from "node:fs";
@@ -24,7 +25,7 @@ function parseArgs(argv) {
     else if (!a.startsWith("--") && args.csv === null) args.csv = a;
     else throw new Error(`unexpected argument: ${a}`);
   }
-  if (!args.csv) throw new Error("usage: stripe-report-slack.mjs <report.csv> [--days N] [--top N] [--dry-run]");
+  if (!args.csv) throw new Error("usage: stripe-report-slack.mjs <report.csv|-> [--days N] [--top N] [--dry-run]");
   if (args.days !== null && !Number.isFinite(args.days)) throw new Error("--days must be a number");
   if (!Number.isFinite(args.top) || args.top < 1) throw new Error("--top must be a positive number");
   return args;
@@ -160,13 +161,13 @@ async function post(webhook, text) {
   });
   const body = await res.text();
   if (!res.ok || body !== "ok") {
-    throw new Error(`Slack webhook returned ${res.status}: ${body}`);
+    throw new Error(`Slack webhook returned an unsuccessful response (HTTP ${res.status})`);
   }
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const csv = readFileSync(args.csv, "utf8");
+  const csv = readFileSync(args.csv === "-" ? 0 : args.csv, "utf8");
   const rows = parseCsv(csv);
   const agg = aggregate(rows);
   const text = buildMessage(agg, { days: args.days, top: args.top });
@@ -178,7 +179,7 @@ async function main() {
   const webhook = process.env.SLACK_WEBHOOK_URL;
   if (!webhook) throw new Error("SLACK_WEBHOOK_URL is not set");
   await post(webhook, text);
-  console.error(`Posted Stripe usage digest to Slack (${agg.customers.length} customers, ${centsToUsd(agg.totalCents)}).`);
+  console.error("Posted Stripe usage digest to Slack.");
 }
 
 main().catch((e) => {
