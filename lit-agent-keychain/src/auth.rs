@@ -37,16 +37,17 @@ impl<'r> FromRequest<'r> for Session {
         if cookie.value().len() != 64 {
             return Outcome::Error((Status::Unauthorized, ()));
         }
+        let token_hash = crypto::hash_bytes(cookie.value().as_bytes());
         match sqlx::query_scalar::<_, String>(
             "SELECT vault_id FROM kc_sessions WHERE token_hash=$1 AND expires_at>now()",
         )
-        .bind(crypto::hash_bytes(cookie.value().as_bytes()))
+        .bind(&token_hash)
         .fetch_optional(pool)
         .await
         {
             Ok(Some(vault_id)) => Outcome::Success(Session {
                 vault_id,
-                token_hash: crypto::hash_bytes(cookie.value().as_bytes()),
+                token_hash,
             }),
             Ok(None) => Outcome::Error((Status::Unauthorized, ())),
             Err(_) => Outcome::Error((Status::ServiceUnavailable, ())),

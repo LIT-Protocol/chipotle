@@ -1759,7 +1759,7 @@ function App() {
                   >
                     Add recovery passkey
                   </button>
-                  {settings.googleClientId && (
+                  {settings?.googleClientId && (
                     <>
                       <h3>Add a Google account</h3>
                       <p>
