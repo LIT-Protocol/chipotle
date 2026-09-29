@@ -109,6 +109,71 @@ impl<'r> FromRequest<'r> for User {
     }
 }
 
+/// Request guard extracting a raw `Authorization: Bearer <token>` value.
+///
+/// Used by agent-side endpoints (pairing completion, self-revoke) that need the
+/// raw token to prove possession, rather than a resolved [`User`]. Forwards when
+/// no usable bearer header is present.
+pub struct RawBearer(pub String);
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for RawBearer {
+    type Error = ();
+
+    async fn from_request(req: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        match bearer_token(req) {
+            Some(token) => Outcome::Success(RawBearer(token.to_string())),
+            None => Outcome::Forward(Status::Unauthorized),
+        }
+    }
+}
+
+/// Like [`User`], but only satisfied by an interactive browser **session cookie**
+/// — never by an agent bearer token.
+///
+/// The human-approval steps (`/agent/authorize`, `/agent/pair` info) use this so a
+/// leaked or compromised agent token cannot non-interactively self-approve fresh
+/// pairings and mint itself renewable, revocation-surviving persistence. Only a
+/// real signed-in browser can approve an agent.
+pub struct SessionUser(pub User);
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for SessionUser {
+    type Error = ();
+
+    async fn from_request(req: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        let pool = match req.rocket().state::<PgPool>() {
+            Some(p) => p,
+            None => {
+                tracing::error!("SessionUser guard: PgPool not in Rocket state");
+                return Outcome::Error((Status::InternalServerError, ()));
+            }
+        };
+
+        let Some(cookie) = req.cookies().get_private(SESSION_COOKIE_NAME) else {
+            return Outcome::Forward(Status::Unauthorized);
+        };
+        let token = cookie.value().to_string();
+        let user_id = match lookup(pool, &token).await {
+            Ok(Some(id)) => id,
+            Ok(None) => return Outcome::Forward(Status::Unauthorized),
+            Err(e) => {
+                tracing::warn!("session lookup failed: {e}");
+                return Outcome::Error((Status::InternalServerError, ()));
+            }
+        };
+
+        match user::find_by_id(pool, user_id).await {
+            Ok(Some(user)) => Outcome::Success(SessionUser(user)),
+            Ok(None) => Outcome::Forward(Status::Unauthorized),
+            Err(e) => {
+                tracing::warn!("user lookup failed: {e}");
+                Outcome::Error((Status::InternalServerError, ()))
+            }
+        }
+    }
+}
+
 fn bearer_token<'a>(req: &'a Request<'_>) -> Option<&'a str> {
     let value = req.headers().get_one("authorization")?.trim();
     value

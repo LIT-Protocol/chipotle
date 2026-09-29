@@ -22,6 +22,9 @@ async fn rocket() -> _ {
     if let Err(e) = auth::session::purge_expired(&pool).await {
         tracing::warn!("session purge on boot failed: {e}");
     }
+    if let Err(e) = auth::pairing::purge_expired(&pool).await {
+        tracing::warn!("agent pairing purge on boot failed: {e}");
+    }
 
     let mailer =
         mail::Mailer::new(cfg.resend_api_key.clone(), cfg.mail_from.clone()).expect("mailer");
@@ -31,6 +34,7 @@ async fn rocket() -> _ {
     tokio::spawn(dispatcher::run(pool.clone(), cfg.clone()));
     tokio::spawn(scheduler::run(pool.clone(), cfg.clone()));
     tokio::spawn(chain_events::run(pool.clone(), cfg.clone()));
+    tokio::spawn(purge_pairings_loop(pool.clone()));
 
     rocket::build()
         .manage(pool)
@@ -49,7 +53,12 @@ async fn rocket() -> _ {
                 auth_routes::request_link,
                 auth_routes::verify_link,
                 auth_routes::logout,
+                auth_routes::pair_start,
+                auth_routes::pair_info,
                 auth_routes::authorize_agent,
+                auth_routes::pair_complete,
+                auth_routes::revoke_agent_token,
+                auth_routes::revoke_all_agent_tokens,
                 auth_routes::me,
                 triggers::create_trigger,
                 triggers::list_triggers,
@@ -62,6 +71,23 @@ async fn rocket() -> _ {
             ],
         )
         .mount("/static", FileServer::from("static"))
+}
+
+/// Periodically delete expired/consumed agent pairings. `POST /agent/pair` is
+/// unauthenticated, so purging only at boot would let the table grow under load
+/// between restarts. Runs every 5 minutes (TTL is 10 minutes).
+async fn purge_pairings_loop(pool: sqlx::PgPool) {
+    let mut ticker = tokio::time::interval(std::time::Duration::from_secs(5 * 60));
+    // Skip the immediate first tick; boot already purged once.
+    ticker.tick().await;
+    loop {
+        ticker.tick().await;
+        match auth::pairing::purge_expired(&pool).await {
+            Ok(n) if n > 0 => tracing::debug!("purged {n} expired agent pairings"),
+            Ok(_) => {}
+            Err(e) => tracing::warn!("agent pairing purge failed: {e}"),
+        }
+    }
 }
 
 fn apply_platform_env() {
@@ -96,15 +122,17 @@ async fn skill_doc() -> Result<NamedFile, Status> {
         .map_err(|_| Status::NotFound)
 }
 
-#[get("/agent/authorize?<challenge>")]
+#[get("/agent/authorize?<code>")]
 async fn agent_authorize_page(
     user: Option<auth::User>,
-    challenge: Option<&str>,
+    code: Option<&str>,
 ) -> Result<NamedFile, Redirect> {
-    let Some(challenge) = challenge else {
+    let Some(code) = code else {
         return Err(Redirect::to("/login?error=invalid"));
     };
-    if auth::agent::validate_agent_token_hash(challenge).is_err() {
+    // The code is an opaque, server-issued, single-use pairing reference — not a
+    // caller-chosen binding target. Validate its shape before doing anything.
+    if auth::pairing::validate_code(code).is_err() {
         return Err(Redirect::to("/login?error=invalid"));
     }
     match user {
@@ -112,7 +140,7 @@ async fn agent_authorize_page(
             .await
             .map_err(|_| Redirect::to("/login?error=missing_static")),
         None => Err(Redirect::to(format!(
-            "/login?next=/agent/authorize%3Fchallenge%3D{challenge}"
+            "/login?next=/agent/authorize%3Fcode%3D{code}"
         ))),
     }
 }

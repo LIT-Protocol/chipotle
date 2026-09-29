@@ -45,25 +45,60 @@ print(path.read_text().strip())
 PY
 ```
 
-Build an authorization URL. The URL contains only a hash challenge, not the raw bearer token:
+Start a pairing. Send only the token *hash* to the server; the raw token never leaves this machine. The server returns a single-use authorization URL and a short confirmation code:
 
 ```bash
 python3 - <<'PY'
-import base64, hashlib, pathlib, urllib.parse
+import base64, hashlib, json, pathlib, subprocess
 raw = (pathlib.Path.home() / '.lit-triggers' / 'agent-token').read_text().strip()
-challenge = base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest()).rstrip(b'=').decode()
-print('https://triggers.litprotocol.com/agent/authorize?' + urllib.parse.urlencode({'challenge': challenge}))
+token_hash = base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest()).rstrip(b'=').decode()
+out = subprocess.check_output([
+    'curl', '-fsS', '-X', 'POST',
+    '-H', 'content-type: application/json',
+    '-d', json.dumps({'token_hash': token_hash, 'label': 'local-agent'}),
+    'https://triggers.litprotocol.com/agent/pair',
+], text=True)
+data = json.loads(out)
+print('Authorize URL:', data['authorize_url'])
+print('Confirmation code:', data['user_code'])
 PY
 ```
 
-Open that URL in the user's browser, or send it to the user and ask them to open it.
+Give the user **both** the authorize URL and the confirmation code. Tell them to open the URL and only click **Authorize agent** if the code shown on the page matches the confirmation code above. This lets the user reject any authorization request they did not start.
 
 Expected browser flow:
 
 1. If the user is not logged in, the site asks for email magic-link login.
-2. After login, the site redirects back to the agent authorization page.
-3. The user clicks **Authorize agent**.
+2. After login, the site shows the confirmation code and the agent label.
+3. The user checks the code matches, then clicks **Authorize agent**.
 4. The page says the agent is authorized.
+
+Finish pairing by proving possession of the raw token. Poll until it reports `authorized` (the pairing URL expires after 10 minutes):
+
+```bash
+python3 - <<'PY'
+import json, pathlib, subprocess, sys, time, urllib.parse
+raw = (pathlib.Path.home() / '.lit-triggers' / 'agent-token').read_text().strip()
+# Paste the authorize URL printed above; the code is its ?code= query param.
+authorize_url = input('Authorize URL: ').strip()
+code = urllib.parse.parse_qs(urllib.parse.urlparse(authorize_url).query)['code'][0]
+deadline = time.time() + 600
+while time.time() < deadline:
+    body = subprocess.run([
+        'curl', '-sS', '-X', 'POST',
+        '-H', 'authorization: Bearer ' + raw,
+        '-H', 'content-type: application/json',
+        '-d', json.dumps({'code': code}),
+        'https://triggers.litprotocol.com/agent/pair/complete',
+    ], text=True, capture_output=True).stdout
+    if '"authorized"' in body:
+        print('Agent authorized.')
+        sys.exit(0)
+    time.sleep(3)
+print('Timed out waiting for approval; ask the user to open the URL and approve.')
+sys.exit(1)
+PY
+```
 
 After approval, verify API access:
 
@@ -80,7 +115,9 @@ subprocess.run([
 PY
 ```
 
-If verification returns `401`, ask the user to repeat the authorization flow with the generated URL. Do not generate a new token unless the user wants to replace the old one.
+If verification returns `401`, ask the user to repeat the authorization flow with a freshly generated pairing URL. Do not generate a new token unless the user wants to replace the old one.
+
+To revoke this agent's access later, call `POST /agent/revoke` with the bearer token, or ask the user to revoke all agents from their account with `POST /api/agent/revoke-all` (signed-in browser session). Agent tokens also expire automatically 90 days after authorization.
 
 ## 2. Decide What Trigger to Create
 
@@ -394,9 +431,11 @@ Endpoints:
 
 ## Troubleshooting
 
-- `401` from `/api/*`: the local agent token has not been authorized, was mistyped, or was revoked. Repeat the authorize URL flow.
+- `401` from `/api/*`: the local agent token has not been authorized, was mistyped, expired, or was revoked. Repeat the pairing flow.
 - Browser lands on login instead of authorization: expected if the user is logged out. After magic-link login it should return to `/agent/authorize?...`.
-- `400` from `/agent/authorize`: generated challenge was invalid. Regenerate the URL with the command in this skill.
+- `400` from `/agent/pair`: the token hash was malformed. Regenerate it with the command in this skill.
+- `404`/`403` from `/agent/pair/complete`: the pairing expired or was already used (`404`), or the presented bearer token does not match the hash registered at pairing start (`403`). Start a fresh pairing.
+- `"pending"` from `/agent/pair/complete`: the user has not approved yet. Keep polling until it returns `"authorized"`.
 - `422 Unprocessable Entity` (empty body) when creating a trigger: a required field is missing or malformed — most commonly `usage_api_key`.
 - `400 {"error":"invalid_cron"}`: cron expression is malformed or sub-30-second.
 - `400 {"error":"invalid_chain_event_config"}`: `chain` is not in the supported list, or `contract_address`/`event_signature` is malformed.
