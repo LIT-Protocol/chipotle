@@ -48,17 +48,33 @@ cast call 0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC \
   --rpc-url https://mainnet.base.org
 # Expect: true
 
-# 3. Is the TLS cert pinned to the TEE-attested cert?
+# 3. Is the TLS cert bound to the TEE by the attestation quote?
+#    First anchor the evidence to the hardware: the evidence quote's reportData
+#    must equal SHA-256(sha256sum.txt). Without this step, comparing the live
+#    cert to /evidences/cert-*.pem is a tautology — both come from the same
+#    server, so it passes even for an un-attested relay.
+curl -sf https://api.chipotle.litprotocol.com/evidences/sha256sum.txt > sha256sum.txt
+REPORT_DATA=$(curl -sf https://api.chipotle.litprotocol.com/evidences/quote.json \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["report_data"][:64])')
+CHAIN=$(openssl dgst -sha256 -hex sha256sum.txt | awk '{print $NF}')
+[ "$REPORT_DATA" = "$CHAIN" ] \
+  && echo "Evidence bound to TEE quote" \
+  || { echo "MISMATCH: evidence not attested by the quote"; exit 1; }
+
+# Now the evidence cert is TEE-attested, so matching the live cert to it is
+# meaningful. (Confirm cert-*.pem is listed in sha256sum.txt — the file the
+# reportData commits to — so the attested checksum actually covers it.)
+CERT_FILE=$(curl -sf https://api.chipotle.litprotocol.com/evidences/ \
+  | grep -o 'href="cert-[^"]*\.pem"' | sed 's/href="//;s/"//')
+grep -q "$CERT_FILE" sha256sum.txt || { echo "cert not covered by attested checksum"; exit 1; }
 LIVE=$(openssl s_client -connect api.chipotle.litprotocol.com:443 \
   -servername api.chipotle.litprotocol.com </dev/null 2>/dev/null \
   | openssl x509 -outform DER 2>/dev/null \
   | openssl dgst -sha256 -hex | awk '{print $NF}')
-ATTESTED=$(curl -sf "https://api.chipotle.litprotocol.com/evidences/$(
-  curl -sf https://api.chipotle.litprotocol.com/evidences/ \
-    | grep -o 'href="cert-[^"]*\.pem"' | sed 's/href="//;s/"//')" \
+ATTESTED=$(curl -sf "https://api.chipotle.litprotocol.com/evidences/$CERT_FILE" \
   | openssl x509 -outform DER 2>/dev/null \
   | openssl dgst -sha256 -hex | awk '{print $NF}')
-[ "$LIVE" = "$ATTESTED" ] && echo "TLS cert matches TEE evidence" || echo "MISMATCH"
+[ "$LIVE" = "$ATTESTED" ] && echo "TLS cert matches TEE-attested evidence" || echo "MISMATCH"
 ```
 
 For the full end-to-end verification — including replaying the RTMR3 event log, verifying image signatures with Sigstore, and walking the on-chain governance Safe — see the [Full Verification Guide](/architecture/verification/full-verification).

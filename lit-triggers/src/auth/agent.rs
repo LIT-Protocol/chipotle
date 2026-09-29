@@ -50,19 +50,35 @@ pub async fn authorize_hash(
         .filter(|s| !s.is_empty())
         .unwrap_or("local-agent");
 
-    sqlx::query(
+    // Insert a fresh token, or (idempotently) re-label an existing token that is
+    // still active AND owned by the same user. A row that has been revoked, or
+    // that belongs to a different user, is never resurrected or transferred: the
+    // `ON CONFLICT` update is guarded so it matches no row in those cases,
+    // `RETURNING` yields nothing, and we reject. Without this guard a leaked raw
+    // token could be un-revoked and rebound to whoever replays it — the owner's
+    // `revoke()` would then match zero rows forever, silently defeating
+    // revocation and the audit trail.
+    let row = sqlx::query_scalar::<_, Uuid>(
         "INSERT INTO agent_access_tokens (token_hash, user_id, label)
          VALUES ($1, $2, $3)
          ON CONFLICT (token_hash) DO UPDATE
-           SET user_id = EXCLUDED.user_id,
-               label = EXCLUDED.label,
-               revoked_at = NULL",
+           SET label = EXCLUDED.label
+           WHERE agent_access_tokens.user_id = EXCLUDED.user_id
+             AND agent_access_tokens.revoked_at IS NULL
+         RETURNING user_id",
     )
     .bind(token_hash)
     .bind(user_id)
     .bind(label)
-    .execute(pool)
+    .fetch_optional(pool)
     .await?;
+
+    if row.is_none() {
+        anyhow::bail!(
+            "agent token already exists and cannot be re-authorized (it was revoked \
+             or belongs to another user); issue a fresh token"
+        );
+    }
     Ok(())
 }
 
