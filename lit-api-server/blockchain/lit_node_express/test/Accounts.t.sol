@@ -1162,6 +1162,24 @@ contract AccountsTest is BaseTest {
         );
     }
 
+    /// @notice Adds a group to `master` holding `cidHash` and `wallet`, pranked
+    ///         by `admin` (the account's admin wallet). Post-#62 a wildcard
+    ///         usage key authorizes a request only when it resolves to a group
+    ///         in its own account, so wildcard tests must register one.
+    function _registerActionWalletGroup(
+        address admin,
+        uint256 master,
+        uint256 cidHash,
+        address wallet
+    ) internal returns (uint256 groupId) {
+        uint256[] memory cids = new uint256[](1);
+        cids[0] = cidHash;
+        address[] memory pkps = new address[](1);
+        pkps[0] = wallet;
+        vm.prank(admin);
+        groupId = writes.addGroup(master, "grp", "", cids, pkps);
+    }
+
     function test_canExecuteAction_deniesExpiredUsageKey() public {
         vm.prank(user);
         writes.newChainSecuredAccount("alice", "primary");
@@ -1169,6 +1187,10 @@ contract AccountsTest is BaseTest {
 
         uint256 usageHash = _wildcardUsageKey(master, block.timestamp + 7 days);
         uint256 cidHash = uint256(keccak256("some-action"));
+
+        // A wildcard key is scoped to its own account's groups (#62), so
+        // register a group holding this action + wallet for it to resolve to.
+        _registerActionWalletGroup(user, master, cidHash, address(0xBEEF));
 
         // Before expiry the key authorizes execution and wallet use.
         assertTrue(views_.canExecuteAction(usageHash, cidHash));
@@ -1233,11 +1255,86 @@ contract AccountsTest is BaseTest {
         uint256 usageHash = _wildcardUsageKey(master, 0);
         uint256 cidHash = uint256(keccak256("some-action"));
 
+        // Wildcard keys resolve only against their own account's groups (#62).
+        _registerActionWalletGroup(user, master, cidHash, address(0xBEEF));
+
         assertTrue(views_.canExecuteAction(usageHash, cidHash));
 
         vm.warp(block.timestamp + 3650 days);
         assertTrue(views_.canExecuteAction(usageHash, cidHash));
         assertTrue(views_.canExecuteActionFast(usageHash, cidHash));
+    }
+
+    // --- Wildcard key cross-account PKP scoping (issue #62) ---
+
+    /// @notice A wildcard usage key (executeInGroups=[0]) must NOT let its
+    ///         account reach a PKP/wallet that belongs to another account.
+    ///         Before the fix, the group-0 short-circuit returned true for any
+    ///         (cid, wallet), so account B's wildcard key could run crypto ops
+    ///         with account A's PKP in the shared node keystore.
+    function test_wildcardKey_cannotUseAnotherAccountsWallet() public {
+        // Account A (victim) owns walletA and registers it in a group.
+        vm.prank(user);
+        writes.newChainSecuredAccount("alice", "primary");
+        uint256 masterA = apiKeyHashOf(user);
+        uint256 cidHash = uint256(keccak256("shared-action"));
+        address walletA = address(0xA11CE);
+        _registerActionWalletGroup(user, masterA, cidHash, walletA);
+
+        // Account B (attacker) holds a wildcard usage key but never registers
+        // walletA (or any group referencing it).
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("bob", "primary");
+        uint256 masterB = apiKeyHashOf(stranger);
+        uint256[] memory empty = new uint256[](0);
+        uint256[] memory wildcard = new uint256[](1);
+        wildcard[0] = 0;
+        uint256 usageB = uint256(keccak256("bob-wildcard-usage"));
+        vm.prank(stranger);
+        writes.setUsageApiKey(
+            masterB,
+            usageB,
+            0,
+            0,
+            "bob",
+            "",
+            false,
+            false,
+            false,
+            empty,
+            empty,
+            empty,
+            wildcard
+        );
+
+        // B's wildcard key cannot use A's wallet: no group in B resolves it.
+        assertFalse(
+            views_.canUseWalletInAction(usageB, cidHash, walletA),
+            "wildcard key reached another account's wallet"
+        );
+        assertFalse(
+            views_.canUseWalletInActionFast(usageB, cidHash, walletA),
+            "wildcard key (fast) reached another account's wallet"
+        );
+        (bool canExec, bool canWallet) = views_.canExecuteActionAndUseWallet(
+            usageB,
+            cidHash,
+            walletA
+        );
+        assertFalse(canWallet, "wildcard key (combined) reached foreign wallet");
+        // The action isn't registered to B either, so execution is denied too.
+        assertFalse(canExec, "wildcard key executed unregistered action");
+        assertFalse(views_.canExecuteAction(usageB, cidHash));
+        assertFalse(views_.canExecuteActionFast(usageB, cidHash));
+
+        // Positive control: once B registers its own wallet in its own group,
+        // the wildcard key authorizes B's wallet (but still not A's).
+        address walletB = address(0xB0B);
+        _registerActionWalletGroup(stranger, masterB, cidHash, walletB);
+        assertTrue(views_.canUseWalletInAction(usageB, cidHash, walletB));
+        assertTrue(views_.canUseWalletInActionFast(usageB, cidHash, walletB));
+        assertFalse(views_.canUseWalletInAction(usageB, cidHash, walletA));
+        assertFalse(views_.canUseWalletInActionFast(usageB, cidHash, walletA));
     }
 
     function test_setAdminApiPayerAccount_ownerOnly() public {
