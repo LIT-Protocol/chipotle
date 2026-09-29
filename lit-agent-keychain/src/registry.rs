@@ -178,6 +178,7 @@ pub async fn update_credentials(
         .execute(&mut *tx)
         .await
         .map_err(api::internal)?;
+    crate::two_factor::invalidate_pending(&mut tx, &session.vault_id).await?;
     tx.commit().await.map_err(api::internal)?;
     Ok(Json(json!({"ok":true,"signInRequired":true})))
 }

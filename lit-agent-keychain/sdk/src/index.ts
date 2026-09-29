@@ -524,6 +524,10 @@ export class OwnerClient {
    * take roughly 30 seconds.
    */
   progress?: (message: string) => void;
+  /** Prompt for an authenticator/recovery code and call verify. Resolve only
+   * after verification succeeds; reject to cancel. A failed code can be retried.
+   * Without a handler, login fails closed for vaults requiring 2FA. */
+  secondFactor?: (verify: (code: string) => Promise<void>) => Promise<void>;
   constructor(
     authority: Authority,
     readonly signer: OwnerSigner,
@@ -705,10 +709,32 @@ export class OwnerClient {
       this.progress?.("Retrying with the vault's current authority release…");
       authorization = await this.approve(document, template);
     }
-    const result = await this.api(
+    let result = await this.api(
       "/auth/login",
       post({ authority: this.authority, authorization }),
     );
+    if (result.twoFactorRequired === true) {
+      requireThat(
+        !!this.secondFactor,
+        "Two-factor authentication required. Configure a secondFactor handler to enter an authenticator or recovery code.",
+      );
+      requireThat(
+        typeof result.token === "string" && /^[0-9a-f]{64}$/.test(result.token),
+      );
+      const token = result.token;
+      let verified = false;
+      this.progress?.("Enter your two-factor authentication code…");
+      await this.secondFactor!(async (code) => {
+        const completed = await this.api(
+          "/auth/two-factor",
+          post({ token, code }),
+        );
+        requireThat(completed.vaultId === this.vaultId);
+        result = completed;
+        verified = true;
+      });
+      requireThat(verified, "Two-factor authentication was not completed");
+    }
     this.progress?.(
       "Preparing your vault's execution key on the Lit network… " +
         "The first sign-in takes about 30 seconds.",
@@ -989,6 +1015,45 @@ export class OwnerClient {
     };
     await this.api(`/api/secrets/${manifest.secretId}/rotate`, post(updated));
     return updated;
+  }
+  async securityStatus(): Promise<{
+    enabled: boolean;
+    recoveryCodesRemaining: number;
+  }> {
+    return this.api("/api/security");
+  }
+  private async securityApproval(
+    operation: "setup" | "disable" | "regenerate",
+  ) {
+    const { authorityCid, ...document } = await this.api(
+      "/api/security/challenge",
+      post({ operation }),
+    );
+    requireThat(document.kind === "login" && document.vaultId === this.vaultId);
+    return this.authorize(document, authorityCid);
+  }
+  async setupTwoFactor(): Promise<{ secret: string; uri: string }> {
+    return this.api(
+      "/api/security/totp/setup",
+      post(await this.securityApproval("setup")),
+    );
+  }
+  async confirmTwoFactor(code: string): Promise<{ recoveryCodes: string[] }> {
+    return this.api("/api/security/totp/confirm", post({ code }));
+  }
+  async disableTwoFactor(code: string): Promise<void> {
+    await this.api(
+      "/api/security/totp/disable",
+      post({ authorization: await this.securityApproval("disable"), code }),
+    );
+  }
+  async regenerateRecoveryCodes(
+    code: string,
+  ): Promise<{ recoveryCodes: string[] }> {
+    return this.api(
+      "/api/security/totp/regenerate",
+      post({ authorization: await this.securityApproval("regenerate"), code }),
+    );
   }
   async getCredentials(): Promise<Signed<Credentials> | null> {
     const state = await this.api(`/api/registry/credentials/${this.vaultId}`);

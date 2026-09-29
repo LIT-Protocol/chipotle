@@ -34,9 +34,13 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 
 ## SDK release coordination
 
-This source prepares SDK **2.2.2**. It updates SDK error guidance and documentation
-to use live discovery after removing agent-config downloads from the website.
-This is an SDK-only patch; no action templates or catalog locks change.
+This source prepares SDK **2.2.3**. It adds authenticator-app 2FA enrollment,
+recovery-code management, and the owner client's second-factor login callback.
+The accompanying owner UI/API enforce hosted-login 2FA; no action templates or
+catalog locks change.
+
+SDK 2.2.2 updated error guidance and documentation to use live discovery after
+removing agent-config downloads from the website.
 
 SDK 2.2.1 added
 Lit-signed Google device approvals lasting 30 days, with local persistence across
@@ -92,7 +96,7 @@ Consequences, all handled by the release mechanism described in
   release still takes one signature per document (`PRE_BATCH_AUTHORITY_HASHES`).
 
 Release checks: run `npm test` and `npm run build`, publish through the normal
-maintainer release process, verify `npm view @lit-protocol/keychain@2.2.2 version`,
+maintainer release process, verify `npm view @lit-protocol/keychain@2.2.3 version`,
 then repeat the strict external TypeScript consumer and attestation-enabled Node
 smoke test from the registry artifact. Only then deploy the owner UI/API and create,
 rotate and read a secret against production. See the QA reports under `docs/` for
@@ -369,3 +373,29 @@ key derivation, external Google issuance, and Stripe billing. It never calls pro
 
 Agent examples: [sdk/README.md](sdk/README.md). Security/operational limits:
 [SECURITY.md](SECURITY.md). Review findings: [ADVERSARIAL_REVIEW.md](ADVERSARIAL_REVIEW.md).
+
+## Security & sign-in
+
+The **Security & sign-in** page manages approved owner methods (passkeys,
+wallets, and Google accounts), authenticator-app 2FA, and encrypted vault backups.
+Each owner method can sign in independently; when 2FA is enabled, every method
+also needs a code from the authenticator or a single-use recovery code.
+
+To enable 2FA, approve setup with the current owner, scan the QR code (or enter
+the setup key), verify a six-digit code, and save the ten recovery codes outside
+this vault. Other browser sessions are signed out. Disabling 2FA and replacing
+recovery codes require owner approval plus a code; replacing codes invalidates
+the old set. Keep a fresh vault backup after changing owner methods, especially
+for signing in with a recovery wallet or Google account on a new device.
+
+2FA protects hosted login, not direct Lit owner authorization or existing agent
+grants. Authenticator and recovery codes are not included in vault backups. See
+[the security contract](SECURITY.md#authenticator-app-two-factor-login) for the
+trust boundary and recovery behavior. Existing vaults have 2FA off until enrolled;
+the database migration runs on server startup and uses the existing
+`USAGE_KEY_ENCRYPTION_KEY` with a separate derived encryption key.
+
+SDK owner clients can set `client.secondFactor = async (verify) => { ... }` to
+prompt for a code and call `await verify(code)`. Resolve only after verification
+succeeds, retry incorrect codes within the callback, or reject to cancel. A client
+without this callback cannot log in to a vault that requires 2FA.

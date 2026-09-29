@@ -15,3 +15,4 @@ pub mod sponsorship;
 pub mod stripe;
 pub mod subscriptions;
 pub mod templates;
+pub mod two_factor;

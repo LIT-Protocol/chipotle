@@ -105,6 +105,7 @@ try {
     "tsx",
     "--test",
     "tests/api.test.ts",
+    "tests/two-factor-api.test.ts",
     "tests/live-discovery-api.test.ts",
     "tests/billing-api.test.ts",
   ]);
