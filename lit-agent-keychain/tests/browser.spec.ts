@@ -420,6 +420,15 @@ test("authenticator setup, recovery login and disabling 2FA", async ({
   await expect(
     page.getByRole("heading", { name: "Sign-in & recovery methods" }),
   ).toBeVisible();
+  await expect(page.getByText("Not enabled", { exact: true })).toBeVisible();
+  await page
+    .locator(".two-factor-card")
+    .screenshot({ path: "../.context/keychain/two-factor-off-desktop.png" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page
+    .locator(".two-factor-card")
+    .screenshot({ path: "../.context/keychain/two-factor-off-mobile.png" });
+  await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole("button", { name: "Set up authenticator app" }).click();
   await expect(
     page.getByRole("img", { name: "Scan with your authenticator app" }),
@@ -438,9 +447,7 @@ test("authenticator setup, recovery login and disabling 2FA", async ({
   await page.getByRole("button", { name: "Verify & enable 2FA" }).click();
   await expect(page.locator(".recovery-codes li")).toHaveCount(10);
   const codes = await page.locator(".recovery-codes li code").allTextContents();
-  await expect(
-    page.getByText("On · Required at login", { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText("Enabled", { exact: true })).toBeVisible();
   expect(codes).toHaveLength(10);
   await expect(
     page.getByRole("button", { name: "Done", exact: true }),
