@@ -21,9 +21,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub const LIT_ACTIONS_SOCKET: &str = "/tmp/lit_actions.sock";
-/// Default socket of the any-language (gVisor) runner. Overridable at boot via
-/// the `LIT_ACTIONS_GVISOR_SOCKET` env var (prod mounts it under /var/run/lit).
-pub const LIT_ACTIONS_GVISOR_SOCKET: &str = "/tmp/lit_actions_gvisor.sock";
 
 /// Wrapper around the lit-actions socket path so it can be injected via
 /// Rocket managed state. Tests build the rocket with a path guaranteed not to
@@ -31,17 +28,9 @@ pub const LIT_ACTIONS_GVISOR_SOCKET: &str = "/tmp/lit_actions_gvisor.sock";
 /// `/tmp/lit_actions.sock`.
 pub struct LitActionsSocketPath(pub PathBuf);
 
-/// Socket of the any-language (gVisor) runner — the `/lit_binary_action`
-/// backend. Injected the same way as `LitActionsSocketPath`.
-pub struct LitActionsGvisorSocketPath(pub PathBuf);
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HealthResponse {
     pub lit_actions_reachable: bool,
-    /// Reachability of the gVisor runner. Informational only — does NOT gate
-    /// health status, so a node still reports healthy before the gVisor
-    /// container is rolled out (or if the binary route is unused).
-    pub lit_actions_gvisor_reachable: bool,
     pub cpu_available: bool,
     pub billing_keys_present: bool,
 }
@@ -57,16 +46,14 @@ async fn health(
     cpu_monitor: &State<CpuOverloadMonitor>,
     stripe_state: &State<Option<Arc<StripeState>>>,
     socket_path: &State<LitActionsSocketPath>,
-    gvisor_socket_path: &State<LitActionsGvisorSocketPath>,
 ) -> (Status, Json<HealthResponse>) {
     let lit_actions_reachable = probe_socket(grpc_pool, &socket_path.0).await;
-    let lit_actions_gvisor_reachable = probe_socket(grpc_pool, &gvisor_socket_path.0).await;
 
     let cpu_available = !cpu_monitor.is_overloaded();
     let billing_keys_present = stripe_state.is_some();
 
     // Only lit_actions_reachable + cpu_available gate health.
-    // billing_keys_present and lit_actions_gvisor_reachable are informational.
+    // billing_keys_present is informational.
     let healthy = lit_actions_reachable && cpu_available;
 
     let status = if healthy {
@@ -79,7 +66,6 @@ async fn health(
         status,
         Json(HealthResponse {
             lit_actions_reachable,
-            lit_actions_gvisor_reachable,
             cpu_available,
             billing_keys_present,
         }),
@@ -114,8 +100,6 @@ async fn probe_socket(
             // promoting to warn would flood logs (and on-call) during any
             // sustained lit-actions outage. The JSON response already signals
             // the failure; this line just records the *reason*.
-            // Generic wording since this probes both runners (JS and gVisor);
-            // the `socket` field identifies exactly which one failed.
             tracing::debug!(
                 socket = %socket_key,
                 error = %e,
@@ -171,13 +155,11 @@ mod tests {
         // lit-actions process running for local dev), which would flip the
         // expected "unreachable" result to "reachable".
         let socket = LitActionsSocketPath(unique_nonexistent_socket_path());
-        let gvisor_socket = LitActionsGvisorSocketPath(unique_nonexistent_socket_path());
         rocket::build()
             .manage(pool)
             .manage(monitor)
             .manage(stripe_state)
             .manage(socket)
-            .manage(gvisor_socket)
             .mount("/", routes![health])
     }
 
@@ -200,19 +182,6 @@ mod tests {
         assert_eq!(response.status(), Status::ServiceUnavailable);
         let body: HealthResponse = response.into_json().await.expect("valid json");
         assert!(!body.lit_actions_reachable);
-    }
-
-    #[tokio::test]
-    async fn health_reports_gvisor_unreachable_when_no_socket() {
-        // With no gVisor socket present the field reports false, but because it
-        // is informational it must not, on its own, flip the status to 503
-        // (that only happens here because the JS socket is also absent).
-        let client = Client::tracked(build_rocket(false, None))
-            .await
-            .expect("valid rocket");
-        let response = client.get("/health").dispatch().await;
-        let body: HealthResponse = response.into_json().await.expect("valid json");
-        assert!(!body.lit_actions_gvisor_reachable);
     }
 
     #[tokio::test]

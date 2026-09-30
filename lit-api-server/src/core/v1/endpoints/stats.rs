@@ -5,7 +5,6 @@
 //! operational metadata: byte/entry counts and socket presence, never
 //! account data or secrets.
 
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -21,15 +20,6 @@ use moka::future::Cache;
 use rocket::State;
 use rocket::get;
 use rocket_okapi::openapi;
-
-/// Env var overriding the gVisor runner's socket path. Same name and default
-/// the `/lit_binary_action` wiring uses, so the two stay in agreement once
-/// that route lands.
-pub const LIT_ACTIONS_GVISOR_SOCKET_ENV: &str = "LIT_ACTIONS_GVISOR_SOCKET";
-
-/// Default gVisor runner socket on the shared `lit-socket` volume — see
-/// `docker-compose.phala.yml` and `architectureDocs/gvisor-server.md`.
-pub const LIT_ACTIONS_GVISOR_SOCKET: &str = "/tmp/lit_actions_gvisor.sock";
 
 /// Flushing moka's pending maintenance (`run_pending_tasks`) makes the counts
 /// exact, but this endpoint is public — a request flood must not be able to
@@ -140,22 +130,11 @@ pub(super) async fn get_system_stats(
         }
     }
 
-    let gvisor_socket = std::env::var(LIT_ACTIONS_GVISOR_SOCKET_ENV)
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| LIT_ACTIONS_GVISOR_SOCKET.to_string());
-    let runners = vec![
-        RunnerInfo {
-            name: "js".to_string(),
-            socket_path: js_socket.0.display().to_string(),
-            socket_present: js_socket.0.exists(),
-        },
-        RunnerInfo {
-            name: "gvisor".to_string(),
-            socket_present: Path::new(&gvisor_socket).exists(),
-            socket_path: gvisor_socket,
-        },
-    ];
+    let runners = vec![RunnerInfo {
+        name: "js".to_string(),
+        socket_path: js_socket.0.display().to_string(),
+        socket_present: js_socket.0.exists(),
+    }];
 
     OpenApiResponse {
         response: ApiResult(Ok(SystemStatsResponse {
@@ -291,10 +270,9 @@ mod tests {
         assert_eq!(action_code.entry_count, 1);
         assert_eq!(action_code.approx_bytes, Some(4));
 
-        assert_eq!(body.runners.len(), 2);
+        assert_eq!(body.runners.len(), 1);
         let js = &body.runners[0];
         assert_eq!(js.name, "js");
         assert!(!js.socket_present);
-        assert_eq!(body.runners[1].name, "gvisor");
     }
 }

@@ -1,4 +1,0 @@
-{
-  "runtime": "python3",
-  "env": { "PYTHONUNBUFFERED": "1" }
-}

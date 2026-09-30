@@ -61,8 +61,7 @@ pub(crate) const DEFAULT_MEMORY_LIMIT_MB: usize = 64; // 64MB
 // far larger than any host can honor: an effectively unbounded timeout pins a
 // worker forever, and an oversized heap request outruns the near-heap OOM
 // guard so the host OOM-killer takes down the runner (and any co-located
-// lit_node) instead. Mirrors the sibling gvisor-server's clamps
-// (`supervisor.rs`); see CPL-371.
+// lit_node) instead. See CPL-371.
 const MAX_TIMEOUT_MS: u64 = 1000 * 60 * 150; // 150 minutes
 pub(crate) const MAX_MEMORY_LIMIT_MB: usize = 2048; // 2GB
 

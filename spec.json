@@ -78,6 +78,7 @@
         "tags": [
           "Account Management"
         ],
+        "description": "Create a new managed account: derives a fresh wallet, registers it on-chain, and provisions a Stripe customer with starter credits. Returns the account's API key and wallet address.\n\nNo authentication is required (this is how a caller obtains their first API key), but the endpoint is rate limited per client IP and may return 429 Too Many Requests when the node is under load or a single source creates accounts too quickly. Retry those with exponential backoff.",
         "operationId": "new_account",
         "requestBody": {
           "content": {
@@ -106,6 +107,9 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Too Many Requests — the node is CPU-overloaded and shedding load. Clients receiving this response should retry the request up to five times with exponential backoff."
           }
         }
       }
@@ -412,58 +416,6 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/LitActionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "default": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/LitActionResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ErrMessage"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Too Many Requests — the node is CPU-overloaded and shedding load. Clients receiving this response should retry the request up to five times with exponential backoff."
-          }
-        }
-      }
-    },
-    "/lit_binary_action": {
-      "post": {
-        "tags": [
-          "Actions"
-        ],
-        "description": "Execute an any-language action bundle on the gVisor runner. Same billing, CPU-gating, and response shape as `/lit_action`; differs only in payload (a tar bundle instead of JS) and backend socket.",
-        "operationId": "lit_binary_action",
-        "parameters": [
-          {
-            "name": "X-Api-Key",
-            "in": "header",
-            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LitBinaryActionRequest"
               }
             }
           },
@@ -1783,7 +1735,7 @@
           {
             "name": "X-Api-Key",
             "in": "header",
-            "description": "API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{typed_data, signature})>` where `typed_data` is EIP-712 with `primaryType: \"BillingAuth\"`. The signature proves wallet possession; the typed data must include the connected wallet address and an issuedAt timestamp within ±5 minutes.",
+            "description": "Billing owner only: account master API key or verified X-Wallet-Auth. Execution usage keys cannot manage funding or saved-card settings.",
             "schema": {
               "type": "string"
             }
@@ -1831,7 +1783,7 @@
           {
             "name": "X-Api-Key",
             "in": "header",
-            "description": "API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{typed_data, signature})>` where `typed_data` is EIP-712 with `primaryType: \"BillingAuth\"`. The signature proves wallet possession; the typed data must include the connected wallet address and an issuedAt timestamp within ±5 minutes.",
+            "description": "Billing owner only: account master API key or verified X-Wallet-Auth. Execution usage keys cannot manage funding or saved-card settings.",
             "schema": {
               "type": "string"
             }
@@ -2189,28 +2141,6 @@
             "nullable": true
           },
           "js_params": {
-            "nullable": true
-          }
-        }
-      },
-      "LitBinaryActionRequest": {
-        "description": "POST /lit_binary_action\n\nExecutes an any-language action **bundle** in the gVisor runner. Provide either `bundle` (a base64-encoded tar/tar.gz containing a `lit.json` manifest at its root) or `checksum` (the content id of a bundle the runner already cached). When `bundle` is supplied the server derives the checksum from the decoded tar bytes and authorizes on that derived value — a client-supplied `checksum` is only a hint and is ignored if it disagrees.",
-        "type": "object",
-        "properties": {
-          "bundle": {
-            "description": "Base64-encoded tar or tar.gz bundle. Optional when `checksum` refers to a previously-submitted bundle the runner still has cached.",
-            "default": null,
-            "type": "string",
-            "nullable": true
-          },
-          "checksum": {
-            "description": "Content id (IPFS CID) of the bundle. Required when `bundle` is omitted; when `bundle` is present it is only a hint, validated against the value derived from the bundle bytes.",
-            "default": null,
-            "type": "string",
-            "nullable": true
-          },
-          "js_params": {
-            "description": "Parameters passed to the action (exposed to guest code via `lit params`).",
             "nullable": true
           }
         }
@@ -2945,7 +2875,7 @@
             "type": "string"
           },
           "execution_model": {
-            "description": "Underlying runner: \"deno\" (JS) or \"gvisor\" (everything else).",
+            "description": "Underlying runner: \"deno\" (JS).",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ExecutionModel"
@@ -2971,8 +2901,7 @@
       "ExecutionModel": {
         "type": "string",
         "enum": [
-          "deno",
-          "gvisor"
+          "deno"
         ]
       },
       "LanguageRuntime": {
@@ -2997,7 +2926,7 @@
             "type": "boolean"
           },
           "prewarmed": {
-            "description": "True once this profile's install layers are materialized in the gVisor runner's cache. Always false until the install cache lands (CPL-349 phase 2); pre-warm status is wired in phase 5.",
+            "description": "True once this profile's install layers are materialized in the runner's cache. Always false today.",
             "type": "boolean"
           }
         }

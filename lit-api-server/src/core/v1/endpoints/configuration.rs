@@ -105,10 +105,8 @@ mod tests {
 
     #[test]
     fn get_supported_languages_serves_the_managed_allowlist() {
-        let languages = SupportedLanguages::parse(
-            "javascript|raw_script; python:python3.13:python3.12|raw_script,bundle",
-        )
-        .expect("valid allowlist");
+        let languages =
+            SupportedLanguages::parse("javascript|raw_script").expect("valid allowlist");
         let rocket = rocket::build()
             .mount("/", routes![get_supported_languages])
             .manage(Arc::new(languages));
@@ -120,10 +118,8 @@ mod tests {
 
         let body: SupportedLanguagesResponse =
             serde_json::from_str(&resp.into_string().expect("body")).expect("valid response JSON");
-        assert_eq!(body.languages.len(), 2);
+        assert_eq!(body.languages.len(), 1);
         assert_eq!(body.languages[0].name, "javascript");
-        assert_eq!(body.languages[1].name, "python");
-        assert_eq!(body.languages[1].runtimes[0].id, "python3.13");
-        assert!(body.languages[1].runtimes[0].is_default);
+        assert!(body.languages[0].runtimes.is_empty());
     }
 }

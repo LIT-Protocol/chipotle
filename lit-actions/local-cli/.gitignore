@@ -1,5 +1,0 @@
-/target
-Cargo.lock
-
-# Per-run local state written by the CLI (master key, response, logs, counters).
-.lit-local/

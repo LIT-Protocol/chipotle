@@ -1071,7 +1071,6 @@ function renderRuntimes(health, stats) {
   if (!body) return;
   const runner = name => stats?.runners?.find(r => r.name === name);
   const js = runner('js');
-  const gv = runner('gvisor');
   const rows = [];
 
   // JS runner — /health probes its socket with a real gRPC connect.
@@ -1082,19 +1081,6 @@ function renderRuntimes(health, stats) {
     jsUp == null ? 'unknown' : jsUp ? 'reachable' : 'unreachable',
     js?.socket_path,
   ));
-
-  // gVisor runner — prefer the /health connect probe once nodes ship it
-  // (#558); until then fall back to socket presence from /get_system_stats.
-  let gvState = 'unknown';
-  let gvText = 'unknown';
-  if (typeof health?.lit_actions_gvisor_reachable === 'boolean') {
-    gvState = health.lit_actions_gvisor_reachable ? 'healthy' : 'critical';
-    gvText = health.lit_actions_gvisor_reachable ? 'reachable' : 'unreachable';
-  } else if (gv) {
-    gvState = gv.socket_present ? 'healthy' : 'unknown';
-    gvText = gv.socket_present ? 'socket present' : 'not deployed';
-  }
-  rows.push(runtimeRow('gVisor runner', 'any-language sandbox', gvState, gvText, gv?.socket_path));
 
   if (health) {
     rows.push(runtimeRow(
@@ -1176,14 +1162,13 @@ function renderLanguages(languages) {
     return;
   }
   setHtml(body, languages.map(lang => {
-    const isGvisor = lang.execution_model === 'gvisor';
     const runtimes = (lang.runtimes ?? []).map(rt =>
       `<span class="badge${rt.is_default ? ' accent' : ''}" title="${escapeHtml(rt.version ?? '')}${rt.prewarmed ? ' · prewarmed' : ''}">${escapeHtml(rt.id)}${rt.is_default ? ' ★' : ''}</span>`
     ).join(' ');
     const methods = (lang.methods ?? []).map(m => `<span class="badge">${escapeHtml(m)}</span>`).join(' ');
     return `<div class="sys-row" style="flex-wrap:wrap">` +
       `<span>${escapeHtml(lang.display_name ?? lang.name)}</span>` +
-      `<span class="badge${isGvisor ? ' accent' : ''}">${isGvisor ? 'gVisor sandbox' : 'Deno / V8'}</span>` +
+      `<span class="badge">Deno / V8</span>` +
       `<span class="sys-value" style="display:flex;gap:0.35rem;flex-wrap:wrap;justify-content:flex-end">${runtimes} ${methods}</span>` +
     `</div>`;
   }).join(''));

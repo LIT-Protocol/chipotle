@@ -1,5 +1,0 @@
-/target
-
-# Bundle outputs produced by `lit-bundle bundle` / tests.
-*.tar
-*.tar.gz
