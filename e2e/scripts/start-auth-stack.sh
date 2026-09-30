@@ -93,7 +93,7 @@ EOF
 # create managed accounts and have local gas before it starts.
 derive_payer() {
   local key secret
-  key=$(curl --fail --silent --show-error --unix-socket "$DSTACK_SOCKET" \
+  key=$(curl --fail --silent --show-error --max-time 10 --unix-socket "$DSTACK_SOCKET" \
     -H 'Content-Type: application/json' http://dstack/GetKey \
     -d "{\"path\":\"$1\",\"purpose\":\"lit_payer\"}" | jq -er '.key')
   secret=$(cast keccak "0x$key")
@@ -120,7 +120,7 @@ send "$CONTRACT_ADDRESS" 'setApiPayers(address[])' "$PAYER_ARRAY"
   RUST_LOG=info exec "$API_BIN") > "$RUN_DIR/api.log" 2>&1 &
 PIDS+=("$!")
 # /health also checks the unrelated Action worker. Probe account configuration.
-wait_for "${PIDS[2]}" curl --fail --silent http://localhost:8000/core/v1/get_node_chain_config
+wait_for "${PIDS[2]}" curl --fail --silent --max-time 3 http://localhost:8000/core/v1/get_node_chain_config
 
 # Start static hosting last: Playwright's readiness probe now implies the API
 # and chain are ready too. Keep all runtime files outside the working tree.

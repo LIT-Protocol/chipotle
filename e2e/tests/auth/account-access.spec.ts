@@ -9,9 +9,11 @@ const test = base.extend<{ dashboard: DashboardPage; browserErrors: void }>({
   browserErrors: [async ({ page }, use) => {
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
-    // Typography is irrelevant to the auth contract; don't depend on Google
-    // Fonts availability. Application JS and all happy-path API calls are real.
-    await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ body: '' }));
+    // Account access doesn't use Stripe checkout, syntax highlighting, or web
+    // fonts. Keep those third-party assets out of this local regression check.
+    // Application JS and all happy-path API calls are real.
+    await page.route(/^https:\/\/(fonts\.googleapis\.com|fonts\.gstatic\.com|js\.stripe\.com|cdnjs\.cloudflare\.com)\//,
+      route => route.fulfill({ body: '' }));
     await use();
     expect(errors, 'Uncaught browser exceptions').toEqual([]);
   }, { auto: true }],
