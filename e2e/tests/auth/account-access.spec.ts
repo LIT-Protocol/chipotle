@@ -56,6 +56,7 @@ test('create an account, preserve the session, sign out and sign in with the iss
 
   await page.reload();
   await dashboard.expectLoggedIn();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize()!.width);
   await signOut(page);
   await page.reload();
   await dashboard.expectLoggedOut();
