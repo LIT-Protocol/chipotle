@@ -171,19 +171,46 @@ async function authorizeAgent(base) {
     console.log("  reusing existing authorized agent token");
     return existing;
   }
-  const token = crypto.randomBytes(36).toString("base64url");
-  const challenge = crypto.createHash("sha256").update(token).digest("base64url");
-  const url = `${base}/agent/authorize?challenge=${encodeURIComponent(challenge)}`;
-  console.log("\n  Opening the authorization page. Sign in if needed, then click");
-  console.log("  \"Authorize agent\". Waiting for approval...\n");
+  const token = existing || crypto.randomBytes(36).toString("base64url");
+  const tokenHash = crypto.createHash("sha256").update(token).digest("base64url");
+  const startedAt = Date.now();
+  const pairing = await fetch(`${base}/agent/pair`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token_hash: tokenHash, label: "chainlink-feed-mirror" }),
+  });
+  if (!pairing.ok) throw new Error(`start agent pairing -> HTTP ${pairing.status}`);
+  const { authorize_url: url, user_code: userCode, expires_in_seconds: expiresIn } = await pairing.json();
+  const code = new URL(url).searchParams.get("code");
+  if (!code || !userCode || !Number.isFinite(expiresIn) || expiresIn <= 0) {
+    throw new Error("invalid agent pairing response");
+  }
+
+  console.log("\n  Opening the authorization page. Sign in if needed.");
+  console.log(`  Confirmation code: ${userCode}`);
+  console.log('  Only click "Authorize agent" if the code on the page matches.');
   console.log(`  ${url}\n`);
   openBrowser(url);
-  const deadline = Date.now() + 5 * 60 * 1000;
+
+  const deadline = startedAt + expiresIn * 1000;
   while (Date.now() < deadline) {
+    const res = await fetch(`${base}/agent/pair/complete`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    if (!res.ok) {
+      throw new Error(`complete agent pairing -> HTTP ${res.status}; rerun setup to start a fresh pairing`);
+    }
+    const { status } = await res.json();
+    if (status === "authorized") {
+      if (!(await meOk(base, token))) throw new Error("agent pairing succeeded but API access verification failed");
+      return token;
+    }
+    if (status !== "pending") throw new Error(`unexpected agent pairing status: ${status}`);
     await sleep(3000);
-    if (await meOk(base, token)) return token;
   }
-  throw new Error("timed out waiting for agent authorization (5 min)");
+  throw new Error("agent pairing expired; rerun setup to start a fresh pairing");
 }
 async function meOk(base, token) {
   try {
