@@ -4,7 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="referrer" content="no-referrer">
-  <title>Chipotle - Lit Express Dashboard</title>
+  <title>Sign in · Chipotle Dashboard</title>
+  <link rel="icon" href="../../assets/lit-logo.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -16,34 +17,16 @@
   <div class="app">
     <!-- Login (standalone when not authenticated) -->
     <section id="page-login" class="login-page">
-      <header class="marketing-topbar">
-        <a class="marketing-brand" href="#" aria-label="Lit dashboard">
-          <span class="brand-mark">Lit</span>
-          <span class="brand-divider" aria-hidden="true"></span>
-          <span class="brand-sub">Dashboard</span>
+      <div class="login-container">
+        <a class="login-brand" href="#sign-in" aria-label="Lit Chipotle sign in">
+          <img src="../../assets/lit-logo.svg" width="48" height="35" alt="Lit">
+          <span>Chipotle <span class="login-brand-detail">Dashboard</span></span>
         </a>
-        <a class="marketing-doclink" href="https://developer.litprotocol.com" target="_blank" rel="noopener">Developer docs <span aria-hidden="true">↗</span></a>
-      </header>
-
-      <main class="login-layout">
-        <section class="login-intro">
-          <p class="eyebrow">Build with Lit</p>
-          <h1 class="login-hero-title">Your crypto system.<br>Your rules.</h1>
-          <p class="login-lede">Programmable wallets, verifiable Actions, and permissions you control.</p>
-          <div class="login-principles">
-            <p><span>01</span> Run code in confidential hardware.</p>
-            <p><span>02</span> Define what your wallets can sign.</p>
-            <p><span>03</span> Govern permissions on-chain.</p>
-          </div>
-          <a class="text-link" href="https://developer.litprotocol.com" target="_blank" rel="noopener">How ChainSecured works <span aria-hidden="true">↗</span></a>
-        </section>
-
-        <section class="login-signin" aria-labelledby="signin-title">
-          <p class="eyebrow">Your workspace</p>
-          <h2 class="login-title" id="signin-title">Sign in to Lit.</h2>
-          <p class="login-subtitle">Choose how you manage your account.</p>
-          <div id="login-status" class="status info" style="display: none;"></div>
-
+        <div class="login-card-shell">
+          <header class="login-heading">
+            <h1 id="login-title" class="login-title" tabindex="-1">Sign in</h1>
+            <p id="login-subtitle" class="login-subtitle">Manage your wallets, keys, and Lit Actions.</p>
+          </header>
           <section id="password-verify-panel" class="password-panel" hidden>
             <p id="password-verify-copy"></p>
             <form id="password-verify-form" method="post" autocomplete="on">
@@ -51,38 +34,30 @@
                 <label for="password-verify-email">Current email</label><input id="password-verify-email" name="username" class="input" type="email" autocomplete="username">
                 <label for="password-verify-password">Current password</label><input id="password-verify-password" name="password" class="input" type="password" autocomplete="current-password">
               </div>
-              <button class="btn btn-primary" type="submit">Confirm email</button>
-            </form>
-          </section>
-          <!-- Access method is separate from the API/wallet account mode. -->
-          <fieldset class="access-fieldset">
-            <legend id="login-auth-mode-label">Account access</legend>
-            <div class="access-options" role="radiogroup" aria-labelledby="login-auth-mode-label">
-              <button type="button" class="access-card" role="radio" id="login-auth-mode-password" aria-label="Email &amp; password" aria-describedby="login-help-password" aria-checked="false" data-auth-mode="password" hidden>
-                <span class="access-radio" aria-hidden="true"></span><span class="access-copy"><span class="access-title">Email &amp; password</span><span class="access-sub">Recommended for new accounts.</span></span>
+              <button type="button" class="login-tab access-card" role="radio" id="login-auth-mode-password" aria-label="Email &amp; password" aria-describedby="login-help-password" aria-checked="false" data-auth-mode="password" hidden>
+                <span class="access-copy"><span class="access-title">Email &amp; password</span></span>
               <span class="access-tooltip" role="tooltip" id="login-help-password">Sign in with the email and password you chose when creating your account. Your password encrypts your API key in your browser. For new accounts only; there is no password reset, so save your password in a password manager.</span>
               </button>
-              <button type="button" class="access-card is-active" role="radio" id="login-auth-mode-api" aria-label="API key" aria-describedby="login-help-api" aria-checked="true" data-auth-mode="api">
-                <span class="access-radio" aria-hidden="true"></span>
+              <button type="button" class="login-tab access-card is-active" role="radio" id="login-auth-mode-api" aria-label="API key" aria-describedby="login-help-api" aria-checked="true" data-auth-mode="api">
+                
                 <span class="access-copy">
                   <span class="access-title">API key</span>
-                  <span class="access-sub">Use your existing key.</span>
+                  
                 </span>
               <span class="access-tooltip" role="tooltip" id="login-help-api">Sign in by pasting your existing account API key. The key grants access to your account, so keep it private and backed up. Existing API-key accounts cannot switch to email and password.</span>
               </button>
-              <button type="button" class="access-card" role="radio" id="login-auth-mode-chainsecured" aria-label="Wallet" aria-describedby="login-help-chainsecured" aria-checked="false" data-auth-mode="sovereign">
-                <span class="access-radio" aria-hidden="true"></span>
+              <button type="button" class="login-tab access-card" role="radio" id="login-auth-mode-chainsecured" aria-label="Wallet" aria-describedby="login-help-chainsecured" aria-checked="false" data-auth-mode="sovereign">
+                
                 <span class="access-copy">
                   <span class="access-title">Wallet</span>
-                  <span class="access-sub">Use your admin wallet.</span>
+                  
                 </span>
               <span class="access-tooltip" role="tooltip" id="login-help-chainsecured">Connect the wallet that administers your ChainSecured account. Your wallet controls account permissions and approves changes. Use this option for a wallet-managed account; an email password or API key does not replace your wallet.</span>
               </button>
             </div>
-          </fieldset>
-
-          <!-- Secondary axis (existing vs new) drives which panel below is shown. -->
-          <div id="login-panel-existing" class="login-tab-panel is-active" role="tabpanel" aria-labelledby="login-tab-existing">
+          </div>
+          <div id="login-status" class="status info" role="status" aria-live="polite" style="display: none;"></div>
+          <div id="login-panel-existing" class="login-tab-panel" aria-labelledby="login-title">
             <div class="login-cards">
               <div class="login-card login-card-password">
                 <form id="password-login-form" method="post" autocomplete="on">
@@ -93,25 +68,21 @@
                 </form>
                 <p class="form-hint">There’s no “Forgot password” option. Use the password saved in your password manager. Existing API-key users should choose API key.</p>
               </div>
-              <div class="login-card login-card-api">
+              <form id="sign-in-api-form" class="login-card login-card-api">
+                <p class="login-card-tagline">Use your account API key to sign in.</p>
                 <div class="form-group">
-                  <label class="field-label" for="login-api-key">Account API key</label>
-                  <input type="password" id="login-api-key" class="input" placeholder="Paste your account API key">
-                  <p class="form-hint">Use your account key, not a usage key.</p>
+                  <label for="login-api-key">API key</label>
+                  <input type="password" id="login-api-key" class="input" placeholder="Paste your account API key" autocomplete="current-password" spellcheck="false" required>
                 </div>
-                <button type="button" id="btn-login" class="btn btn-primary btn-block">Continue <span aria-hidden="true">→</span></button>
-                <p class="access-note">API mode authorizes account changes through your API key.</p>
-              </div>
-              <div class="login-card login-card-chainsecured">
-                <div class="chain-explainer">
-                  <p>Connect the wallet that owns your account. Your wallet address is the account identity.</p>
-                  <p class="form-hint">Permission changes are signed on-chain. Running Actions uses a usage key. <button type="button" class="login-card-help" aria-label="What is ChainSecured? Your wallet is the key. Writes are signed on-chain — no API key shared." data-tooltip="Your wallet is the key. Writes are signed on-chain — no API key shared.">?</button></p>
-                </div>
-                <button type="button" id="btn-login-wallet" class="btn btn-outline btn-block">Connect wallet <span aria-hidden="true">→</span></button>
-              </div>
+                <button type="submit" id="btn-login" class="btn btn-primary btn-block">Sign in</button>
+              </form>
+              <form id="sign-in-wallet-form" class="login-card login-card-chainsecured">
+                <p class="login-card-tagline">Connect the wallet that owns your ChainSecured account. Your wallet signs account changes on-chain.</p>
+                <button type="submit" id="btn-login-wallet" class="btn btn-primary btn-block">Connect wallet</button>
+              </form>
             </div>
           </div>
-          <div id="login-panel-new" class="login-tab-panel" role="tabpanel" aria-labelledby="login-tab-new" hidden>
+          <div id="login-panel-new" class="login-tab-panel" aria-labelledby="login-title" hidden>
             <div class="login-cards">
               <div class="login-card login-card-password">
                 <form id="password-signup-form" method="post" autocomplete="on">
@@ -129,51 +100,43 @@
                 </form>
                 <details id="password-backup" hidden><summary>Unfinished signup: save your API key as a backup</summary><p class="form-hint">Keep this key safe until account setup finishes. It grants full account access.</p><input id="password-backup-key" class="input" type="password" readonly aria-label="Pending account API key"><button type="button" class="btn btn-sm" data-show-password="password-backup-key">Show password</button></details>
               </div>
-              <div class="login-card login-card-api">
+              <form id="create-api-form" class="login-card login-card-api">
+                <p class="login-card-tagline">Create an account and receive an API key. Save it securely — it’s your sign-in credential.</p>
                 <div class="form-group">
-                  <label class="field-label" for="new-account-email">Email</label>
-                  <input type="email" id="new-account-email" class="input" placeholder="you@example.com" required>
+                  <label for="new-account-email">Email</label>
+                  <input type="email" id="new-account-email" class="input" autocomplete="email" placeholder="you@example.com" required>
                 </div>
                 <div class="form-group">
-                  <label class="field-label" for="new-account-name">Account name</label>
-                  <input type="text" id="new-account-name" class="input" placeholder="My account">
+                  <label for="new-account-name">Account name</label>
+                  <input type="text" id="new-account-name" class="input" required placeholder="My account">
                 </div>
                 <div class="form-group">
-                  <label class="field-label" for="new-account-desc">Account description</label>
+                  <label for="new-account-desc">Description <span class="login-optional">(optional)</span></label>
                   <input type="text" id="new-account-desc" class="input" placeholder="Optional">
                 </div>
-                <button type="button" id="btn-create-account" class="btn btn-primary btn-block">Create account <span aria-hidden="true">→</span></button>
-                <p class="access-note">Creates a managed account and returns a new API key. Store it securely.</p>
-              </div>
-              <div class="login-card login-card-chainsecured">
+                <button type="submit" id="btn-create-account" class="btn btn-primary btn-block">Create account</button>
+              </form>
+              <form id="create-wallet-form" class="login-card login-card-chainsecured">
+                <p class="login-card-tagline">Your wallet will own this ChainSecured account and sign account changes on-chain.</p>
                 <div class="form-group">
-                  <label class="field-label" for="new-chainsecured-name">Account name</label>
-                  <input type="text" id="new-chainsecured-name" class="input" placeholder="My account">
+                  <label for="new-chainsecured-name">Account name</label>
+                  <input type="text" id="new-chainsecured-name" class="input" required placeholder="My account">
                 </div>
                 <div class="form-group">
-                  <label class="field-label" for="new-chainsecured-desc">Account description</label>
+                  <label for="new-chainsecured-desc">Description <span class="login-optional">(optional)</span></label>
                   <input type="text" id="new-chainsecured-desc" class="input" placeholder="Optional">
                 </div>
-                <button type="button" id="btn-create-chainsecured" class="btn btn-outline btn-block">Connect wallet &amp; create <span aria-hidden="true">→</span></button>
-                <p class="access-note">Creates an unmanaged account owned by the connected wallet.</p>
-              </div>
+                <button type="submit" id="btn-create-chainsecured" class="btn btn-primary btn-block">Connect wallet &amp; create</button>
+              </form>
             </div>
           </div>
-
-          <!-- Secondary switch: existing account vs create a new one. Only the
-               option you can switch *to* is shown (CSS gates on .is-active), so
-               auth.js's existing is-active toggle drives the flip with no extra JS. -->
-          <div class="login-switch">
-            <button type="button" class="login-switch-tab is-active" role="tab" id="login-tab-existing" aria-selected="true" aria-controls="login-panel-existing" data-tab="existing"><span class="login-switch-lead">Have an account?</span> Sign in</button>
-            <button type="button" class="login-switch-tab" role="tab" id="login-tab-new" aria-selected="false" aria-controls="login-panel-new" data-tab="new"><span class="login-switch-lead">New to Lit?</span> Create an account <span aria-hidden="true">→</span></button>
-          </div>
-        </section>
-      </main>
-
-      <footer class="marketing-footer">
-        <span>Lit Protocol</span>
-        <span>Confidential, verifiable execution.</span>
-      </footer>
+          <nav class="login-card-footer" aria-label="Account access pages">
+            <p id="login-create-link">New to Chipotle? <a id="login-tab-new" href="#create-account">Create an account</a></p>
+            <p id="login-sign-in-link" hidden>Already have an account? <a id="login-tab-existing" href="#sign-in">Sign in</a></p>
+          </nav>
+        </div>
+        <p class="login-docs"><a href="https://developer.litprotocol.com/management/dashboard" target="_blank" rel="noopener">Read the documentation <span aria-hidden="true">↗</span></a></p>
+      </div>
     </section>
 
     <!-- Dashboard (single page when authenticated) -->
