@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
   <title>Chipotle - Lit Express Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -43,10 +44,23 @@
           <p class="login-subtitle">Choose how you manage your account.</p>
           <div id="login-status" class="status info" style="display: none;"></div>
 
-          <!-- Primary choice: how you administer the account (API key vs wallet). -->
+          <section id="password-verify-panel" class="password-panel" hidden>
+            <p id="password-verify-copy"></p>
+            <form id="password-verify-form">
+              <div id="password-email-confirm-fields" hidden>
+                <label for="password-verify-email">Current email</label><input id="password-verify-email" class="input" type="email" autocomplete="username">
+                <label for="password-verify-password">Current password</label><input id="password-verify-password" class="input" type="password" autocomplete="current-password">
+              </div>
+              <button class="btn btn-primary" type="submit">Confirm email</button>
+            </form>
+          </section>
+          <!-- Access method is separate from the API/wallet account mode. -->
           <fieldset class="access-fieldset">
             <legend id="login-auth-mode-label">Account access</legend>
             <div class="access-options" role="radiogroup" aria-labelledby="login-auth-mode-label">
+              <button type="button" class="access-card" role="radio" id="login-auth-mode-password" aria-checked="false" data-auth-mode="password" hidden>
+                <span class="access-radio" aria-hidden="true"></span><span class="access-copy"><span class="access-title">Email &amp; password</span><span class="access-sub">For new accounts.</span></span>
+              </button>
               <button type="button" class="access-card is-active" role="radio" id="login-auth-mode-api" aria-checked="true" data-auth-mode="api">
                 <span class="access-radio" aria-hidden="true"></span>
                 <span class="access-copy">
@@ -67,6 +81,15 @@
           <!-- Secondary axis (existing vs new) drives which panel below is shown. -->
           <div id="login-panel-existing" class="login-tab-panel is-active" role="tabpanel" aria-labelledby="login-tab-existing">
             <div class="login-cards">
+              <div class="login-card login-card-password">
+                <form id="password-login-form">
+                  <label class="field-label" for="password-login-email">Email</label><input id="password-login-email" class="input" type="email" autocomplete="username" required>
+                  <label class="field-label" for="password-login-password">Password</label><input id="password-login-password" class="input" type="password" autocomplete="current-password" required>
+                  <button type="button" class="btn btn-sm" data-show-password="password-login-password">Show password</button>
+                  <button type="submit" class="btn btn-primary btn-block">Sign in</button>
+                </form>
+                <p class="form-hint">There’s no “Forgot password” option. Use the password saved in your password manager. Existing API-key users should choose API key.</p>
+              </div>
               <div class="login-card login-card-api">
                 <div class="form-group">
                   <label class="field-label" for="login-api-key">Account API key</label>
@@ -87,6 +110,22 @@
           </div>
           <div id="login-panel-new" class="login-tab-panel" role="tabpanel" aria-labelledby="login-tab-new" hidden>
             <div class="login-cards">
+              <div class="login-card login-card-password">
+                <form id="password-signup-form">
+                  <label class="field-label" for="password-signup-email">Email</label><input id="password-signup-email" class="input" type="email" autocomplete="email" required>
+                  <button type="submit" class="btn btn-primary btn-block">Verify email</button>
+                  <p class="form-hint">We’ll email you a link to create a new account. This won’t change an existing API-key account.</p>
+                </form>
+                <form id="password-create-form" hidden>
+                  <label class="field-label" for="password-create-email">Verified email</label><input id="password-create-email" class="input" type="email" autocomplete="username" readonly>
+                  <label class="field-label" for="password-account-name">Account name (optional)</label><input id="password-account-name" class="input" autocomplete="organization" maxlength="100">
+                  <label class="field-label" for="password-create-password">Password</label><input id="password-create-password" class="input" type="password" autocomplete="new-password" minlength="15" required aria-describedby="password-save-notice">
+                  <button type="button" class="btn btn-sm" data-show-password="password-create-password">Show password</button>
+                  <p id="password-save-notice" class="form-hint">Save this password in your password manager. There’s no “Forgot password” option, and we can’t reset it for you. Use at least 15 characters.</p>
+                  <button id="password-create-submit" type="submit" class="btn btn-primary btn-block">Create account</button>
+                </form>
+                <details id="password-backup" hidden><summary>Unfinished signup: save your API key as a backup</summary><p class="form-hint">Keep this key safe until account setup finishes. It grants full account access.</p><input id="password-backup-key" class="input" type="password" readonly aria-label="Pending account API key"><button type="button" class="btn btn-sm" data-show-password="password-backup-key">Show password</button></details>
+              </div>
               <div class="login-card login-card-api">
                 <div class="form-group">
                   <label class="field-label" for="new-account-email">Email</label>
@@ -162,6 +201,7 @@
               <button type="button" class="account-dropdown-item account-dropdown-convert" id="convert-to-chainsecured-btn" role="menuitem" hidden>Convert to ChainSecured</button>
               <button type="button" class="account-dropdown-item" id="change-ownership-btn" role="menuitem" hidden>Change Ownership</button>
               <div class="account-dropdown-divider" role="separator"></div>
+              <button type="button" class="account-dropdown-item" id="password-settings-open" role="menuitem" hidden>Email &amp; password</button>
               <button type="button" class="account-dropdown-item" id="about-dashboard-btn" role="menuitem">About Dashboard</button>
               <button type="button" class="account-dropdown-item account-dropdown-signout" id="account-signout-btn" role="menuitem">Sign out</button>
             </div>
@@ -763,6 +803,25 @@
     </div>
   </div>
 
+  <dialog id="password-settings" class="password-settings">
+    <button type="button" id="password-settings-close" class="btn btn-sm">Close</button>
+    <h2>Email &amp; password</h2>
+    <p>Save your password in a password manager. We can’t reset forgotten passwords.</p>
+    <label for="password-settings-email">Email</label><input id="password-settings-email" class="input" type="email" readonly>
+    <div id="password-settings-status" class="status" role="status" style="display:none;"></div>
+    <form id="password-change-form">
+      <h3>Change password</h3>
+      <label for="password-current">Current password</label><input id="password-current" class="input" type="password" autocomplete="current-password" required>
+      <label for="password-new">New password</label><input id="password-new" class="input" type="password" autocomplete="new-password" minlength="15" required>
+      <button type="submit" class="btn btn-primary">Change password</button>
+    </form>
+    <form id="password-email-form">
+      <h3>Change email</h3>
+      <label for="password-email-new">New email</label><input id="password-email-new" class="input" type="email" autocomplete="email" required>
+      <label for="password-email-current">Current password</label><input id="password-email-current" class="input" type="password" autocomplete="current-password" required>
+      <button type="submit" class="btn btn-outline">Verify new email</button>
+    </form>
+  </dialog>
   <script src="https://js.stripe.com/v3/"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>

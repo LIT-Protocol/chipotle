@@ -4,6 +4,7 @@ on:
     branches: [main, next]
     paths:
       - 'lit-static/**'
+      - 'lit-dashboard-auth/scripts/configure-static.py'
       - '.github/workflows/deploy-static.yml'
   workflow_dispatch:
     inputs:
@@ -39,6 +40,11 @@ jobs:
       - name: Inject lit-payments URL
         run: sed -i "s|__LIT_PAYMENTS_BASE_URL__|${{ vars.LIT_PAYMENTS_STAGING_URL }}|g" lit-static/dapps/dashboard/auth.js
 
+      - name: Configure password auth service
+        env:
+          AUTH_URL: ${{ vars.LIT_AUTH_STAGING_URL }}
+        run: python3 lit-dashboard-auth/scripts/configure-static.py
+
       - name: Inject dashboard git commit
         run: sed -i "s|__LIT_DASHBOARD_GIT_COMMIT__|${GITHUB_SHA}|g" lit-static/dapps/dashboard/about.js
 
@@ -66,6 +72,11 @@ jobs:
 
       - name: Inject lit-payments URL
         run: sed -i "s|__LIT_PAYMENTS_BASE_URL__|${{ vars.LIT_PAYMENTS_STAGING_URL }}|g" lit-static/dapps/dashboard/auth.js
+
+      - name: Configure password auth service
+        env:
+          AUTH_URL: ${{ vars.LIT_AUTH_STAGING_URL }}
+        run: python3 lit-dashboard-auth/scripts/configure-static.py
 
       - name: Inject dashboard git commit
         run: sed -i "s|__LIT_DASHBOARD_GIT_COMMIT__|${GITHUB_SHA}|g" lit-static/dapps/dashboard/about.js

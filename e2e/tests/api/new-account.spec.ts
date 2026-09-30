@@ -46,6 +46,7 @@ test.describe('new account (API mode)', () => {
 
   test('account creation is rejected when email is missing', async ({ dashboardPage }) => {
     await dashboardPage.goto();
+    await dashboardPage.page.locator('#login-auth-mode-api').click();
     await dashboardPage.showNewUserTab();
     await dashboardPage.page.locator('#new-account-name').fill('missing-email');
     await dashboardPage.page.locator('#btn-create-account').click();

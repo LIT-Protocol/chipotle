@@ -2871,3 +2871,18 @@ textarea.input.textarea-sm {
 /* Keep sidebar labels visible — supersedes the old icon-rail @media(768) rule
    that hid .sidebar-link-text for the collapsed 72px sidebar. */
 .sidebar-link-text { display: inline; }
+
+/* Password authentication is optional until a Worker URL is configured. */
+body:not(.login-mode-password) .login-card-password,
+body.login-mode-password .login-card-api,
+body.login-mode-password .login-card-chainsecured { display: none; }
+.password-login-enabled .access-options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.password-login-enabled .access-card { padding: 12px 8px; }
+.login-card-password label, .password-settings label { display: block; margin-top: 12px; }
+.login-card-password button, .password-settings form button { margin-top: 12px; }
+.password-panel { margin: 16px 0; padding: 16px; border: 1px solid var(--border, #ddd); border-radius: 12px; }
+.password-settings { width: min(480px, calc(100vw - 32px)); padding: 24px; border: 1px solid var(--border, #ddd); border-radius: 16px; background: var(--bg, white); color: var(--text, #222); }
+.password-settings::backdrop { background: rgb(0 0 0 / .45); }
+.password-settings form + form { border-top: 1px solid var(--border, #ddd); margin-top: 24px; padding-top: 12px; }
+@media(max-width: 600px) { .password-login-enabled .access-options { grid-template-columns: 1fr; } }
+.access-card[hidden] { display: none; }

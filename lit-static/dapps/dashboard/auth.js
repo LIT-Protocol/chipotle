@@ -1,3 +1,5 @@
+import { initPasswordLogin, resetPasswordIdentity } from './password-login.js';
+import { enabled as passwordLoginEnabled } from './password-client.js';
 /**
  * Authentication — session state, API client, theme, stat cards.
  */
@@ -82,6 +84,7 @@ export function getChainSecuredHash() {
  * hashing an (empty) api key string.
  */
 export async function setChainSecuredSession({ walletAddress, apiKeyHash }) {
+  resetPasswordIdentity();
   if (walletAddress) sessionStorage.setItem(STORAGE_KEY_CHAINSECURED_WALLET, walletAddress);
   else sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_WALLET);
   if (apiKeyHash) sessionStorage.setItem(STORAGE_KEY_CHAINSECURED_HASH, apiKeyHash);
@@ -118,6 +121,7 @@ export function isAuthenticated() {
 
 /** Full sign-out: clears api-key, ChainSecured session, and the client cache. */
 export function logOut() {
+  resetPasswordIdentity();
   sessionStorage.removeItem(STORAGE_KEY_API);
   sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_WALLET);
   sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_HASH);
@@ -750,41 +754,38 @@ export function initLogin() {
 
   ensureWalletWatch();
 
-  // CPL-288 — Auth mode toggle (API vs ChainSecured). Drives which login card
-  // is visible via `body.login-mode-chainsecured` (CSS in styles.css). Persists
-  // through setMode() so the same sessionStorage-backed mode the dashboard uses
-  // post-login is also primed before login. Implements the WAI-ARIA radiogroup
-  // pattern: roving tabindex (only the checked radio is tabbable) + arrow-key
-  // navigation that selects-on-move.
-  const authModeApi = document.getElementById('login-auth-mode-api');
-  const authModeChainSecured = document.getElementById('login-auth-mode-chainsecured');
+  const passwordEnabled = passwordLoginEnabled();
+  const choices = [...document.querySelectorAll('[data-auth-mode]')];
+  const passwordChoice = document.getElementById('login-auth-mode-password');
+  if (passwordChoice) passwordChoice.hidden = !passwordEnabled;
+  document.body.classList.toggle('password-login-enabled', passwordEnabled);
+  let selected = getMode() === 'sovereign' ? 'sovereign' : (passwordEnabled ? 'password' : 'api');
   function applyLoginAuthMode(mode, focusActive = false) {
-    const isSovereign = mode === 'sovereign';
-    setMode(isSovereign ? 'sovereign' : 'api');
-    document.body.classList.toggle('login-mode-chainsecured', isSovereign);
-    if (authModeApi) {
-      authModeApi.classList.toggle('is-active', !isSovereign);
-      authModeApi.setAttribute('aria-checked', !isSovereign ? 'true' : 'false');
-      authModeApi.setAttribute('tabindex', !isSovereign ? '0' : '-1');
+    selected = mode;
+    setMode(mode === 'sovereign' ? 'sovereign' : 'api');
+    document.body.classList.toggle('login-mode-chainsecured', mode === 'sovereign');
+    document.body.classList.toggle('login-mode-password', mode === 'password');
+    for (const choice of choices) {
+      const active = choice.dataset.authMode === mode;
+      choice.classList.toggle('is-active', active);
+      choice.setAttribute('aria-checked', String(active));
+      choice.tabIndex = active ? 0 : -1;
+      if (active && focusActive) choice.focus();
     }
-    if (authModeChainSecured) {
-      authModeChainSecured.classList.toggle('is-active', isSovereign);
-      authModeChainSecured.setAttribute('aria-checked', isSovereign ? 'true' : 'false');
-      authModeChainSecured.setAttribute('tabindex', isSovereign ? '0' : '-1');
-    }
-    if (focusActive) (isSovereign ? authModeChainSecured : authModeApi)?.focus();
     hideStatus('login-status');
   }
-  authModeApi?.addEventListener('click', () => applyLoginAuthMode('api'));
-  authModeChainSecured?.addEventListener('click', () => applyLoginAuthMode('sovereign'));
-  function onAuthModeKey(e) {
-    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
-    e.preventDefault();
-    applyLoginAuthMode(getMode() === 'sovereign' ? 'api' : 'sovereign', true);
+  for (const choice of choices) {
+    choice.addEventListener('click', () => applyLoginAuthMode(choice.dataset.authMode));
+    choice.addEventListener('keydown', event => {
+      if (!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) return;
+      event.preventDefault();
+      const available = choices.filter(c => !c.hidden);
+      const index = available.findIndex(c => c.dataset.authMode === selected);
+      const step = ['ArrowLeft','ArrowUp'].includes(event.key) ? -1 : 1;
+      applyLoginAuthMode(available[(index + step + available.length) % available.length].dataset.authMode, true);
+    });
   }
-  authModeApi?.addEventListener('keydown', onAuthModeKey);
-  authModeChainSecured?.addEventListener('keydown', onAuthModeKey);
-  applyLoginAuthMode(getMode());
+  applyLoginAuthMode(selected);
 
   const tabExisting = document.getElementById('login-tab-existing');
   const tabNew = document.getElementById('login-tab-new');
@@ -803,6 +804,7 @@ export function initLogin() {
   }
   tabExisting?.addEventListener('click', () => switchLoginTab(true));
   tabNew?.addEventListener('click', () => switchLoginTab(false));
+  initPasswordLogin();
 
   // ----- Card A (Existing): API-key login -----
   document.getElementById('btn-login').addEventListener('click', async () => {
@@ -819,6 +821,7 @@ export function initLogin() {
       const client = await getClient();
       const exists = await client.accountExists(key);
       if (exists) {
+        resetPasswordIdentity();
         setApiKey(key);
         showStatus('login-status', 'Logged in. You can now use the dashboard.', 'success');
       } else {
@@ -867,6 +870,7 @@ export function initLogin() {
       setMode('api');
       const client = await getClient();
       const res = await client.newAccount({ accountName: name, accountDescription: desc, email: email || undefined });
+      resetPasswordIdentity();
       setApiKey(res.api_key);
       showNewAccountBanner(res.api_key);
       document.getElementById('new-account-name').value = '';
