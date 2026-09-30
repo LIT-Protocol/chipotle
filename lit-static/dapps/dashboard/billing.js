@@ -280,12 +280,14 @@ async function billingRequestOptions(signal) {
 export function refreshBillingUI() {
   const capturedKey = billingAuthKey();
   const balanceEl = document.getElementById('billing-balance-display');
+  const refreshBtn = document.getElementById('btn-refresh-balance');
   const addFundsBtn = document.getElementById('btn-add-funds');
   const notRequiredEl = document.getElementById('billing-not-required');
   const billingBanner = document.getElementById('billing-disabled-banner');
   const noFundsWarning = document.getElementById('no-funds-warning');
   if (!capturedKey || hasUsageKeyOverride()) {
     if (balanceEl) balanceEl.style.display = 'none';
+    if (refreshBtn) refreshBtn.style.display = 'none';
     if (addFundsBtn) addFundsBtn.style.display = 'none';
     if (notRequiredEl) notRequiredEl.style.display = 'none';
     if (billingBanner) billingBanner.style.display = 'none';
@@ -296,6 +298,7 @@ export function refreshBillingUI() {
     if (billingAuthKey() !== capturedKey) return;
     if (available) {
       if (balanceEl) balanceEl.style.display = '';
+      if (refreshBtn) refreshBtn.style.display = '';
       if (addFundsBtn) addFundsBtn.style.display = '';
       if (notRequiredEl) notRequiredEl.style.display = 'none';
       if (billingBanner) billingBanner.style.display = 'none';
@@ -316,6 +319,7 @@ export function refreshBillingUI() {
       }
     } else {
       if (balanceEl) balanceEl.style.display = 'none';
+      if (refreshBtn) refreshBtn.style.display = 'none';
       if (addFundsBtn) addFundsBtn.style.display = 'none';
       if (notRequiredEl) notRequiredEl.style.display = '';
       if (billingBanner) billingBanner.style.display = '';
@@ -371,7 +375,7 @@ function refreshBalanceFromApiCall(methodName) {
   }, BALANCE_REFRESH_DEBOUNCE_MS);
 }
 
-async function loadBillingBalance() {
+async function loadBillingBalance(force = false) {
   const apiKey = billingAuthKey();
   if (!apiKey) return;
   const el = document.getElementById('billing-balance-display');
@@ -382,6 +386,7 @@ async function loadBillingBalance() {
     const client = await getClient();
     if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
     const opts = await billingRequestOptions(ctrl.signal);
+    if (force) opts.force = true;
     if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
     const data = await client.getBillingBalance(apiKey, opts);
     if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
@@ -397,6 +402,26 @@ async function loadBillingBalance() {
     if (billingAuthKey() === apiKey) {
       el.textContent = 'Balance unavailable';
       if (noFundsWarning) noFundsWarning.style.display = 'none';
+    }
+  }
+}
+
+// Manual "sync balance" button in the topbar. Forces a live Stripe read so a
+// credit added directly in Stripe (e.g. a manual grant) shows up without the
+// user having to run a Lit Action or wait out the node's balance cache TTL.
+async function handleRefreshBalance() {
+  const btn = document.getElementById('btn-refresh-balance');
+  if (btn) {
+    if (btn.disabled) return; // ignore rapid double-clicks while a sync is in flight
+    btn.disabled = true;
+    btn.classList.add('is-refreshing');
+  }
+  try {
+    await loadBillingBalance(true);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-refreshing');
     }
   }
 }
@@ -687,6 +712,9 @@ export function initBilling() {
   const backBtn = document.getElementById('billing-back-btn');
   const payBtn = document.getElementById('billing-pay-btn');
   const litkeyBtn = document.getElementById('billing-litkey-btn');
+
+  const refreshBalanceBtn = document.getElementById('btn-refresh-balance');
+  if (refreshBalanceBtn) refreshBalanceBtn.addEventListener('click', handleRefreshBalance);
 
   if (addFundsBtn) addFundsBtn.addEventListener('click', openAddFundsModal);
   if (litkeyBtn) litkeyBtn.addEventListener('click', openLitkeyPaymentPage);

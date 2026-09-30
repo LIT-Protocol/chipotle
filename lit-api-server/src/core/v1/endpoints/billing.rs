@@ -65,13 +65,26 @@ pub(super) async fn billing_stripe_config(
 }
 
 /// GET /billing/balance — returns the current credit balance for the authenticated user.
+///
+/// `force=true` drops the cached balance before reading so a credit added
+/// directly in Stripe surfaces immediately, without waiting out the 10-minute
+/// cache TTL or having to run a Lit Action. A plain re-read is not enough: the
+/// stale-while-revalidate background refresh deliberately ignores credit
+/// *increases* (it only adopts a balance that went up, to preserve optimistic
+/// charge decrements), so the cache must be invalidated to pick up a top-up.
 #[openapi(tag = "Billing")]
-#[get("/billing/balance")]
+#[get("/billing/balance?<force>")]
 pub(super) async fn billing_balance(
     auth: BillingAuth,
     stripe_state: &State<Option<Arc<StripeState>>>,
+    force: Option<bool>,
 ) -> OpenApiResponse<BillingBalanceResponse, ErrMessage> {
-    let result = billing_balance_impl(auth.identity_string(), stripe_state.inner()).await;
+    let result = billing_balance_impl(
+        auth.identity_string(),
+        stripe_state.inner(),
+        force.unwrap_or(false),
+    )
+    .await;
     OpenApiResponse {
         response: ApiResult(result).into(),
     }
@@ -80,6 +93,7 @@ pub(super) async fn billing_balance(
 async fn billing_balance_impl(
     api_key: &str,
     stripe_state: &Option<Arc<StripeState>>,
+    force: bool,
 ) -> Result<BillingBalanceResponse, ApiStatus> {
     let stripe = stripe_state.as_ref().ok_or_else(billing_disabled_err)?;
     let wallet = stripe::resolve_wallet_address(api_key, stripe)
@@ -88,6 +102,10 @@ async fn billing_balance_impl(
     let customer_id = stripe::get_customer_by_wallet(&wallet, stripe)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "Stripe error"))?;
+    if force {
+        // Force the next read through to Stripe (inline fetch on cache miss).
+        stripe.invalidate_balance_cache(&customer_id).await;
+    }
     let balance = stripe::get_credit_balance(&customer_id, stripe)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "Stripe error"))?;

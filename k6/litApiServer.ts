@@ -669,7 +669,8 @@ export type ConvertToChainSecuredAccountHeaders = {
 };
 
 export type ConvertToChainSecuredAccountDefault =
-  AccountOpResponse | ErrMessage;
+  | AccountOpResponse
+  | ErrMessage;
 
 export type AccountExistsHeaders = {
   /**
@@ -699,7 +700,8 @@ export type CreateWalletPostHeaders = {
 export type CreateWalletPostDefault = CreateWalletResponse | ErrMessage;
 
 export type CreateWalletWithSignatureDefault =
-  CreateWalletWithSignatureResponse | ErrMessage;
+  | CreateWalletWithSignatureResponse
+  | ErrMessage;
 
 export type PrepareWalletDefault = PrepareWalletResponse | ErrMessage;
 
@@ -805,7 +807,8 @@ export type AddUsageApiKeyHeaders = {
 export type AddUsageApiKeyDefault = AddUsageApiKeyResponse | ErrMessage;
 
 export type AddUsageApiKeyWithSignatureDefault =
-  AddUsageApiKeyWithSignatureResponse | ErrMessage;
+  | AddUsageApiKeyWithSignatureResponse
+  | ErrMessage;
 
 export type UpdateUsageApiKeyHeaders = {
   /**
@@ -954,7 +957,8 @@ export type GetNodeChainConfigDefault = NodeChainConfigResponse | ErrMessage;
 export type GetChainConfigKeysDefault = ChainConfigKeysResponse | ErrMessage;
 
 export type GetLitActionClientConfigDefault =
-  LitActionClientConfigResponse | ErrMessage;
+  | LitActionClientConfigResponse
+  | ErrMessage;
 
 export type GetCacheMetadataHeaders = {
   /**
@@ -966,13 +970,21 @@ export type GetCacheMetadataHeaders = {
 export type GetCacheMetadataDefault = CacheMetadataResponse | ErrMessage;
 
 export type GetSupportedLanguagesDefault =
-  SupportedLanguagesResponse | ErrMessage;
+  | SupportedLanguagesResponse
+  | ErrMessage;
 
 export type GetApiPayersDefault = string[] | ErrMessage;
 
 export type GetAdminApiPayerDefault = string | ErrMessage;
 
 export type BillingStripeConfigDefault = StripeConfigResponse | ErrMessage;
+
+export type BillingBalanceParams = {
+  /**
+   * @nullable
+   */
+  force?: boolean | null;
+};
 
 export type BillingBalanceHeaders = {
   /**
@@ -991,7 +1003,8 @@ export type BillingCreatePaymentIntentHeaders = {
 };
 
 export type BillingCreatePaymentIntentDefault =
-  CreatePaymentIntentResponse | ErrMessage;
+  | CreatePaymentIntentResponse
+  | ErrMessage;
 
 export type BillingConfirmPaymentHeaders = {
   /**
@@ -2692,9 +2705,12 @@ NOT IDEMPOTENT: every call returns a brand-new wallet (a fresh random derivation
   }
 
   /**
-   * GET /billing/balance — returns the current credit balance for the authenticated user.
-   */
+ * GET /billing/balance — returns the current credit balance for the authenticated user.
+
+`force=true` drops the cached balance before reading so a credit added directly in Stripe surfaces immediately, without waiting out the 10-minute cache TTL or having to run a Lit Action. A plain re-read is not enough: the stale-while-revalidate background refresh deliberately ignores credit *increases* (it only adopts a balance that went up, to preserve optimistic charge decrements), so the cache must be invalidated to pick up a top-up.
+ */
   billingBalance(
+    params?: BillingBalanceParams,
     headers?: BillingBalanceHeaders,
     requestParameters?: Params,
   ): {
@@ -2702,7 +2718,11 @@ NOT IDEMPOTENT: every call returns a brand-new wallet (a fresh random derivation
     data: BillingBalanceDefault;
     operationId: string;
   } {
-    const k6url = new URL(this.cleanBaseUrl + `/billing/balance`);
+    const k6url = new URL(
+      this.cleanBaseUrl +
+        `/billing/balance` +
+        `?${new URLSearchParams(params).toString()}`,
+    );
     const mergedRequestParameters = this._mergeRequestParameters(
       requestParameters || {},
       this.commonRequestParameters,
