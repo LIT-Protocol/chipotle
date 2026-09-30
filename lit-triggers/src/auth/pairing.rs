@@ -106,6 +106,9 @@ pub async fn start(
 ) -> Result<Option<StartedPairing>> {
     agent::validate_agent_token_hash(token_hash)?;
     let label = label.map(str::trim).filter(|s| !s.is_empty());
+    // Cap length so an unauthenticated caller can't store an oversized label
+    // (row count is already bounded by MAX_PENDING_PAIRINGS).
+    let label = label.map(|s| &s[..s.char_indices().nth(64).map_or(s.len(), |(i, _)| i)]);
     let code = generate_code();
     let user_code = generate_user_code();
     let expires_at = OffsetDateTime::now_utc() + time::Duration::seconds(PAIRING_TTL_SECONDS);
