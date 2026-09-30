@@ -5,6 +5,64 @@ functional surface as the k6 suite (chain config, account creation, usage API
 keys, Lit Action execution, encrypt/decrypt) but through the dashboard's UI,
 plus ChainSecured (wallet) flows that the k6 tests don't cover.
 
+## Account-access CI
+
+`Dashboard Auth` runs on every PR targeting `main`, pushes to `main`, and merge
+queue checks. Its stable check name is **Dashboard account access**. After this
+workflow is merged and has reported once, add that check to `main`'s required
+status checks (with GitHub Actions as its source). Until that ruleset change,
+GitHub reports failures but does not prevent merging them. The workflow has no
+path filters, so a required check is never left pending for unrelated PRs.
+
+The separate `pnpm test:auth` suite uses real Chromium, the real dashboard/SDK,
+the Rust API, deployed AccountConfig contracts on a disposable Anvil chain, and
+the pinned dstack simulator. It tests desktop and mobile signup, the returned
+API key, an independent account-existence read, session restoration, logout,
+login with the issued key, rejected keys, missing fields, API-error recovery,
+and keyboard access-mode selection. Only error-injection tests replace API
+responses; the successful account-creation and login paths use the real API.
+
+This is an account-access check, not complete system coverage: real TEE hardware,
+Stripe, wallet connection/signing, and Lit Action execution are not exercised.
+The existing EOA/WalletConnect/Action suites below cover those other local flows.
+No production accounts, paid transactions, or secrets are used. The HTML report,
+screenshots, failure traces/videos, and service logs are uploaded as
+`dashboard-account-access` for seven days. The suite uses both current tab
+navigation and PR #719's native links, so either PR can merge first.
+
+To run locally, use Node 22, Python 3, Foundry (`anvil`, `cast`), `jq`, and the
+dstack simulator. Ports 8545, 8000, and 8088 must be free; the launcher refuses
+to reuse running services. Build once from the repository root:
+
+```sh
+corepack enable
+(cd e2e && pnpm install --frozen-lockfile && pnpm exec playwright install chromium)
+npm ci --prefix lit-api-server/blockchain/lit_node_express
+(cd lit-api-server/blockchain/lit_node_express && npx hardhat compile)
+cargo build --locked --manifest-path lit-api-server/Cargo.toml --features dstack --bin lit-api-server
+cargo build --locked --manifest-path lit-api-server/blockchain/rust_generator_and_deployer/Cargo.toml --bin contract_deployer
+```
+
+Use dstack revision `5c37b2574069267eaff5c490694dc2f4d24eaa62` (Rust 1.92) and
+build its `sdk/simulator` using `bash build.sh`. Then:
+
+```sh
+cd e2e
+SIMULATOR_DIR=/absolute/path/to/dstack/sdk/simulator AGENT_SCREENSHOTS=1 pnpm test:auth
+```
+
+Playwright starts and stops the account-access stack automatically; do not run
+`make up` for this suite. Runtime config, databases, and sockets live in a fresh
+temporary directory; your `NodeConfig.toml` is untouched. Startup logs are saved
+to `e2e/artifacts/auth-stack`, screenshots/traces to `e2e/test-results/auth`, and
+the HTML report to `e2e/playwright-report/auth`. This suite has zero automatic
+retries so a flaky failure remains visible. To inspect a failure:
+
+```sh
+pnpm exec playwright show-report playwright-report/auth
+pnpm exec playwright show-trace test-results/auth/<test-directory>/trace.zip
+```
+
 ## What's in here
 
 ```
