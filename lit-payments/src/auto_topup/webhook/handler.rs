@@ -317,9 +317,12 @@ async fn process_event(
     }
 
     // Step 8: Cap check. Sum amounts of all non-failed PIs this month.
-    let topup_amount = config
-        .topup_amount_cents
-        .expect("CHECK constraint enforces non-null when enabled");
+    // A DB CHECK constraint keeps this non-null whenever auto top-up is enabled;
+    // if that invariant is ever violated, fail the webhook rather than panic in
+    // the hot path (crate no-panic rule; CPL-379 L9).
+    let topup_amount = config.topup_amount_cents.context(
+        "auto top-up enabled but topup_amount_cents is null (DB CHECK invariant violated)",
+    )?;
     // monthly_cap_cents is optional — None = unlimited (only the
     // per-charge MAX_TOPUP_CENTS cap applies). When set, enforce the
     // soft cap as before.
@@ -347,10 +350,11 @@ async fn process_event(
     // retry window for an individual event would risk false hits, but
     // within a redelivery burst it's exactly what we want. Falls back
     // to a UUID if event_id is missing (only the unit-test paths).
-    let payment_method_id = config
-        .payment_method_id
-        .as_deref()
-        .expect("CHECK constraint enforces non-null when enabled");
+    // Same DB CHECK invariant as topup_amount above — propagate instead of
+    // panicking if it is ever violated (crate no-panic rule; CPL-379 L9).
+    let payment_method_id = config.payment_method_id.as_deref().context(
+        "auto top-up enabled but payment_method_id is null (DB CHECK invariant violated)",
+    )?;
     let wallet_address = config.wallet_address.as_str();
     let amount_str = topup_amount.to_string();
     let idempotency_key = if event_id.is_empty() {

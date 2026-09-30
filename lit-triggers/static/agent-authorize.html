@@ -20,21 +20,62 @@
       </p>
     </section>
 
-    <button id="authorize-btn" type="button">Authorize agent</button>
+    <section class="panel callout" id="confirm-panel" hidden>
+      <h2>Confirm the code</h2>
+      <p>
+        <strong>Only continue if you just started authorizing an agent on this device.</strong>
+        The code below must exactly match the one your own agent showed you. If you did
+        not start this, or you don't recognize the code, close this page — do not authorize.
+      </p>
+      <p class="user-code" id="user-code" aria-live="polite"></p>
+      <p class="note">Agent: <span id="agent-label"></span></p>
+    </section>
+
+    <button id="authorize-btn" type="button" disabled>Authorize agent</button>
     <p id="status" class="status" role="status" aria-live="polite"></p>
     <p class="note"><a href="/SKILL.md">View the agent setup guide</a></p>
   </main>
 
   <script>
     const params = new URLSearchParams(window.location.search);
-    const challenge = params.get('challenge') || '';
+    const code = params.get('code') || '';
     const button = document.getElementById('authorize-btn');
     const status = document.getElementById('status');
+    const confirmPanel = document.getElementById('confirm-panel');
+    const userCodeEl = document.getElementById('user-code');
+    const agentLabelEl = document.getElementById('agent-label');
 
-    if (!challenge) {
-      button.disabled = true;
-      status.textContent = 'Missing agent challenge. Ask your agent to generate a fresh authorize URL.';
-      status.className = 'status error';
+    function toLogin() {
+      window.location.href = `/login?next=${encodeURIComponent(`/agent/authorize?code=${encodeURIComponent(code)}`)}`;
+    }
+
+    async function loadPairing() {
+      if (!code) {
+        status.textContent = 'Missing pairing code. Ask your agent to generate a fresh authorize URL.';
+        status.className = 'status error';
+        return;
+      }
+      try {
+        const resp = await fetch(`/agent/pair?code=${encodeURIComponent(code)}`, {
+          credentials: 'same-origin',
+          headers: { 'accept': 'application/json' },
+        });
+        if (resp.status === 401) return toLogin();
+        if (resp.status === 404) {
+          status.textContent = 'This authorization link has expired or was already used. Ask your agent for a fresh one.';
+          status.className = 'status error';
+          return;
+        }
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const info = await resp.json();
+        userCodeEl.textContent = info.user_code;
+        agentLabelEl.textContent = info.label;
+        confirmPanel.hidden = false;
+        button.disabled = false;
+      } catch (_err) {
+        status.textContent = 'Could not load this authorization request. Ask your agent for a fresh URL and try again.';
+        status.className = 'status error';
+      }
     }
 
     button.addEventListener('click', async () => {
@@ -46,12 +87,9 @@
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ challenge, label: 'local-agent' }),
+          body: JSON.stringify({ code }),
         });
-        if (resp.status === 401) {
-          window.location.href = `/login?next=${encodeURIComponent(`/agent/authorize?challenge=${encodeURIComponent(challenge)}`)}`;
-          return;
-        }
+        if (resp.status === 401) return toLogin();
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         status.textContent = 'Agent authorized. You can return to your agent now.';
         status.className = 'status ok';
@@ -61,6 +99,8 @@
         button.disabled = false;
       }
     });
+
+    loadPairing();
   </script>
 </body>
 </html>

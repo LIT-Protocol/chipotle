@@ -4,6 +4,86 @@ pragma solidity =0.8.28;
 import {BaseTest} from "./helpers/BaseTest.sol";
 import {AppStorage} from "../contracts/AccountConfigFacets/AppStorage.sol";
 import {ViewsFacet} from "../contracts/AccountConfigFacets/ViewsFacet.sol";
+import {IDiamond} from "../interfaces/IDiamond.sol";
+import {FunctionNotFound} from "../contracts/AccountConfig.sol";
+import {SecurityLib} from "../contracts/AccountConfigFacets/SecurityLib.sol";
+import {NotContractOwner} from "../libraries/LibDiamond.sol";
+
+// Historical migration facet, used only to exercise its removal from a diamond.
+contract LegacyOwnerBackfills {
+    event PkpOwnerBackfilled(address indexed pkpId, uint256 indexed masterHash);
+
+    /// @notice One-time migration helper: bind wallets registered before the global
+    ///         owner binding existed to their original master account.
+    /// @dev Pairs should be derived off-chain from the EARLIEST
+    ///      `WalletDerivationRegistered(masterHash, pkpId, ...)` event per pkpId
+    ///      (first registration wins, matching the rule `registerWalletDerivation`
+    ///      now enforces). Already-bound pkpIds are skipped, never re-assigned, so
+    ///      the call is idempotent and safe to run in batches / re-run. Restricted
+    ///      to the diamond owner or config operator.
+    function backfillPkpOwners(
+        address[] calldata pkpIds,
+        uint256[] calldata masterHashes
+    ) public {
+        SecurityLib.revertIfNotConfigOperatorOrOwner(msg.sender);
+        if (pkpIds.length != masterHashes.length) {
+            revert AppStorage.InvalidRequest("array length mismatch");
+        }
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        for (uint256 i = 0; i < pkpIds.length; i++) {
+            if (masterHashes[i] == 0) {
+                revert AppStorage.InvalidRequest("masterHash must be non-zero");
+            }
+            if (s.pkpIdToOwnerMaster[pkpIds[i]] != 0) {
+                continue; // already bound — never re-assign ownership
+            }
+            s.pkpIdToOwnerMaster[pkpIds[i]] = masterHashes[i];
+            emit PkpOwnerBackfilled(pkpIds[i], masterHashes[i]);
+        }
+    }
+
+
+    event PathOwnerBackfilled(
+        uint256 indexed derivationPath,
+        uint256 indexed masterHash
+    );
+
+    /// @notice One-time migration helper: bind derivation paths registered before
+    ///         the global path-owner binding existed to their original master
+    ///         account. Companion to backfillPkpOwners — until a path is
+    ///         backfilled, getWalletDerivation falls through (pathOwner == 0), so
+    ///         the aliasing hole stays open for that path. Run this over every
+    ///         historical path to fully close it for pre-fix wallets.
+    /// @dev Pairs should be derived off-chain from the EARLIEST
+    ///      `WalletDerivationRegistered(masterHash, pkpId, derivationPath)` event
+    ///      per derivationPath (first registration wins, matching the rule
+    ///      registerWalletDerivation now enforces). Already-bound paths are
+    ///      skipped, never re-assigned, so the call is idempotent and safe to
+    ///      re-run. Restricted to the diamond owner or config operator.
+    function backfillPathOwners(
+        uint256[] calldata derivationPaths,
+        uint256[] calldata masterHashes
+    ) public {
+        SecurityLib.revertIfNotConfigOperatorOrOwner(msg.sender);
+        if (derivationPaths.length != masterHashes.length) {
+            revert AppStorage.InvalidRequest("array length mismatch");
+        }
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        for (uint256 i = 0; i < derivationPaths.length; i++) {
+            if (masterHashes[i] == 0) {
+                revert AppStorage.InvalidRequest("masterHash must be non-zero");
+            }
+            if (derivationPaths[i] == 0) {
+                revert AppStorage.InvalidRequest("derivationPath must be non-zero");
+            }
+            if (s.pathToOwnerMaster[derivationPaths[i]] != 0) {
+                continue; // already bound — never re-assign ownership
+            }
+            s.pathToOwnerMaster[derivationPaths[i]] = masterHashes[i];
+            emit PathOwnerBackfilled(derivationPaths[i], masterHashes[i]);
+        }
+    }
+}
 
 contract AccountsTest is BaseTest {
     function test_newChainSecuredAccount_writesPersistAndAreReadable() public {
@@ -266,6 +346,89 @@ contract AccountsTest is BaseTest {
         assertEq(keys[0].metadata.name, "usage-1-updated");
     }
 
+    function test_newChainSecuredAccount_reclaimsSquattedUsageKeyHash() public {
+        // Attacker onboards, then squats keccak256(victimWallet) as one of their
+        // own usage keys BEFORE the victim ever creates an account. Pre-fix this
+        // stamped allApiKeyHashesToMaster[victimHash] = attackerMaster and
+        // permanently blocked the victim's newChainSecuredAccount.
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+
+        uint256 victimHash = apiKeyHashOf(user);
+        uint256[] memory empty = new uint256[](0);
+        vm.prank(stranger);
+        writes.setUsageApiKey(
+            attackerHash,
+            victimHash, // squat the victim's would-be account hash
+            block.timestamp + 7 days,
+            0,
+            "squat",
+            "squat",
+            false,
+            false,
+            false,
+            empty,
+            empty,
+            empty,
+            empty
+        );
+
+        // The squat currently resolves the victim's hash to the attacker.
+        assertEq(views_.getAccountWalletAddress(victimHash), stranger);
+        assertEq(views_.listApiKeys(attackerHash, 0, 10).length, 1);
+
+        // The victim can still onboard: the sovereign wallet owner reclaims their
+        // own account-hash namespace, evicting the squatted usage key.
+        vm.prank(user);
+        writes.newChainSecuredAccount("victim", "victim");
+
+        // Victim now owns a real master account at their hash.
+        assertEq(views_.getAccountWalletAddress(victimHash), user);
+        assertEq(views_.getBillingWalletAddress(victimHash), user);
+
+        // The squatted usage key is gone from the attacker's account.
+        assertEq(views_.listApiKeys(attackerHash, 0, 10).length, 0);
+
+        // The victim's account is a genuine master (resolves to itself), so a
+        // second creation attempt now hard-reverts as a normal duplicate.
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.AccountAlreadyExists.selector,
+                victimHash
+            )
+        );
+        writes.newChainSecuredAccount("victim2", "victim2");
+    }
+
+    function test_newAccount_doesNotEvictAdminWalletAlias() public {
+        // convertToChainSecuredAccount registers keccak256(newAdmin) as an alias
+        // that resolves to the master but is NOT a usage key. A later newAccount
+        // targeting that alias hash must still hard-revert (never be "reclaimed").
+        uint256 managedHash = uint256(keccak256("managed-1"));
+        vm.prank(apiPayer);
+        writes.newAccount(managedHash, true, "managed", "m", apiPayer);
+
+        vm.prank(apiPayer);
+        writes.convertToChainSecuredAccount(managedHash, user);
+        uint256 aliasHash = apiKeyHashOf(user);
+
+        // The alias resolves to the underlying master, not to itself.
+        assertEq(views_.getAccountWalletAddress(aliasHash), user);
+
+        // The user cannot create a fresh account at their alias hash — it is a
+        // legitimate reference to the converted account, not a squat.
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.AccountAlreadyExists.selector,
+                aliasHash
+            )
+        );
+        writes.newChainSecuredAccount("dup", "dup");
+    }
+
     function test_addAction_thenListActions_thenRemove() public {
         vm.prank(user);
         writes.newChainSecuredAccount("alice", "primary");
@@ -346,6 +509,488 @@ contract AccountsTest is BaseTest {
         vm.prank(user);
         writes.registerWalletDerivation(hash, pkpB, 44, "b2", "b2");
         assertEq(views_.getWalletDerivation(hash, pkpB), 44);
+    }
+
+    function test_registerWalletDerivation_crossAccountHijackReverts() public {
+        // Victim registers a wallet; its derivationPath is public on-chain.
+        vm.prank(user);
+        writes.newChainSecuredAccount("victim", "victim");
+        uint256 victimHash = apiKeyHashOf(user);
+
+        address pkpAddr = address(0xBEEF);
+        vm.prank(user);
+        writes.registerWalletDerivation(victimHash, pkpAddr, 42, "v", "v");
+        assertEq(views_.getPkpOwnerMaster(pkpAddr), victimHash);
+
+        // Attacker with their own account cannot register the victim's pkpId,
+        // even though the attacker's account has no entry for it.
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "PKP owned by another account"
+            )
+        );
+        writes.registerWalletDerivation(attackerHash, pkpAddr, 42, "a", "a");
+    }
+
+    function test_pkpOwnerBinding_survivesRemoveWalletDerivation() public {
+        vm.prank(user);
+        writes.newChainSecuredAccount("victim", "victim");
+        uint256 victimHash = apiKeyHashOf(user);
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+
+        address pkpAddr = address(0xBEEF);
+        vm.prank(user);
+        writes.registerWalletDerivation(victimHash, pkpAddr, 42, "v", "v");
+        vm.prank(user);
+        writes.removeWalletDerivation(victimHash, pkpAddr);
+
+        // Binding is kept after the hard delete.
+        assertEq(views_.getPkpOwnerMaster(pkpAddr), victimHash);
+
+        // Attacker still cannot claim the deleted address.
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "PKP owned by another account"
+            )
+        );
+        writes.registerWalletDerivation(attackerHash, pkpAddr, 42, "a", "a");
+
+        // The original owner can re-register (recovery / re-add after delete).
+        vm.prank(user);
+        writes.registerWalletDerivation(victimHash, pkpAddr, 42, "v2", "v2");
+        assertEq(views_.getWalletDerivation(victimHash, pkpAddr), 42);
+        assertEq(views_.getPkpOwnerMaster(pkpAddr), victimHash);
+    }
+
+    function test_removeBackfillPkpOwners_preservesBindingsAndBlocksHijack() public {
+        bytes4 selector = LegacyOwnerBackfills.backfillPkpOwners.selector;
+        assertEq(loupe.facetAddress(selector), address(0));
+        bytes4[] memory selectors = new bytes4[](1);
+        selectors[0] = selector;
+        IDiamond.FacetCut[] memory cuts = new IDiamond.FacetCut[](1);
+        cuts[0] = IDiamond.FacetCut(
+            address(new LegacyOwnerBackfills()), IDiamond.FacetCutAction.Add, selectors
+        );
+        vm.prank(owner);
+        cut.diamondCut(cuts, address(0), "");
+        LegacyOwnerBackfills legacy = LegacyOwnerBackfills(d.diamond);
+        vm.prank(user);
+        writes.newChainSecuredAccount("legacy", "legacy");
+        uint256 legacyHash = apiKeyHashOf(user);
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+
+        // Simulate a pre-migration wallet: registered in the account but with no
+        // global owner binding (as if registered before the upgrade).
+        address legacyPkp = address(0x1E9AC7);
+        vm.prank(stranger);
+        writes.registerWalletDerivation(attackerHash, legacyPkp, 8, "a", "a");
+        assertEq(uint256(vm.load(address(views_), _pkpOwnerSlot(legacyPkp))), attackerHash);
+        vm.store(address(views_), _pkpOwnerSlot(legacyPkp), bytes32(0));
+        assertEq(views_.getPkpOwnerMaster(legacyPkp), 0);
+
+        address[] memory pkpIds = new address[](1);
+        pkpIds[0] = legacyPkp;
+        uint256[] memory masters = new uint256[](1);
+        masters[0] = legacyHash;
+
+        // Only the diamond owner or config operator may backfill.
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.OnlyConfigOperatorOrOwner.selector,
+                stranger
+            )
+        );
+        legacy.backfillPkpOwners(pkpIds, masters);
+
+        vm.prank(owner);
+        legacy.backfillPkpOwners(pkpIds, masters);
+        assertEq(views_.getPkpOwnerMaster(legacyPkp), legacyHash);
+
+        // Backfill never re-assigns an existing binding (idempotent, skip-if-set).
+        masters[0] = attackerHash;
+        vm.prank(owner);
+        legacy.backfillPkpOwners(pkpIds, masters);
+        assertEq(views_.getPkpOwnerMaster(legacyPkp), legacyHash);
+
+        vm.prank(user);
+        writes.registerWalletDerivation(legacyHash, legacyPkp, 7, "l", "l");
+
+        cuts[0] = IDiamond.FacetCut(address(0), IDiamond.FacetCutAction.Remove, selectors);
+        vm.prank(owner);
+        cut.diamondCut(cuts, address(0), "");
+        assertEq(loupe.facetAddress(selector), address(0));
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(FunctionNotFound.selector, selector));
+        legacy.backfillPkpOwners(pkpIds, masters);
+        assertEq(views_.getPkpOwnerMaster(legacyPkp), legacyHash);
+        assertEq(views_.getWalletDerivation(legacyHash, legacyPkp), 7);
+        vm.expectRevert(
+            abi.encodeWithSelector(AppStorage.InvalidRequest.selector, "PKP owned by another account")
+        );
+        views_.getWalletDerivation(attackerHash, legacyPkp);
+
+        vm.prank(user);
+        writes.removeWalletDerivation(legacyHash, legacyPkp);
+
+        // A fresh account cannot claim the PKP after the original removes it.
+        // The historical attacker's stale row was already tested above.
+        vm.prank(apiPayer);
+        writes.newChainSecuredAccount("new attacker", "new attacker");
+        vm.prank(apiPayer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "PKP owned by another account"
+            )
+        );
+        writes.registerWalletDerivation(apiKeyHashOf(apiPayer), legacyPkp, 7, "a", "a");
+
+        // ...but the legacy owner can (e.g. #450 recovery re-registration).
+        vm.prank(user);
+        writes.registerWalletDerivation(legacyHash, legacyPkp, 7, "l", "l");
+        assertEq(views_.getWalletDerivation(legacyHash, legacyPkp), 7);
+    }
+
+    /// @dev Storage slot of `pkpIdToOwnerMaster[pkpId]`. The mapping is at field
+    ///      index 18 (counting the two EnumerableSet fields as 2 slots each) at
+    ///      base slot keccak256("com.litprotocol.accountconfig.storage"). Used to
+    ///      plant the pre-fix on-chain state that the public API can no longer
+    ///      create.
+    function _pkpOwnerSlot(address pkpId) internal pure returns (bytes32) {
+        bytes32 base = keccak256("com.litprotocol.accountconfig.storage");
+        bytes32 mapSlot = bytes32(uint256(base) + 18);
+        return keccak256(abi.encode(pkpId, mapSlot));
+    }
+
+    /// @dev Storage slot of `pathToOwnerMaster[derivationPath]`. Appended
+    ///      immediately after pkpIdToOwnerMaster, so field index 19.
+    function _pathOwnerSlot(
+        uint256 derivationPath
+    ) internal pure returns (bytes32) {
+        bytes32 base = keccak256("com.litprotocol.accountconfig.storage");
+        bytes32 mapSlot = bytes32(uint256(base) + 19);
+        return keccak256(abi.encode(derivationPath, mapSlot));
+    }
+
+    /// The core path-aliasing attack: the private key is a stateless function of
+    /// the derivationPath, and paths are public. The #575 pkpId binding only
+    /// protects the address label, so an attacker could register a FRESH,
+    /// self-owned pkpId carrying the victim's public path and drive the node to
+    /// release the victim's key. The path first-owner binding blocks that at
+    /// registration — note the attacker uses a DIFFERENT pkpId than the victim,
+    /// so it is the path binding, not the pkpId binding, doing the work.
+    function test_registerWalletDerivation_pathAliasingAcrossAccountsReverts()
+        public
+    {
+        uint256 victimPath = 42;
+
+        vm.prank(user);
+        writes.newChainSecuredAccount("victim", "victim");
+        uint256 victimHash = apiKeyHashOf(user);
+        address victimPkp = address(0xBEEF);
+        vm.prank(user);
+        writes.registerWalletDerivation(
+            victimHash,
+            victimPkp,
+            victimPath,
+            "v",
+            "v"
+        );
+        assertEq(views_.getPathOwnerMaster(victimPath), victimHash);
+
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+
+        // Fresh pkpId label the attacker legitimately owns, aliased to the
+        // victim's path. The pkpId binding would let this through (new address);
+        // the path binding is what must revert.
+        address attackerPkp = address(0xF00D);
+        assertEq(views_.getPkpOwnerMaster(attackerPkp), 0);
+
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "derivation path owned by another account"
+            )
+        );
+        writes.registerWalletDerivation(
+            attackerHash,
+            attackerPkp,
+            victimPath,
+            "a",
+            "a"
+        );
+    }
+
+    function test_pathOwnerBinding_survivesRemoveAndAllowsOwnerReRegister()
+        public
+    {
+        uint256 path = 42;
+
+        vm.prank(user);
+        writes.newChainSecuredAccount("victim", "victim");
+        uint256 victimHash = apiKeyHashOf(user);
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+
+        address victimPkp = address(0xBEEF);
+        vm.prank(user);
+        writes.registerWalletDerivation(victimHash, victimPkp, path, "v", "v");
+
+        // Hard delete wipes the account-local entry, but the path binding is
+        // kept (symmetric with the pkpId binding) so the key stays claimable
+        // only by its first owner.
+        vm.prank(user);
+        writes.removeWalletDerivation(victimHash, victimPkp);
+        assertEq(views_.getPathOwnerMaster(path), victimHash);
+
+        // Attacker cannot claim the freed path under any fresh label.
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "derivation path owned by another account"
+            )
+        );
+        writes.registerWalletDerivation(
+            attackerHash,
+            address(0xF00D),
+            path,
+            "a",
+            "a"
+        );
+
+        // The original owner can re-register the path (recovery flow intact).
+        vm.prank(user);
+        writes.registerWalletDerivation(victimHash, victimPkp, path, "v2", "v2");
+        assertEq(views_.getWalletDerivation(victimHash, victimPkp), path);
+    }
+
+    function test_getWalletDerivation_preExistingPathAliasFailsClosed() public {
+        uint256 path = 42;
+
+        // Attacker holds a legitimate account-local entry keyed on a fresh label
+        // pointing at `path` — exactly the stale row a pre-fix aliasing attack
+        // would have left behind (pkpId owner = attacker, so the pkpId check
+        // passes).
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+        address attackerPkp = address(0xF00D);
+        vm.prank(stranger);
+        writes.registerWalletDerivation(
+            attackerHash,
+            attackerPkp,
+            path,
+            "a",
+            "a"
+        );
+
+        // Sanity-check the slot math against the contract's own getter before
+        // relying on vm.store (guards against storage-layout drift).
+        assertEq(
+            uint256(vm.load(address(views_), _pathOwnerSlot(path))),
+            attackerHash
+        );
+
+        // Simulate post-backfill truth: the VICTIM was the real first owner of
+        // the path. (The attacker still owns the pkpId label locally.)
+        uint256 victimHash = apiKeyHashOf(user);
+        vm.store(address(views_), _pathOwnerSlot(path), bytes32(victimHash));
+        assertEq(views_.getPathOwnerMaster(path), victimHash);
+
+        // The node's key-release path resolves via getWalletDerivation with the
+        // caller's account hash. The pkpId check passes (attacker owns the
+        // label), but the path check now fails closed — neutralizing an alias
+        // that predates the upgrade.
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "derivation path owned by another account"
+            )
+        );
+        views_.getWalletDerivation(attackerHash, attackerPkp);
+    }
+
+    function test_removeBackfillPathOwners_preservesBindingsAndBlocksAliasing()
+        public
+    {
+        bytes4 selector = LegacyOwnerBackfills.backfillPathOwners.selector;
+        // Fresh deployments must not expose the retired selector.
+        assertEq(loupe.facetAddress(selector), address(0));
+        bytes4[] memory selectors = new bytes4[](1);
+        selectors[0] = selector;
+        IDiamond.FacetCut[] memory cuts = new IDiamond.FacetCut[](1);
+        cuts[0] = IDiamond.FacetCut(
+            address(new LegacyOwnerBackfills()), IDiamond.FacetCutAction.Add, selectors
+        );
+        vm.prank(owner);
+        cut.diamondCut(cuts, address(0), "");
+        LegacyOwnerBackfills legacy = LegacyOwnerBackfills(d.diamond);
+        uint256 legacyPath = 4242;
+
+        vm.prank(user);
+        writes.newChainSecuredAccount("legacy", "legacy");
+        uint256 legacyHash = apiKeyHashOf(user);
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+
+        // Recreate a pre-fix alias: the label belongs to the attacker, but
+        // the historical path has not yet been bound to its original owner.
+        vm.prank(stranger);
+        writes.registerWalletDerivation(attackerHash, address(0xCAFE), legacyPath, "a", "a");
+        assertEq(uint256(vm.load(address(views_), _pathOwnerSlot(legacyPath))), attackerHash);
+        vm.store(address(views_), _pathOwnerSlot(legacyPath), bytes32(0));
+        assertEq(views_.getPathOwnerMaster(legacyPath), 0);
+
+        uint256[] memory paths = new uint256[](1);
+        paths[0] = legacyPath;
+        uint256[] memory masters = new uint256[](1);
+        masters[0] = legacyHash;
+
+        // Only the diamond owner or config operator may backfill.
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.OnlyConfigOperatorOrOwner.selector,
+                stranger
+            )
+        );
+        legacy.backfillPathOwners(paths, masters);
+
+        vm.prank(owner);
+        legacy.backfillPathOwners(paths, masters);
+        assertEq(views_.getPathOwnerMaster(legacyPath), legacyHash);
+
+        // Idempotent: never re-assigns an existing binding.
+        masters[0] = attackerHash;
+        vm.prank(owner);
+        legacy.backfillPathOwners(paths, masters);
+        assertEq(views_.getPathOwnerMaster(legacyPath), legacyHash);
+
+        vm.prank(user);
+        writes.registerWalletDerivation(legacyHash, address(0xBEEF), legacyPath, "l", "l");
+
+        // Retire the selector using the same Remove action as the deployment manifest.
+        cuts[0] = IDiamond.FacetCut(address(0), IDiamond.FacetCutAction.Remove, selectors);
+        vm.prank(owner);
+        cut.diamondCut(cuts, address(0), "");
+        assertEq(loupe.facetAddress(selector), address(0));
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(FunctionNotFound.selector, selector));
+        legacy.backfillPathOwners(paths, masters);
+        assertEq(views_.getPathOwnerMaster(legacyPath), legacyHash);
+
+        assertEq(views_.getWalletDerivation(legacyHash, address(0xBEEF)), legacyPath);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "derivation path owned by another account"
+            )
+        );
+        views_.getWalletDerivation(attackerHash, address(0xCAFE));
+
+        // Post-backfill, the attacker cannot alias the legacy path...
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "derivation path owned by another account"
+            )
+        );
+        writes.registerWalletDerivation(
+            attackerHash,
+            address(0xF00D),
+            legacyPath,
+            "a",
+            "a"
+        );
+
+        // ...but the legacy owner can still register another label for it.
+        vm.prank(user);
+        writes.registerWalletDerivation(
+            legacyHash,
+            address(0xBEF0),
+            legacyPath,
+            "l",
+            "l"
+        );
+        assertEq(
+            views_.getWalletDerivation(legacyHash, address(0xBEF0)),
+            legacyPath
+        );
+    }
+
+    function test_getWalletDerivation_preExistingHijackFailsClosed() public {
+        // Register under the attacker legitimately: sets owner=attacker AND the
+        // attacker's account-local pkpData entry (this is the stale row a pre-fix
+        // hijack would have left behind).
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+        address pkpAddr = address(0xBEEF);
+        vm.prank(stranger);
+        writes.registerWalletDerivation(attackerHash, pkpAddr, 42, "a", "a");
+
+        // Sanity: verify our slot math matches the contract's own getter before
+        // we rely on vm.store — guards against a silent storage-layout drift.
+        assertEq(
+            uint256(vm.load(address(views_), _pkpOwnerSlot(pkpAddr))),
+            attackerHash
+        );
+
+        // Simulate the post-backfill truth: the VICTIM was the real first owner.
+        uint256 victimHash = apiKeyHashOf(user);
+        vm.store(address(views_), _pkpOwnerSlot(pkpAddr), bytes32(victimHash));
+        assertEq(views_.getPkpOwnerMaster(pkpAddr), victimHash);
+
+        // The node's signing path calls getWalletDerivation with the caller's
+        // account hash. The attacker still has a local entry, but the view now
+        // fails closed because the wallet is owned by another account — this is
+        // what neutralizes a hijack that already happened before the upgrade.
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "PKP owned by another account"
+            )
+        );
+        views_.getWalletDerivation(attackerHash, pkpAddr);
+    }
+
+    function test_getWalletDerivation_legacyUnboundStillReadable() public {
+        // A pre-migration wallet has a local entry but no owner binding yet
+        // (owner==0). It must keep resolving so signing doesn't break in the
+        // window between the facet upgrade and the backfill run.
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("u", "u");
+        uint256 hash = apiKeyHashOf(stranger);
+        address pkpAddr = address(0xBEEF);
+        vm.prank(stranger);
+        writes.registerWalletDerivation(hash, pkpAddr, 42, "a", "a");
+
+        // Clear the binding to reproduce the not-yet-backfilled legacy state.
+        vm.store(address(views_), _pkpOwnerSlot(pkpAddr), bytes32(uint256(0)));
+        assertEq(views_.getPkpOwnerMaster(pkpAddr), 0);
+
+        // owner==0 falls through: the wallet still resolves for its account.
+        assertEq(views_.getWalletDerivation(hash, pkpAddr), 42);
     }
 
     function test_removeWalletDerivation_unregisteredReverts() public {
@@ -485,5 +1130,237 @@ contract AccountsTest is BaseTest {
         assertEq(views_.getAccountWalletAddress(aliasHash), user);
         ViewsFacet.UsageApiKeyReturn[] memory keys = views_.listApiKeys(master, 0, 10);
         assertEq(keys.length, 0);
+    }
+
+    // --- Usage API key expiration enforcement (issue #31 / #24 finding 4) ---
+
+    /// @notice Registers a wildcard-execute usage key with the given expiration
+    ///         and returns its hash. The key can execute any action in any group.
+    function _wildcardUsageKey(
+        uint256 master,
+        uint256 expiration
+    ) internal returns (uint256 usageHash) {
+        usageHash = uint256(keccak256("expiring-usage-key"));
+        uint256[] memory empty = new uint256[](0);
+        uint256[] memory wildcard = new uint256[](1);
+        wildcard[0] = 0; // group-0 wildcard: execute in any group
+        vm.prank(user);
+        writes.setUsageApiKey(
+            master,
+            usageHash,
+            expiration,
+            0,
+            "expiring",
+            "expiring usage key",
+            false,
+            false,
+            false,
+            empty,
+            empty,
+            empty,
+            wildcard
+        );
+    }
+
+    /// @notice Adds a group to `master` holding `cidHash` and `wallet`, pranked
+    ///         by `admin` (the account's admin wallet). Post-#62 a wildcard
+    ///         usage key authorizes a request only when it resolves to a group
+    ///         in its own account, so wildcard tests must register one.
+    function _registerActionWalletGroup(
+        address admin,
+        uint256 master,
+        uint256 cidHash,
+        address wallet
+    ) internal returns (uint256 groupId) {
+        uint256[] memory cids = new uint256[](1);
+        cids[0] = cidHash;
+        address[] memory pkps = new address[](1);
+        pkps[0] = wallet;
+        vm.prank(admin);
+        groupId = writes.addGroup(master, "grp", "", cids, pkps);
+    }
+
+    function test_canExecuteAction_deniesExpiredUsageKey() public {
+        vm.prank(user);
+        writes.newChainSecuredAccount("alice", "primary");
+        uint256 master = apiKeyHashOf(user);
+
+        uint256 usageHash = _wildcardUsageKey(master, block.timestamp + 7 days);
+        uint256 cidHash = uint256(keccak256("some-action"));
+
+        // A wildcard key is scoped to its own account's groups (#62), so
+        // register a group holding this action + wallet for it to resolve to.
+        _registerActionWalletGroup(user, master, cidHash, address(0xBEEF));
+
+        // Before expiry the key authorizes execution and wallet use.
+        assertTrue(views_.canExecuteAction(usageHash, cidHash));
+        assertTrue(views_.canExecuteActionFast(usageHash, cidHash));
+        assertTrue(
+            views_.canUseWalletInAction(usageHash, cidHash, address(0xBEEF))
+        );
+        assertTrue(
+            views_.canUseWalletInActionFast(usageHash, cidHash, address(0xBEEF))
+        );
+        (bool canExec, bool canWallet) = views_.canExecuteActionAndUseWallet(
+            usageHash,
+            cidHash,
+            address(0xBEEF)
+        );
+        assertTrue(canExec);
+        assertTrue(canWallet);
+
+        // Warp past the expiration. Every authorization path must now deny.
+        vm.warp(block.timestamp + 8 days);
+
+        assertFalse(views_.canExecuteAction(usageHash, cidHash));
+        assertFalse(views_.canExecuteActionFast(usageHash, cidHash));
+        assertFalse(
+            views_.canUseWalletInAction(usageHash, cidHash, address(0xBEEF))
+        );
+        assertFalse(
+            views_.canUseWalletInActionFast(usageHash, cidHash, address(0xBEEF))
+        );
+        (canExec, canWallet) = views_.canExecuteActionAndUseWallet(
+            usageHash,
+            cidHash,
+            address(0xBEEF)
+        );
+        assertFalse(canExec);
+        assertFalse(canWallet);
+    }
+
+    function test_canExecuteAction_deniesKeyExpiredAtCreation() public {
+        // A key whose expiration is already in the past must never authorize,
+        // even immediately after being written. block.timestamp is warped
+        // forward first so an expiration in the past is expressible.
+        vm.warp(30 days);
+        vm.prank(user);
+        writes.newChainSecuredAccount("alice", "primary");
+        uint256 master = apiKeyHashOf(user);
+
+        uint256 usageHash = _wildcardUsageKey(master, block.timestamp - 1 days);
+        uint256 cidHash = uint256(keccak256("some-action"));
+
+        assertFalse(views_.canExecuteAction(usageHash, cidHash));
+        assertFalse(views_.canExecuteActionFast(usageHash, cidHash));
+    }
+
+    function test_canExecuteAction_zeroExpirationNeverExpires() public {
+        // expiration == 0 is the "never expires" sentinel and must keep
+        // authorizing even far into the future.
+        vm.prank(user);
+        writes.newChainSecuredAccount("alice", "primary");
+        uint256 master = apiKeyHashOf(user);
+
+        uint256 usageHash = _wildcardUsageKey(master, 0);
+        uint256 cidHash = uint256(keccak256("some-action"));
+
+        // Wildcard keys resolve only against their own account's groups (#62).
+        _registerActionWalletGroup(user, master, cidHash, address(0xBEEF));
+
+        assertTrue(views_.canExecuteAction(usageHash, cidHash));
+
+        vm.warp(block.timestamp + 3650 days);
+        assertTrue(views_.canExecuteAction(usageHash, cidHash));
+        assertTrue(views_.canExecuteActionFast(usageHash, cidHash));
+    }
+
+    // --- Wildcard key cross-account PKP scoping (issue #62) ---
+
+    /// @notice A wildcard usage key (executeInGroups=[0]) must NOT let its
+    ///         account reach a PKP/wallet that belongs to another account.
+    ///         Before the fix, the group-0 short-circuit returned true for any
+    ///         (cid, wallet), so account B's wildcard key could run crypto ops
+    ///         with account A's PKP in the shared node keystore.
+    function test_wildcardKey_cannotUseAnotherAccountsWallet() public {
+        // Account A (victim) owns walletA and registers it in a group.
+        vm.prank(user);
+        writes.newChainSecuredAccount("alice", "primary");
+        uint256 masterA = apiKeyHashOf(user);
+        uint256 cidHash = uint256(keccak256("shared-action"));
+        address walletA = address(0xA11CE);
+        _registerActionWalletGroup(user, masterA, cidHash, walletA);
+
+        // Account B (attacker) holds a wildcard usage key but never registers
+        // walletA (or any group referencing it).
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("bob", "primary");
+        uint256 masterB = apiKeyHashOf(stranger);
+        uint256[] memory empty = new uint256[](0);
+        uint256[] memory wildcard = new uint256[](1);
+        wildcard[0] = 0;
+        uint256 usageB = uint256(keccak256("bob-wildcard-usage"));
+        vm.prank(stranger);
+        writes.setUsageApiKey(
+            masterB,
+            usageB,
+            0,
+            0,
+            "bob",
+            "",
+            false,
+            false,
+            false,
+            empty,
+            empty,
+            empty,
+            wildcard
+        );
+
+        // B's wildcard key cannot use A's wallet: no group in B resolves it.
+        assertFalse(
+            views_.canUseWalletInAction(usageB, cidHash, walletA),
+            "wildcard key reached another account's wallet"
+        );
+        assertFalse(
+            views_.canUseWalletInActionFast(usageB, cidHash, walletA),
+            "wildcard key (fast) reached another account's wallet"
+        );
+        (bool canExec, bool canWallet) = views_.canExecuteActionAndUseWallet(
+            usageB,
+            cidHash,
+            walletA
+        );
+        assertFalse(canWallet, "wildcard key (combined) reached foreign wallet");
+        // The action isn't registered to B either, so execution is denied too.
+        assertFalse(canExec, "wildcard key executed unregistered action");
+        assertFalse(views_.canExecuteAction(usageB, cidHash));
+        assertFalse(views_.canExecuteActionFast(usageB, cidHash));
+
+        // Positive control: once B registers its own wallet in its own group,
+        // the wildcard key authorizes B's wallet (but still not A's).
+        address walletB = address(0xB0B);
+        _registerActionWalletGroup(stranger, masterB, cidHash, walletB);
+        assertTrue(views_.canUseWalletInAction(usageB, cidHash, walletB));
+        assertTrue(views_.canUseWalletInActionFast(usageB, cidHash, walletB));
+        assertFalse(views_.canUseWalletInAction(usageB, cidHash, walletA));
+        assertFalse(views_.canUseWalletInActionFast(usageB, cidHash, walletA));
+    }
+
+    function test_setAdminApiPayerAccount_ownerOnly() public {
+        // Owner can (re)assign the admin api payer.
+        vm.prank(owner);
+        apiConfig.setAdminApiPayerAccount(user);
+        assertEq(views_.adminApiPayerAccount(), user);
+    }
+
+    function test_setAdminApiPayerAccount_apiPayerCannotSelfPromote() public {
+        // A regular api_payer must NOT be able to promote itself (or anyone)
+        // to admin api payer — that would let it seize the whole payer set.
+        vm.prank(apiPayer);
+        vm.expectRevert(abi.encodeWithSelector(NotContractOwner.selector, apiPayer, owner));
+        apiConfig.setAdminApiPayerAccount(apiPayer);
+
+        // The existing admin api payer likewise cannot rotate the role itself.
+        vm.prank(adminApiPayer);
+        vm.expectRevert(
+            abi.encodeWithSelector(NotContractOwner.selector, adminApiPayer, owner)
+        );
+        apiConfig.setAdminApiPayerAccount(adminApiPayer);
+
+        // A stranger obviously cannot either.
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(NotContractOwner.selector, stranger, owner));
+        apiConfig.setAdminApiPayerAccount(stranger);
     }
 }

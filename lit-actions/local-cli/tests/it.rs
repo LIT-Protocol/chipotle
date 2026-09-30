@@ -189,9 +189,9 @@ fn missing_key_is_generated_and_reused() {
 fn run_executes_a_shell_bundle_and_surfaces_response() {
     let (dir, state) = workspace();
     let d = dir.path();
-    std::fs::write(d.join("lit.json"), r#"{"entrypoint":"run.sh"}"#).unwrap();
+    // No manifest needed: the bundle's root startup.sh is the entrypoint.
     std::fs::write(
-        d.join("run.sh"),
+        d.join("startup.sh"),
         "lit print \"hi\"\nKEY=$(lit get-private-key pkp-1)\nlit set-response \"len=${#KEY}\"\n",
     )
     .unwrap();
@@ -210,10 +210,9 @@ fn run_executes_a_shell_bundle_and_surfaces_response() {
 fn run_propagates_nonzero_exit_and_withholds_response() {
     let (dir, state) = workspace();
     let d = dir.path();
-    std::fs::write(d.join("lit.json"), r#"{"entrypoint":"run.sh"}"#).unwrap();
     // Record a response, then fail: a failed run must NOT surface it on stdout.
     std::fs::write(
-        d.join("run.sh"),
+        d.join("startup.sh"),
         "lit set-response should-not-be-printed\necho boom >&2\nexit 3\n",
     )
     .unwrap();
@@ -228,6 +227,95 @@ fn run_propagates_nonzero_exit_and_withholds_response() {
 }
 
 #[test]
+fn run_startup_script_flag_overrides_bundle_script() {
+    // The --startup-script override is the local analog of the
+    // request-supplied startup_script: same bundle, different script.
+    let (dir, state) = workspace();
+    let d = dir.path();
+    std::fs::write(d.join("startup.sh"), "lit set-response from-bundle\n").unwrap();
+    std::fs::write(d.join("other.sh"), "lit set-response from-override\n").unwrap();
+
+    let out = lit(d, &state, &["run", "--startup-script", "other.sh"]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim_end(),
+        "from-override"
+    );
+}
+
+#[test]
+fn run_startup_script_resolves_against_cwd_not_dir() {
+    // A relative --startup-script is CWD-relative (like every path flag);
+    // the script still executes with --dir as its working directory.
+    let (dir, state) = workspace();
+    let d = dir.path();
+    let bundle = d.join("bundle");
+    std::fs::create_dir(&bundle).unwrap();
+    std::fs::write(bundle.join("startup.sh"), "lit set-response from-bundle\n").unwrap();
+    std::fs::write(bundle.join("payload.txt"), "payload").unwrap();
+    // Script lives in the CWD, not the bundle, and reads a bundle file.
+    std::fs::write(
+        d.join("send.sh"),
+        "lit set-response \"cwd-script: $(cat payload.txt)\"\n",
+    )
+    .unwrap();
+
+    let out = lit(
+        d,
+        &state,
+        &["run", "--dir", "bundle", "--startup-script", "send.sh"],
+    );
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim_end(),
+        "cwd-script: payload"
+    );
+}
+
+#[test]
+fn run_without_any_startup_script_fails() {
+    let (dir, state) = workspace();
+    let out = lit(dir.path(), &state, &["run"]);
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("startup.sh"),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn run_injects_js_params_as_env_vars() {
+    // Same injection rules as the sandbox: strings verbatim, other JSON
+    // compact, reserved/invalid names skipped (PATH must stay intact or the
+    // `lit` calls below could not even resolve).
+    let (dir, state) = workspace();
+    let d = dir.path();
+    std::fs::write(
+        d.join("lit.job.json"),
+        r#"{"jsParams":{"name":"lit","count":2,"PATH":"/evil","not-a-name":"x"}}"#,
+    )
+    .unwrap();
+    std::fs::write(d.join("startup.sh"), "lit set-response \"$name-$count\"\n").unwrap();
+
+    let out = lit(d, &state, &["run"]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), "lit-2");
+}
+
+#[test]
 fn read_only_command_leaves_no_state_dir() {
     let (dir, state) = workspace();
     // A read-only command must not generate a master key or create .lit-local.
@@ -238,16 +326,17 @@ fn read_only_command_leaves_no_state_dir() {
 #[test]
 fn cli_env_wiring_overrides_manifest_env() {
     // The manifest tries to set LIT_ACTION_IPFS_ID; the CLI's --ipfs-id must
-    // win (manifest.env is applied first so CLI wiring can't be clobbered).
+    // win (reserved names are filtered from manifest env, same as the
+    // sandbox, and the CLI wiring is applied last).
     let (dir, state) = workspace();
     let d = dir.path();
     std::fs::write(
         d.join("lit.json"),
-        r#"{"entrypoint":"run.sh","env":{"LIT_ACTION_IPFS_ID":"QmFromManifest"}}"#,
+        r#"{"env":{"LIT_ACTION_IPFS_ID":"QmFromManifest"}}"#,
     )
     .unwrap();
     std::fs::write(
-        d.join("run.sh"),
+        d.join("startup.sh"),
         "lit set-response \"$LIT_ACTION_IPFS_ID\"\n",
     )
     .unwrap();
@@ -286,7 +375,6 @@ fn run_discovers_job_next_to_the_bundle() {
     let d = dir.path();
     let bundle = d.join("bundle");
     std::fs::create_dir(&bundle).unwrap();
-    std::fs::write(bundle.join("lit.json"), r#"{"entrypoint":"run.sh"}"#).unwrap();
     std::fs::write(
         bundle.join("lit.job.json"),
         r#"{"ipfsId":"QmBundleCid","jsParams":{"from":"bundle"}}"#,
@@ -299,12 +387,12 @@ fn run_discovers_job_next_to_the_bundle() {
     )
     .unwrap();
     std::fs::write(
-        bundle.join("run.sh"),
+        bundle.join("startup.sh"),
         "lit set-response \"$(lit params)|$LIT_ACTION_IPFS_ID\"\n",
     )
     .unwrap();
 
-    let out = lit(d, &state, &["run", "--manifest", "bundle/lit.json"]);
+    let out = lit(d, &state, &["run", "--dir", "bundle"]);
     assert!(
         out.status.success(),
         "stderr: {}",

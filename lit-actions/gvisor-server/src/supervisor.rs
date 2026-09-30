@@ -1,11 +1,18 @@
-//! One execution end-to-end: bundle resolve → per-exec guest-ops socket →
-//! sandbox spawn → wait (timeout / usage ticks / fatal op errors) → teardown.
+//! One execution end-to-end: bundle resolve → startup script materialize →
+//! per-exec guest-ops socket → sandbox spawn → wait (timeout / usage ticks /
+//! fatal op errors) → teardown.
 //!
 //! Mirrors the JS runner's `runtime::execute_with_worker` control flow, with
 //! the sandbox process standing in for the V8 isolate: termination is "the
-//! entrypoint exits" (serverless semantics), `SetResponse` merely records
+//! startup script exits" (serverless semantics), `SetResponse` merely records
 //! the response api-server-side, and timeout/cancel are hard kills reported
 //! with the same `tonic::Status` codes and messages as the JS runner.
+//!
+//! The sandbox only ever executes `bash startup.sh` (CPL-355). The script
+//! comes from the request when supplied — so one cached bundle serves many
+//! different startup scripts — falling back to a `startup.sh` at the bundle
+//! root. Authorization stays keyed on the bundle CID alone; the per-request
+//! script is authenticated by API-key authorization, not content-addressing.
 
 use std::os::unix::fs::PermissionsExt as _;
 use std::process::Stdio;
@@ -23,10 +30,10 @@ use tonic::Status;
 use tracing::{debug, error, instrument};
 
 use crate::bridge::OpBridge;
-use crate::bundle::{Bundle, BundleCache};
+use crate::bundle::{Bundle, BundleCache, STARTUP_SCRIPT_FILE};
 use crate::guest_service::GuestOpsService;
 use crate::proto::{GuestOpsServer, Job};
-use crate::sandbox::{ENV_ACTION_IPFS_ID, ExecSpec, OP_SOCK_FILE, SandboxRuntime};
+use crate::sandbox::{ENV_ACTION_IPFS_ID, ENV_OP_SOCK, ExecSpec, OP_SOCK_FILE, SandboxRuntime};
 
 /// Same default as the JS runner.
 pub const DEFAULT_TIMEOUT_MS: u64 = 1000 * 60 * 15; // 15 minutes
@@ -46,6 +53,18 @@ const STDERR_TAIL_BYTES: usize = 8 * 1024;
 /// Cap on a single forwarded output line; longer lines are forwarded in
 /// chunks of this size so guest output can't balloon runner memory.
 const FORWARD_CHUNK_BYTES: u64 = 64 * 1024;
+
+/// Per-value / total caps on js-params injected into the sandbox
+/// environment. Oversized values are skipped (still available via
+/// `lit params`) rather than risking an `execve` E2BIG inside the sandbox.
+const MAX_PARAM_ENV_VALUE_BYTES: usize = 64 * 1024;
+const MAX_PARAM_ENV_TOTAL_BYTES: usize = 1024 * 1024;
+
+/// Environment variables the runtime owns; neither js-params nor manifest
+/// env may shadow them (a param named PATH must not break `lit` resolution
+/// inside the guest, and a manifest-set LIT_OP_SOCK must not sever the op
+/// loop).
+const RESERVED_ENV: [&str; 5] = ["PATH", "HOME", "TMPDIR", ENV_OP_SOCK, ENV_ACTION_IPFS_ID];
 
 pub struct Supervisor {
     runtime: Arc<dyn SandboxRuntime>,
@@ -103,21 +122,76 @@ impl Supervisor {
         let exec_dir = tempfile::tempdir().context("failed to create exec dir")?;
         let sock_dir = exec_dir.path().join("sock");
         std::fs::create_dir_all(&sock_dir)?;
+        // Lock the socket's directory to 0700 rather than trusting the umask
+        // default (~0755). This is purely a HOST-side gate against other host
+        // uids / co-tenant processes: only this process's uid can traverse it
+        // on the host (the parent exec tempdir is already 0700; this hardens
+        // the immediate dir too). It does NOT restrict the sandboxed guest —
+        // the guest reaches the socket through gVisor's gofer, which runs as
+        // this process's uid (the dir owner), not by traversing this dir as
+        // its own in-sandbox uid. Guest-side access is governed by the socket
+        // mode set below, so a non-root guest uid would still connect.
+        std::fs::set_permissions(&sock_dir, std::fs::Permissions::from_mode(0o700))?;
         let sock_path = sock_dir.join(OP_SOCK_FILE);
+
+        // Materialize the startup script — the only thing the sandbox will
+        // execute. The request-supplied script wins (one cached bundle, many
+        // scripts); otherwise the bundle must ship one at its root.
+        let startup_dir = exec_dir.path().join("startup");
+        std::fs::create_dir_all(&startup_dir)?;
+        match req
+            .startup_script
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+        {
+            Some(script) => {
+                std::fs::write(startup_dir.join(STARTUP_SCRIPT_FILE), script)
+                    .context("failed to write request startup script")?;
+            }
+            None => {
+                let bundled = bundle.dir.join(STARTUP_SCRIPT_FILE);
+                if !bundled.is_file() {
+                    bail!(
+                        "nothing to execute: the request supplied no startup script and the \
+                         bundle has no {STARTUP_SCRIPT_FILE} at its root"
+                    );
+                }
+                std::fs::copy(&bundled, startup_dir.join(STARTUP_SCRIPT_FILE))
+                    .context("failed to stage bundle startup script")?;
+            }
+        }
 
         // Guest-ops server on the per-exec socket. Bound BEFORE the sandbox
         // spawns so the guest never races the listener.
         let listener = UnixListener::bind(&sock_path)
             .with_context(|| format!("failed to bind op socket {}", sock_path.display()))?;
-        // The guest may run as any uid; the socket sits in a 0700 host
-        // tempdir, so host-side exposure is unchanged.
+        // 0777 is the GUEST-side gate: the in-sandbox process (today uid 0,
+        // but any uid should work) must pass gVisor's permission check against
+        // this mode to connect. Host-side cross-tenant exposure is bounded by
+        // the 0700 sock_dir above (and the 0700 exec tempdir), so the socket
+        // being world-rw does not widen reach beyond this process.
         std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o777))?;
 
+        // The identity the running code holds for CID-derived key material. When
+        // the request overrides the bundle's entrypoint the api-server binds the
+        // script into a distinct id (#75 F1b / #600) and sends it here, so the
+        // guest's own key / public-key / wallet-address lookups resolve to the
+        // running identity and match the private key it receives. Absent (JS lane
+        // or no override) ⇒ the bundle CID. Bundle cache resolution above still
+        // keys on the CID, so this never affects which bundle bytes run.
+        let action_identity = req
+            .action_identity
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(bundle.cid.as_str())
+            .to_string();
+
         let job = Job {
-            js_params: req.js_params,
+            js_params: req.js_params.clone(),
             auth_context: req.auth_context,
             http_headers: req.http_headers,
-            ipfs_id: bundle.cid.clone(),
+            ipfs_id: action_identity.clone(),
             timeout_ms,
         };
         let (guest_shutdown_tx, guest_shutdown_rx) = oneshot::channel::<()>();
@@ -134,11 +208,14 @@ impl Supervisor {
 
         let spec = build_spec(
             &bundle,
+            &action_identity,
             exec_id,
             sock_dir,
+            startup_dir,
             exec_dir.path().to_path_buf(),
             memory_limit_mb,
-        )?;
+            req.js_params.as_deref(),
+        );
 
         let run_result = self.spawn_and_wait(&spec, &bridge, timeout_ms).await;
 
@@ -267,32 +344,144 @@ impl Supervisor {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_spec(
     bundle: &Bundle,
+    action_identity: &str,
     id: String,
     sock_dir: std::path::PathBuf,
+    startup_dir: std::path::PathBuf,
     exec_dir: std::path::PathBuf,
     memory_limit_mb: u64,
-) -> Result<ExecSpec> {
-    let mut env: Vec<(String, String)> = bundle
-        .manifest
-        .env
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-    env.push((ENV_ACTION_IPFS_ID.to_string(), bundle.cid.clone()));
+    js_params: Option<&[u8]>,
+) -> ExecSpec {
+    // Layering: js-params first, then manifest env — a param name colliding
+    // with a manifest variable must not silently reconfigure the bundle.
+    // RESERVED_ENV names are dropped from BOTH sources: a manifest that set
+    // LIT_OP_SOCK would sever the guest op loop under the process runtime,
+    // and a duplicate PATH / LIT_ACTION_IPFS_ID in the OCI env list has
+    // undefined precedence. `spec.env` therefore never carries a
+    // runtime-owned name; the runtimes and the push below own those.
+    let mut env = js_params_env(js_params);
+    for (k, v) in &bundle.manifest.env {
+        if RESERVED_ENV.contains(&k.as_str()) {
+            debug!(name = %k, "manifest env not injected: reserved name");
+            continue;
+        }
+        env.retain(|(name, _)| name != k);
+        env.push((k.clone(), v.clone()));
+    }
+    // The guest's own action identity (LIT_ACTION_IPFS_ID) — the bundle CID, or
+    // the script-bound id when the request overrode the entrypoint (#75 F1b /
+    // #600) — so `lit`'s default key/public-key/wallet-address lookups match the
+    // private key the guest actually gets.
+    env.push((ENV_ACTION_IPFS_ID.to_string(), action_identity.to_string()));
 
-    Ok(ExecSpec {
+    ExecSpec {
         id,
         bundle_dir: bundle.dir.clone(),
-        argv: bundle.manifest.entrypoint.to_argv()?,
+        startup_dir,
         env,
         sock_dir,
         exec_dir,
         memory_limit_mb,
         pids_limit: DEFAULT_PIDS_LIMIT,
         tmpfs_mb: DEFAULT_TMPFS_MB,
-    })
+    }
+}
+
+/// Top-level js-params as environment variables for the startup script
+/// (CPL-355): string values verbatim, everything else as compact JSON.
+/// Params whose name is not a valid environment variable name, shadows a
+/// runtime-owned variable, or whose value exceeds the size caps are skipped
+/// — the full-fidelity data remains available via `lit params`.
+fn js_params_env(js_params: Option<&[u8]>) -> Vec<(String, String)> {
+    let Some(serde_json::Value::Object(params)) =
+        js_params.and_then(|b| serde_json::from_slice(b).ok())
+    else {
+        return Vec::new();
+    };
+
+    let mut env = Vec::new();
+    let mut total = 0usize;
+    for (name, value) in params {
+        if !is_valid_env_name(&name)
+            || RESERVED_ENV.contains(&name.as_str())
+            || is_interpreter_control_env(&name)
+        {
+            debug!(
+                name,
+                "js param not injected into env: reserved, invalid, or interpreter-control name"
+            );
+            continue;
+        }
+        let value = match value {
+            serde_json::Value::String(s) => s,
+            other => other.to_string(),
+        };
+        if value.len() > MAX_PARAM_ENV_VALUE_BYTES
+            || total + name.len() + value.len() > MAX_PARAM_ENV_TOTAL_BYTES
+        {
+            debug!(name, "js param not injected into env: too large");
+            continue;
+        }
+        total += name.len() + value.len();
+        env.push((name, value));
+    }
+    env
+}
+
+fn is_valid_env_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && !name.as_bytes()[0].is_ascii_digit()
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+/// Environment variable names that make an interpreter or the dynamic loader
+/// execute caller-chosen code *independently of the audited startup script*.
+///
+/// js-params are untrusted request input (a caller only needs execute access to
+/// the bundle to set them). If one of these lands in the guest environment, a
+/// caller can run arbitrary code under the audited bundle's key identity WITHOUT
+/// ever supplying a `startup_script` override — e.g. `BASH_ENV='$(lit
+/// get-action-private-key)'` is sourced by `/bin/bash` before the bundle's own
+/// `startup.sh` runs, and bash evaluates the command substitution in the value.
+/// That re-opens the exact cross-account key-theft path #75 (F1b) / #600 closes
+/// on the `startup_script` channel, so these are dropped from js-param injection
+/// the same way `RESERVED_ENV` names are. Bundle manifest env is NOT filtered by
+/// this: the manifest is part of the content-addressed, audited bundle and is
+/// the author's own trusted configuration.
+fn is_interpreter_control_env(name: &str) -> bool {
+    // glibc dynamic loader honours every LD_* knob (LD_PRELOAD, LD_LIBRARY_PATH,
+    // LD_AUDIT, …); block the whole family rather than chase individual names.
+    if name.starts_with("LD_") {
+        return true;
+    }
+    matches!(
+        name,
+        // sh / bash startup-file and option hijacks.
+        "BASH_ENV"
+            | "ENV"
+            | "SHELLOPTS"
+            | "BASHOPTS"
+            | "PROMPT_COMMAND"
+            | "PS4"
+            // Language runtimes that source or import code named by the env.
+            | "PYTHONSTARTUP"
+            | "PYTHONPATH"
+            | "PYTHONINSPECT"
+            | "PERL5OPT"
+            | "PERL5LIB"
+            | "PERLLIB"
+            | "PERL5DB"
+            | "RUBYOPT"
+            | "RUBYLIB"
+            | "NODE_OPTIONS"
+            | "LUA_INIT"
+            | "LUA_PATH"
+            | "LUA_CPATH"
+    )
 }
 
 /// One usage tick. Error messages match the JS runner verbatim (callers may
@@ -382,5 +571,72 @@ fn push_tail(tail: &Arc<Mutex<String>>, line: &str) {
             .find(|i| tail.is_char_boundary(*i))
             .unwrap_or(tail.len());
         tail.drain(..boundary);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn env(params: &str) -> Vec<(String, String)> {
+        js_params_env(Some(params.as_bytes()))
+    }
+
+    #[test]
+    fn params_env_strings_verbatim_other_types_as_json() {
+        let env = env(r#"{"name":"lit","count":2,"flag":true,"obj":{"a":1},"nil":null}"#);
+        let get = |k: &str| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+        assert_eq!(get("name"), Some("lit"));
+        assert_eq!(get("count"), Some("2"));
+        assert_eq!(get("flag"), Some("true"));
+        assert_eq!(get("obj"), Some(r#"{"a":1}"#));
+        assert_eq!(get("nil"), Some("null"));
+    }
+
+    #[test]
+    fn params_env_skips_reserved_and_invalid_names() {
+        let env =
+            env(r#"{"PATH":"/evil","LIT_OP_SOCK":"x","not-a-name":"x","9lives":"x","ok":"yes"}"#);
+        assert_eq!(env, vec![("ok".to_string(), "yes".to_string())]);
+    }
+
+    #[test]
+    fn params_env_skips_oversized_values() {
+        let big = "x".repeat(MAX_PARAM_ENV_VALUE_BYTES + 1);
+        let env = env(&format!(r#"{{"big":"{big}","small":"y"}}"#));
+        assert_eq!(env, vec![("small".to_string(), "y".to_string())]);
+    }
+
+    #[test]
+    fn params_env_handles_non_object_and_absent() {
+        assert!(js_params_env(None).is_empty());
+        assert!(env("[1,2]").is_empty());
+        assert!(env("not json").is_empty());
+    }
+
+    #[test]
+    fn params_env_drops_interpreter_control_names() {
+        // BASH_ENV is sourced by /bin/bash before the audited startup.sh runs
+        // and its value is expanded (command substitution included), so it must
+        // never be injectable from untrusted js-params — otherwise a caller
+        // could run code under the bundle's key identity without a startup_script
+        // override (#75 F1b / #600). Same for the loader/interpreter family.
+        let env = env(
+            r#"{"BASH_ENV":"$(evil)","ENV":"x","LD_PRELOAD":"/evil.so","LD_LIBRARY_PATH":"/evil","NODE_OPTIONS":"--require /evil","PYTHONPATH":"/evil","RUBYOPT":"-revil","SHELLOPTS":"xtrace","ok":"yes"}"#,
+        );
+        assert_eq!(env, vec![("ok".to_string(), "yes".to_string())]);
+    }
+
+    #[test]
+    fn interpreter_control_env_matches_families_and_names() {
+        assert!(is_interpreter_control_env("LD_PRELOAD"));
+        assert!(is_interpreter_control_env("LD_AUDIT"));
+        assert!(is_interpreter_control_env("LD_ANYTHING_NEW"));
+        assert!(is_interpreter_control_env("BASH_ENV"));
+        assert!(is_interpreter_control_env("PERL5OPT"));
+        // Ordinary names a bundle legitimately reads must pass through.
+        assert!(!is_interpreter_control_env("API_URL"));
+        assert!(!is_interpreter_control_env("LDAP_HOST")); // not an LD_ knob
+        assert!(!is_interpreter_control_env("ok"));
     }
 }

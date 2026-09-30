@@ -65,6 +65,22 @@ Create a Railway project with:
 3. The web service root directory set to `lit-triggers`.
 4. App sleeping disabled. `lit-triggers/railway.json` sets `sleepApplication: false`; keep it disabled in the Railway UI too because scheduled and chain-event triggers rely on a continuously running worker.
 
+### CI/CD (GitHub Actions)
+
+`.github/workflows/deploy-lit-triggers.yml` deploys automatically via the Railway CLI, mirroring the `lit-static` release flow:
+
+- push to `main` → Railway **staging** environment
+- push of a `v*` tag → Railway **production** environment
+
+It runs `railway up` from the `lit-triggers/` directory (matching the service root) and selects the service with `--service`. Auth uses environment-scoped Railway **project tokens**, so no `railway link` is needed.
+
+Required repo secrets:
+
+- `RAILWAY_TOKEN_TRIGGERS_STAGING` — project token, `staging` environment
+- `RAILWAY_TOKEN_TRIGGERS_PRODUCTION` — project token, `production` environment
+
+Optional repo variable: `RAILWAY_TRIGGERS_SERVICE` (defaults to `lit-triggers`).
+
 Set the web service variables before deploying:
 
 ```bash

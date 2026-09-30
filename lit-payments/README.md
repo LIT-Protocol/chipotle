@@ -115,7 +115,7 @@ Public:
 - `GET /payWithLitkey?wallet=0x…` — end-user Base mainnet LITKEY payment page for an existing Stripe customer wallet.
 - `POST /auth/request` — send magic link (rate-limited per email, 60s cooldown).
 - `GET /auth/verify?token=…` — validate token, set session cookie, redirect.
-- `GET /api/customer/preview?wallet=0x…` — wallet-scoped customer identity preview for the LITKEY payment page. Returns only `found`, `email`, and `wallet_address`; it does not expose Stripe customer ids or balances.
+- `GET /api/customer/preview?wallet=0x…` — wallet-scoped customer identity preview for the LITKEY payment page. Returns only `found`, `email`, and `wallet_address`; it does not expose Stripe customer ids or balances. The `email` is **masked** (e.g. `b***n@l***l.com`) so the unauthenticated endpoint can't be scraped into a wallet↔email dataset (CPL-376), and it is throttled per client IP (token bucket, `PREVIEW_RATE_LIMIT_*` env vars).
 - `GET /api/litkey/quote` — public LITKEY quote for the end-user payment page; includes `crediting_paused` and omits an effective credit rate while paused.
 - `GET /api/litkey/payment-config` — public Base mainnet payment config: chain id, LITKEY token address, and payment gateway address. Fails closed with `503` if chain verification is not configured.
 - `POST /api/litkey/payment-claim` — wallet-scoped transaction claim for the browser payment page. Accepts `{ "tx_hash": "0x…", "wallet": "0x…" }`, fetches the transaction receipt, verifies the configured gateway emitted the expected `Payment` event for that wallet, and applies credit idempotently from that receipt.
@@ -346,6 +346,25 @@ railway login
 railway link        # choose or create the lit-payments project
 railway up          # from repo root; service config path should be lit-payments/railway.json
 ```
+
+### CI/CD (GitHub Actions)
+
+`.github/workflows/deploy-lit-payments.yml` deploys automatically via the
+Railway CLI, mirroring the `lit-static` release flow:
+
+- push to `main` → Railway **staging** environment
+- push of a `v*` tag → Railway **production** environment
+
+It runs `railway up` from the repo root (so the Dockerfile can reach
+`lit-billing-core`) and selects the service with `--service`. Auth uses
+environment-scoped Railway **project tokens**, so no `railway link` is needed.
+
+Required repo secrets:
+
+- `RAILWAY_TOKEN_PAYMENTS_STAGING` — project token, `staging` environment
+- `RAILWAY_TOKEN_PAYMENTS_PRODUCTION` — project token, `production` environment
+
+Optional repo variable: `RAILWAY_PAYMENTS_SERVICE` (defaults to `lit-payments`).
 
 ### 2. Add Postgres
 

@@ -32,9 +32,7 @@ macro_rules! remote_op {
             )) => {
                 Err(error_box(error))
             }
-            other => Err(error_box(format!(
-                "{op_name}: unexpected response: {other:?}"
-            ))),
+            _ => Err(error_box(format!("{op_name}: unexpected response type"))),
         }
     }};
 }
@@ -76,9 +74,7 @@ macro_rules! remote_op_async {
             )) => {
                 Err(error_box(error))
             }
-            other => Err(error_box(format!(
-                "{op_name}: unexpected response: {other:?}"
-            ))),
+            _ => Err(error_box(format!("{op_name}: unexpected response type"))),
         }
     }};
 }

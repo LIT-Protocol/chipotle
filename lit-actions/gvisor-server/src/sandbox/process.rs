@@ -2,17 +2,19 @@
 //!
 //! For integration tests and local development on hosts without gVisor
 //! (e.g. macOS). Presents the same guest contract as the runsc runtime —
-//! `LIT_OP_SOCK`, the `lit` CLI on PATH, cwd inside the action dir — so a
-//! bundle developed against it runs unchanged in production.
+//! `bash startup.sh` as the only entrypoint, `LIT_OP_SOCK`, the `lit` CLI
+//! on PATH, cwd inside the action dir — so a bundle developed against it
+//! runs unchanged in production.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context as _, Result, ensure};
+use anyhow::{Context as _, Result};
 use tokio::process::Command;
 use tracing::warn;
 
-use super::{ENV_OP_SOCK, ExecSpec, OP_SOCK_FILE, SandboxRuntime};
+use super::{ENV_OP_SOCK, ExecSpec, OP_SOCK_FILE, STARTUP_SHELL, SandboxRuntime};
+use crate::bundle::STARTUP_SCRIPT_FILE;
 
 pub struct ProcessRuntime {
     /// Directory containing the guest `lit` CLI; prepended to PATH.
@@ -25,16 +27,14 @@ impl SandboxRuntime for ProcessRuntime {
     }
 
     fn command(&self, spec: &ExecSpec) -> Result<Command> {
-        ensure!(!spec.argv.is_empty(), "empty entrypoint argv");
-
         // Copy the bundle into a per-exec dir so the child never runs inside
         // the shared read-only cache (parity with the runsc mount: the cache
         // copy must survive a badly-behaved action).
         let action_dir = spec.exec_dir.join("action");
         copy_dir(&spec.bundle_dir, &action_dir).context("failed to stage action dir")?;
 
-        let mut cmd = Command::new(&spec.argv[0]);
-        cmd.args(&spec.argv[1..]);
+        let mut cmd = Command::new(STARTUP_SHELL);
+        cmd.arg(spec.startup_dir.join(STARTUP_SCRIPT_FILE));
         cmd.current_dir(&action_dir);
         cmd.env(ENV_OP_SOCK, spec.sock_dir.join(OP_SOCK_FILE));
         for (k, v) in &spec.env {

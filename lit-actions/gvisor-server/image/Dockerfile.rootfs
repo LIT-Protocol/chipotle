@@ -18,8 +18,11 @@ WORKDIR /src
 # lit-core/lit-observability from the workspace).
 COPY lit-core /src/lit-core
 COPY lit-actions /src/lit-actions
+# The `lit` bin is gated behind the `gvisor` cargo feature (CPL-359) — off by
+# default, so building the sandbox rootfs must opt in with `--features gvisor`.
 RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler \
     && cargo build --release --manifest-path lit-actions/Cargo.toml \
+       --features gvisor \
        -p lit-actions-gvisor-server --bin lit
 
 # ---- sandbox rootfs -------------------------------------------------------

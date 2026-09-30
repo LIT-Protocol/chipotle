@@ -1,6 +1,6 @@
 # Verifiable Clean Bill of Execution — Implementation Plan
 
-**Source of truth**: [requirements.md](requirements.md)
+**Source of truth**: [requirements.md](/deployment/planning/requirements)
 
 ## Context
 
@@ -150,10 +150,10 @@ Each phase has its own plan with workflow details, files, and exit criteria. All
 
 | Phase | Plan | Goal |
 |-------|------|------|
-| **1** | [PLAN-phase-1.md](PLAN-phase-1.md) | Prerequisites & Configuration — app `/attestation` and `/info` endpoints, digest pinning, **Sigstore** for container provenance, **Onchain KMS on Base** (DstackApp; prod), Cloud KMS (dev). Custom domain deferred to Phase 4. |
-| **2** | [PLAN-phase-2.md](PLAN-phase-2.md) | Verifier Crate — based on dstack-verifier (Dstack-TEE/dstack); extend VR-3, VR-4 (incl. DstackApp/DstackKms on Base) |
-| **3** | [PLAN-phase-3.md](PLAN-phase-3.md) | Verification Automation — dev + production deploy paths (Onchain KMS app creation) |
-| **4** | [PLAN-phase-4.md](PLAN-phase-4.md) | Documentation — dev vs production paths, Onchain KMS setup |
+| **1** | [PLAN-phase-1.md](/deployment/planning/PLAN-phase-1) | Prerequisites & Configuration — app `/attestation` and `/info` endpoints, digest pinning, **Sigstore** for container provenance, **Onchain KMS on Base** (DstackApp; prod), Cloud KMS (dev). Custom domain deferred to Phase 4. |
+| **2** | [PLAN-phase-2.md](/deployment/planning/PLAN-phase-2) | Verifier Crate — based on dstack-verifier (Dstack-TEE/dstack); extend VR-3, VR-4 (incl. DstackApp/DstackKms on Base) |
+| **3** | [PLAN-phase-3.md](/deployment/planning/PLAN-phase-3) | Verification Automation — dev + production deploy paths (Onchain KMS app creation) |
+| **4** | [PLAN-phase-4.md](/deployment/planning/PLAN-phase-4) | Documentation — dev vs production paths, Onchain KMS setup |
 
 ### Phase Dependency Graph
 

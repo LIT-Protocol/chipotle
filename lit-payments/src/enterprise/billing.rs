@@ -6,8 +6,11 @@
 //!   2. Determine the current anchor period.
 //!   3. If no invoice exists for it yet, snapshot consumption from the payer's
 //!      live Stripe balance, create a DRAFT invoice on the invoice account,
-//!      regrant the payer buffer back to target, and email the breakdown for a
-//!      human to review + send.
+//!      regrant the payer buffer back to target, and then either finalize +
+//!      send the invoice automatically (`auto_send` accounts, with an FYI email
+//!      to `notify_email`) or email the breakdown for a human to review + send.
+//!      Anomalous cycles (0 consumed units, or a reading at/above the full
+//!      buffer target) are always held for review, even with `auto_send` on.
 //!
 //! Idempotency: the `enterprise_invoices` row (UNIQUE per account+period) is the
 //! gate; each external side effect is guarded by a stored id so a crash mid-flow
@@ -123,24 +126,35 @@ async fn run_account(
     let next_anchor = period::next_anchor(anchor, day);
 
     // 3. Missed-cycle guard. The immediately-preceding in-term anchor must
-    //    already have an invoice row; otherwise a prior cycle went unbilled and
-    //    folding its usage into this one (one allotment for multi-cycle usage,
-    //    one committed fee for several months) would mis-bill. Refuse and surface
-    //    rather than silently lump — a >1-cycle outage needs a human.
+    //    already have a RESOLVED invoice row; otherwise a prior cycle went
+    //    unbilled (or died mid-flow) and folding its usage into this one (one
+    //    allotment for multi-cycle usage, one committed fee for several months)
+    //    would mis-bill. Refuse and surface rather than silently lump — a
+    //    >1-cycle outage needs a human. A mere row-exists check is not enough:
+    //    an `error`/`pending` row from last cycle means money state is
+    //    unresolved, and auto-billing the next cycle on top of it compounds it.
     let prev_in_term = account.term_start.is_none_or(|ts| prev_anchor >= ts);
     if prev_in_term {
         let prev_key = period::period_key(prev_anchor);
-        if db::get_invoice(pool, account.id, &prev_key)
-            .await?
-            .is_none()
-        {
-            anyhow::bail!(
+        match db::get_invoice(pool, account.id, &prev_key).await? {
+            None => anyhow::bail!(
                 "enterprise billing gap for account {}: period {prev_key} has no invoice row, so \
                  a prior cycle went unbilled. Refusing to bill {period_key} (would lump multiple \
                  cycles into one allotment / skip a committed fee). Backfill the missing period(s) \
                  manually, then this resumes automatically.",
                 account.id
-            );
+            ),
+            Some(prev) if !matches!(prev.status.as_str(), "draft" | "sent" | "paid" | "manual") => {
+                anyhow::bail!(
+                    "enterprise billing gap for account {}: period {prev_key} is stuck in status \
+                     '{}' — its money state is unresolved. Refusing to bill {period_key} until it \
+                     is resolved (draft/sent/paid/manual); fix the {prev_key} row, then this \
+                     resumes automatically.",
+                    account.id,
+                    prev.status
+                );
+            }
+            Some(_) => {}
         }
     }
 
@@ -327,12 +341,68 @@ async fn resume_invoice(
         }
     }
 
-    // c. Email the breakdown + draft link, then mark drafted.
+    // c. Deliver. `auto_send` accounts get finalize + send with an FYI email;
+    //    otherwise the draft is left for a human to review + send. Cycles whose
+    //    consumed reading is untrustworthy (0 units, or at/above the full
+    //    buffer target — see `calc::hold_for_review`) are held for review even
+    //    with auto_send on, so a mis-metered invoice never goes out unseen.
     let invoice_url = format!(
         "{}/invoices/{}",
         cfg.stripe_dashboard_base.trim_end_matches('/'),
         invoice_id
     );
+    if account.auto_send && !calc::hold_for_review(row.consumed_units, account.target_credit_cents)
+    {
+        if row.finalized_at.is_none() {
+            // Durability guard (same class as the create/regrant guards). Past
+            // the idempotency window a finalize replay can't double-charge
+            // (Stripe rejects re-finalizing), but the customer MAY already have
+            // been emailed — hand off to a human instead of guessing.
+            let age_hours = (OffsetDateTime::now_utc() - row.created_at).whole_hours();
+            if age_hours >= MAX_RETRY_AGE_HOURS {
+                db::set_invoice_status(pool, row.id, "error").await?;
+                anyhow::bail!(
+                    "invoice {} finalize+send is unconfirmed and {}h old (past the {}h \
+                     idempotency window). The invoice MAY already be finalized and emailed to \
+                     the customer. Check invoice {} in Stripe: if it is open/paid, set \
+                     finalized_at and mark this row 'sent'; if it is still a draft, send it from \
+                     the dashboard and mark this row 'manual'.",
+                    row.id,
+                    age_hours,
+                    MAX_RETRY_AGE_HOURS,
+                    invoice_id
+                );
+            }
+            invoice::finalize_and_send(
+                stripe,
+                &invoice_id,
+                &format!("ent_fin:{}:{}", account.id, row.period_key),
+                &format!("ent_send:{}:{}", account.id, row.period_key),
+            )
+            .await
+            .context("finalize and send invoice")?;
+            // Record BEFORE the FYI email: a crash from here on resumes at the
+            // email step and never re-touches Stripe for this invoice.
+            let now = OffsetDateTime::now_utc();
+            db::set_invoice_finalized(pool, row.id, now).await?;
+            row.finalized_at = Some(now);
+        }
+        email::send_sent_email(mailer, account, &row, &invoice_url)
+            .await
+            .context("send sent-notification email")?;
+        db::set_invoice_sent(pool, row.id, OffsetDateTime::now_utc()).await?;
+
+        tracing::info!(
+            account_id = account.id,
+            period = %row.period_key,
+            invoice = %invoice_id,
+            total_cents = row.total_cents,
+            overage_units = row.overage_units,
+            "enterprise invoice finalized and sent; notification email sent"
+        );
+        return Ok(());
+    }
+
     email::send_review_email(mailer, account, &row, &invoice_url)
         .await
         .context("send review email")?;

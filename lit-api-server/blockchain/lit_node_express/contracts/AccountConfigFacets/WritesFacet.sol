@@ -68,6 +68,16 @@ contract WritesFacet {
         uint256 indexed apiKeyHash,
         address indexed pkpId
     );
+    // Retained in the ABI for decoding historical migration logs.
+    event PkpOwnerBackfilled(
+        address indexed pkpId,
+        uint256 indexed masterHash
+    );
+    // Retained in the ABI for decoding historical migration logs.
+    event PathOwnerBackfilled(
+        uint256 indexed derivationPath,
+        uint256 indexed masterHash
+    );
     event UsageApiKeyRemoved(
         uint256 indexed accountApiKeyHash,
         uint256 indexed usageApiKeyHash
@@ -81,6 +91,7 @@ contract WritesFacet {
         address indexed previousAdminWalletAddress,
         address indexed newAdminWalletAddress
     );
+    event NodeConfigurationSet(string key, string value);
 
     function newChainSecuredAccount(
         string memory accountName,
@@ -126,8 +137,32 @@ contract WritesFacet {
                 );
             }
         }
-        if (s.allApiKeyHashesToMaster[apiKeyHash] != 0) {
-            revert AppStorage.AccountAlreadyExists(apiKeyHash);
+        uint256 existingMaster = s.allApiKeyHashesToMaster[apiKeyHash];
+        if (existingMaster != 0) {
+            // A real account already owns this hash: hard stop. But a *usage
+            // key* pre-squatting this slot (allApiKeyHashesToMaster[keccak256(
+            // victimWallet)] = attackerMaster, set via setUsageApiKey before the
+            // victim ever onboards) must NOT permanently block account creation.
+            // The account-hash namespace is sovereign to the wallet whose
+            // keccak256 it is — only that wallet's owner can produce the hash
+            // (self-service path), and an api_payer is trusted — so a
+            // subordinate usage key can never outrank a master account at the
+            // same slot. Evict the squatted usage key and continue.
+            //
+            // existingMaster == apiKeyHash means a master account already lives
+            // here (created via newAccount). A hash that merely resolves to
+            // another master but is NOT a registered usage key is an admin-wallet
+            // alias from convert/transfer ownership — that is a legitimate
+            // account reference and is left untouched (falls through to revert).
+            bool squatIsUsageKey = existingMaster != apiKeyHash &&
+                s.accounts[existingMaster].usageApiKeys[apiKeyHash].apiKeyHash ==
+                apiKeyHash;
+            if (!squatIsUsageKey) {
+                revert AppStorage.AccountAlreadyExists(apiKeyHash);
+            }
+            s.accounts[existingMaster].usageApiKeysList.remove(apiKeyHash);
+            delete s.accounts[existingMaster].usageApiKeys[apiKeyHash];
+            emit UsageApiKeyRemoved(existingMaster, apiKeyHash);
         }
         AppStorage.Account storage account = s.accounts[apiKeyHash];
         account.managed = managed;
@@ -291,6 +326,14 @@ contract WritesFacet {
             );
         }
         SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
+        // The account arg must be the MASTER account, not any key that merely
+        // resolves to it. revertIfNoAccountAccess above resolves a usage-key hash
+        // to its master and returns true for the api_payer on a managed account,
+        // so without this a scoped usage key could pass accountApiKeyHash = its
+        // own hash and rewrite its own scopes (or mint new keys) under the master.
+        // Every sibling structural write (updateGroup, updateActionMetadata,
+        // removeUsageApiKey, debitApiKey, ...) enforces this same invariant.
+        SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         uint256 masterAccountApiKeyHash = s.allApiKeyHashesToMaster[
             accountApiKeyHash
@@ -681,6 +724,32 @@ contract WritesFacet {
         if (account.pkpData[pkpId].id != 0) {
             revert AppStorage.InvalidRequest("PKP already registered");
         }
+        // Global first-owner binding. Derivation paths are public on-chain and
+        // the key is a stateless function of the path, so without this check a
+        // different account could register an already-registered pkpId under
+        // its own account and drive the node to sign with the victim's key.
+        // The first master account to register a pkpId owns it forever; the
+        // binding survives removeWalletDerivation, so only the original owner
+        // may ever re-register a deleted address (recovery flow stays intact).
+        uint256 existingOwner = s.pkpIdToOwnerMaster[pkpId];
+        if (existingOwner == 0) {
+            s.pkpIdToOwnerMaster[pkpId] = masterHash;
+        } else if (existingOwner != masterHash) {
+            revert AppStorage.InvalidRequest("PKP owned by another account");
+        }
+        // Global first-owner binding on the derivationPath itself. The pkpId
+        // binding above only protects the address label, but the private key is a
+        // stateless function of the path (get_client_key(path)) and paths are
+        // public, so an attacker could otherwise register a fresh, self-owned
+        // pkpId carrying a victim's path and have the node release the victim's
+        // key. Binding the path to its first owner makes that registration revert.
+        // Enforced symmetrically at resolve time in ViewsFacet.getWalletDerivation.
+        uint256 existingPathOwner = s.pathToOwnerMaster[derivationPath];
+        if (existingPathOwner == 0) {
+            s.pathToOwnerMaster[derivationPath] = masterHash;
+        } else if (existingPathOwner != masterHash) {
+            revert AppStorage.InvalidRequest("derivation path owned by another account");
+        }
         account.pkpData[pkpId].id = derivationPath;
         account.pkpData[pkpId].name = name;
         account.pkpData[pkpId].description = description;
@@ -701,6 +770,11 @@ contract WritesFacet {
     ///
     ///      The global `allPkpIds` "ever generated" ledger is intentionally left untouched;
     ///      it records only the address (never the path) and serves as an append-only history.
+    ///
+    ///      The global `pkpIdToOwnerMaster` binding is also intentionally kept: even after a
+    ///      hard delete, only the original master account may ever re-register this address.
+    ///      This closes the delete/re-register race that would otherwise let another account
+    ///      claim the address (and thus the key, which is a stateless function of the path).
     function removeWalletDerivation(uint256 apiKeyHash, address pkpId) public {
         SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
         SecurityLib.revertIfNotMasterAccount(apiKeyHash);
@@ -740,13 +814,21 @@ contract WritesFacet {
         emit WalletDerivationRemoved(apiKeyHash, pkpId);
     }
 
+    /// @notice Set an on-chain node configuration key/value that the Lit nodes read
+    ///         to drive how they process requests.
+    /// @dev    Restricted to the diamond owner or config operator. This used to be
+    ///         gated to `revertIfNotApiPayerOrOwner`, which let any api_payer write
+    ///         arbitrary node configuration — an unnecessarily broad privilege that
+    ///         could redirect or crash nodes. Config changes now emit an event so
+    ///         they can be monitored and audited off-chain.
     function setNodeConfiguration(
         string memory key,
         string memory value
     ) public {
-        SecurityLib.revertIfNotApiPayerOrOwner(msg.sender);
+        SecurityLib.revertIfNotConfigOperatorOrOwner(msg.sender);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         s.nodeConfigurationKeys.add(key);
         s.nodeConfigurationValues[key] = value;
+        emit NodeConfigurationSet(key, value);
     }
 }

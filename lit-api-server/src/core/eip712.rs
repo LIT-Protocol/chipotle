@@ -19,10 +19,13 @@
 //! no out-of-band type-hash check needed beyond pinning the schema.
 
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
+use std::time::Duration;
 
 use alloy::dyn_abi::TypedData;
 use alloy::primitives::{Address, B256, Bytes, FixedBytes, Signature, U256};
 use alloy::sol;
+use moka::future::Cache;
 
 use crate::config::GLOBAL_NODE_CONFIG;
 use crate::core::v1::helpers::api_status::ApiStatus;
@@ -59,12 +62,55 @@ const ERC1271_CALL_GAS_LIMIT: u64 = 1_000_000;
 /// adversarial RPC / contract can tie up a request handler.
 const ERC1271_CALL_TIMEOUT_SECS: u64 = 5;
 
-/// ±5-minute window on `issuedAt`; the only replay protection (no nonce
-/// store). Worst-case replay on the unauthenticated mint endpoints just
-/// produces an extra unattached PKP — the bytes returned are equivalent to
-/// a freshly generated keypair until the admin wallet calls the on-chain
-/// follow-ups, so compute cost only.
+/// ±5-minute window on `issuedAt`. This bounds how long any single signature
+/// stays acceptable at all; within that window the single-use cache
+/// (`USED_SIGNATURES`, see [`verify_eip712_signature_allow_contract_wallet_single_use`])
+/// is the actual anti-replay: each verified `digest` on the mint
+/// endpoints can be consumed only once. A captured signature can no longer be
+/// replayed to mint many keys — the second use is rejected until the timestamp
+/// window itself expires it.
 pub(crate) const TIMESTAMP_SKEW_SECONDS: i64 = 300;
+
+/// TTL for a consumed-signature entry in [`USED_SIGNATURES`]. A signature with
+/// `issuedAt = t` is accepted only while `now ∈ [t - skew, t + skew]`, so its
+/// entire validity window is `2 * skew`. Retaining the used marker for at least
+/// that long guarantees a replay is caught by the cache for as long as the
+/// timestamp check would otherwise still admit it (worst case: first use at
+/// `t - skew`, replay attempted just before `t + skew`). The extra minute is
+/// slack for clock skew between the two requests. Beyond this TTL the timestamp
+/// window rejects the signature anyway, so the entry is safe to evict.
+const REPLAY_CACHE_TTL: Duration = Duration::from_secs((2 * TIMESTAMP_SKEW_SECONDS) as u64 + 60);
+
+/// Hard cap on distinct consumed-signature entries, bounding memory under a
+/// flood. Entries also expire via [`REPLAY_CACHE_TTL`], so the steady-state
+/// working set is `request_rate * TTL`; this ceiling is far above any
+/// legitimate rate. Only *cryptographically valid* signatures are ever
+/// recorded (the check runs after verification), so an attacker cannot cheaply
+/// churn this cache with junk to evict a real entry — they would need a flood
+/// of distinct valid signatures, which they cannot forge without the signers'
+/// keys.
+const REPLAY_CACHE_MAX_ENTRIES: u64 = 1_000_000;
+
+/// Process-local single-use signature cache for the mint endpoints. Keyed by the
+/// EIP-712 `digest` — it already commits to the full typed data (domain, message,
+/// and the primaryType via its type hash), so a given key can only ever
+/// correspond to one signed message for one flow. Keying on the digest rather
+/// than the signature bytes means every valid encoding of the same authorization
+/// (ECDSA malleability, EIP-1271 multi-encoding) collapses to one key and is
+/// rejected on re-presentation.
+///
+/// Scope caveat: this is per-replica. In a multi-replica deployment a signature
+/// replayed against a *different* replica within the validity window is not
+/// caught by this cache — the same process-local limitation the on-chain
+/// permission cache carries (see `accounts::blockchain_cache`). A shared store
+/// (e.g. Redis) would be required for cross-replica dedup; the timestamp window
+/// still bounds the exposure to `2 * skew`.
+static USED_SIGNATURES: LazyLock<Cache<B256, ()>> = LazyLock::new(|| {
+    Cache::builder()
+        .max_capacity(REPLAY_CACHE_MAX_ENTRIES)
+        .time_to_live(REPLAY_CACHE_TTL)
+        .build()
+});
 
 /// Hard cap on the JSON-serialised typed-data payload to bound the work an
 /// unauthenticated caller can force the server to do before any cheap
@@ -304,6 +350,43 @@ pub(crate) async fn verify_eip712_signature_allow_contract_wallet(
     expected_primary_type: &str,
 ) -> Result<Address, ApiStatus> {
     let prepared = prepare_verification(typed_data_json, signature_hex, expected_primary_type)?;
+    verify_prepared_allow_contract_wallet(&prepared).await
+}
+
+/// Like [`verify_eip712_signature_allow_contract_wallet`], but additionally
+/// enforces **single use**: a verified `(digest, signature)` pair can be
+/// consumed only once within its `issuedAt` validity window (see
+/// [`USED_SIGNATURES`]).
+///
+/// This is the anti-replay boundary for the unauthenticated mint endpoints
+/// (`create_wallet_with_signature`, `add_usage_api_key_with_signature`,
+/// `convert_to_chain_secured_account`). Without it, a single captured valid
+/// signature could be replayed within the ±skew window to mint an unbounded
+/// number of keys/wallets. Billing authentication deliberately does **not** use
+/// this variant: a wallet-auth signature there is a short-lived session-style
+/// credential reused across several requests inside its window, so single-use
+/// would break legitimate callers.
+///
+/// The dedup runs *after* signature verification so only cryptographically
+/// valid signatures are ever recorded — an attacker cannot pollute or evict
+/// entries with junk they haven't legitimately signed.
+pub(crate) async fn verify_eip712_signature_allow_contract_wallet_single_use(
+    typed_data_json: &serde_json::Value,
+    signature_hex: &str,
+    expected_primary_type: &str,
+) -> Result<Address, ApiStatus> {
+    let prepared = prepare_verification(typed_data_json, signature_hex, expected_primary_type)?;
+    let address = verify_prepared_allow_contract_wallet(&prepared).await?;
+    reject_if_replayed(prepared.digest).await?;
+    Ok(address)
+}
+
+/// Verify an already-prepared payload against an EOA (ECDSA) or, failing that,
+/// an EIP-1271 smart-contract wallet. Shared by the plain and single-use entry
+/// points so both apply identical verification semantics.
+async fn verify_prepared_allow_contract_wallet(
+    prepared: &PreparedVerification,
+) -> Result<Address, ApiStatus> {
     if prepared.ecdsa_recovered == Some(prepared.claimed_address) {
         return Ok(prepared.claimed_address);
     }
@@ -329,6 +412,38 @@ pub(crate) async fn verify_eip712_signature_allow_contract_wallet(
         "Signature invalid: did not verify as an EOA (ECDSA) signature or as an \
          EIP-1271 smart-contract-wallet signature",
     ))
+}
+
+/// Record a verified EIP-712 `digest` as used, rejecting it if it has been used
+/// before within its validity window. Keyed by the `digest` alone.
+///
+/// The key is deliberately the digest, **not** `(digest, signature)`: the EIP-712
+/// digest already uniquely commits to the full typed data (domain, message, and
+/// primaryType), so it is the true replay identity. Folding signature bytes into
+/// the key would reopen the replay it is meant to close, because a single
+/// authorization can be presented with more than one valid signature encoding
+/// over the same digest — ECDSA is malleable (`(r, s, v)` and `(r, n-s, v^1)`
+/// both recover the same signer, and k256 recovery does not reject high-s), and
+/// EIP-1271 contract wallets may accept several encodings for one digest. Each
+/// such variant would hash to a different `(digest, signature)` key and slip
+/// through. Keying on the digest alone rejects every re-presentation of the same
+/// authorization regardless of how the signature is encoded.
+///
+/// `entry(..).or_insert(())` is atomic first-writer-wins: for concurrent
+/// requests carrying the same digest, moka runs the initializer exactly once
+/// and only that caller observes `is_fresh() == true`. Every other concurrent
+/// (or later) caller sees `false` and is rejected, so a replay cannot slip
+/// through a check-then-insert race.
+async fn reject_if_replayed(digest: B256) -> Result<(), ApiStatus> {
+    let entry = USED_SIGNATURES.entry(digest).or_insert(()).await;
+    if entry.is_fresh() {
+        Ok(())
+    } else {
+        Err(ApiStatus::bad_request(
+            anyhow::anyhow!("EIP-712 signature already used (replay rejected)"),
+            "This signature has already been used. Sign a fresh message (new issuedAt) and retry.",
+        ))
+    }
 }
 
 /// Run the synchronous validation pipeline and parse the signature. Shared by
@@ -1341,5 +1456,100 @@ mod tests {
             format!("{err}").contains("Chain client unavailable"),
             "unexpected error: {err}",
         );
+    }
+
+    /// Anti-replay (issue #69): the single-use entry point accepts a signature
+    /// the first time and rejects the identical `(digest, signature)` on every
+    /// subsequent call within its validity window. This is what stops one
+    /// captured signature from being replayed to mint many keys.
+    #[tokio::test]
+    async fn single_use_accepts_first_use_and_rejects_replay() {
+        let chain_id = ensure_test_chain_id();
+        let wallet = PrivateKeySigner::random();
+        let (typed, sig) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_ADD_USAGE_API_KEY,
+            now_secs(),
+            chain_id,
+        );
+
+        // First use verifies and is consumed.
+        let recovered = verify_eip712_signature_allow_contract_wallet_single_use(
+            &typed,
+            &sig,
+            PRIMARY_TYPE_ADD_USAGE_API_KEY,
+        )
+        .await
+        .expect("first use of a valid signature must verify");
+        assert_eq!(recovered, wallet.address());
+
+        // Replaying the exact same payload is rejected.
+        let err = verify_eip712_signature_allow_contract_wallet_single_use(
+            &typed,
+            &sig,
+            PRIMARY_TYPE_ADD_USAGE_API_KEY,
+        )
+        .await
+        .expect_err("replaying the same signature must be rejected");
+        assert!(
+            format!("{err}").to_lowercase().contains("already"),
+            "unexpected error: {err}",
+        );
+    }
+
+    /// Two distinct valid signatures (different signers) are independent — the
+    /// dedup keys on the specific `digest`, not on the endpoint, so legitimate
+    /// concurrent mints from different wallets all succeed.
+    #[tokio::test]
+    async fn single_use_allows_distinct_signatures() {
+        let chain_id = ensure_test_chain_id();
+        for _ in 0..2 {
+            let wallet = PrivateKeySigner::random();
+            let (typed, sig) =
+                sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), chain_id);
+            let recovered = verify_eip712_signature_allow_contract_wallet_single_use(
+                &typed,
+                &sig,
+                PRIMARY_TYPE_CREATE_WALLET,
+            )
+            .await
+            .expect("each distinct valid signature must verify once");
+            assert_eq!(recovered, wallet.address());
+        }
+    }
+
+    /// The same wallet re-signing with a fresh `issuedAt` produces a different
+    /// digest (and signature), so it is a new single-use token and is accepted —
+    /// the dedup does not lock a wallet out, only its already-spent signatures.
+    #[tokio::test]
+    async fn single_use_allows_resign_with_new_issued_at() {
+        let chain_id = ensure_test_chain_id();
+        let wallet = PrivateKeySigner::random();
+
+        let (typed1, sig1) =
+            sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), chain_id);
+        verify_eip712_signature_allow_contract_wallet_single_use(
+            &typed1,
+            &sig1,
+            PRIMARY_TYPE_CREATE_WALLET,
+        )
+        .await
+        .expect("first signature must verify");
+
+        // A different issuedAt within the skew window → different digest → new token.
+        let (typed2, sig2) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_CREATE_WALLET,
+            now_secs() - 1,
+            chain_id,
+        );
+        let recovered = verify_eip712_signature_allow_contract_wallet_single_use(
+            &typed2,
+            &sig2,
+            PRIMARY_TYPE_CREATE_WALLET,
+        )
+        .await
+        .expect("a freshly signed message must verify even from the same wallet");
+        assert_eq!(recovered, wallet.address());
     }
 }

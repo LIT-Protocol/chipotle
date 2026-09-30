@@ -119,7 +119,7 @@ async fn op_aes_encrypt(
     )
 }
 
-#[instrument(skip_all, ret)]
+#[instrument(skip_all)]
 #[op2(reentrant)]
 #[string]
 async fn op_aes_decrypt(
@@ -137,7 +137,7 @@ async fn op_aes_decrypt(
     )
 }
 
-#[instrument(skip_all, ret)]
+#[instrument(skip_all)]
 #[op2(reentrant)]
 #[string]
 async fn op_get_private_key(
@@ -153,7 +153,7 @@ async fn op_get_private_key(
     )
 }
 
-#[instrument(skip_all, ret)]
+#[instrument(skip_all)]
 #[op2(reentrant)]
 #[string]
 async fn op_get_lit_action_private_key(state: Rc<RefCell<OpState>>) -> Result<String, JsErrorBox> {
@@ -287,8 +287,22 @@ fn default_proxied_fetch_method() -> String {
 }
 
 /// Split `scheme://user:pass@host:port` into (`scheme://host:port`, Some((user, pass))).
-/// Userinfo is taken up to the last `@` before the host; the user/pass split is
-/// on the first `:`. Returns no credentials when there is no userinfo.
+/// Returns no credentials when there is no userinfo.
+///
+/// Parsing goes through `reqwest::Url` — the same url-crate WHATWG parser the
+/// egress guard (`egress::connect_target_forbidden_ip`) and `reqwest::Proxy`
+/// itself use — so the host we rebuild the proxy for is byte-for-byte the host
+/// the guard validated. A hand-rolled last-`@` split diverged from the guard
+/// (WHATWG ends the authority at the first `/ ? #`, a raw split does not) and let
+/// `http://a/b@10.0.0.1:8888/` validate as host `a` yet connect to `10.0.0.1`, an
+/// SSRF into the enclave's internal address space (issue #13). We drop userinfo,
+/// path, query, and fragment and rebuild `scheme://host[:port]` from the parsed
+/// authority so the connect target cannot drift from the guarded one.
+///
+/// Scheme-less proxies (no `://`) are passed through unchanged: the guard and
+/// reqwest both prepend `http://` before parsing, so that path has no divergence
+/// to close. A string that fails to parse is likewise returned unchanged so
+/// `reqwest::Proxy::all` surfaces the error itself.
 ///
 /// User and pass are percent-decoded: per RFC 3986 the userinfo component is
 /// percent-encoded, and proxy providers (Webshare, Bright Data, ...) hand out
@@ -300,18 +314,32 @@ fn default_proxied_fetch_method() -> String {
 fn split_proxy_credentials(proxy_url: &str) -> (String, Option<(String, String)>) {
     use percent_encoding::percent_decode_str;
 
-    let Some((scheme, rest)) = proxy_url.split_once("://") else {
+    if !proxy_url.contains("://") {
+        return (proxy_url.to_string(), None);
+    }
+    let Ok(url) = reqwest::Url::parse(proxy_url) else {
         return (proxy_url.to_string(), None);
     };
-    let Some((userinfo, hostport)) = rest.rsplit_once('@') else {
+    let Some(host) = url.host_str() else {
         return (proxy_url.to_string(), None);
     };
-    let decode = |s: &str| percent_decode_str(s).decode_utf8_lossy().into_owned();
-    let (user, pass) = match userinfo.split_once(':') {
-        Some((u, p)) => (decode(u), decode(p)),
-        None => (decode(userinfo), String::new()),
+
+    // Rebuild the authority the guard checked, dropping userinfo / path / query /
+    // fragment. `host_str` keeps IPv6 hosts bracketed, so `[::1]:8888` round-trips
+    // to a valid proxy URL.
+    let base_url = match url.port() {
+        Some(port) => format!("{}://{host}:{port}", url.scheme()),
+        None => format!("{}://{host}", url.scheme()),
     };
-    (format!("{scheme}://{hostport}"), Some((user, pass)))
+
+    let credentials = if url.username().is_empty() && url.password().is_none() {
+        None
+    } else {
+        let decode = |s: &str| percent_decode_str(s).decode_utf8_lossy().into_owned();
+        Some((decode(url.username()), decode(url.password().unwrap_or(""))))
+    };
+
+    (base_url, credentials)
 }
 
 #[derive(serde::Serialize)]
@@ -325,6 +353,61 @@ struct ProxiedFetchResponse {
 /// a one-off client (no eviction churn, no unbounded growth from hostile
 /// per-request proxy strings).
 const PROXIED_FETCH_CLIENT_POOL_MAX: usize = 16;
+
+/// Fallback permit count when no `ProxiedFetchLimiter` was installed in
+/// `OpState` (i.e. the op is driven outside the server's execution path, which
+/// always installs one sized to the isolate's memory budget). Mirrors the
+/// server's 64 MiB default budget / 10 MiB per fetch = 6, so a stray direct
+/// invocation is still bounded rather than running unbounded.
+const PROXIED_FETCH_FALLBACK_PERMITS: usize = 6;
+
+/// Per-execution cap on how many `op_lit_proxied_fetch` calls may be buffering a
+/// response body natively at the same time.
+///
+/// Each in-flight call holds up to `PROXIED_FETCH_MAX_BYTES` (10 MiB) in a native
+/// `Vec` that lives OUTSIDE the V8 heap, so it is invisible to the isolate's
+/// `add_near_heap_limit_callback` OOM guard. Without a concurrency cap,
+/// `Promise.all(N × proxiedFetch(bigUrl))` grows RSS to N × 10 MiB with nothing
+/// to stop it short of the host OOM killer (CPL-373). The permit is held across
+/// the request + streamed read and released on return, so excess concurrent
+/// fetches wait for a permit here instead of each pinning up to 10 MiB of
+/// off-heap RSS. Cloneable: the inner `Arc<Semaphore>` is shared, so every clone
+/// draws from the same permit pool.
+#[derive(Clone)]
+pub struct ProxiedFetchLimiter(Arc<tokio::sync::Semaphore>);
+
+impl ProxiedFetchLimiter {
+    /// Size the permit count so `permits × PROXIED_FETCH_MAX_BYTES` tracks the
+    /// isolate's heap budget: combined native buffering stays on the order of
+    /// the memory the isolate is already allowed and no more. Always at least
+    /// one permit so a lone fetch is never blocked, even for a tiny custom
+    /// `memory_limit_mb`.
+    pub fn for_memory_budget_mb(memory_limit_mb: usize) -> Self {
+        let budget_bytes = memory_limit_mb.saturating_mul(1024 * 1024);
+        let permits = (budget_bytes / PROXIED_FETCH_MAX_BYTES).max(1);
+        Self(Arc::new(tokio::sync::Semaphore::new(permits)))
+    }
+
+    /// Acquire one buffering slot, awaiting a free permit if all are in use.
+    /// The returned permit must be held for the lifetime of the native buffer;
+    /// dropping it frees the slot for a waiting fetch.
+    async fn acquire(&self) -> Result<tokio::sync::OwnedSemaphorePermit, JsErrorBox> {
+        // `acquire_owned` only errors if the semaphore is closed, which we never
+        // do — the limiter lives as long as the execution's OpState.
+        Arc::clone(&self.0)
+            .acquire_owned()
+            .await
+            .map_err(|_| JsErrorBox::generic("op_lit_proxied_fetch: fetch limiter unavailable"))
+    }
+}
+
+impl Default for ProxiedFetchLimiter {
+    fn default() -> Self {
+        Self(Arc::new(tokio::sync::Semaphore::new(
+            PROXIED_FETCH_FALLBACK_PERMITS,
+        )))
+    }
+}
 
 lazy_static::lazy_static! {
     /// One `reqwest::Client` per proxy URL ("" = direct). `Client` is an Arc
@@ -376,7 +459,12 @@ fn proxied_fetch_client(proxy: Option<&str>) -> Result<reqwest::Client, JsErrorB
         // downgrade — replaying the caller's method, body, and API-key/HMAC headers
         // to a destination the action never authorized. The action sees the 3xx
         // status and decides for itself.
-        .redirect(reqwest::redirect::Policy::none());
+        .redirect(reqwest::redirect::Policy::none())
+        // Egress filter (CPL-295): drop DNS answers pointing at internal address
+        // space so a hostname destination/proxy can't SSRF into the TEE pod.
+        // Literal-IP connect targets bypass DNS and are rejected up front in
+        // op_lit_proxied_fetch via egress::connect_target_forbidden_ip.
+        .dns_resolver(crate::egress::egress_filtered_reqwest_resolver());
     if !key.is_empty() {
         // Pull any `user:pass@` out of the URL and apply it explicitly:
         // reqwest::Proxy does not reliably forward URL userinfo as the
@@ -415,9 +503,12 @@ fn proxied_fetch_client(proxy: Option<&str>) -> Result<reqwest::Client, JsErrorB
 /// destination is sent as an ordinary forward-proxy request, so the proxy sees
 /// the full URL/headers/body in cleartext — callers handling secrets must use
 /// `https://`. The per-action fetch quota is enforced by the JS wrapper calling
-/// `op_increment_fetch_count` before this op; the byte cap bounds memory the way
-/// `deno_fetch` does. Unlike the other ops here it does no gRPC round-trip to
-/// lit-node — the request is purely local.
+/// `op_increment_fetch_count` before this op; the byte cap bounds a single
+/// response the way `deno_fetch` does, and a per-execution `ProxiedFetchLimiter`
+/// caps how many responses buffer natively at once so concurrent calls can't
+/// amplify off-heap RSS past the isolate's memory budget (CPL-373). Unlike the
+/// other ops here it does no gRPC round-trip to lit-node — the request is purely
+/// local.
 //
 // NB: `async(lazy)`, not bare `async`: in edition 2024 a bare `async` keyword in
 // attribute position fails to parse ("expected `async(...)`"). The other async
@@ -427,11 +518,45 @@ fn proxied_fetch_client(proxy: Option<&str>) -> Result<reqwest::Client, JsErrorB
 #[op2(async(lazy))]
 #[serde]
 async fn op_lit_proxied_fetch(
+    state: Rc<RefCell<OpState>>,
     #[serde] req: ProxiedFetchRequest,
 ) -> Result<ProxiedFetchResponse, JsErrorBox> {
     ensure_not_blank!(req.url, "url");
 
-    let client = proxied_fetch_client(resolve_proxy(req.proxy.as_deref())?)?;
+    let proxy = resolve_proxy(req.proxy.as_deref())?;
+
+    // Egress filter (CPL-295): reject a request that would connect directly to
+    // an internal literal IP. When proxied, the connect target is the proxy
+    // host; otherwise it is the destination URL host. Hostname targets are
+    // caught later by the client's egress DNS resolver. Checked before taking a
+    // limiter permit so a blocked request fails fast without holding one.
+    if crate::egress::connect_target_forbidden_ip(req.url.trim(), proxy) {
+        return Err(JsErrorBox::generic(
+            "op_lit_proxied_fetch: destination blocked: connecting to internal \
+             address space (loopback / RFC1918 / link-local) is not permitted",
+        ));
+    }
+
+    // Bound concurrent native response buffering per execution (CPL-373). The
+    // server installs a `ProxiedFetchLimiter` sized to the isolate's memory
+    // budget; if one is somehow absent (a direct op call outside that path), we
+    // install a conservative default so all calls in this execution still share
+    // one permit pool rather than each running unbounded.
+    let limiter = {
+        let mut state = state.borrow_mut();
+        if let Some(limiter) = state.try_borrow::<ProxiedFetchLimiter>() {
+            limiter.clone()
+        } else {
+            let limiter = ProxiedFetchLimiter::default();
+            state.put(limiter.clone());
+            limiter
+        }
+    };
+    // Held until this op returns, gating both the in-flight request and the
+    // native read buffer below. Released on drop so a waiting fetch can proceed.
+    let _permit = limiter.acquire().await?;
+
+    let client = proxied_fetch_client(proxy)?;
 
     let method = reqwest::Method::from_bytes(req.method.trim().to_ascii_uppercase().as_bytes())
         .map_err(|e| JsErrorBox::generic(format!("op_lit_proxied_fetch: invalid method: {e}")))?;
@@ -568,9 +693,19 @@ mod proxied_fetch_tests {
 
     #[test]
     fn user_without_colon_gets_empty_password() {
+        // `:443` is the https default port, which WHATWG normalization drops from
+        // the rebuilt authority; `reqwest::Proxy` connects to the same host:port
+        // either way.
         let (url, creds) = split_proxy_credentials("https://tokenonly@proxy.example:443");
-        assert_eq!(url, "https://proxy.example:443");
+        assert_eq!(url, "https://proxy.example");
         assert_eq!(creds, Some(("tokenonly".to_string(), String::new())));
+    }
+
+    #[test]
+    fn non_default_port_is_preserved() {
+        let (url, creds) = split_proxy_credentials("http://proxy.example:8080");
+        assert_eq!(url, "http://proxy.example:8080");
+        assert_eq!(creds, None);
     }
 
     #[test]
@@ -589,11 +724,34 @@ mod proxied_fetch_tests {
 
     #[test]
     fn password_containing_at_sign_splits_on_last_at() {
-        // userinfo is taken up to the LAST `@`, so a literal `@` mid-password
-        // (when not percent-encoded) still leaves the real host intact.
+        // WHATWG userinfo runs up to the LAST `@` in the authority, so a literal
+        // `@` mid-password (when not percent-encoded) still leaves the real host
+        // intact — same host the egress guard sees.
         let (url, creds) = split_proxy_credentials("http://u:p@ss@proxy.example:8080");
         assert_eq!(url, "http://proxy.example:8080");
         assert_eq!(creds, Some(("u".to_string(), "p@ss".to_string())));
+    }
+
+    #[test]
+    fn authority_ends_at_path_query_fragment_not_first_at() {
+        // Regression for the SSRF in issue #13. The egress guard parses the proxy
+        // with `reqwest::Url` (WHATWG: the authority ends at the first `/ ? #`),
+        // so it sees host `a` and lets these through. The old hand-rolled split
+        // took everything after the first/last `@` as the host and connected to
+        // the internal IP hidden in the path/query/fragment. The rebuilt base_url
+        // must now match the guard's host `a`, never the post-`@` internal IP.
+        for proxy in [
+            "http://a/b@10.0.0.1:8888/",
+            "http://a?x@10.0.0.1:8888/",
+            "http://a#x@127.0.0.1:8888/",
+        ] {
+            let (url, creds) = split_proxy_credentials(proxy);
+            assert_eq!(
+                url, "http://a",
+                "{proxy} must rebuild to the guarded host `a`, not the internal IP after `@`"
+            );
+            assert_eq!(creds, None, "{proxy} carries no real userinfo");
+        }
     }
 
     #[test]
@@ -629,5 +787,69 @@ mod proxied_fetch_tests {
         // Guards the memory bound the op relies on; a silent bump here would let
         // a single response grow the native buffer past the documented limit.
         assert_eq!(PROXIED_FETCH_MAX_BYTES, 10 * 1024 * 1024);
+    }
+
+    #[test]
+    fn limiter_permits_track_memory_budget() {
+        // permits = budget / 10 MiB, so combined native buffering
+        // (permits × 10 MiB) stays on the order of the isolate's heap budget.
+        assert_eq!(
+            ProxiedFetchLimiter::for_memory_budget_mb(64)
+                .0
+                .available_permits(),
+            6 // 64 MiB / 10 MiB
+        );
+        assert_eq!(
+            ProxiedFetchLimiter::for_memory_budget_mb(128)
+                .0
+                .available_permits(),
+            12 // 128 MiB / 10 MiB
+        );
+    }
+
+    #[test]
+    fn limiter_floors_at_one_permit_for_tiny_budgets() {
+        // A budget below a single fetch's cap must still allow one fetch — a
+        // 0-permit semaphore would deadlock every proxied fetch forever.
+        assert_eq!(
+            ProxiedFetchLimiter::for_memory_budget_mb(8)
+                .0
+                .available_permits(),
+            1
+        );
+        assert_eq!(
+            ProxiedFetchLimiter::for_memory_budget_mb(0)
+                .0
+                .available_permits(),
+            1
+        );
+    }
+
+    #[test]
+    fn limiter_default_matches_fallback_permits() {
+        assert_eq!(
+            ProxiedFetchLimiter::default().0.available_permits(),
+            PROXIED_FETCH_FALLBACK_PERMITS
+        );
+    }
+
+    #[test]
+    fn limiter_blocks_once_permits_exhausted() {
+        // The concurrency bound that stops native-memory amplification
+        // (CPL-373): with one slot, a second concurrent fetch finds no permit
+        // and must wait until the first releases.
+        let limiter = ProxiedFetchLimiter::for_memory_budget_mb(8); // 1 permit
+        let held = Arc::clone(&limiter.0)
+            .try_acquire_owned()
+            .expect("first slot free");
+        assert!(
+            limiter.0.try_acquire().is_err(),
+            "second concurrent fetch must wait for a permit"
+        );
+        drop(held);
+        assert!(
+            limiter.0.try_acquire().is_ok(),
+            "permit is freed once the first fetch's buffer is released"
+        );
     }
 }

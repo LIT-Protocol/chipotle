@@ -7,7 +7,7 @@ use crate::core::v1::models::response::{
     AccountOpResponse, BillingBalanceResponse, CreatePaymentIntentResponse, StripeConfigResponse,
 };
 use crate::stripe::{self, StripeState};
-use lit_billing_core::billing_auth::BillingAuth;
+use lit_billing_core::billing_auth::{BillingAuth, BillingOwnerAuth};
 use rocket::State;
 use rocket::serde::json::Json;
 use rocket::{get, post};
@@ -108,7 +108,7 @@ async fn billing_balance_impl(
 #[openapi(tag = "Billing")]
 #[post("/billing/create_payment_intent", format = "json", data = "<req>")]
 pub(super) async fn billing_create_payment_intent(
-    auth: BillingAuth,
+    auth: BillingOwnerAuth,
     stripe_state: &State<Option<Arc<StripeState>>>,
     req: Json<CreatePaymentIntentRequest>,
 ) -> OpenApiResponse<CreatePaymentIntentResponse, ErrMessage> {
@@ -142,7 +142,7 @@ async fn billing_create_payment_intent_impl(
 #[openapi(tag = "Billing")]
 #[post("/billing/confirm_payment", format = "json", data = "<req>")]
 pub(super) async fn billing_confirm_payment(
-    auth: BillingAuth,
+    auth: BillingOwnerAuth,
     stripe_state: &State<Option<Arc<StripeState>>>,
     req: Json<ConfirmPaymentRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {

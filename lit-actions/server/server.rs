@@ -234,8 +234,14 @@ impl Action for Server {
             #[allow(clippy::single_match)]
             match req.union {
                 Some(UnionRequest::Execute(req)) => {
-                    // Privacy mode is indicated by the PRIVACY_MODE_TAG suffix
-                    // on the request_id, tagged at the origin (lit-api-server fairing).
+                    // `DebugExecutionRequest` redacts user secrets (js_params,
+                    // headers, auth_context) by default (CPL-369). Privacy mode
+                    // is a *stronger* opt-in guarantee that additionally
+                    // suppresses non-secret request metadata (truncated code,
+                    // ids); it runs before `set_request_context`, so the
+                    // `PrivacyModeLayer` can't filter here — keep the explicit
+                    // branch. Forging the tag only reduces the caller's own
+                    // logging, so relying on it for full suppression is safe.
                     let privacy_mode = req
                         .http_headers
                         .get(&HEADER_KEY_X_REQUEST_ID.to_ascii_lowercase())

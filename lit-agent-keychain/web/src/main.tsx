@@ -1,0 +1,1891 @@
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
+import { createRoot } from "react-dom/client";
+import {
+  WagmiProvider,
+  useAccount,
+  useSignTypedData,
+  useDisconnect,
+  http,
+  createConfig,
+} from "wagmi";
+import { mainnet, base } from "wagmi/chains";
+import { injectedWallet } from "@rainbow-me/rainbowkit/wallets";
+import {
+  RainbowKitProvider,
+  ConnectButton,
+  getDefaultConfig,
+  lightTheme,
+  connectorsForWallets,
+} from "@rainbow-me/rainbowkit";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  OwnerClient,
+  LitConnection,
+  Keychain,
+  digest,
+  ACTIONS,
+  type Authority,
+  type Grant,
+  type SecretBundle,
+  type OwnerSigner,
+} from "../../sdk/src/index.ts";
+import { jsonFetch, HttpError } from "../../protocol/client-http.ts";
+import { ownerSchema, type Owner } from "../../protocol/schema.ts";
+import {
+  ownerClient,
+  walletIdentity,
+  createPasskey,
+  discoverPasskey,
+  googleSession,
+  restoreGoogleIdentity,
+  passkeyIdentity,
+  saveSession,
+  loadSession,
+  clearSession,
+  sessionAlive,
+  GoogleSessionExpired,
+  LIT_URL,
+  type Identity,
+} from "./identities.ts";
+import { Brand, Intro, LandingFooter, KEYCHAIN_DOCS_URL } from "./Landing.tsx";
+import { NPX_KEYCHAIN } from "./version.ts";
+import { AddSecret, ActionDocs } from "./AddSecret.tsx";
+import { AgentOnboarding } from "./AgentOnboarding.tsx";
+import { AgentConnection } from "./AgentConnection.tsx";
+import "@rainbow-me/rainbowkit/styles.css";
+import {
+  TwoFactorLogin,
+  TwoFactorSettings,
+  type TwoFactorPrompt,
+} from "./TwoFactor.tsx";
+import "./style.css";
+
+const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
+const config = projectId
+  ? getDefaultConfig({
+      appName: "Lit Agent Keychain",
+      projectId,
+      chains: [mainnet, base],
+      ssr: false,
+    })
+  : createConfig({
+      chains: [mainnet, base],
+      connectors: connectorsForWallets(
+        [{ groupName: "Browser wallet", wallets: [injectedWallet] }],
+        { appName: "Lit Agent Keychain", projectId: "unused-injected-only" },
+      ),
+      transports: { [mainnet.id]: http(), [base.id]: http() },
+    });
+const queryClient = new QueryClient();
+function download(name: string, value: unknown) {
+  const url = URL.createObjectURL(
+    new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }),
+  );
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+async function readFile(file: File) {
+  if (file.size > 192 * 1024 * 1024) throw new Error("Backup is too large");
+  return JSON.parse(await file.text());
+}
+const brief = (s: string) => s.slice(0, 8) + "…" + s.slice(-6);
+type AgentSummary = {
+  key: string;
+  label: string;
+  labels: string[];
+  secrets: any[];
+};
+/** Short label for a secret's action: how agents may use it. */
+const actionLabel = (release: string) =>
+  release === "export"
+    ? "Stored secret"
+    : (ACTIONS[release]?.name ?? "Connected service");
+const isStored = (release: string) => release === "export";
+function GoogleButton({
+  clientId,
+  network,
+  onIdentity,
+  onError,
+}: {
+  clientId: string;
+  network: string;
+  onIdentity: (identity: Identity) => void;
+  onError: (error: string) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const callbacks = useRef({ onIdentity, onError });
+  callbacks.current = { onIdentity, onError };
+  useEffect(() => {
+    let session = googleSession(network);
+    let active = true;
+    const init = () => {
+      const google = (window as any).google;
+      if (!active || !google || !ref.current) return;
+      // An earlier popup may still be completing; its callback retains its key.
+      session = googleSession(network);
+      const pending = session;
+      google.accounts.id.initialize({
+        client_id: clientId,
+        nonce: pending.nonce,
+        auto_select: false,
+        callback: (response: { credential: string }) => {
+          try {
+            if (active)
+              callbacks.current.onIdentity(
+                pending.identity(response.credential, clientId),
+              );
+          } catch {
+            callbacks.current.onError(
+              "Google sign-in failed. Please try again.",
+            );
+          }
+        },
+      });
+      google.accounts.id.renderButton(ref.current, {
+        theme: "outline",
+        size: "large",
+        text: "continue_with",
+        width: Math.max(200, Math.min(400, ref.current.clientWidth || 400)),
+      });
+    };
+    if ((window as any).google) init();
+    else {
+      const script = document.createElement("script");
+      script.src = "https://accounts.google.com/gsi/client";
+      script.async = true;
+      script.onload = init;
+      script.onerror = () =>
+        callbacks.current.onError("Unable to load Google sign-in");
+      document.head.appendChild(script);
+    }
+    // Keep the nonce window fresh if the sign-in page is left open.
+    const refresh = window.setInterval(init, 4 * 60 * 1000);
+    // identity() copies the selected key; this pending nonce owns only its copy.
+    return () => {
+      active = false;
+      window.clearInterval(refresh);
+      session.destroy();
+    };
+  }, [clientId, network]);
+  return <div ref={ref} className="google-button" />;
+}
+function App() {
+  const [settings, setSettings] = useState<any>();
+  const [client, setClient] = useState<OwnerClient>();
+  const [recovery, setRecovery] = useState<Authority>();
+  const [secrets, setSecrets] = useState<any[]>([]);
+  const [billing, setBilling] = useState<any>();
+  const [selected, setSelected] = useState<SecretBundle>();
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [twoFactorPrompt, setTwoFactorPrompt] = useState<TwoFactorPrompt>();
+  const requestSecondFactor = useCallback(
+    (verify: (code: string) => Promise<void>) =>
+      new Promise<void>((resolve, reject) => {
+        setTwoFactorPrompt({
+          verify: async (code) => {
+            await verify(code);
+            setTwoFactorPrompt(undefined);
+            resolve();
+          },
+          cancel: () => {
+            setTwoFactorPrompt(undefined);
+            clearSession();
+            reject(new Error("Sign-in cancelled."));
+          },
+        });
+      }),
+    [],
+  );
+  const [tab, setTab] = useState<
+    "secrets" | "agents" | "recovery" | "activity"
+  >("secrets");
+  const [events, setEvents] = useState<any[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [addingAgent, setAddingAgent] = useState<
+    false | { name?: string; key?: string }
+  >(false);
+  const [selectedAgent, setSelectedAgent] = useState("");
+  const addAgentButton = useRef<HTMLButtonElement>(null);
+  const [agentKey, setAgentKey] = useState("");
+  const [agentName, setAgentName] = useState("");
+  // Approved-elsewhere agents ticked for the selected secret.
+  const [agentPicks, setAgentPicks] = useState<string[]>([]);
+  const [rotation, setRotation] = useState("");
+  const [days, setDays] = useState(30);
+  // 90 for secrets pinned to an older release that still caps lifetimes; null = owner's choice.
+  const [lifetimeCap, setLifetimeCap] = useState<number | null>(null);
+  const [recoveryOwners, setRecoveryOwners] = useState<Owner[]>([]);
+  const [newWallet, setNewWallet] = useState("");
+  // The signer behind the open vault. Swappable so an expired Google approval
+  // session, or a wallet reconnected after a refresh, renews without sign-out.
+  const signerRef = useRef<OwnerSigner>();
+  const [reauth, setReauth] = useState(false);
+  const { address } = useAccount();
+  const { signTypedDataAsync } = useSignTypedData();
+  const wallet = useRef({ address, signTypedDataAsync });
+  wallet.current = { address, signTypedDataAsync };
+  const { disconnect } = useDisconnect();
+  useEffect(() => {
+    jsonFetch("/api/config")
+      .then(setSettings)
+      .catch(() => setError("Unable to connect to Keychain."));
+  }, []);
+  const signOutLocally = () => {
+    clearSession();
+    if (client) client.lit.usageApiKey = undefined;
+    signerRef.current = undefined;
+    setReauth(false);
+    setClient(undefined);
+    setTab("secrets");
+    setAddingAgent(false);
+    setSelectedAgent("");
+    setSelected(undefined);
+    setSecrets([]);
+    setBilling(undefined);
+  };
+  const work = async (label: string, operation: () => Promise<void>) => {
+    if (busy) return;
+    setBusy(label);
+    setError("");
+    setNotice("");
+    try {
+      await operation();
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 401 && client) {
+        signOutLocally();
+        setNotice("Your session expired. Sign in again.");
+      } else if (e instanceof GoogleSessionExpired) {
+        setReauth(true);
+        setError(e.message);
+      } else setError(e instanceof Error ? e.message : "Operation failed");
+    } finally {
+      setBusy("");
+    }
+  };
+  /** Build the vault client around a swappable signer and remember which
+   *  credential opened it, so a refresh can resume the server session. */
+  const openClient = (identity: Identity, authority?: Authority) => {
+    signerRef.current = identity.signer;
+    setReauth(false);
+    const c = ownerClient(
+      {
+        owner: identity.owner,
+        signer: (challenge, authorityRelease) => {
+          const signer = signerRef.current;
+          if (!signer) throw new GoogleSessionExpired();
+          return signer(challenge, authorityRelease);
+        },
+      },
+      settings.network,
+      authority || recovery,
+    );
+    c.progress = setBusy;
+    c.secondFactor = requestSecondFactor;
+    saveSession(identity.owner, c.authority);
+    return c;
+  };
+  /** Restore the selected credential, including a Google device approval. */
+  const restoredSigner = (owner: Owner): OwnerSigner | undefined => {
+    if (owner.kind === "passkey") return passkeyIdentity(owner).signer;
+    if (owner.kind === "wallet")
+      return (challenge) => {
+        const w = wallet.current;
+        if (!w.address || w.address.toLowerCase() !== owner.address)
+          throw new Error(
+            `Connect the wallet ${brief(owner.address)} to approve changes.`,
+          );
+        return walletIdentity(w.address, w.signTypedDataAsync as any).signer(
+          challenge,
+        );
+      };
+    return restoreGoogleIdentity(owner, settings.network)?.signer;
+  };
+  // Resume an open vault after a refresh: the server session cookie is the proof;
+  // the stored descriptors only say which vault and credential to rebuild.
+  useEffect(() => {
+    if (!settings || client) return;
+    const stored = loadSession();
+    if (!stored) return;
+    let cancelled = false;
+    void (async () => {
+      setBusy("Resuming your vault…");
+      try {
+        if (!(await sessionAlive(stored))) {
+          clearSession();
+          if (!cancelled) setNotice("Your session expired. Sign in again.");
+          return;
+        }
+        signerRef.current = restoredSigner(stored.owner);
+        setReauth(false);
+        const c = ownerClient(
+          {
+            owner: stored.owner,
+            signer: (challenge, authorityRelease) => {
+              const signer = signerRef.current;
+              if (!signer) throw new GoogleSessionExpired();
+              return signer(challenge, authorityRelease);
+            },
+          },
+          settings.network,
+          stored.authority,
+        );
+        c.progress = setBusy;
+        c.secondFactor = requestSecondFactor;
+        const { usageApiKey } = await c.api("/api/execution-key", {
+          method: "POST",
+        });
+        c.lit.usageApiKey = usageApiKey;
+        if (cancelled) return;
+        setClient(c);
+        await refresh(c);
+        const policy = await c.getCredentials();
+        setRecoveryOwners(policy?.document.owners || [c.authority.owner]);
+      } catch (e) {
+        if (cancelled) return;
+        clearSession();
+        setClient(undefined);
+        setError(
+          e instanceof Error
+            ? `Could not resume your vault: ${e.message}`
+            : "Could not resume your vault. Sign in again.",
+        );
+      } finally {
+        if (!cancelled) setBusy("");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings]);
+  const refresh = async (c = client) => {
+    if (c) {
+      const [stored, billing] = await Promise.all([
+        c.listSecrets(),
+        c.api("/api/billing"),
+      ]);
+      setSecrets(stored);
+      setBilling(billing);
+    }
+  };
+  const signIn = async (identity: Identity, authority?: Authority) =>
+    work("Verifying owner authorization…", async () => {
+      const c = openClient(identity, authority);
+      await c.login();
+      identity.remember?.(c.googleApproval);
+      setBusy("Loading your vault…");
+      setClient(c);
+      await c.api("/api/billing/refresh", { method: "POST" });
+      await refresh(c);
+      const policy = await c.getCredentials();
+      setRecoveryOwners(policy?.document.owners || [c.authority.owner]);
+      setNotice("Signed in. Owner approvals stay on this device.");
+    });
+  const changeOwners = async (owners: Owner[], message: string) => {
+    const unique = new Set(owners.map((owner) => digest(owner)));
+    if (unique.size !== owners.length)
+      throw new Error("That sign-in method is already approved.");
+    if (owners.length > 8)
+      throw new Error("A vault supports up to eight sign-in methods.");
+    await client!.updateCredentials(owners);
+    setRecovery(client!.authority);
+    signOutLocally();
+    setNotice(message + " Sign in again, then download a fresh vault backup.");
+  };
+  const pick = (id: string) =>
+    work("Checking secret…", async () => {
+      const bundle = await client!.bundle(id);
+      setLifetimeCap(await client!.policyLifetimeCapDays(bundle));
+      setSelected(bundle);
+      setCreating(false);
+      setRotation("");
+      setAgentPicks([]);
+    });
+  const savePolicy = async (changes: {
+    grants?: Grant[];
+    disabled?: boolean;
+    days?: number | null;
+  }) => {
+    const updated = await client!.setPolicy(selected!, changes);
+    setSelected(updated);
+    await refresh();
+  };
+  const atLimit =
+    !!billing && secrets.length >= billing.subscription.secretLimit;
+  /** The Secrets listing inverted: every approved public key with the secrets it may use.
+   *  Labels are per secret, so one key may carry several; the first is the display name. */
+  const agents = useMemo(() => {
+    const byKey = new Map<string, AgentSummary>();
+    for (const s of secrets)
+      for (const g of (s.agents ?? []) as Grant[]) {
+        let a = byKey.get(g.agentPublicKey);
+        if (!a) {
+          a = {
+            key: g.agentPublicKey,
+            label: g.label,
+            labels: [],
+            secrets: [],
+          };
+          byKey.set(g.agentPublicKey, a);
+        }
+        if (!a.labels.includes(g.label)) a.labels.push(g.label);
+        a.secrets.push(s);
+      }
+    return [...byKey.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }, [secrets]);
+  const agent = agents.find((a) => a.key === selectedAgent);
+  const revokeFromSecret = (agentPublicKey: string, secretId: string) =>
+    work("Revoking agent…", async () => {
+      const bundle = await client!.bundle(secretId);
+      const updated = await client!.setPolicy(bundle, {
+        grants: bundle.policy.document.grants.filter(
+          (g) => g.agentPublicKey !== agentPublicKey,
+        ),
+      });
+      if (selected?.manifest.document.manifest.secretId === secretId)
+        setSelected(updated);
+      await refresh();
+    });
+  const remove = () => {
+    if (!selected) return;
+    const secretName = selected.envelope.document.metadata.name;
+    if (
+      !window.confirm(
+        `Delete "${secretName}"?\n\nEvery agent loses access on its next request and the encrypted value is removed from Keychain. This frees the slot. It cannot be undone unless you restore it from an encrypted backup you saved earlier.`,
+      )
+    )
+      return;
+    void work("Deleting secret…", async () => {
+      await client!.deleteSecret(selected.manifest.document.manifest.secretId);
+      setSelected(undefined);
+      setLifetimeCap(null);
+      await refresh();
+      setNotice(`Deleted ${secretName}. Agents can no longer use it.`);
+    });
+  };
+  const reveal = () => {
+    if (!selected) return;
+    const secretName = selected.envelope.document.metadata.name;
+    if (
+      !window.confirm(
+        `Export "${secretName}" in plaintext?\n\nThis decrypts the current value and saves it unencrypted as ${secretName}.json in your downloads folder. Delete that file once you have used it. For agents, approve their public key instead; live clients need no config download.`,
+      )
+    )
+      return;
+    void work("Authorizing a temporary reader…", async () => {
+      const key = Keychain.generateKey();
+      const original = selected.policy.document.grants;
+      let delegated: SecretBundle | undefined;
+      try {
+        delegated = await client!.delegate(
+          selected,
+          key.publicKey,
+          "Owner recovery",
+        );
+        setSelected(delegated);
+        const m = delegated.manifest.document.manifest;
+        const secretName = delegated.envelope.document.metadata.name;
+        const agent = new Keychain(key.privateKey, {
+          v: 2,
+          litApiUrl: LIT_URL,
+          usageApiKey: client!.lit.usageApiKey,
+          secrets: {
+            [secretName]: {
+              manifest: m,
+              actionCid: delegated.manifest.document.actionCid,
+            },
+          },
+        });
+        try {
+          const plaintext = await agent.get(secretName);
+          download(`${secretName}.json`, {
+            name: secretName,
+            value: plaintext,
+          });
+          setNotice(
+            `Saved the plaintext of ${secretName} as ${secretName}.json in your downloads folder. Delete it when you are done.`,
+          );
+        } finally {
+          agent.destroy();
+        }
+      } finally {
+        if (delegated) {
+          const restored = await client!.setPolicy(delegated, {
+            grants: original,
+          });
+          setSelected(restored);
+          await refresh();
+        }
+      }
+    });
+  };
+  return (
+    <>
+      <header className="topbar">
+        <Brand />
+        <div className="header-right">
+          <a href={KEYCHAIN_DOCS_URL}>
+            Developer docs <span aria-hidden="true">↗</span>
+          </a>
+          {client && (
+            <button
+              className="ghost"
+              disabled={!!busy}
+              onClick={() =>
+                work("Signing out…", async () => {
+                  await fetch("/auth/logout", { method: "POST" });
+                  signOutLocally();
+                  disconnect();
+                })
+              }
+            >
+              Sign out
+            </button>
+          )}
+        </div>
+      </header>
+      {busy && (
+        <div className="progress" role="status" aria-live="polite">
+          <span className="spinner" aria-hidden="true" />
+          {busy}
+        </div>
+      )}
+      {error && (
+        <div className="alert error" role="alert">
+          {error}
+          <button onClick={() => setError("")} aria-label="Dismiss error">
+            ×
+          </button>
+        </div>
+      )}
+      {notice && (
+        <div className="alert success" role="status">
+          {notice}
+        </div>
+      )}
+      {twoFactorPrompt && <TwoFactorLogin prompt={twoFactorPrompt} />}
+      {!client ? (
+        <>
+          <main className="login-layout">
+            <Intro />
+            <section className="signin" aria-labelledby="signin-title">
+              <p className="eyebrow">Your vault</p>
+              <h2 id="signin-title">Sign in to Keychain.</h2>
+              <p className="muted">
+                Google, a wallet or a passkey. Each can own a vault; Google
+                needs neither a wallet nor a passkey.
+              </p>
+              <div className="signin-methods">
+                {settings?.googleClientId && (
+                  <GoogleButton
+                    clientId={settings.googleClientId}
+                    network={settings.network}
+                    onIdentity={(identity) => void signIn(identity)}
+                    onError={setError}
+                  />
+                )}
+                <div className="wallet-row">
+                  <ConnectButton chainStatus="none" showBalance={false} />
+                  {address && (
+                    <button
+                      disabled={!!busy || !settings}
+                      onClick={() =>
+                        void signIn(
+                          walletIdentity(address, signTypedDataAsync as any),
+                        )
+                      }
+                    >
+                      Sign in with wallet
+                    </button>
+                  )}
+                </div>
+                <p className="divider-label">or use a passkey</p>
+                <button
+                  className="secondary"
+                  disabled={!!busy || !settings}
+                  onClick={() =>
+                    work("Creating a passkey…", async () => {
+                      const identity = await createPasskey("My Keychain");
+                      const c = openClient(identity);
+                      await c.login();
+                      setBusy("Loading your vault…");
+                      setClient(c);
+                      await c.api("/api/billing/refresh", { method: "POST" });
+                      setRecoveryOwners([identity.owner]);
+                      await refresh(c);
+                    })
+                  }
+                >
+                  Create a passkey
+                </button>
+                <button
+                  className="ghost"
+                  disabled={!!busy || !settings}
+                  onClick={() =>
+                    work("Finding your passkey…", async () => {
+                      const found = await discoverPasskey(recovery);
+                      // An explicitly loaded backup selects the vault, even if lookup
+                      // finds an empty duplicate rooted at the recovery credential.
+                      const c = openClient(
+                        found.identity,
+                        recovery || found.authority,
+                      );
+                      await c.login();
+                      setBusy("Loading your vault…");
+                      setClient(c);
+                      await c.api("/api/billing/refresh", { method: "POST" });
+                      await refresh(c);
+                      const policy = await c.getCredentials();
+                      setRecoveryOwners(
+                        policy?.document.owners || [c.authority.owner],
+                      );
+                    })
+                  }
+                >
+                  Use an existing passkey
+                </button>
+              </div>
+              <details>
+                <summary>Recover an existing vault</summary>
+                <p>
+                  Choose the backup file you downloaded from this vault, then
+                  sign in with an approved credential.
+                </p>
+                <input
+                  aria-label="Backup file"
+                  type="file"
+                  accept="application/json"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f)
+                      void work("Reading backup file…", async () => {
+                        const data = await readFile(f);
+                        await OwnerClient.restoreCredentials(
+                          data,
+                          new LitConnection(LIT_URL),
+                        );
+                        setRecovery(data.authority);
+                        setNotice(
+                          "Backup loaded. Sign in with one of this vault's approved credentials.",
+                        );
+                      });
+                  }}
+                />
+                {recovery && <p>Vault {brief(digest(recovery))} selected.</p>}
+              </details>
+            </section>
+          </main>
+        </>
+      ) : (
+        <div className="workspace">
+          <aside>
+            <div className="account">
+              <div>
+                <strong>Your vault</strong>
+                <code>{brief(client.vaultId)}</code>
+              </div>
+            </div>
+            <nav aria-label="Vault">
+              {(["secrets", "agents", "recovery", "activity"] as const).map(
+                (t) => (
+                  <button
+                    key={t}
+                    disabled={!!busy}
+                    className={tab === t ? "active" : ""}
+                    onClick={() => {
+                      setTab(t);
+                      if (t === "activity")
+                        void work("Loading activity…", async () =>
+                          setEvents((await client.api("/api/audit")).events),
+                        );
+                    }}
+                  >
+                    {t === "secrets"
+                      ? "Secrets"
+                      : t === "agents"
+                        ? "Agents"
+                        : t === "recovery"
+                          ? "Security & sign-in"
+                          : "Activity"}
+                  </button>
+                ),
+              )}
+            </nav>
+            <p className="aside-note">
+              Permissions are verified in Lit Actions. Revocation freshness is
+              trusted to Keychain.
+            </p>
+          </aside>
+          <main className="dashboard">
+            {reauth && client.authority.owner.kind === "google" && (
+              <section className="reauth-panel" role="alert">
+                <div>
+                  <strong>Approve with Google again</strong>
+                  <p className="muted">
+                    Sign in again to approve this change. Device approvals last
+                    30 days; older secrets require a recent Google sign-in.
+                  </p>
+                </div>
+                {settings?.googleClientId && (
+                  <GoogleButton
+                    clientId={settings.googleClientId}
+                    network={settings.network}
+                    onIdentity={(identity) => {
+                      if (
+                        JSON.stringify(identity.owner) !==
+                        JSON.stringify(client.authority.owner)
+                      ) {
+                        setError(
+                          "That Google account does not own this vault. Sign in with the account you used before.",
+                        );
+                        return;
+                      }
+                      void work("Renewing Google approval…", async () => {
+                        signerRef.current = identity.signer;
+                        await client.login();
+                        identity.remember?.(client.googleApproval);
+                        setReauth(false);
+                        setNotice(
+                          "Google approval renewed. Retry your change.",
+                        );
+                      });
+                    }}
+                    onError={setError}
+                  />
+                )}
+              </section>
+            )}
+            <section className="billing-panel" aria-label="Subscription">
+              <div>
+                <strong>
+                  {billing?.subscription?.plan === "custom"
+                    ? "Custom plan"
+                    : billing?.subscription?.active
+                      ? "$10/month · Standard"
+                      : "Free"}
+                </strong>
+                <p>
+                  {secrets.length.toLocaleString()} /{" "}
+                  {(billing?.subscription?.secretLimit ?? 5).toLocaleString()}{" "}
+                  secrets
+                </p>
+                <small>
+                  Execution included under fair use. No automatic overage
+                  charges.
+                </small>
+                {billing?.subscription?.active ? (
+                  <small>
+                    {billing.subscription.cancelAtPeriodEnd
+                      ? "Cancels"
+                      : "Access paid through"}{" "}
+                    {new Date(
+                      billing.subscription.paidUntil * 1000,
+                    ).toLocaleDateString()}
+                  </small>
+                ) : (
+                  <small>
+                    Free includes 5 secrets. Subscribe for up to 1,000. Deleting
+                    a secret frees its slot; nothing is removed unless you
+                    delete it.
+                  </small>
+                )}
+              </div>
+              <div className="billing-actions">
+                {!billing?.subscription?.active && (
+                  <button
+                    disabled={!!busy || !billing}
+                    onClick={() =>
+                      work("Opening secure checkout…", async () => {
+                        const { url } = await client.api(
+                          "/api/billing/checkout",
+                          { method: "POST" },
+                        );
+                        window.location.assign(url);
+                      })
+                    }
+                  >
+                    Subscribe for $10/month
+                  </button>
+                )}
+                {billing?.canManageBilling && (
+                  <button
+                    className="secondary"
+                    disabled={!!busy}
+                    onClick={() =>
+                      work("Opening billing management…", async () => {
+                        const { url } = await client.api(
+                          "/api/billing/portal",
+                          { method: "POST" },
+                        );
+                        window.location.assign(url);
+                      })
+                    }
+                  >
+                    Manage billing
+                  </button>
+                )}
+                <button
+                  className="ghost"
+                  disabled={!!busy}
+                  onClick={() =>
+                    work("Refreshing subscription…", async () => {
+                      await client.api("/api/billing/refresh", {
+                        method: "POST",
+                      });
+                      await refresh();
+                    })
+                  }
+                >
+                  Refresh billing
+                </button>
+                <a
+                  href={`mailto:${encodeURIComponent(billing?.contactEmail || "support@litprotocol.com")}?subject=Keychain%20custom%20plan`}
+                >
+                  Contact us for more
+                </a>
+              </div>
+            </section>
+            {tab === "secrets" && (
+              <>
+                <div className="page-heading">
+                  <div>
+                    <p className="eyebrow">AGENT ACCESS</p>
+                    <h1>Secrets</h1>
+                    <p>
+                      {atLimit
+                        ? `This plan holds ${billing.subscription.secretLimit} secrets and all are in use. Subscribe above to add more, or rotate an existing secret instead of adding one.`
+                        : "Start with no agent access. Grant only what each agent needs."}
+                    </p>
+                  </div>
+                  <div className="button-row">
+                    <button
+                      disabled={!!busy || !billing || atLimit}
+                      title={
+                        atLimit
+                          ? `Plan full: ${secrets.length} of ${billing.subscription.secretLimit} secrets used`
+                          : undefined
+                      }
+                      onClick={() => {
+                        setCreating(true);
+                        setSelected(undefined);
+                      }}
+                    >
+                      + Add secret
+                    </button>
+                  </div>
+                </div>
+                <div className="secret-layout">
+                  <section className="secret-list">
+                    {secrets.length === 0 && (
+                      <div className="empty">
+                        <h3>Your vault is ready</h3>
+                        <p>
+                          Add your first secret, then authorize an agent’s
+                          public key.
+                        </p>
+                      </div>
+                    )}
+                    {[
+                      {
+                        title: "Stored secrets",
+                        note: "Agents receive an encrypted copy.",
+                        items: secrets.filter((s) => isStored(s.release)),
+                      },
+                      {
+                        title: "Connected services",
+                        note: "Agents run one reviewed action; they never see the key.",
+                        items: secrets.filter((s) => !isStored(s.release)),
+                      },
+                    ]
+                      .filter((group) => group.items.length > 0)
+                      .map((group) => (
+                        <div className="secret-group" key={group.title}>
+                          {secrets.some((s) => isStored(s.release)) &&
+                            secrets.some((s) => !isStored(s.release)) && (
+                              <p className="eyebrow">
+                                {group.title.toUpperCase()}
+                                <span className="muted"> · {group.note}</span>
+                              </p>
+                            )}
+                          {group.items.map((s) => (
+                            <button
+                              className={
+                                "secret-row " +
+                                (selected?.manifest.document.manifest
+                                  .secretId === s.secretId
+                                  ? "selected"
+                                  : "")
+                              }
+                              key={s.secretId}
+                              onClick={() => pick(s.secretId)}
+                            >
+                              <span
+                                className={
+                                  "secret-icon" +
+                                  (isStored(s.release) ? "" : " service")
+                                }
+                              >
+                                {isStored(s.release) ? "⌘" : "⚡"}
+                              </span>
+                              <span>
+                                <strong>{s.name}</strong>
+                                <small>
+                                  {actionLabel(s.release)} · v{s.version}
+                                </small>
+                              </span>
+                              <span
+                                className={
+                                  "status " + (s.disabled ? "off" : "")
+                                }
+                              >
+                                {s.disabled
+                                  ? "Disabled"
+                                  : s.expiresAt !== null &&
+                                      s.expiresAt * 1000 <= Date.now()
+                                    ? "Expired"
+                                    : s.agentCount === 1
+                                      ? "1 agent"
+                                      : s.agentCount + " agents"}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      ))}
+                  </section>
+                  <section className="detail-card">
+                    {creating ? (
+                      <AddSecret
+                        busy={!!busy}
+                        onCancel={() => setCreating(false)}
+                        onCreate={(name, value, release) =>
+                          work("Encrypting and approving secret…", async () => {
+                            const bundle = await client.create(
+                              name,
+                              value,
+                              release,
+                            );
+                            setCreating(false);
+                            setLifetimeCap(null);
+                            setSelected(bundle);
+                            await refresh();
+                            setNotice(
+                              isStored(release)
+                                ? "Secret saved. No agents have access yet."
+                                : "Service connected. No agents have access yet.",
+                            );
+                          })
+                        }
+                      />
+                    ) : selected ? (
+                      <>
+                        <p className="eyebrow">
+                          {isStored(selected.manifest.document.manifest.release)
+                            ? "STORED SECRET · AGENTS RECEIVE AN ENCRYPTED COPY"
+                            : `CONNECTED SERVICE · ${actionLabel(
+                                selected.manifest.document.manifest.release,
+                              ).toUpperCase()} · AGENTS NEVER SEE THE KEY`}
+                        </p>
+                        <h2>{selected.envelope.document.metadata.name}</h2>
+                        <p className="hint">
+                          Version {selected.envelope.document.metadata.version}{" "}
+                          ·{" "}
+                          {selected.policy.document.expiresAt === null
+                            ? "Permission never expires"
+                            : `Permission expires ${new Date(
+                                selected.policy.document.expiresAt * 1000,
+                              ).toLocaleDateString()}`}
+                        </p>
+                        <div className="button-row">
+                          <button
+                            className="secondary"
+                            disabled={!!busy}
+                            onClick={() =>
+                              void work("Updating policy…", () =>
+                                savePolicy({
+                                  disabled: !selected.policy.document.disabled,
+                                }),
+                              )
+                            }
+                          >
+                            {selected.policy.document.disabled
+                              ? "Enable"
+                              : "Disable"}
+                          </button>
+                          <button
+                            className="danger ghost"
+                            disabled={!!busy}
+                            onClick={remove}
+                          >
+                            Delete
+                          </button>
+                          {selected.manifest.document.manifest.release ===
+                            "export" && (
+                            <button
+                              className="ghost"
+                              disabled={
+                                !!busy || selected.policy.document.disabled
+                              }
+                              onClick={reveal}
+                            >
+                              Export secret
+                            </button>
+                          )}
+                        </div>
+                        {isStored(
+                          selected.manifest.document.manifest.release,
+                        ) && (
+                          <details className="docs-details">
+                            <summary>How agents use this secret</summary>
+                            <p>
+                              Hand the value to one command without ever
+                              printing it. It reaches only that process's
+                              environment, as{" "}
+                              <code>
+                                {selected.envelope.document.metadata.name}
+                              </code>
+                              .
+                            </p>
+                            <pre className="terminal">
+                              <code>
+                                {`KEYCHAIN_SERVICE_URL=${window.location.origin} ${NPX_KEYCHAIN} run ./agent-identity.json --only ${selected.envelope.document.metadata.name} -- <command>`}
+                              </code>
+                            </pre>
+                            <p>
+                              For tools that read credentials from a path, add{" "}
+                              <code>
+                                --file{" "}
+                                {selected.envelope.document.metadata.name}
+                                =PATH
+                              </code>{" "}
+                              to write a private file that is removed when the
+                              command exits.
+                            </p>
+                            <p>
+                              In code, <code>keychain.get(name)</code> returns
+                              the value; the <code>get_secret</code> MCP tool
+                              does the same for MCP clients.
+                            </p>
+                          </details>
+                        )}
+                        {!isStored(
+                          selected.manifest.document.manifest.release,
+                        ) &&
+                          ACTIONS[selected.manifest.document.manifest.release]
+                            ?.kind === "use" && (
+                            <details className="docs-details">
+                              <summary>How agents use this service</summary>
+                              <ActionDocs
+                                compact
+                                action={
+                                  ACTIONS[
+                                    selected.manifest.document.manifest.release
+                                  ] as any
+                                }
+                                secretName={
+                                  selected.envelope.document.metadata.name
+                                }
+                              />
+                            </details>
+                          )}
+                        <hr />
+                        <h3>Authorized agents</h3>
+                        {selected.policy.document.grants.length === 0 && (
+                          <p className="muted">No agents have access.</p>
+                        )}
+                        {selected.policy.document.grants.map((g) => (
+                          <div className="agent-row" key={g.agentPublicKey}>
+                            <span>
+                              <strong>{g.label}</strong>
+                              <code>{brief(g.agentPublicKey)}</code>
+                            </span>
+                            <span className="row-actions">
+                              <button
+                                className="danger ghost"
+                                disabled={!!busy}
+                                onClick={() =>
+                                  void work("Revoking agent…", () =>
+                                    savePolicy({
+                                      grants:
+                                        selected.policy.document.grants.filter(
+                                          (x) =>
+                                            x.agentPublicKey !==
+                                            g.agentPublicKey,
+                                        ),
+                                    }),
+                                  )
+                                }
+                              >
+                                Revoke
+                              </button>
+                            </span>
+                          </div>
+                        ))}
+                        {(() => {
+                          const candidates = agents.filter(
+                            (a) =>
+                              !selected.policy.document.grants.some(
+                                (g) => g.agentPublicKey === a.key,
+                              ),
+                          );
+                          if (candidates.length === 0) return null;
+                          const picked = agentPicks.filter((k) =>
+                            candidates.some((a) => a.key === k),
+                          );
+                          return (
+                            <fieldset
+                              className="agent-checklist"
+                              disabled={!!busy}
+                            >
+                              <legend>Approve your other agents</legend>
+                              <p className="hint">
+                                Agents already approved elsewhere in this vault.
+                                Each approval needs one owner signature.
+                              </p>
+                              <div className="button-row">
+                                <button
+                                  type="button"
+                                  className="secondary"
+                                  disabled={picked.length === candidates.length}
+                                  onClick={() =>
+                                    setAgentPicks(candidates.map((a) => a.key))
+                                  }
+                                >
+                                  Select all
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ghost"
+                                  disabled={picked.length === 0}
+                                  onClick={() => setAgentPicks([])}
+                                >
+                                  Clear selection
+                                </button>
+                              </div>
+                              {candidates.map((a) => (
+                                <label
+                                  className="agent-secret-choice"
+                                  key={a.key}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={picked.includes(a.key)}
+                                    onChange={(e) =>
+                                      setAgentPicks(
+                                        e.target.checked
+                                          ? [...picked, a.key]
+                                          : picked.filter((k) => k !== a.key),
+                                      )
+                                    }
+                                  />
+                                  <span>
+                                    <strong>{a.label}</strong>
+                                    <small>
+                                      <code>{brief(a.key)}</code> ·{" "}
+                                      {a.secrets.length === 1
+                                        ? "1 secret"
+                                        : `${a.secrets.length} secrets`}
+                                    </small>
+                                  </span>
+                                </label>
+                              ))}
+                              <button
+                                type="button"
+                                disabled={picked.length === 0}
+                                onClick={() => {
+                                  const chosen = candidates.filter((a) =>
+                                    picked.includes(a.key),
+                                  );
+                                  void work("Approving agents…", async () => {
+                                    let bundle = selected;
+                                    const done: string[] = [];
+                                    try {
+                                      for (const a of chosen) {
+                                        bundle = await client.delegate(
+                                          bundle,
+                                          a.key,
+                                          a.label,
+                                        );
+                                        done.push(a.label);
+                                        setAgentPicks((p) =>
+                                          p.filter((k) => k !== a.key),
+                                        );
+                                      }
+                                    } finally {
+                                      setSelected(bundle);
+                                      await refresh();
+                                      if (done.length)
+                                        setNotice(
+                                          `Approved ${done.join(", ")}. Ready on their next request; no config download or restart needed.`,
+                                        );
+                                    }
+                                  });
+                                }}
+                              >
+                                {picked.length === 0
+                                  ? "Approve selected agents"
+                                  : `Approve ${picked.length} selected agent${
+                                      picked.length === 1 ? "" : "s"
+                                    }`}
+                              </button>
+                            </fieldset>
+                          );
+                        })()}
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            const key = agentKey.trim().toLowerCase();
+                            // Agents are identified by key: a key the vault already
+                            // knows keeps its name, so one agent never appears twice.
+                            const known = agents.find((a) => a.key === key);
+                            const label = known ? known.label : agentName;
+                            const existing =
+                              selected.policy.document.grants.find(
+                                (g) => g.agentPublicKey === key,
+                              );
+                            void work("Approving agent…", async () => {
+                              setSelected(
+                                await client.delegate(selected, key, label),
+                              );
+                              setAgentKey("");
+                              setAgentName("");
+                              await refresh();
+                              setNotice(
+                                existing
+                                  ? `${label} (${brief(key)}) already had access to this secret. Nothing changed.`
+                                  : `Approved ${label}. Ready to use on its next request with the live SDK, CLI or MCP client. No config download or restart needed.`,
+                              );
+                            });
+                          }}
+                        >
+                          <p className="form-title">Approve a new agent</p>
+                          {(() => {
+                            const known = agents.find(
+                              (a) => a.key === agentKey.trim().toLowerCase(),
+                            );
+                            return (
+                              <>
+                                <label>
+                                  Agent name
+                                  <input
+                                    value={known ? known.label : agentName}
+                                    onChange={(e) =>
+                                      setAgentName(e.target.value)
+                                    }
+                                    readOnly={!!known}
+                                    required
+                                    maxLength={128}
+                                    placeholder="Research assistant"
+                                  />
+                                </label>
+                                {known && (
+                                  <p className="hint">
+                                    This key is already approved as{" "}
+                                    {known.label}. Agents are identified by
+                                    their key, so the name is kept.
+                                  </p>
+                                )}
+                              </>
+                            );
+                          })()}
+                          <label>
+                            Agent public key
+                            <input
+                              value={agentKey}
+                              onChange={(e) => setAgentKey(e.target.value)}
+                              required
+                              pattern="[0-9a-fA-F]{64}"
+                              title="64 hex characters: the publicKey printed by keychain init (upper- or lowercase)"
+                              placeholder="Generate on the agent with keychain init"
+                              autoComplete="off"
+                            />
+                          </label>
+                          <button disabled={!!busy}>Approve agent</button>
+                          <p className="hint">
+                            Approve only a public key you received from your
+                            agent. Its private key stays on its device.
+                          </p>
+                        </form>
+                        <details>
+                          <summary>Rotate secret</summary>
+                          <form
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              void work(
+                                "Encrypting a new version…",
+                                async () => {
+                                  setSelected(
+                                    await client.rotate(selected, rotation),
+                                  );
+                                  setRotation("");
+                                  await refresh();
+                                },
+                              );
+                            }}
+                          >
+                            <label>
+                              New value
+                              <textarea
+                                value={rotation}
+                                onChange={(e) => setRotation(e.target.value)}
+                                required
+                                autoComplete="off"
+                                spellCheck={false}
+                              />
+                            </label>
+                            <p className="hint">
+                              Existing agents move to the new version and keep
+                              their current expiry. The new policy retires older
+                              versions.
+                            </p>
+                            <button disabled={!!busy}>Rotate & approve</button>
+                          </form>
+                        </details>
+                        <details>
+                          <summary>Renew permissions</summary>
+                          <label>
+                            Days
+                            <input
+                              type="number"
+                              min="1"
+                              max={lifetimeCap ?? undefined}
+                              value={days}
+                              onChange={(e) => setDays(Number(e.target.value))}
+                            />
+                          </label>
+                          <p className="hint">
+                            {lifetimeCap === null
+                              ? "Any number of days, or remove the expiry so access lasts until you revoke or disable it. Within the lifetime, the operator could replay a revoked policy; a shorter expiry bounds that."
+                              : `This secret was created under an earlier release that limits permissions to ${lifetimeCap} days. Recreate it to choose a longer or unlimited lifetime.`}
+                          </p>
+                          <div className="button-row">
+                            <button
+                              disabled={!!busy}
+                              onClick={() =>
+                                void work("Renewing permissions…", () =>
+                                  savePolicy({ days }),
+                                )
+                              }
+                            >
+                              Renew with owner approval
+                            </button>
+                            {lifetimeCap === null && (
+                              <button
+                                className="secondary"
+                                disabled={
+                                  !!busy ||
+                                  selected.policy.document.expiresAt === null
+                                }
+                                onClick={() =>
+                                  void work("Removing expiry…", () =>
+                                    savePolicy({ days: null }),
+                                  )
+                                }
+                              >
+                                Never expire
+                              </button>
+                            )}
+                          </div>
+                        </details>
+                        <details>
+                          <summary>Verify identity</summary>
+                          <p className="hint">Action CID</p>
+                          <code className="wrap">
+                            {selected.manifest.document.actionCid}
+                          </code>
+                          <p className="hint">Ciphertext digest</p>
+                          <code className="wrap">
+                            {digest(selected.envelope.document)}
+                          </code>
+                        </details>
+                      </>
+                    ) : (
+                      <div className="empty">
+                        <h3>Select a secret</h3>
+                        <p>
+                          Inspect permissions, approve an agent, or rotate its
+                          credential.
+                        </p>
+                      </div>
+                    )}
+                  </section>
+                </div>
+              </>
+            )}
+            {tab === "agents" && (
+              <>
+                <div className="page-heading">
+                  <div>
+                    <p className="eyebrow">AGENT ACCESS</p>
+                    <h1>Agents</h1>
+                    <p>
+                      Every approved public key and the secrets it may use.
+                      Approve only what each agent needs.
+                    </p>
+                  </div>
+                  <div className="button-row">
+                    <button
+                      ref={addAgentButton}
+                      disabled={!!busy}
+                      onClick={() => setAddingAgent({})}
+                    >
+                      + Add agent
+                    </button>
+                  </div>
+                </div>
+                {addingAgent && (
+                  <AgentOnboarding
+                    client={client}
+                    secrets={
+                      addingAgent.key
+                        ? secrets.filter(
+                            (s) =>
+                              !((s.agents ?? []) as Grant[]).some(
+                                (g) => g.agentPublicKey === addingAgent.key,
+                              ),
+                          )
+                        : secrets
+                    }
+                    initialName={addingAgent.name}
+                    initialKey={addingAgent.key}
+                    knownAgents={agents}
+                    onBusyChange={(active) =>
+                      setBusy(active ? "Approving selected secrets…" : "")
+                    }
+                    onClose={() => {
+                      setAddingAgent(false);
+                      addAgentButton.current?.focus();
+                    }}
+                    onAddSecret={() => {
+                      setAddingAgent(false);
+                      setTab("secrets");
+                      setCreating(true);
+                      setSelected(undefined);
+                    }}
+                    onApproved={async () => {
+                      setSelected(undefined);
+                      await refresh();
+                    }}
+                  />
+                )}
+                <div className="secret-layout" hidden={!!addingAgent}>
+                  <section className="secret-list" aria-label="Agents">
+                    {agents.length === 0 && (
+                      <div className="empty">
+                        <h3>No agents yet</h3>
+                        <p>
+                          {secrets.length === 0
+                            ? "Add a secret, then approve an agent’s public key."
+                            : "Approve an agent’s public key to give it access to your secrets."}
+                        </p>
+                      </div>
+                    )}
+                    {agents.map((a) => (
+                      <button
+                        className={
+                          "secret-row " +
+                          (a.key === selectedAgent ? "selected" : "")
+                        }
+                        key={a.key}
+                        onClick={() => setSelectedAgent(a.key)}
+                      >
+                        <span className="secret-icon agent">◎</span>
+                        <span>
+                          <strong>{a.label}</strong>
+                          <small>
+                            <code>{brief(a.key)}</code>
+                            {a.labels.length > 1 &&
+                              ` · also ${a.labels.slice(1).join(", ")}`}
+                          </small>
+                        </span>
+                        <span className="status">
+                          {a.secrets.length === 1
+                            ? "1 secret"
+                            : a.secrets.length + " secrets"}
+                        </span>
+                      </button>
+                    ))}
+                  </section>
+                  <section className="detail-card">
+                    {agent ? (
+                      <>
+                        <p className="eyebrow">
+                          AGENT · ED25519 PUBLIC KEY · PRIVATE KEY STAYS ON ITS
+                          DEVICE
+                        </p>
+                        <h2>{agent.label}</h2>
+                        <code className="wrap">{agent.key}</code>
+                        {agent.labels.length > 1 && (
+                          <p className="hint">
+                            Also approved as {agent.labels.slice(1).join(", ")}{" "}
+                            on some secrets.
+                          </p>
+                        )}
+                        <AgentConnection
+                          key={agent.key}
+                          name={agent.label}
+                          publicKey={agent.key}
+                        />
+                        <div className="button-row">
+                          <button
+                            className="secondary"
+                            disabled={
+                              !!busy || agent.secrets.length >= secrets.length
+                            }
+                            title={
+                              agent.secrets.length >= secrets.length
+                                ? "This agent already has access to every secret"
+                                : undefined
+                            }
+                            onClick={() =>
+                              setAddingAgent({
+                                name: agent.label,
+                                key: agent.key,
+                              })
+                            }
+                          >
+                            + Grant secrets
+                          </button>
+                          <button
+                            className="danger ghost"
+                            disabled={!!busy}
+                            onClick={() => {
+                              if (
+                                !window.confirm(
+                                  `Revoke ${agent.label} from all ${agent.secrets.length} secret${
+                                    agent.secrets.length === 1 ? "" : "s"
+                                  }?\n\nEach secret needs its own owner approval. Values it already received cannot be recalled.`,
+                                )
+                              )
+                                return;
+                              const key = agent.key;
+                              const ids = agent.secrets.map((s) => s.secretId);
+                              void work("Revoking agent…", async () => {
+                                try {
+                                  for (const id of ids) {
+                                    const bundle = await client.bundle(id);
+                                    await client.setPolicy(bundle, {
+                                      grants:
+                                        bundle.policy.document.grants.filter(
+                                          (g) => g.agentPublicKey !== key,
+                                        ),
+                                    });
+                                  }
+                                  setSelectedAgent("");
+                                  setSelected(undefined);
+                                } finally {
+                                  await refresh();
+                                }
+                              });
+                            }}
+                          >
+                            Revoke all
+                          </button>
+                        </div>
+                        <hr />
+                        <h3>Accessible secrets</h3>
+                        {agent.secrets.map((s) => (
+                          <div className="agent-row" key={s.secretId}>
+                            <span>
+                              <strong>{s.name}</strong>
+                              <small className="muted">
+                                {" "}
+                                · {actionLabel(s.release)} · v{s.version}
+                                {s.disabled
+                                  ? " · Disabled"
+                                  : s.expiresAt !== null &&
+                                      s.expiresAt * 1000 <= Date.now()
+                                    ? " · Expired"
+                                    : s.expiresAt === null
+                                      ? " · No expiry"
+                                      : ` · Expires ${new Date(
+                                          s.expiresAt * 1000,
+                                        ).toLocaleDateString()}`}
+                              </small>
+                            </span>
+                            <span className="row-actions">
+                              <button
+                                className="ghost"
+                                disabled={!!busy}
+                                onClick={() => {
+                                  setTab("secrets");
+                                  void pick(s.secretId);
+                                }}
+                              >
+                                Open secret
+                              </button>
+                              <button
+                                className="danger ghost"
+                                disabled={!!busy}
+                                onClick={() =>
+                                  void revokeFromSecret(agent.key, s.secretId)
+                                }
+                              >
+                                Revoke
+                              </button>
+                            </span>
+                          </div>
+                        ))}
+                        <p className="hint">
+                          Revocations apply on the agent's next request. Values
+                          it already received cannot be recalled.
+                        </p>
+                      </>
+                    ) : (
+                      <div className="empty">
+                        <h3>Select an agent</h3>
+                        <p>
+                          See which secrets it can use, grant more, or revoke
+                          access.
+                        </p>
+                      </div>
+                    )}
+                  </section>
+                </div>
+              </>
+            )}
+            {tab === "recovery" && (
+              <>
+                <div className="page-heading">
+                  <div>
+                    <p className="eyebrow">OWNER CONTROL</p>
+                    <h1>Security & sign-in</h1>
+                    <p>
+                      Manage your sign-in methods, require 2FA, and prepare for
+                      recovery.
+                    </p>
+                  </div>
+                </div>
+                <TwoFactorSettings client={client} busy={!!busy} work={work} />
+                <section className="detail-card wide recovery-methods">
+                  <h2>Sign-in & recovery methods</h2>
+                  <p>
+                    Each method can sign in to this vault. When 2FA is on, all
+                    methods also require an authenticator or recovery code.
+                    Changes require your current owner’s approval and end
+                    existing browser sessions. Keep a vault backup so you can
+                    select this vault when signing in with a recovery wallet or
+                    Google account.
+                  </p>
+                  {recoveryOwners.map((o, i) => (
+                    <div className="agent-row" key={digest(o)}>
+                      <span>
+                        <strong>{o.kind}</strong>
+                        <code>
+                          {o.kind === "wallet"
+                            ? brief(o.address)
+                            : o.kind === "google"
+                              ? "Google account"
+                              : brief(o.credentialId)}
+                        </code>
+                      </span>
+                      <button
+                        className="danger ghost"
+                        disabled={recoveryOwners.length <= 1 || !!busy}
+                        onClick={() =>
+                          void work(
+                            "Replacing owner credentials…",
+                            async () => {
+                              await changeOwners(
+                                recoveryOwners.filter((_, n) => n !== i),
+                                "Sign-in method removed.",
+                              );
+                            },
+                          )
+                        }
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void work("Adding recovery wallet…", async () => {
+                        const owner = ownerSchema.parse({
+                          kind: "wallet",
+                          address: newWallet.toLowerCase(),
+                        });
+                        await changeOwners(
+                          [...recoveryOwners, owner],
+                          "Recovery wallet added.",
+                        );
+                      });
+                    }}
+                  >
+                    <label>
+                      Recovery wallet address
+                      <input
+                        value={newWallet}
+                        onChange={(e) => setNewWallet(e.target.value)}
+                        required
+                        pattern="0x[0-9a-fA-F]{40}"
+                      />
+                    </label>
+                    <button disabled={!!busy}>Approve recovery wallet</button>
+                  </form>
+                  <button
+                    className="secondary"
+                    disabled={!!busy}
+                    onClick={() =>
+                      void work("Creating recovery passkey…", async () => {
+                        const identity =
+                          await createPasskey("Keychain recovery");
+                        await changeOwners(
+                          [...recoveryOwners, identity.owner],
+                          "Recovery passkey added.",
+                        );
+                      })
+                    }
+                  >
+                    Add recovery passkey
+                  </button>
+                  {settings?.googleClientId && (
+                    <>
+                      <h3>Add a Google account</h3>
+                      <p>
+                        Choose the Google account you want to approve as another
+                        sign-in method.
+                      </p>
+                      <GoogleButton
+                        clientId={settings.googleClientId}
+                        network={settings.network}
+                        onIdentity={(identity) =>
+                          void work(
+                            "Approving Google sign-in method…",
+                            async () => {
+                              await changeOwners(
+                                [...recoveryOwners, identity.owner],
+                                "Google sign-in method added.",
+                              );
+                            },
+                          )
+                        }
+                        onError={setError}
+                      />
+                    </>
+                  )}
+                </section>
+                <section className="detail-card wide">
+                  <h2>Back up this vault</h2>
+                  <p>
+                    One file with your vault data for recovery on a new device:
+                    your encrypted secrets, their signed policies, and the vault
+                    identity. It cannot be read without an approved sign-in
+                    method. Download a fresh copy after adding secrets or
+                    changing credentials.
+                  </p>
+                  <button
+                    disabled={!!busy}
+                    onClick={() =>
+                      void work("Verifying and exporting backup…", async () =>
+                        download("keychain-backup.json", await client.backup()),
+                      )
+                    }
+                  >
+                    Download backup
+                  </button>
+                  <label>
+                    Restore missing secrets
+                    <input
+                      type="file"
+                      accept="application/json"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f)
+                          void work("Verifying backup…", async () => {
+                            await client.restore(await readFile(f));
+                            await refresh();
+                            setNotice(
+                              "Backup restored. Expired policies need owner-approved renewal.",
+                            );
+                          });
+                      }}
+                    />
+                  </label>
+                </section>
+              </>
+            )}
+            {tab === "activity" && (
+              <>
+                <div className="page-heading">
+                  <div>
+                    <p className="eyebrow">VAULT HISTORY</p>
+                    <h1>Activity</h1>
+                    <p>
+                      Committed management changes. Direct Lit executions are
+                      not a complete access audit.
+                    </p>
+                  </div>
+                </div>
+                <section className="detail-card wide">
+                  {events.length === 0 && <p>No events yet.</p>}
+                  {events.map((e) => (
+                    <div className="activity-row" key={e.id}>
+                      <strong>{e.event.replaceAll("_", " ")}</strong>
+                      <time>{new Date(e.createdAt).toLocaleString()}</time>
+                    </div>
+                  ))}
+                  {events.length >= 100 && (
+                    <button
+                      className="ghost"
+                      onClick={() =>
+                        void work("Loading older activity…", async () =>
+                          setEvents([
+                            ...events,
+                            ...(
+                              await client.api(
+                                `/api/audit?before=${events.at(-1).id}`,
+                              )
+                            ).events,
+                          ]),
+                        )
+                      }
+                    >
+                      Load older activity
+                    </button>
+                  )}
+                </section>
+              </>
+            )}
+          </main>
+        </div>
+      )}
+      <LandingFooter
+        contactEmail={
+          settings?.pricing?.contactEmail ||
+          billing?.contactEmail ||
+          "support@litprotocol.com"
+        }
+      />
+    </>
+  );
+}
+createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <WagmiProvider config={config}>
+      <QueryClientProvider client={queryClient}>
+        <RainbowKitProvider
+          theme={lightTheme({
+            accentColor: "#181818",
+            accentColorForeground: "#ffffff",
+            borderRadius: "small",
+            fontStack: "system",
+          })}
+        >
+          <App />
+        </RainbowKitProvider>
+      </QueryClientProvider>
+    </WagmiProvider>
+  </React.StrictMode>,
+);

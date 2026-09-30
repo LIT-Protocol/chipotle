@@ -32,6 +32,21 @@ const ACCOUNT_CONFIG_VIEW_ABI = [
   },
   {
     inputs: [],
+    name: 'configOperator',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    // ERC-173 owner() — served by the diamond's OwnershipFacet.
+    inputs: [],
+    name: 'owner',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
     name: 'adminApiPayerAccount',
     outputs: [{ internalType: 'address', name: '', type: 'address' }],
     stateMutability: 'view',
@@ -125,6 +140,18 @@ function el(id) {
 
 function escapeHtml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Assign innerHTML only when it actually changed. On the 30s refresh most cards
+// re-render byte-for-byte identical markup; blindly reassigning innerHTML blanks
+// and repaints the node (flicker) and can shift layout. Skipping the no-op write
+// keeps the screen still. All writes to a given node must go through this helper
+// (or the __lastHtml cache goes stale) — see setCardError and the system cards.
+function setHtml(node, html) {
+  if (!node) return;
+  if (node.__lastHtml === html) return;
+  node.__lastHtml = html;
+  node.innerHTML = html;
 }
 
 function setValue(id, text, isEmpty) {
@@ -284,6 +311,39 @@ function renderPayerHealthTable() {
 
   const token = getTokenLabel();
 
+  // Fast path: when the same payers appear in the same order (the common case on
+  // a 30s refresh), patch the health dot and balance in place instead of rebuilding
+  // the table. This keeps the copy handlers alive and never blanks/reflows the card,
+  // so the screen updates the changed cells rather than jumping.
+  const tbody = listEl.querySelector('tbody');
+  const sameLayout = tbody
+    && listEl.dataset.token === token
+    && tbody.children.length === sorted.length
+    && sorted.every((p, i) => tbody.children[i].dataset.addr === p.address);
+
+  if (sameLayout) {
+    sorted.forEach((p, i) => {
+      const tr = tbody.children[i];
+      const rowCls = `payer-row ${p.health}`;
+      if (tr.className !== rowCls) tr.className = rowCls;
+      const dot = tr.querySelector('.health-dot');
+      const dotCls = `health-dot ${p.health}`;
+      if (dot && dot.className !== dotCls) dot.className = dotCls;
+      const balCell = tr.querySelector('.bal-cell');
+      if (balCell) {
+        const balText = p.balance != null ? p.balance.toFixed(6) : '…';
+        const balDisplay = p.balance != null ? balText + ' ' + token : balText;
+        if (balCell.textContent !== balDisplay) balCell.textContent = balDisplay;
+        balCell.dataset.copy = balText;
+        const color = p.balance == null ? 'var(--muted)' : '';
+        if (balCell.style.color !== color) balCell.style.color = color;
+      }
+    });
+    updateHealthSummary();
+    return;
+  }
+
+  listEl.dataset.token = token;
   listEl.innerHTML =
     `<table><thead><tr>` +
       `<th style="width:12px"></th><th>Payer</th><th>Address</th><th class="eth">${escapeHtml(token)}</th>` +
@@ -291,11 +351,11 @@ function renderPayerHealthTable() {
     sorted.map(p => {
       const balText = p.balance != null ? p.balance.toFixed(6) : '…';
       const balStyle = p.balance == null ? ' style="color:var(--muted)"' : '';
-      return `<tr class="payer-row ${p.health}">` +
+      return `<tr class="payer-row ${p.health}" data-addr="${escapeHtml(p.address)}">` +
         `<td><span class="health-dot ${p.health}"></span></td>` +
         `<td style="white-space:nowrap">Payer ${p.index}</td>` +
         `<td class="copyable" data-copy="${escapeHtml(p.address)}">${escapeHtml(p.address)}</td>` +
-        `<td class="eth copyable" data-copy="${balText}"${balStyle}>${balText}${p.balance != null ? ' ' + escapeHtml(token) : ''}</td>` +
+        `<td class="eth copyable bal-cell" data-copy="${balText}"${balStyle}>${balText}${p.balance != null ? ' ' + escapeHtml(token) : ''}</td>` +
       `</tr>`;
     }).join('') +
     `</tbody></table>`;
@@ -349,7 +409,11 @@ function updateHealthSummary() {
 /* ═══ Network selector ═══════════════════════════════════════════════════════ */
 
 function getServerUrl() {
-  return (el('network')?.value || '').replace(/\/$/, '');
+  // The editable server-url field is the source of truth; the preset dropdown
+  // just populates it. Fall back to the dropdown before the field is wired up.
+  const custom = (el('server-url')?.value || '').trim();
+  const base = custom || (el('network')?.value || '');
+  return base.replace(/\/+$/, '');
 }
 
 /* ═══ Network health badges ══════════════════════════════════════════════════ */
@@ -407,6 +471,9 @@ function updateActiveNetworkBadge() {
   if (!select) return;
   const opt = select.selectedOptions?.[0] || select.options[select.selectedIndex];
   if (!opt) return;
+  // Only badge the preset when it actually matches the active server URL — a
+  // custom URL typed into the server-url field has no preset to badge.
+  if (opt.value.replace(/\/$/, '') !== getServerUrl()) return;
   const health = payerData.length === 0
     ? 'unknown'
     : aggregateHealth(payerData.map(p => p.balance), getThresholds());
@@ -468,7 +535,7 @@ async function getNodeChainConfig(serverUrl) {
 
   if (errEl) errEl.style.display = 'none';
   if (resultsEl) resultsEl.style.display = 'block';
-  ['cc-chain-name','cc-chain-id','cc-is-evm','cc-testnet','cc-token','cc-contract-address']
+  ['cc-chain-name','cc-chain-id','cc-is-evm','cc-testnet','cc-token','cc-contract-address','ver-contract-address']
     .forEach(id => setValue(id, '…', false));
   const rpcUrlInput = el('cc-rpc-url');
   if (rpcUrlInput) rpcUrlInput.value = '';
@@ -492,24 +559,31 @@ async function getNodeChainConfig(serverUrl) {
     if (rpcInput) rpcInput.value = rpcUrl;
 
     setValue('cc-contract-address', cfg.contract_address ?? '—', !cfg.contract_address);
+    setValue('ver-contract-address', cfg.contract_address ?? '—', !cfg.contract_address);
 
     const contractInput = el('contract-address');
     if (contractInput && cfg.contract_address) contractInput.value = cfg.contract_address;
   } catch (e) {
     const rpcInput = el('cc-rpc-url');
     if (rpcInput) rpcInput.value = '';
+    setValue('ver-contract-address', '—', true);
     if (resultsEl) resultsEl.style.display = 'none';
     if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
   }
 }
 
-async function getApiPayers(serverUrl) {
+async function getApiPayers(serverUrl, { silent = false } = {}) {
   const resultsEl = el('api-payers-results');
   const listEl = el('api-payers-list');
   const errEl = el('api-payers-error');
 
   if (errEl) errEl.style.display = 'none';
-  if (listEl) listEl.innerHTML = '<span style="color:var(--muted);font-family:\'JetBrains Mono\',monospace;font-size:0.85rem">Loading…</span>';
+  // On a silent refresh, leave the current table in place until fresh data lands
+  // — swapping in a "Loading…" line would collapse the card and jump the page.
+  if (!silent && listEl) {
+    listEl.dataset.token = '';
+    listEl.innerHTML = '<span style="color:var(--muted);font-family:\'JetBrains Mono\',monospace;font-size:0.85rem">Loading…</span>';
+  }
   if (resultsEl) resultsEl.style.display = 'block';
 
   try {
@@ -527,21 +601,34 @@ async function getApiPayers(serverUrl) {
           if (typeof fpData === 'string' && fpData) firstPayer = fpData;
         }
       } catch {}
-      listEl.innerHTML =
-        `<p style="color:var(--muted);font-size:0.85rem;margin:0">No payers configured.</p>` +
-        (firstPayer
-          ? `<p style="font-size:0.85rem;margin:0.5rem 0 0;color:#f87171">` +
-              `Please set the default API payer address: <br> ` +
-              `<span style="font-family:'JetBrains Mono',monospace;word-break:break-all">${escapeHtml(firstPayer)}</span>` +
-              `<br>Once this account is set, please fund with native tokens.` +
-            `</p>`
-          : '');
+      if (listEl) {
+        // Guard against the table-rebuild path (which writes innerHTML directly),
+        // so compare the live innerHTML rather than trusting setHtml's cache.
+        const emptyHtml =
+          `<p style="color:var(--muted);font-size:0.85rem;margin:0">No payers configured.</p>` +
+          (firstPayer
+            ? `<p style="font-size:0.85rem;margin:0.5rem 0 0;color:#f87171">` +
+                `Please set the default API payer address: <br> ` +
+                `<span style="font-family:'JetBrains Mono',monospace;word-break:break-all">${escapeHtml(firstPayer)}</span>` +
+                `<br>Once this account is set, please fund with native tokens.` +
+              `</p>`
+            : '');
+        if (listEl.innerHTML !== emptyHtml) listEl.innerHTML = emptyHtml;
+        listEl.dataset.token = '';
+      }
       updateHealthSummary();
       return;
     }
 
-    // Initialize payer data with loading state
-    payerData = payers.map((addr, i) => ({ address: addr, balance: null, health: 'unknown', index: i + 1 }));
+    // Carry prior balances over by address so a silent refresh keeps showing the
+    // last known value instead of flashing "…" while balances re-fetch.
+    const prevByAddr = new Map(payerData.map(p => [p.address, p.balance]));
+    payerData = payers.map((addr, i) => ({
+      address: addr,
+      balance: silent && prevByAddr.has(addr) ? prevByAddr.get(addr) : null,
+      health: 'unknown',
+      index: i + 1,
+    }));
     renderPayerHealthTable();
 
     // Fetch all balances in parallel
@@ -559,22 +646,27 @@ async function getApiPayers(serverUrl) {
       renderPayerHealthTable();
     }
   } catch (e) {
-    payerData = [];
-    if (resultsEl) resultsEl.style.display = 'none';
+    // On a silent refresh keep the last good table visible and just surface the
+    // error, rather than tearing the card down for a transient blip.
+    if (!silent) {
+      payerData = [];
+      if (resultsEl) resultsEl.style.display = 'none';
+      updateHealthSummary();
+    }
     if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
-    updateHealthSummary();
   }
 }
 
+// Renders into the horizontal version bar just above the Pool Health bar.
 async function fetchVersion(serverUrl) {
-  const resultsEl = el('version-results');
   const errEl = el('version-error');
+  const submodulesEl = el('ver-submodules');
 
   if (errEl) errEl.style.display = 'none';
+  setValue('ver-name', '…', false);
   setValue('ver-version', '…', false);
-  const submodulesEl = el('ver-submodules');
+  setValue('ver-commit-version', '…', false);
   if (submodulesEl) submodulesEl.innerHTML = '';
-  if (resultsEl) resultsEl.style.display = 'block';
 
   try {
     const res = await fetch(`${serverUrl}/version`);
@@ -586,23 +678,15 @@ async function fetchVersion(serverUrl) {
     setValue('ver-commit-version', data.commit_version ?? '—', !data.commit_version);
 
     if (submodulesEl) {
-      const rows = (data.submodule_versions ?? []);
-      if (rows.length === 0) {
-        submodulesEl.innerHTML = '<span style="color:var(--muted);font-size:0.85rem">None</span>';
-      } else {
-        submodulesEl.innerHTML =
-          `<table>` +
-            `<thead><tr><th>Submodule</th><th>Version</th></tr></thead>` +
-            `<tbody>` +
-              rows.map(([name, ver]) =>
-                `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(ver)}</td></tr>`
-              ).join('') +
-            `</tbody>` +
-          `</table>`;
-      }
+      submodulesEl.innerHTML = (data.submodule_versions ?? []).map(([name, ver]) =>
+        `<div class="health-bar-item">` +
+          `<span class="health-bar-label">${escapeHtml(name)}</span>` +
+          `<span class="health-bar-value">${escapeHtml(ver)}</span>` +
+        `</div>`
+      ).join('');
     }
   } catch (e) {
-    if (resultsEl) resultsEl.style.display = 'none';
+    ['ver-name', 'ver-version', 'ver-commit-version'].forEach(id => setValue(id, '—', true));
     if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
   }
 }
@@ -619,7 +703,7 @@ function hideError() {
   if (err) err.style.display = 'none';
 }
 
-async function fetchContractValues() {
+async function fetchContractValues({ silent = false } = {}) {
   const rpcUrl = (el('cc-rpc-url')?.value || '').trim();
   const contractAddress = (el('contract-address')?.value || '').trim();
   const results = el('results');
@@ -630,14 +714,22 @@ async function fetchContractValues() {
   }
 
   hideError();
-  setValue('val-pricing-operator', '…', false);
-  setValue('val-pricing-operator-balance', '', false);
-  setValue('val-admin-api-payer', '…', false);
-  setValue('val-admin-api-payer-balance', '', false);
-  setValue('val-payer-count', '…', false);
-  setValue('val-requested-api-payer-count', '…', false);
-  setValue('val-rebalance-amount', '…', false);
-  setValue('val-pkp-count', '…', false);
+  // On a silent refresh keep the current values on screen and let each setValue
+  // below overwrite them in place — resetting to "…" first makes every field
+  // flicker even when the value is unchanged.
+  if (!silent) {
+    setValue('val-contract-owner', '…', false);
+    setValue('val-pricing-operator', '…', false);
+    setValue('val-pricing-operator-balance', '', false);
+    setValue('val-config-operator', '…', false);
+    setValue('val-config-operator-balance', '', false);
+    setValue('val-admin-api-payer', '…', false);
+    setValue('val-admin-api-payer-balance', '', false);
+    setValue('val-payer-count', '…', false);
+    setValue('val-requested-api-payer-count', '…', false);
+    setValue('val-rebalance-amount', '…', false);
+    setValue('val-pkp-count', '…', false);
+  }
   if (results) results.style.display = 'block';
 
   try {
@@ -655,6 +747,30 @@ async function fetchContractValues() {
 
     setValue('val-pricing-operator', pricingOperator ?? '—', !pricingOperator);
     setValue('val-admin-api-payer', adminApiPayer ?? '—', !adminApiPayer);
+
+    // configOperator() may be absent on older diamonds — fetch separately so a
+    // missing selector doesn't blank the rest of the card.
+    contract.configOperator()
+      .then(addr => {
+        setValue('val-config-operator', addr ?? '—', !addr);
+        if (addr && addr !== ethers.ZeroAddress) {
+          provider.getBalance(addr).then(wei => {
+            const node = el('val-config-operator-balance');
+            if (node) {
+              node.textContent = parseFloat(ethers.formatEther(wei)).toFixed(6) + ' ETH';
+              node.style.color = '';
+            }
+          }).catch(() => {});
+        }
+      })
+      .catch(() => setValue('val-config-operator', '—', true));
+
+    // owner() lives on the OwnershipFacet — fetch it separately so a diamond
+    // deployed without that facet doesn't blank the rest of the card.
+    contract.owner()
+      .then(owner => setValue('val-contract-owner', owner ?? '—', !owner))
+      .catch(() => setValue('val-contract-owner', '—', true));
+
     setValue('val-payer-count', String(apiPayerCount), false);
     setValue('val-requested-api-payer-count', String(requestedApiPayerCount), false);
     setValue('val-rebalance-amount', ethers.formatEther(rebalanceAmountWei) + ' ETH', false);
@@ -767,7 +883,19 @@ async function connectWallet() {
     try {
       _wcProvider = await EthereumProvider.init({
         projectId: WALLETCONNECT_PROJECT_ID,
-        chains: [chainId],
+        // CRITICAL: use `optionalChains`, NOT `chains`. @walletconnect/ethereum-provider
+        // turns `chains` into a *requiredNamespaces* entry. A Gnosis Safe (and any
+        // smart-contract wallet) only supports the single chain it was deployed to, and
+        // Reown's own guidance is explicit that required namespaces "cause issues" with
+        // such wallets: the session pairs successfully (the Safe app opens) but the
+        // eth_sendTransaction request never routes to the wallet, so the transaction to
+        // sign silently disappears. Declaring the chain as *optional* keeps EOA wallets
+        // (MetaMask, Rabby) working while letting the Safe negotiate its single chain.
+        // Methods intentionally left unset → they default to the full OPTIONAL_METHODS
+        // set (includes eth_sendTransaction), which the wallet echoes into the approved
+        // namespace so signing routes to the wallet rather than the read-only RPC.
+        // See https://docs.reown.com/advanced/providers/ethereum ("Smart Contract Wallets").
+        optionalChains: [chainId],
         rpcMap: rpcUrl ? { [chainId]: rpcUrl } : undefined,
         showQrModal: true,
       });
@@ -789,12 +917,17 @@ async function connectWallet() {
 
 // ── fetchChainConfigKeys ────────────────────────────────────────────────
 
+// Populates the Node Configuration key dropdown with the ConfigKeys variants
+// the node reads from chain (GET /get_chain_config_keys).
 async function fetchChainConfigKeys(serverUrl) {
-  const listEl = el('chain-config-keys-list');
-  const errEl = el('chain-config-keys-error');
+  const select = el('node-config-key');
+  const errEl = el('node-config-keys-error');
 
   if (errEl) errEl.style.display = 'none';
-  if (listEl) listEl.innerHTML = '<span style="color:var(--muted)">Loading…</span>';
+  if (!select) return;
+
+  const previous = select.value;
+  select.innerHTML = '<option value="" disabled selected>Loading keys…</option>';
 
   try {
     const res = await fetch(`${serverUrl}/get_chain_config_keys`);
@@ -802,13 +935,12 @@ async function fetchChainConfigKeys(serverUrl) {
     const data = await res.json();
     const keys = data.keys ?? [];
 
-    if (listEl) {
-      listEl.innerHTML = keys.length === 0
-        ? '<span style="color:var(--muted)">No keys returned.</span>'
-        : keys.map(k => `<div class="result-row"><span class="result-value">${escapeHtml(k)}</span></div>`).join('');
-    }
+    select.innerHTML =
+      '<option value="" disabled selected>Select a key…</option>' +
+      keys.map(k => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join('');
+    if (previous && keys.includes(previous)) select.value = previous;
   } catch (e) {
-    if (listEl) listEl.innerHTML = '';
+    select.innerHTML = '<option value="" disabled selected>Failed to load keys</option>';
     if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
   }
 }
@@ -851,7 +983,7 @@ async function fetchLitActionClientConfig(serverUrl) {
 
 // ── nodeConfigurationValues ───────────────────────────────────────────────
 
-async function fetchNodeConfigValues() {
+async function fetchNodeConfigValues({ silent = false } = {}) {
   const rpcUrl = (el('cc-rpc-url')?.value || '').trim();
   const contractAddress = (el('contract-address')?.value || '').trim();
   const tableEl = el('node-config-table');
@@ -860,7 +992,9 @@ async function fetchNodeConfigValues() {
   if (errEl) errEl.style.display = 'none';
   if (!rpcUrl || !contractAddress) return;
 
-  if (tableEl) tableEl.innerHTML = '<tr><td colspan="2" style="color:var(--muted)">Loading…</td></tr>';
+  // Skip the "Loading…" placeholder on silent refresh — it collapses the table
+  // to one row and jumps the page. setHtml keeps unchanged rows untouched.
+  if (!silent) setHtml(tableEl, '<tr><td colspan="2" style="color:var(--muted)">Loading…</td></tr>');
 
   try {
     const provider = new ethers.JsonRpcProvider(rpcUrl);
@@ -869,15 +1003,242 @@ async function fetchNodeConfigValues() {
 
     if (!tableEl) return;
     if (!pairs || pairs.length === 0) {
-      tableEl.innerHTML = '<tr><td colspan="2" style="color:var(--muted)">No configuration values set.</td></tr>';
+      setHtml(tableEl, '<tr><td colspan="2" style="color:var(--muted)">No configuration values set.</td></tr>');
       return;
     }
-    tableEl.innerHTML = pairs.map(([key, value]) =>
+    setHtml(tableEl, pairs.map(([key, value]) =>
       `<tr><td>${escapeHtml(key)}</td><td>${escapeHtml(value)}</td></tr>`
-    ).join('');
+    ).join(''));
   } catch (e) {
-    if (tableEl) tableEl.innerHTML = '';
+    if (!silent) setHtml(tableEl, '');
     if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
+  }
+}
+
+/* ═══ System dashboard — runtimes, CVM memory, caches, languages (CPL-353) ═══ */
+
+function fmtBytes(bytes) {
+  if (bytes == null || isNaN(bytes)) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let v = Number(bytes);
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return (i === 0 ? String(v) : v.toFixed(1)) + ' ' + units[i];
+}
+
+function fmtKb(kb) {
+  return kb == null ? '—' : fmtBytes(Number(kb) * 1024);
+}
+
+function fmtCount(n) {
+  return n == null ? '—' : Number(n).toLocaleString('en-US');
+}
+
+async function fetchJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status} ${res.statusText}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+// Older nodes 404 on the new endpoints — show a soft hint rather than an error.
+function setCardError(bodyId, errId, e) {
+  const body = el(bodyId);
+  const errEl = el(errId);
+  if (e?.status === 404) {
+    setHtml(body, '<span class="sys-empty">Not supported by this node version yet.</span>');
+    if (errEl) errEl.style.display = 'none';
+    return;
+  }
+  setHtml(body, '');
+  if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
+}
+
+function runtimeRow(name, sub, state, text, socketPath) {
+  return `<div class="sys-row"${socketPath ? ` title="${escapeHtml(socketPath)}"` : ''}>` +
+    `<span class="health-dot ${state}"></span>` +
+    `<span>${escapeHtml(name)}</span>` +
+    `<span class="badge">${escapeHtml(sub)}</span>` +
+    `<span class="sys-value">${escapeHtml(text)}</span>` +
+  `</div>`;
+}
+
+function renderRuntimes(health, stats) {
+  const body = el('runtimes-body');
+  if (!body) return;
+  const runner = name => stats?.runners?.find(r => r.name === name);
+  const js = runner('js');
+  const gv = runner('gvisor');
+  const rows = [];
+
+  // JS runner — /health probes its socket with a real gRPC connect.
+  const jsUp = health?.lit_actions_reachable;
+  rows.push(runtimeRow(
+    'JS runner', 'Deno / V8 isolate',
+    jsUp == null ? 'unknown' : jsUp ? 'healthy' : 'critical',
+    jsUp == null ? 'unknown' : jsUp ? 'reachable' : 'unreachable',
+    js?.socket_path,
+  ));
+
+  // gVisor runner — prefer the /health connect probe once nodes ship it
+  // (#558); until then fall back to socket presence from /get_system_stats.
+  let gvState = 'unknown';
+  let gvText = 'unknown';
+  if (typeof health?.lit_actions_gvisor_reachable === 'boolean') {
+    gvState = health.lit_actions_gvisor_reachable ? 'healthy' : 'critical';
+    gvText = health.lit_actions_gvisor_reachable ? 'reachable' : 'unreachable';
+  } else if (gv) {
+    gvState = gv.socket_present ? 'healthy' : 'unknown';
+    gvText = gv.socket_present ? 'socket present' : 'not deployed';
+  }
+  rows.push(runtimeRow('gVisor runner', 'any-language sandbox', gvState, gvText, gv?.socket_path));
+
+  if (health) {
+    rows.push(runtimeRow(
+      'CPU', 'request admission',
+      health.cpu_available ? 'healthy' : 'critical',
+      health.cpu_available ? 'available' : 'overloaded',
+      null,
+    ));
+    rows.push(runtimeRow(
+      'Billing keys', 'Stripe configuration',
+      health.billing_keys_present ? 'healthy' : 'unknown',
+      health.billing_keys_present ? 'present' : 'absent',
+      null,
+    ));
+  }
+  setHtml(body, rows.join(''));
+}
+
+function renderMemory(mem) {
+  const body = el('memory-body');
+  if (!body) return;
+  // Fields are independently nullable — render whatever procfs provided
+  // rather than blanking the card when only /proc/meminfo is missing.
+  if (!mem || (mem.total_kb == null && mem.process_rss_kb == null)) {
+    setHtml(body, '<span class="sys-empty">Memory figures unavailable (no procfs on this node).</span>');
+    return;
+  }
+  const parts = [];
+  if (mem.total_kb != null) {
+    const pct = mem.used_kb != null ? (Number(mem.used_kb) / Number(mem.total_kb)) * 100 : null;
+    const cls = pct == null ? '' : pct >= 85 ? 'critical' : pct >= 70 ? 'warning' : '';
+    parts.push(
+      `<div class="sys-row" style="border-bottom:none;padding-bottom:0">` +
+        `<span class="sys-label">Used</span>` +
+        `<span class="sys-value">${fmtKb(mem.used_kb)} / ${fmtKb(mem.total_kb)}${pct != null ? ` (${pct.toFixed(1)}%)` : ''}</span>` +
+      `</div>`,
+      `<div class="gauge"><div class="gauge-fill ${cls}" style="width:${pct == null ? 0 : Math.min(100, pct).toFixed(1)}%"></div></div>`,
+      `<div class="sys-row"><span class="sys-label">Available</span><span class="sys-value">${fmtKb(mem.available_kb)}</span></div>`
+    );
+  } else {
+    parts.push('<div class="sys-empty" style="margin-bottom:0.35rem">CVM totals unavailable (no /proc/meminfo on this node).</div>');
+  }
+  if (mem.process_rss_kb != null) {
+    parts.push(`<div class="sys-row"><span class="sys-label">API server RSS</span><span class="sys-value">${fmtKb(mem.process_rss_kb)}</span></div>`);
+  }
+  setHtml(body, parts.join(''));
+}
+
+function renderCaches(caches) {
+  const body = el('caches-body');
+  if (!body) return;
+  if (!Array.isArray(caches) || caches.length === 0) {
+    setHtml(body, '<span class="sys-empty">No cache statistics reported.</span>');
+    return;
+  }
+  const totalEntries = caches.reduce((s, c) => s + (c.entry_count ?? 0), 0);
+  const totalBytes = caches.reduce((s, c) => s + (c.approx_bytes ?? 0), 0);
+  setHtml(body,
+    `<table><thead><tr><th>Cache</th><th class="eth">Entries</th><th class="eth">Size</th></tr></thead><tbody>` +
+    caches.map(c =>
+      `<tr title="${escapeHtml(c.description ?? '')}">` +
+        `<td>${escapeHtml(c.name)}</td>` +
+        `<td class="eth">${fmtCount(c.entry_count)}</td>` +
+        `<td class="eth">${c.approx_bytes != null ? fmtBytes(c.approx_bytes) : '—'}</td>` +
+      `</tr>`
+    ).join('') +
+    `</tbody></table>` +
+    `<div class="sys-row" style="border-bottom:none;margin-top:0.5rem">` +
+      `<span class="sys-label">Total</span>` +
+      `<span class="sys-value">${fmtCount(totalEntries)} entries &middot; ${fmtBytes(totalBytes)} tracked</span>` +
+    `</div>`);
+}
+
+function renderLanguages(languages) {
+  const body = el('languages-body');
+  if (!body) return;
+  if (!Array.isArray(languages) || languages.length === 0) {
+    setHtml(body, '<span class="sys-empty">No languages advertised.</span>');
+    return;
+  }
+  setHtml(body, languages.map(lang => {
+    const isGvisor = lang.execution_model === 'gvisor';
+    const runtimes = (lang.runtimes ?? []).map(rt =>
+      `<span class="badge${rt.is_default ? ' accent' : ''}" title="${escapeHtml(rt.version ?? '')}${rt.prewarmed ? ' · prewarmed' : ''}">${escapeHtml(rt.id)}${rt.is_default ? ' ★' : ''}</span>`
+    ).join(' ');
+    const methods = (lang.methods ?? []).map(m => `<span class="badge">${escapeHtml(m)}</span>`).join(' ');
+    return `<div class="sys-row" style="flex-wrap:wrap">` +
+      `<span>${escapeHtml(lang.display_name ?? lang.name)}</span>` +
+      `<span class="badge${isGvisor ? ' accent' : ''}">${isGvisor ? 'gVisor sandbox' : 'Deno / V8'}</span>` +
+      `<span class="sys-value" style="display:flex;gap:0.35rem;flex-wrap:wrap;justify-content:flex-end">${runtimes} ${methods}</span>` +
+    `</div>`;
+  }).join(''));
+}
+
+// /health intentionally answers 503 with a JSON body when unhealthy, so parse
+// the body regardless of status.
+async function fetchHealth(serverUrl) {
+  const res = await fetch(`${serverUrl}/health`);
+  try {
+    return await res.json();
+  } catch {
+    const err = new Error(`HTTP ${res.status} ${res.statusText}`);
+    err.status = res.status;
+    throw err;
+  }
+}
+
+async function refreshSystemDashboard(serverUrl) {
+  const [healthResult, statsResult] = await Promise.allSettled([
+    fetchHealth(serverUrl),
+    fetchJson(`${serverUrl}/get_system_stats`),
+  ]);
+  const health = healthResult.status === 'fulfilled' ? healthResult.value : null;
+  const stats = statsResult.status === 'fulfilled' ? statsResult.value : null;
+
+  if (health == null && stats == null) {
+    setCardError('runtimes-body', 'runtimes-error', healthResult.reason ?? statsResult.reason);
+  } else {
+    const errEl = el('runtimes-error');
+    if (errEl) errEl.style.display = 'none';
+    renderRuntimes(health, stats);
+  }
+
+  if (stats) {
+    for (const id of ['memory-error', 'caches-error']) {
+      const errEl = el(id);
+      if (errEl) errEl.style.display = 'none';
+    }
+    renderMemory(stats.memory);
+    renderCaches(stats.caches);
+  } else {
+    setCardError('memory-body', 'memory-error', statsResult.reason);
+    setCardError('caches-body', 'caches-error', statsResult.reason);
+  }
+}
+
+async function fetchSupportedLanguages(serverUrl) {
+  try {
+    const data = await fetchJson(`${serverUrl}/get_supported_languages`);
+    const errEl = el('languages-error');
+    if (errEl) errEl.style.display = 'none';
+    renderLanguages(data.languages);
+  } catch (e) {
+    setCardError('languages-body', 'languages-error', e);
   }
 }
 
@@ -955,6 +1316,8 @@ async function loadNetwork() {
     fetchNodeConfigValues(),
     fetchLitActionClientConfig(serverUrl),
     fetchChainConfigKeys(serverUrl),
+    refreshSystemDashboard(serverUrl),
+    fetchSupportedLanguages(serverUrl),
   ]);
   updateHealthSummary(); // pick up admin reserve after fetchContractValues
   loadThresholdInputs();
@@ -966,10 +1329,14 @@ async function refreshBalances() {
   isRefreshing = true;
   try {
     const serverUrl = getServerUrl();
+    // silent: update values in place without tearing cards down to placeholders,
+    // so a periodic refresh doesn't blank-and-repaint (and jump) the page.
     await Promise.all([
-      getApiPayers(serverUrl),
-      fetchContractValues(),
-      fetchNodeConfigValues(),
+      getApiPayers(serverUrl, { silent: true }),
+      fetchContractValues({ silent: true }),
+      fetchNodeConfigValues({ silent: true }),
+      refreshSystemDashboard(serverUrl),
+      fetchSupportedLanguages(serverUrl),
     ]);
     updateHealthSummary(); // pick up admin reserve after fetchContractValues
   } finally {
@@ -1174,7 +1541,7 @@ el('btn-set-node-config')?.addEventListener('click', async () => {
     return;
   }
   if (!key) {
-    showStatus('node-config-status', 'Enter a configuration key.', true);
+    showStatus('node-config-status', 'Select a configuration key.', true);
     return;
   }
 
@@ -1210,6 +1577,9 @@ el('btn-refresh-node-config')?.addEventListener('click', async () => {
 });
 
 el('cc-rpc-url')?.addEventListener('change', () => refreshBalances());
+
+// Editing the contract address re-queries that contract's values in place.
+el('contract-address')?.addEventListener('change', () => refreshBalances());
 
 el('btn-refresh-contract')?.addEventListener('click', async () => {
   const btn = el('btn-refresh-contract');
@@ -1275,6 +1645,12 @@ el('btn-set-payer-count')?.addEventListener('click', async () => {
 
 /* ═══ Initialization ═════════════════════════════════════════════════════════ */
 
+el('ver-contract-address')?.addEventListener('click', () => {
+  const node = el('ver-contract-address');
+  const text = (node?.textContent || '').trim();
+  if (text && text !== '—' && text !== '…') copyText(text, node);
+});
+
 (function () {
   const select = el('network');
   if (!select) return;
@@ -1294,7 +1670,30 @@ el('btn-set-payer-count')?.addEventListener('click', async () => {
     } catch {}
   }
 
-  select.addEventListener('change', loadNetwork);
+  // Seed the editable server-url field from the selected preset.
+  const urlInput = el('server-url');
+  if (urlInput) urlInput.value = select.value;
+
+  // Picking a preset fills the editable field; editing the field points at any
+  // node (and re-selects the matching preset when the URL is a known one).
+  select.addEventListener('change', () => {
+    if (urlInput) urlInput.value = select.value;
+    loadNetwork();
+  });
+  if (urlInput) {
+    const applyUrl = () => {
+      const v = urlInput.value.trim().replace(/\/$/, '');
+      for (const opt of select.options) {
+        if (opt.value.replace(/\/$/, '') === v) { opt.selected = true; break; }
+      }
+      loadNetwork();
+    };
+    urlInput.addEventListener('change', applyUrl);
+    urlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); applyUrl(); }
+    });
+  }
+
   loadNetwork();
   if (!document.hidden) startNetworkHealthPolling();
 })();

@@ -23,8 +23,12 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use sha2::{Digest as _, Sha256};
 
-/// Manifest file every bundle must carry at its root.
+/// Optional manifest file at the bundle root.
 pub const MANIFEST_FILE: &str = "lit.json";
+/// Bash script the sandbox executes. Every execution runs a `startup.sh` —
+/// either supplied per-request (see the supervisor) or shipped at the
+/// bundle root; nothing else in the bundle is ever an entrypoint.
+pub const STARTUP_SCRIPT_FILE: &str = "startup.sh";
 /// `code` prefix referencing an already-cached bundle by content id.
 pub const CID_REF_PREFIX: &str = "cid:";
 
@@ -34,39 +38,19 @@ const MAX_ENTRIES: usize = 10_000;
 
 const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
 
-#[derive(Debug, Clone, serde::Deserialize)]
+/// Bundle metadata. The bundle itself is pure payload — what runs is always
+/// a `startup.sh` — so the manifest is optional and carries no entrypoint.
+/// A legacy `entrypoint` field in an incoming manifest is simply ignored:
+/// the bundle is "re-written" to the startup-script contract.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct Manifest {
-    /// What to run. A string is a shell script path (run as `sh <path>`, no
-    /// exec bit needed); an array is an argv executed verbatim.
-    pub entrypoint: Entrypoint,
     /// Informational runtime the bundle targets (e.g. "python3"). The v1
     /// base image ships all supported runtimes, so this is not yet enforced.
     #[serde(default)]
     pub runtime: Option<String>,
-    /// Extra environment variables for the entrypoint.
+    /// Extra environment variables for the startup script.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(untagged)]
-pub enum Entrypoint {
-    Argv(Vec<String>),
-    Script(String),
-}
-
-impl Entrypoint {
-    pub fn to_argv(&self) -> Result<Vec<String>> {
-        let argv = match self {
-            Entrypoint::Argv(argv) => argv.clone(),
-            Entrypoint::Script(path) => vec!["/bin/sh".to_string(), path.clone()],
-        };
-        ensure!(
-            !argv.is_empty() && !argv[0].trim().is_empty(),
-            "manifest entrypoint must not be empty"
-        );
-        Ok(argv)
-    }
 }
 
 #[derive(Debug)]
@@ -173,12 +157,12 @@ impl BundleCache {
                 .context("failed to unpack bundle tar entry")?;
         }
 
-        // Preserved modes come from untrusted input: keep rwx bits (binary
-        // entrypoints need exec) but strip setuid/setgid/sticky.
+        // Preserved modes come from untrusted input: keep rwx bits (bundled
+        // binaries need exec) but strip setuid/setgid/sticky.
         strip_special_mode_bits(tmp.path())?;
 
-        // Validate the manifest before publishing so a broken bundle is never
-        // cached under its CID.
+        // Validate the manifest (when present) before publishing so a bundle
+        // with a broken lit.json is never cached under its CID.
         read_manifest(tmp.path())?;
 
         let dir = self.root.join(cid);
@@ -218,13 +202,13 @@ fn strip_special_mode_bits(dir: &std::path::Path) -> Result<()> {
 
 fn read_manifest(dir: &std::path::Path) -> Result<Manifest> {
     let path = dir.join(MANIFEST_FILE);
+    if !path.is_file() {
+        return Ok(Manifest::default());
+    }
     let raw = fs::read(&path)
-        .with_context(|| format!("bundle is missing its {MANIFEST_FILE} manifest"))?;
-    let manifest: Manifest = serde_json::from_slice(&raw)
-        .with_context(|| format!("bundle {MANIFEST_FILE} manifest is invalid"))?;
-    // Fail fast on an empty entrypoint at unpack time, not spawn time.
-    manifest.entrypoint.to_argv()?;
-    Ok(manifest)
+        .with_context(|| format!("failed to read bundle {MANIFEST_FILE} manifest"))?;
+    serde_json::from_slice(&raw)
+        .with_context(|| format!("bundle {MANIFEST_FILE} manifest is invalid"))
 }
 
 /// The CID doubles as a cache directory name, so restrict it to filename-safe
@@ -275,14 +259,14 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let cache = BundleCache::new(root.path()).unwrap();
         let code = tar_gz(&[
-            ("lit.json", r#"{"entrypoint": ["/bin/sh", "run.sh"]}"#),
-            ("run.sh", "echo hi\n"),
+            ("lit.json", r#"{"env": {"GREETING": "hi"}}"#),
+            (STARTUP_SCRIPT_FILE, "echo hi\n"),
         ]);
 
         let bundle = cache.resolve(&code, None).unwrap();
         assert!(bundle.cid.starts_with("sha256-"));
-        assert!(bundle.dir.join("run.sh").is_file());
-        assert_eq!(bundle.manifest.entrypoint.to_argv().unwrap()[0], "/bin/sh");
+        assert!(bundle.dir.join(STARTUP_SCRIPT_FILE).is_file());
+        assert_eq!(bundle.manifest.env["GREETING"], "hi");
 
         // Second resolve via cid: reference hits the cache.
         let via_ref = cache.resolve(&format!("cid:{}", bundle.cid), None).unwrap();
@@ -297,20 +281,20 @@ mod tests {
         let mut tar_bytes = Vec::new();
         {
             let mut builder = tar::Builder::new(&mut tar_bytes);
-            let manifest = r#"{"entrypoint": "run.sh"}"#;
+            let script = "echo hi\n";
             let mut header = tar::Header::new_gnu();
-            header.set_size(manifest.len() as u64);
+            header.set_size(script.len() as u64);
             header.set_mode(0o644);
             header.set_cksum();
             builder
-                .append_data(&mut header, "lit.json", manifest.as_bytes())
+                .append_data(&mut header, STARTUP_SCRIPT_FILE, script.as_bytes())
                 .unwrap();
             let mut link = tar::Header::new_gnu();
             link.set_entry_type(tar::EntryType::Symlink);
             link.set_size(0);
             link.set_cksum();
             builder
-                .append_link(&mut link, "run.sh", "/etc/passwd")
+                .append_link(&mut link, "data.txt", "/etc/passwd")
                 .unwrap();
             builder.finish().unwrap();
         }
@@ -334,7 +318,7 @@ mod tests {
         {
             let mut builder = tar::Builder::new(&mut tar_bytes);
             for (name, contents, mode) in [
-                ("lit.json", r#"{"entrypoint": ["./run"]}"#, 0o644),
+                (STARTUP_SCRIPT_FILE, "./run\n", 0o644),
                 ("run", "#!/bin/sh\n", 0o4755), // setuid + exec
             ] {
                 let mut header = tar::Header::new_gnu();
@@ -362,9 +346,23 @@ mod tests {
     fn resolve_prefers_server_supplied_ipfs_id() {
         let root = tempfile::tempdir().unwrap();
         let cache = BundleCache::new(root.path()).unwrap();
-        let code = tar_gz(&[("lit.json", r#"{"entrypoint": "run.sh"}"#), ("run.sh", "")]);
+        let code = tar_gz(&[(STARTUP_SCRIPT_FILE, "")]);
         let bundle = cache.resolve(&code, Some("QmTestCid123")).unwrap();
         assert_eq!(bundle.cid, "QmTestCid123");
+    }
+
+    #[test]
+    fn legacy_entrypoint_manifest_is_tolerated() {
+        // Pre-startup-script bundles carried an `entrypoint`; it is ignored,
+        // not an error — the bundle is re-written to the startup.sh contract.
+        let root = tempfile::tempdir().unwrap();
+        let cache = BundleCache::new(root.path()).unwrap();
+        let code = tar_gz(&[
+            ("lit.json", r#"{"entrypoint": ["/bin/sh", "run.sh"]}"#),
+            ("run.sh", "echo hi\n"),
+        ]);
+        let bundle = cache.resolve(&code, None).unwrap();
+        assert!(bundle.manifest.env.is_empty());
     }
 
     #[test]
@@ -384,14 +382,24 @@ mod tests {
     }
 
     #[test]
-    fn missing_manifest_errors_and_is_not_cached() {
+    fn missing_manifest_defaults_to_empty() {
         let root = tempfile::tempdir().unwrap();
         let cache = BundleCache::new(root.path()).unwrap();
-        let code = tar_gz(&[("run.sh", "echo hi\n")]);
-        let err = cache.resolve(&code, Some("QmNoManifest")).unwrap_err();
+        let code = tar_gz(&[(STARTUP_SCRIPT_FILE, "echo hi\n")]);
+        let bundle = cache.resolve(&code, Some("QmNoManifest")).unwrap();
+        assert!(bundle.manifest.env.is_empty());
+        assert!(bundle.manifest.runtime.is_none());
+    }
+
+    #[test]
+    fn invalid_manifest_errors_and_is_not_cached() {
+        let root = tempfile::tempdir().unwrap();
+        let cache = BundleCache::new(root.path()).unwrap();
+        let code = tar_gz(&[("lit.json", "not json"), (STARTUP_SCRIPT_FILE, "echo hi\n")]);
+        let err = cache.resolve(&code, Some("QmBadManifest")).unwrap_err();
         assert!(err.to_string().contains(MANIFEST_FILE), "{err:#}");
         // The broken bundle must not have been published under its CID.
-        assert!(cache.resolve("cid:QmNoManifest", None).is_err());
+        assert!(cache.resolve("cid:QmBadManifest", None).is_err());
     }
 
     #[test]

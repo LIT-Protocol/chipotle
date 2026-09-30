@@ -29,7 +29,7 @@ changes. Both are public; both are required.
 ## Who holds the keys
 
 The `DstackApp` contract ([`0x3F91…05FfC`](https://basescan.org/address/0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC))
-and the Phala KMS contract are both owned by a **Safe multisig**
+is owned by a Lit-controlled **Safe multisig**
 ([`0xF688…1098`](https://app.safe.global/base:0xF688411c0FFc300cAb33EB1dA651DBb3E6891098))
 on Base.
 
@@ -38,7 +38,14 @@ on Base.
 | **Threshold** | **2 of 4** signers must approve any change | `cast call 0xF688…1098 "getThreshold()(uint256)" --rpc-url https://mainnet.base.org` |
 | **Signers** | 4 distinct Lit-controlled keys | `cast call 0xF688…1098 "getOwners()(address[])" --rpc-url https://mainnet.base.org` |
 | **Safe version** | 1.4.1 | `cast call 0xF688…1098 "VERSION()(string)" --rpc-url https://mainnet.base.org` |
-| **Timelock** | None — the Safe owns the contracts directly | `owner()` on the app returns the Safe address, not a timelock |
+| **Timelock** | None — the Safe owns the `DstackApp` contract directly | `owner()` on the app returns the Safe address, not a timelock |
+
+The shared **Phala KMS** contract ([`0x2f83…Ba9C`](https://basescan.org/address/0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C))
+— which whitelists allowed OS images and KMS instances — is **not** owned by the Lit Safe.
+Its `owner()` is a separate Phala-controlled Safe
+([`0x3926…a663`](https://app.safe.global/base:0x3926658a072F82BAEa5e5a15e1Fed8a776F4a663), 2-of-3),
+so the OS-image / KMS whitelist is governed by Phala, not Lit. Confirm with
+`cast call 0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C "owner()(address)" --rpc-url https://mainnet.base.org`.
 
 A single compromised signer key cannot change the whitelist; it takes a quorum.
 There is currently **no timelock delay** on top of the multisig, so an approved

@@ -46,13 +46,20 @@ jobs:
       - name: Generate litApiServer from deployed OpenAPI spec
         run: |
           npm install -g @grafana/openapi-to-k6
-          openapi-to-k6 --verbose "${{ inputs.api_root_url }}/openapi.json" ./k6-generated
+          openapi-to-k6 --verbose "${{ inputs.api_root_url }}/openapi.json" "${{ runner.temp }}/k6-generated"
 
       - name: Compare with committed litApiServer.ts
         run: |
-          if ! diff -q ./k6-generated/litApiServer.ts ./k6/litApiServer.ts; then
+          # openapi-to-k6 does not pin its internal prettier, so union-type
+          # formatting (e.g. `A | B` vs leading-pipe multiline) drifts between
+          # tool installs even at the same tool version. Normalize both sides
+          # through a pinned prettier before diffing so only real spec changes
+          # fail this check.
+          cp ./k6/litApiServer.ts "${{ runner.temp }}/k6-committed.ts"
+          npx --yes prettier@3.9.5 --write "${{ runner.temp }}/k6-generated/litApiServer.ts" "${{ runner.temp }}/k6-committed.ts"
+          if ! diff -q "${{ runner.temp }}/k6-generated/litApiServer.ts" "${{ runner.temp }}/k6-committed.ts"; then
             echo "::error::Deployed OpenAPI spec differs from committed k6/litApiServer.ts. Regenerate with: openapi-to-k6 <BASE_URL>/openapi.json ./k6"
-            diff ./k6-generated/litApiServer.ts ./k6/litApiServer.ts || true
+            diff "${{ runner.temp }}/k6-generated/litApiServer.ts" "${{ runner.temp }}/k6-committed.ts" || true
             exit 1
           fi
           echo "litApiServer.ts matches deployed OpenAPI spec"

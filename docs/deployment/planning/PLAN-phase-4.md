@@ -1,6 +1,6 @@
 # Phase 4: Documentation
 
-**Parent**: [PLAN.md](PLAN.md) | **Requirements**: [requirements.md](requirements.md)
+**Parent**: [PLAN.md](/deployment/planning/PLAN) | **Requirements**: [requirements.md](/deployment/planning/requirements)
 
 ## Goal
 

@@ -1,0 +1,129 @@
+---
+title: "SDK, CLI and MCP"
+description: "Reference for the agent side of Lit Agent Keychain: the @lit-protocol/keychain SDK, the keychain CLI, the local MCP server, the three credential artifacts, and what every refusal message means."
+---
+
+One npm package, [`@lit-protocol/keychain`](https://www.npmjs.com/package/@lit-protocol/keychain), covers the SDK, a CLI and a local MCP server. Node 22+, one runtime dependency, Apache-2.0. The agent's private key never leaves its machine, and the SDK attests the Lit endpoint before it sends an execution request.
+
+The package's own [README](https://keychain.litprotocol.com/sdk/README.md) is the exhaustive reference and is published alongside the app so agents can fetch it. This page is the map.
+
+## Installation and identity
+
+```sh
+npm install @lit-protocol/keychain
+npx @lit-protocol/keychain init ./agent-identity.json     # prints publicKey; share only that
+npx @lit-protocol/keychain --help
+```
+
+## Live SDK (2.1.0)
+
+Agents need only their existing private identity and a stable service URL. No config
+file is required. Each operation discovers current approvals; website changes are
+visible on the next request without a client restart.
+
+
+```js
+import { LiveKeychain } from "@lit-protocol/keychain";
+const keychain = new LiveKeychain(identity.privateKey);
+
+await keychain.list();                  // each secret's action and input shape, no values
+await keychain.get("MY_SECRET");        // stored secret: plaintext for this process
+await keychain.use("STRIPE_API_KEY");   // connected service: bounded result, never the key
+await keychain.use("OPENAI_API_KEY", { model: "gpt-4o-mini", messages: [...] });
+await keychain.attest();                // full attestation report for the separately trusted Lit origin
+keychain.destroy();                     // then create a new client before calling again
+```
+
+- `get` on a connected service fails with `Secret "X" was created with the <action> action; call use()`. `use` on a stored secret is the mirror mistake.
+- Each operation discovers current approvals with a one-use signed challenge. Set `serviceUrl` for a custom service; `litApiUrl` is an independent trust decision.
+- `list()` returns a stable `id` (`vaultId/secretId`) as well as `name`. Duplicate names across vaults fail; use the ID rather than guessing.
+- `Keychain(privateKey, config)` remains a legacy static API; its list does not discover additions.
+- Import by package name so Node selects the TLS-aware entry point. `dist/index.js` is the browser build and cannot bind the live TLS certificate.
+- `ACTIONS` exports the catalog compiled into the client; `describeCredential(value)` classifies a value you are unsure about: an identity or config object, the raw JSON text of either file, a private key, or a usage key.
+
+## CLI
+
+| Command | What it does |
+|---|---|
+| `init <identity>` | Generate an Ed25519 identity (mode 0600, never overwrites). |
+| `list <identity>` | Discover current approvals and IDs, without values. |
+| `get <identity> [legacy-config] <NAME>` | Print a stored secret to stdout. Avoid piping it into logs. |
+| `use <identity> [legacy-config] <NAME> ['<json-input>']` | Run a connected service's action and print the bounded result. |
+| `run <identity> [legacy-config] [--only A,B] [--env S=VAR] [--file S=PATH] -- <command>` | Put stored secrets in a child's environment (or a mode-0600 file) and exec the command. Prints nothing. |
+| `actions` | Print the catalog of connected-service actions this client knows. |
+| `attest [url]` | Print the attestation report for the default or given Lit origin. |
+| `mcp <identity> [legacy-config] [more legacy configs]` | Start the local MCP server over stdio. |
+
+`run` is a handoff to a tool you trust, not a sandbox: the child inherits the environment and can still log or disclose the value. With `--file`, SIGKILL can leave the file behind and unlinking does not guarantee erasure; prefer a tmpfs path such as `/dev/shm` for anything long-lived.
+
+Set `KEYCHAIN_SERVICE_URL` for a custom Keychain service and `KEYCHAIN_LIT_API_URL` for a separately trusted Lit endpoint. The service cannot choose that endpoint. `KEYCHAIN_BASE_RPC_URL` pins your Base RPC. `CHIPOTLE_USAGE_API_KEY` overrides billing only in legacy static-config mode.
+
+## MCP server
+
+```sh
+# Claude Code
+claude mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp /absolute/path/agent-identity.json
+# Codex CLI
+codex mcp add lit-keychain -- npx -y @lit-protocol/keychain mcp /absolute/path/agent-identity.json
+```
+
+Cursor, Windsurf and similar clients take the same command in their JSON config:
+
+```json
+{
+  "mcpServers": {
+    "lit-keychain": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@lit-protocol/keychain",
+        "mcp",
+        "/absolute/path/agent-identity.json"
+      ]
+    }
+  }
+}
+```
+
+Pass only the identity for live discovery. Owner website changes appear on the next tool call without restarting MCP. The path must be absolute and readable by the client's user, and Node 22+ must be on that client's PATH.
+
+**Tools:** `agent_public_key` (for the owner to approve), `list_actions`, `list_secrets` (names, permitted operation and input shape, no values), `get_secret`, and one tool per catalog action (`stripe_balance`, `openai_chat`, `github_read_file`, `slack_post_message`, `supabase_tables`), each taking `name` and, where the action declares one, `input`.
+
+The server is deliberately local rather than hosted. Decryption needs the agent's private identity, and a remote endpoint would hand that key and every plaintext to whoever runs it, which the Keychain trust boundary forbids. Tool results enter the model context like any other tool output, so approve agents only for the secrets they need.
+
+## What stays on the agent’s machine
+
+| Artifact | Shape | Sensitivity |
+|---|---|---|
+| Agent identity | JSON `{ "v": 2, "privateKey": <64 hex>, "publicKey": <64 hex> }` | Private. Only `publicKey` is ever shared. |
+| Secret value | Whatever `get` returns | Do not log, echo, or write to disk. |
+
+Start with **Agents → + Add agent** after owner sign-in (the **Agents** page lists every approved key with the secrets it can use; **+ Grant secrets** and **Revoke** live there too): paste the existing public key, name the agent, explicitly select secrets, then **Approve selected secrets**. **Ready to use** confirms the successful approvals. No secret is selected automatically. No config transfer or restart is needed for live clients.
+
+Choose **Connect to a session** on the agent detail page or the **Ready to use** confirmation. Copy the agent prompt into the intended session, or choose Claude Code, Codex, Cursor/Windsurf JSON, or the SDK snippet. Replace the identity path with the existing file on the agent’s machine and verify its public key matches the approved agent. The website only knows the public key; it never needs the identity file. Config downloads have been removed. Live clients discover current approvals and billing credentials on each request.
+
+`usageApiKey` is an opaque string minted by Chipotle (currently 44 characters of base64). It pays for execution and cannot read a secret without the agent identity and an owner grant. There are no setup tokens, management bearer tokens or server-minted grants in Keychain. Never ask an owner for a private key or Google token. The SDK and CLI reject an identity passed as a config, a config passed as an identity, and a private key passed as a usage key, each with a message naming the mistake.
+
+## When a request is refused
+
+Live discovery excludes revoked, disabled, expired and stale-version approvals. An unknown secret may mean no current approval: ask the owner to approve or renew your existing public key, not send a config. Discovery is bounded to 1,000 candidate secrets and explicitly fails above that limit.
+
+
+The enclave answers every failure with the same bare `access_denied`, so nothing about the policy or the upstream service leaks. Before spending an execution, the client checks the signed policy it already fetched and explains what it can see. Every such message starts with `Access denied:` and tells you who can fix it.
+
+| Message starts with | Meaning | Who fixes it |
+|---|---|---|
+| `Access denied: the owner disabled this secret` | The owner switched the secret off. | Owner: Enable in Keychain. |
+| `Access denied: the owner's permission expired` | The signed policy ran past its expiry (30 days by default). | Owner: Renew permissions. |
+| `Access denied: agent <key> is not approved` | Your public key is not in the policy, or you used the wrong identity file. | Owner approves your `publicKey`; check the identity file. |
+| `Access denied: agent … approved for version N` | The secret was rotated since you were approved. | Owner re-approves the agent (Rotate & approve does this). |
+| `Access denied: Lit ran the <action> … did not complete` | Unclassified execution failure after local policy checks: input or credential mismatch, provider error, timeout, or size/schema limit. | Owner checks input and provider status privately. Do not blindly retry writes. |
+| `Secret "X" was created with the <action> action; call use()` | You called `get` on a connected service. | Call `use` or the action's MCP tool instead. |
+| `Attestation: no Base RPC endpoint answered` | Public Base RPCs throttled or down. | Retry, or set `KEYCHAIN_BASE_RPC_URL`. |
+| `Attestation: …` (anything else) | A check failed, evidence is unavailable, or the environment cannot verify it. | Stop. Do not disable attestation; report it. |
+
+Slack posts and Supabase inserts are not exactly-once. A timeout after an upstream write does not prove nothing was sent; inspect provider state before retrying.
+
+## Owner-side integration
+
+Owner and browser integrations use `OwnerClient`, `LitConnection` and `authorizationTypedData` from the same package. The hosted web app's [`identities.ts`](https://github.com/LIT-Protocol/chipotle/blob/main/lit-agent-keychain/web/src/identities.ts) shows wallet, passkey and Google signers. The first sign-in for a vault provisions its Chipotle groups and execution key on-chain and takes roughly 30 seconds; later sign-ins take a few seconds.

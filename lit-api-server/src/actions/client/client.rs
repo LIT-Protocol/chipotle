@@ -26,6 +26,20 @@ impl Client {
         self.socket_path.clone().unwrap_or_default()
     }
 
+    /// The action identity used to gate and derive per-action key material and
+    /// PKP-wallet access. Normally the content id (`ipfs_id`); on the gVisor
+    /// binary lane a request-supplied startup script binds a distinct
+    /// `key_derivation_id` so an override can never wield the audited bundle's
+    /// key. Bundle resolution, billing and the gRPC `ipfs_id` still use
+    /// `ipfs_id` (the bundle checksum). See #75 (F1b) / #600.
+    pub(crate) fn action_key_id(&self) -> &str {
+        if self.key_derivation_id.is_empty() {
+            &self.ipfs_id
+        } else {
+            &self.key_derivation_id
+        }
+    }
+
     pub fn client_timeout(&self) -> Duration {
         Duration::from_millis(self.timeout_ms + self.client_timeout_ms_buffer)
     }

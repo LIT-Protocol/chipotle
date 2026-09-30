@@ -9,18 +9,30 @@ publish = { workspace = true }
 path = "src/lib.rs"
 doctest = false
 
+# gVisor is opt-in (CPL-359): the default build produces no gVisor artifacts.
+# The runner binaries below are gated on this feature, so a plain
+# `cargo build` (or `--all-targets` clippy) skips them; only a deploy that
+# enables gVisor — the gVisor runner image build passes `--features gvisor`,
+# and CI's `--all-features` — compiles them. The lib always builds so its
+# unit tests keep running unconditionally.
+[features]
+gvisor = []
+
 [[bin]]
 name = "lit_actions_gvisor"
 path = "src/main.rs"
+required-features = ["gvisor"]
 test = false
 doctest = false
 
 # Guest-side CLI preinstalled in the sandbox base image. It lives in this
 # crate so the guest wire contract and the supervisor that serves it cannot
-# drift apart.
+# drift apart, and is gated on the same feature — it ships only inside the
+# gVisor sandbox rootfs, so there is nothing to build when gVisor is off.
 [[bin]]
 name = "lit"
 path = "src/bin/lit.rs"
+required-features = ["gvisor"]
 test = false
 doctest = false
 

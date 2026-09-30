@@ -20,7 +20,7 @@
 
 use std::sync::Arc;
 
-use lit_billing_core::billing_auth::{AuthResolver, BillingAuth};
+use lit_billing_core::billing_auth::{AuthResolver, BillingAuth, BillingOwnerAuth};
 use lit_billing_core::{StripeClient, customer};
 use rocket::http::Status;
 use rocket::serde::json::Json;
@@ -118,7 +118,7 @@ async fn resolve_caller(
 
 #[get("/billing/auto_topup_config")]
 pub async fn get_auto_topup_config(
-    auth: BillingAuth,
+    auth: BillingOwnerAuth,
     stripe: &State<StripeClient>,
     pool: &State<PgPool>,
     resolver: &State<Arc<dyn AuthResolver>>,
@@ -187,7 +187,7 @@ pub struct PaymentMethodSummary {
 /// the new card). Cross-tenant guard reuses `verify_payment_method_owned`.
 #[get("/billing/payment_method?<pm_id>")]
 pub async fn get_payment_method(
-    auth: BillingAuth,
+    auth: BillingOwnerAuth,
     pm_id: &str,
     stripe: &State<StripeClient>,
     resolver: &State<Arc<dyn AuthResolver>>,
@@ -285,7 +285,7 @@ async fn verify_payment_method_owned(
 
 #[put("/billing/auto_topup_config", format = "json", data = "<body>")]
 pub async fn put_auto_topup_config(
-    auth: BillingAuth,
+    auth: BillingOwnerAuth,
     body: Json<AutoTopupConfigUpsert>,
     stripe: &State<StripeClient>,
     pool: &State<PgPool>,

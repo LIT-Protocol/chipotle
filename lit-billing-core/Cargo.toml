@@ -34,6 +34,8 @@ tracing = "0.1"
 alloy-dyn-abi = { version = "1.0", features = ["eip712"] }
 alloy-primitives = { version = "1.0", features = ["k256"] }
 hex = "0.4"
+base64 = "0.22"
+k256 = { version = "0.13", features = ["ecdsa"] }
 
 # Rocket guard + AuthResolver trait (was the lit-billing-auth crate).
 # Folded into this crate so both services consume a single shared module

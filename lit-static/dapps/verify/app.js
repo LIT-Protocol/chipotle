@@ -20,7 +20,10 @@ const DEFAULTS = {
   appId: '0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC',
 };
 
-// Reference contracts on Base, all administered by the Lit Safe multisig.
+// Reference contracts on Base. The per-app DstackApp contract (compose-hash
+// whitelist) is administered by the Lit Safe multisig below. The shared Phala
+// KMS contract (OS-image / KMS whitelist) is owned by a separate Phala-controlled
+// Safe (0x3926658a072F82BAEa5e5a15e1Fed8a776F4a663), not the Lit Safe.
 const CONTRACTS = {
   kms: '0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C',
   safe: '0xF688411c0FFc300cAb33EB1dA651DBb3E6891098',
@@ -104,6 +107,53 @@ function parseTcbInfo(tcb) {
     }
   }
   return tcb;
+}
+
+/**
+ * The dstack event log (served with the attestation quote and extended into
+ * RTMR3) records the compose hash the TEE actually measured, as an entry whose
+ * `event` is "compose-hash" and whose `event_payload` is that hash. Pull it out
+ * so we can compare it to the compose_hash the server *reports* — the one thing
+ * that lets us tie the quote to the configuration being served rather than just
+ * displaying the two side by side. Returns the measured hash (lowercase, no 0x)
+ * or null when the log is absent or in a shape we don't recognize.
+ */
+function composeHashFromEventLog(eventLog) {
+  let entries = eventLog;
+  if (typeof entries === 'string') {
+    try {
+      entries = JSON.parse(entries);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(entries)) return null;
+  for (const e of entries) {
+    if (e && typeof e === 'object' && String(e.event).toLowerCase() === 'compose-hash') {
+      // Only a well-formed 32-byte hex value counts as a real commitment. A
+      // missing/empty/non-hex payload is an unrecognized shape, not evidence of
+      // a different config — return null so the caller degrades to 'unknown'
+      // rather than hard-failing the genuine endpoint on a malformed log.
+      const payload = normHex(e.event_payload);
+      return /^[0-9a-f]{64}$/.test(payload) ? payload : null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Does the attestation quote's event log commit to the compose_hash the server
+ * reports? 'match' — the measured hash equals the reported one. 'mismatch' — the
+ * quote attests a *different* configuration than the one being served (a strong
+ * tamper / mix-and-match signal). 'unknown' — no event log, or a shape we can't
+ * parse in-browser, so binding could not be established here.
+ */
+function composeHashCommitment(quote, composeHash) {
+  const want = normHex(composeHash);
+  if (!quote || !quote.event_log || !want) return { state: 'unknown' };
+  const got = composeHashFromEventLog(quote.event_log);
+  if (got === null) return { state: 'unknown' };
+  return { state: got === want ? 'match' : 'mismatch', got };
 }
 
 // ── Verdict banner ───────────────────────────────────────────────────────────
@@ -224,9 +274,11 @@ async function stepInfo(apiUrl) {
   const tcb = parseTcbInfo(info.tcb_info);
   const composeHash = info.compose_hash || tcb.compose_hash || '';
 
-  // The attestation quote is the artifact that ties this server to real TDX
-  // hardware. A genuine TEE always serves one; its absence is disqualifying,
-  // even though full DCAP validation of it happens at the Trust Center (step 5).
+  // A genuine TEE always serves an attestation quote, so its absence is
+  // disqualifying. But serving one proves little on its own: the quote is a
+  // static artifact a plain HTTP relay can copy verbatim from the real API. We
+  // check below whether it actually commits to the configuration being served,
+  // and full DCAP validation of it happens at the Trust Center (step 5).
   let quote = null;
   let quoteNote = '';
   try {
@@ -266,7 +318,24 @@ async function stepInfo(apiUrl) {
     detail += `<p class="note bad">Server did not return a TDX attestation quote. A genuine TEE always serves one; without it this endpoint cannot be attested.</p>`;
     outcome = FAIL;
   } else {
-    setPill('step-info', 'pass', 'reachable');
+    // Bind the quote to the served config: if its event log attests a different
+    // compose hash than the server reports, the quote does not vouch for what is
+    // being served and no green verdict should survive.
+    const commit = composeHashCommitment(quote, composeHash);
+    if (commit.state === 'mismatch') {
+      setPill('step-info', 'fail', 'quote/config mismatch');
+      detail += `<p class="note bad">The attestation quote's event log attests compose hash <code>${escapeHtml(
+        commit.got
+      )}</code>, which does NOT match the <code>compose_hash</code> this server reports. The quote does not vouch for the configuration being served — do not trust this endpoint.</p>`;
+      outcome = FAIL;
+    } else {
+      setPill('step-info', 'pass', 'reachable');
+      if (commit.state === 'match') {
+        detail += `<p class="note">The quote's event log commits to this compose_hash, so the quote attests the configuration being served — not merely a value displayed next to it.</p>`;
+      } else {
+        detail += `<p class="note">The quote is displayed but could not be bound to the served configuration in this browser. Serving a quote does not prove this endpoint runs it — a plain HTTP relay can copy a genuine quote. Only the Trust Center check (step 5), which pins the live TLS channel to the enclave, closes that gap.</p>`;
+      }
+    }
   }
   setDetail('step-info', detail);
 
@@ -393,13 +462,21 @@ async function stepOnChain(rpcUrl, dstackAppAddress, composeHash) {
 
 /** Step 5 — defer the heavy checks to the Phala Trust Center. */
 function stepTrustCenter(info, expectedAppId) {
-  const appId = normHex(info && info.app_id) || normHex(expectedAppId);
+  const reportedAppId = normHex(info && info.app_id);
+  const appId = reportedAppId || normHex(expectedAppId);
   const trustUrl = `https://trust.phala.com/app/${appId}`;
+  // Keep the warning honest about which app_id the link was actually built from:
+  // the endpoint's self-reported value, or — when it reported none — the expected
+  // address the user configured.
+  const handoffWarning = reportedAppId
+    ? `<p class="note bad">This link is built from the server's <em>self-reported</em> app_id. If this endpoint is a relay, it describes the genuine deployment — not necessarily the server you are connected to. Confirm the certificate the Trust Center attests is the one this endpoint actually serves before trusting it.</p>`
+    : `<p class="note bad">This endpoint reported no app_id, so the link falls back to the <em>expected</em> DstackApp address you configured. It therefore describes that expected deployment, not anything this endpoint proved — confirm the certificate the Trust Center attests is the one this endpoint actually serves before trusting it.</p>`;
   setPill('step-trust', 'info', 'manual');
   setDetail(
     'step-trust',
     `<p class="note">${link(trustUrl, 'Open the Phala Trust Center report →')}</p>` +
-      `<p class="note">It validates the Intel TDX hardware quote, the OS measurements, and that HTTPS is terminated inside the enclave — automatically, with no install.</p>` +
+      `<p class="note">It validates the Intel TDX hardware quote, the OS measurements, and — crucially — that HTTPS is terminated inside the enclave. That TLS-in-TEE check binds the endpoint you are actually talking to (this TLS connection) to the attested deployment, so it is the step that catches a relay or proxy that merely copies a genuine attestation.</p>` +
+      handoffWarning +
       `<p class="note">On-chain governance (Base): ${link(
         'https://basescan.org/address/' + expectedAppId,
         'DstackApp'
@@ -495,8 +572,8 @@ async function runVerify() {
     } else {
       setVerdict(
         'pass',
-        'Configuration checks passed',
-        'The server is reachable, serves an attestation quote, its app_compose hashes to the reported compose_hash, its identity matches, and that hash is whitelisted on Base. This does NOT by itself prove the hardware: complete the Intel TDX quote validation at the Phala Trust Center (step 5) to confirm a genuine enclave.'
+        'Configuration checks passed — endpoint not yet proven',
+        'The endpoint reports a whitelisted configuration and its self-reported values are internally consistent. This does NOT prove you are talking to the enclave: a plain HTTP proxy that relays a genuine /info and /attestation passes every check here. Only the Phala Trust Center step (5) — which pins the live TLS channel to the TEE-generated certificate — can catch such a relay. Complete it before trusting this endpoint.'
       );
     }
   } catch (e) {

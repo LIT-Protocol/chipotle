@@ -1,0 +1,252 @@
+---
+title: "Derived Actions"
+description: "Stamp a small config object into an audited action template to mint a new immutable action — and a new TEE-held key — per user, per secret, or per tenant. No PKP to mint, no IPFS upload, one audit for every instance."
+---
+
+Every Lit Action has its own key: `Lit.Actions.getLitActionPrivateKey()` returns a secp256k1 private key that the TEE derives from the action's IPFS CID. Change one byte of the source and you get a new CID and a new key.
+
+That property is usually described as a guarantee ("only this exact code can sign"). It is also a **factory**. Take one audited template, append a small JSON constant, and you have a brand-new immutable action with a brand-new key that only that code can use. Repeat with a different constant and you have another. We call these **derived actions**, and they are the primitive underneath the [Lit Agent Keychain](https://github.com/LIT-Protocol/chipotle/tree/main/lit-agent-keychain), where every stored secret is its own derived action.
+
+```
+template.js  +  const MANIFEST = {"secretId":"a1…"}   →  CID Qm1…  →  key K1
+template.js  +  const MANIFEST = {"secretId":"b2…"}   →  CID Qm2…  →  key K2
+template.js  +  const MANIFEST = {"owner":"0x…alice"}  →  CID Qm3…  →  key K3
+```
+
+Nothing is uploaded to IPFS. Chipotle computes the CID from the source you submit on every call, so the "publish" step is just computing a hash locally and enrolling it in a group.
+
+## Why you'd want this
+
+| Need | Without derived actions | With derived actions |
+|---|---|---|
+| A wallet only one user can control | Mint a PKP, add it to a group, gate on the user's signature inside the action | Stamp the user's address into the template. The CID-derived key *is* their wallet. |
+| A separate encryption key per secret | One vault PKP per secret, each added to the group | One derived action per secret. Its own key encrypts and decrypts only that secret. |
+| Auditing hundreds of near-identical actions | Read hundreds of files | Read one template. Every instance is `template + constant`; anyone can reproduce the CID and diff. |
+| Letting an untrusted party run the action | Worry about what their `js_params` can do | The constant is in the code, not in `js_params`. Callers cannot change it. |
+
+The last row is the important one. **Anything in the source is trusted; anything in `js_params` is not.** Moving configuration from parameters into the source turns it from caller-controlled input into part of the action's identity.
+
+## The pattern, step by step
+
+### 1. Write the template once
+
+The template is ordinary action code that reads its configuration from a constant instead of from `js_params`. Keep every dependency inside the file so the bytes are reproducible: either bundle with esbuild into a single IIFE, or use [version-pinned imports](/lit-actions/imports) whose specifier bytes never change.
+
+```javascript
+// template.js — audited once, reused for every instance.
+// The MANIFEST constant is appended below at derive time.
+async function run(manifest, params) {
+  if (params.op === "address") {
+    const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+    return { address: wallet.address };
+  }
+
+  // Authorization comes from the manifest (trusted), never from params.
+  const signer = ethers.utils.verifyMessage(params.message, params.signature);
+  if (signer.toLowerCase() !== manifest.owner.toLowerCase()) {
+    return { ok: false, error: "unauthorized" };
+  }
+  // ... sign the thing the owner asked for
+}
+```
+
+### 2. Derive an instance by appending a canonical constant
+
+```javascript
+import { canonical } from "./canonical.js"; // sorted keys, safe integers only (see below)
+
+export function actionSource(template, manifest) {
+  return (
+    template +
+    "\nconst MANIFEST=" + canonical(manifest) + ";\n" +
+    "async function main(params){return run(MANIFEST,params)}\n"
+  );
+}
+```
+
+`canonical()` must be deterministic: sort object keys, reject floats and `undefined`, and never depend on insertion order. Two parties who compute the source independently (a browser, a backend, a verifier) must get identical bytes, or they will get different CIDs. The Keychain's implementation is [`protocol/crypto.ts`](https://github.com/LIT-Protocol/chipotle/blob/main/lit-agent-keychain/protocol/crypto.ts); it sorts ASCII property names and permits only safe integers.
+
+<Warning>
+**Changing the template's bytes changes every instance's key.** A dependency bump, a minifier upgrade, or a reformat gives every derived action a new CID and orphans every key derived from the old one. Treat the built template as a release artifact: commit the bundle, record its hash, and introduce new templates as an explicit migration. The Keychain records `sha256(template)` in `generated/release.json` and refuses to silently rebuild a deployed template.
+</Warning>
+
+### 3. Compute the CID locally
+
+Chipotle identifies an action by the CIDv0 of its UTF-8 source (UnixFS, 256 KiB chunks, balanced layout). You can compute it in three ways:
+
+<Tabs>
+  <Tab title="JavaScript">
+    ```javascript
+    import { importBytes } from "ipfs-unixfs-importer";
+    import { fixedSize } from "ipfs-unixfs-importer/chunker";
+    import { balanced } from "ipfs-unixfs-importer/layout";
+
+    export async function cidForCode(code) {
+      const { cid } = await importBytes(
+        new TextEncoder().encode(code),
+        { put: async (cid) => cid },
+        {
+          cidVersion: 0,
+          rawLeaves: false,
+          leafType: "file",
+          chunker: fixedSize({ chunkSize: 262144 }),
+          layout: balanced({ maxChildrenPerNode: 174 }),
+        },
+      );
+      return cid.toString(); // "Qm…"
+    }
+    ```
+  </Tab>
+  <Tab title="Rust">
+    ```rust
+    use ipfs_hasher::IpfsHasher; // ipfs-hasher = "0.13.0"
+
+    pub fn cid(code: &str) -> String {
+        IpfsHasher::default().compute(code.as_bytes())
+    }
+    ```
+    This is the same crate the Chipotle server uses, so the CID you compute is exactly what the server authorizes against. The repo vendors a patched copy at [`vendor/ipfs-hasher`](https://github.com/LIT-Protocol/chipotle/tree/main/vendor/ipfs-hasher) that fixes a panic when the source length is an exact multiple of the 256 KiB chunk size; use it if your sources can be that large.
+  </Tab>
+  <Tab title="REST">
+    ```bash
+    # No auth required. Body is a JSON string containing the source.
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/get_lit_action_ipfs_id" \
+      -H "Content-Type: application/json" \
+      -d '"async function main(){ return 1 }"'
+    ```
+    Handy for spot-checking, but compute locally in production so you never depend on the server to tell you your own action's identity.
+  </Tab>
+</Tabs>
+
+### 4. Enroll the CID in a group
+
+Add the derived CID to a group exactly as you would any action. `add_action_to_group` takes the raw CID; `add_group` takes keccak256 hashes of the CID string.
+
+```javascript
+// One call per derived instance. The Keychain does this at secret creation.
+await client.addActionToGroup({ apiKey: masterKey, groupId, actionIpfsCid: cid });
+
+// Or pre-permit at group creation time:
+const hash = ethers.utils.keccak256(ethers.utils.toUtf8Bytes(cid));
+await client.addGroup({ apiKey: masterKey, groupName: "vault-123",
+  pkpIdsPermitted: [], cidHashesPermitted: [hash] });
+```
+
+Newly granted permissions are eventually consistent. Poll the real path (run the action with the real key) rather than sleeping a fixed amount. See the [API guide](/management/api_direct#7-run-lit-action).
+
+### 5. Execute by sending the source
+
+There is no upload step. Every execution submits the full derived source as `code`; the server hashes it, checks the usage key's group permissions against that CID, and runs it.
+
+```javascript
+const res = await fetch("https://api.chipotle.litprotocol.com/core/v1/lit_action", {
+  method: "POST",
+  headers: { "Content-Type": "application/json", "X-Api-Key": usageKey },
+  body: JSON.stringify({ code: actionSource(template, manifest), js_params: params }),
+});
+```
+
+Because callers can compute the CID themselves, they can also *verify* they are talking to the action they expect: compute `cidForCode(code)` and compare it with the CID whose key signed the response.
+
+## Give each caller an execute-only key
+
+A derived action is only as safe as the key that can run it. Hand end users a **usage key that can execute and nothing else**:
+
+```json
+{
+  "name": "vault-123 execution",
+  "can_create_groups": false,
+  "can_delete_groups": false,
+  "can_create_pkps": false,
+  "manage_ipfs_ids_in_groups": [],
+  "add_pkp_to_groups": [],
+  "remove_pkp_from_groups": [],
+  "execute_in_groups": [123]
+}
+```
+
+Such a key cannot add a new CID to the group, so it cannot get any other code run against the group's PKPs. It cannot change the derived action's code, because that would change the CID and fall outside the group. What it *can* do is pay for executions, so treat it as a billing credential, not an authority credential. In the Keychain, the per-vault execution key is deliberately given to owners and agents; authority comes from signatures the action verifies, never from the key. Read [API Keys](/management/api_keys) for the permission model.
+
+## Discovering an action's public key without running it
+
+Verifiers need the public key of a derived action before trusting anything it signed. Two options:
+
+**Inside another action:** `Lit.Actions.getLitActionPublicKey({ ipfsId })` and `getLitActionWalletAddress({ ipfsId })` work for *any* CID. They require no group permission (the key is public) and count toward the per-execution limit of ten key operations.
+
+**From outside Lit:** run a tiny fixed helper action that does nothing but look up a key. This is what the Keychain SDK does; the helper is enrolled in a group every usage key can execute.
+
+```javascript
+// public-key.js — fixed source, enrolled once. Returns only public information.
+async function main(params) {
+  if (!/^Qm[1-9A-HJ-NP-Za-km-z]{44}$/.test(params?.cid || ""))
+    throw new Error("Invalid action CID");
+  return {
+    ok: true,
+    public_key: await Lit.Actions.getLitActionPublicKey({ ipfsId: params.cid }),
+  };
+}
+```
+
+<Note>
+Fetch public keys from the Lit origin you trust, directly over TLS, and cache them. Never accept a "here is the action's public key" value from an intermediary such as your own backend, because a compromised backend could substitute a key it controls. The Keychain SDK pins the Lit origin at build time and refuses replacement endpoints from API responses. For a stronger check, verify the TEE itself with [remote attestation](/architecture/verification/attestation) before the first request.
+</Note>
+
+## Deriving an encryption key from the action key
+
+The identity key is a 32-byte secp256k1 scalar. Run it through HKDF and you get keys for other purposes that are still bound to this exact code. The Keychain derives an X25519 key for HPKE so that a secret can be **encrypted to a derived action** in the browser, with no PKP at all:
+
+```javascript
+import { hkdf } from "@noble/hashes/hkdf.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { x25519 } from "@noble/curves/ed25519.js";
+
+const actionKey = unhex((await Lit.Actions.getLitActionPrivateKey()).replace(/^0x/, ""));
+const encKey = hkdf(sha256, actionKey, utf8("my-app/v1"), utf8("secret-envelope-x25519"), 32);
+const encPub = x25519.getPublicKey(encKey);
+```
+
+The client must learn `encPub` safely. The derived X25519 key is not the identity key, so `getLitActionPublicKey` cannot return it. Instead the action returns a **binding** signed by its identity key, and the client verifies the signature against the identity public key obtained through discovery above:
+
+```javascript
+// Inside the action, `publicKey` operation
+if (params.operation === "publicKey") {
+  requireHex32(params.challenge); // caller-supplied freshness
+  const payload = {
+    domain: "my-app/key-binding/v1",
+    manifestHash: digest(MANIFEST),
+    encryptionPublicKey: hex(encPub),
+    challenge: params.challenge,
+  };
+  return { binding: { payload, signature: signWithIdentityKey(payload, actionKey) } };
+}
+```
+
+The client checks the challenge matches the one it sent, the manifest hash matches the manifest it derived the CID from, and the signature verifies under the identity key for that CID. Now it can HPKE-seal a secret to `encPub` knowing only this exact code can ever open it. The full flow, including AES-GCM payload encryption with metadata as additional authenticated data, is in the Keychain's [`protocol/crypto.ts`](https://github.com/LIT-Protocol/chipotle/blob/main/lit-agent-keychain/protocol/crypto.ts) and [`actions/secret-common.ts`](https://github.com/LIT-Protocol/chipotle/blob/main/lit-agent-keychain/actions/secret-common.ts).
+
+## Operational rules that fall out of the pattern
+
+- **Request the private key last.** Do every independent check (signatures, windows, policy) *before* calling `getLitActionPrivateKey`. A rejected request should never have touched key material.
+- **Zero buffers in `finally`.** Call `.fill(0)` on key and plaintext `Uint8Array`s. JavaScript strings cannot be erased, so keep secrets in byte arrays where practical.
+- **Return one generic error.** The Keychain actions return `{ ok: false, error: "access_denied" }` for every failure so that callers cannot probe which check tripped.
+- **Rotate by re-encrypting, not by re-deriving.** To rotate a secret held by a derived action, encrypt the new value to the same action; the CID and key stay put. To *retire* an action, remove its CID from the group.
+- **Version the constant.** Include a protocol version in the manifest so a future template can recognize and migrate old instances.
+- **Keep the fetch budget in mind.** Actions may make up to fifty outbound requests, and responses are capped at 1 MB. See [Limits](/lit-actions/limits).
+
+## Where the Keychain uses this
+
+| Derived action | Constant stamped in | Key used for |
+|---|---|---|
+| **Authority action** | The vault's owner identity (wallet address, passkey public key, or Google subject + client ID) and registry URL | Signing receipts over policy documents after verifying the owner's proof. See [Signed Data in Untrusted Storage](/lit-actions/signed-storage). |
+| **Secret action** (`export` release) | Vault ID, secret ID, the authority action's CID, registry URL | HKDF to X25519 for decrypting that one secret; signing the encrypted response. |
+| **Secret action** (`stripe_balance` release) | Same manifest, different template | Same key derivation, but the template can only call one fixed Stripe endpoint and return bounded numbers. The credential has no export path even for the owner. |
+| **Public-key helper** | Nothing (fixed source) | None. Public discovery only. |
+
+A user's whole vault is therefore *N+1* immutable actions built from three templates, and anyone can regenerate every CID from the public manifests and confirm the exact code that guards each secret.
+
+## See also
+
+- [Action-Identity Signing](/lit-actions/patterns#action-identity-signing--immutable-proofs) — the single-action version of this idea.
+- [A Wallet Bound to the Action, Unique Per User](/lit-actions/patterns#a-wallet-bound-to-the-action--and-a-unique-one-per-user) — the simplest derived action: a template plus an owner address.
+- [Signed Data in Untrusted Storage](/lit-actions/signed-storage) — how derived actions authorize each other through a database you do not have to trust.
+- [Module Imports](/lit-actions/imports) — keeping dependency bytes stable so CIDs stay stable.
+- [`examples/action-bound-wallet`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/action-bound-wallet) — runnable per-user wallet example.

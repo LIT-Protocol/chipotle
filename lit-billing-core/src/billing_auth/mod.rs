@@ -23,9 +23,11 @@
 //! lit-payments), so two parallel crates was needless ceremony.
 
 pub mod guard;
+pub mod owner;
 pub mod resolver;
 
 pub use guard::BillingAuth;
+pub use owner::BillingOwnerAuth;
 pub use resolver::{AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload};
 
 // Re-export the precomputed-hash-shape detector from the on-chain module —

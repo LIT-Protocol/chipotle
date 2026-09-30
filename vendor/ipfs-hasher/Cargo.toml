@@ -1,0 +1,9 @@
+[package]
+name = "ipfs-hasher"
+version = "0.13.0"
+edition = "2018"
+license = "MIT"
+description = "Pinned ipfs-hasher 0.13.0 with exact-chunk finalization fix"
+
+[dependencies]
+ipfs-unixfs = "0.2"

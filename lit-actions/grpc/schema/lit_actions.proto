@@ -30,6 +30,19 @@ message ExecuteJsRequest {
     optional uint32 memory_limit = 5;  // megabytes
     map<string, string> http_headers = 6;
     optional string ipfs_id = 7;       // IPFS CID for code cache lookup
+    // Bash script executed as the sandbox entrypoint by the gVisor runner
+    // (binary actions only; the JS runner ignores it). Sent separately from
+    // the bundle in `code` so different scripts reuse the cached bundle.
+    optional string startup_script = 8;
+    // Identity the running code holds for CID-derived key material (binary
+    // actions only). When a request-supplied startup_script overrides the
+    // bundle's entrypoint, the api-server binds the script into a distinct id
+    // and sends it here so the guest's own key / public-key / wallet-address
+    // lookups all resolve to the running identity, not the bare bundle CID
+    // (which the private key no longer matches). Absent ⇒ the guest identity is
+    // the bundle CID. `ipfs_id` above stays the bundle CID for cache lookup.
+    // See #75 (F1b) / #600.
+    optional string action_identity = 9;
   }
 
   message ErrorResponse {

@@ -28,7 +28,7 @@
 
 use std::sync::Arc;
 
-use lit_billing_core::billing_auth::{AuthResolver, BillingAuth};
+use lit_billing_core::billing_auth::{AuthResolver, BillingAuth, BillingOwnerAuth};
 use lit_billing_core::{StripeClient, customer};
 use rocket::http::Status;
 use rocket::serde::json::Json;
@@ -55,7 +55,7 @@ pub struct ErrorBody {
 
 #[post("/billing/setup_intent")]
 pub async fn setup_intent(
-    auth: BillingAuth,
+    auth: BillingOwnerAuth,
     cfg: &State<Config>,
     stripe: &State<StripeClient>,
     resolver: &State<Arc<dyn AuthResolver>>,
@@ -66,7 +66,7 @@ pub async fn setup_intent(
     // out the wallet — the resolver caches API-key → wallet for 1h on
     // the api-server side, so this is effectively sub-ms on the hot
     // path.
-    let wallet_address = match &auth {
+    let wallet_address = match &auth.0 {
         BillingAuth::WalletSigned {
             wallet_address_hex, ..
         } => wallet_address_hex.clone(),

@@ -25,6 +25,16 @@ gets back a signed result.
 | [`mpc-signing-ecdsa`](./mpc-signing-ecdsa) | A threshold-ECDSA key split between a Lit Action and the user (DKLs23 MPC in WASM): **2-of-3 by default** — Lit + your hot share + a cold recovery share. Lit literally cannot sign without you co-signing, the full key never exists anywhere, and because you hold 2 of 3 you can always recover without Lit. Output is a standard ECDSA signature any EVM contract verifies with `ecrecover`. Covers the **secp256k1-ECDSA** family: every EVM chain, Bitcoin legacy/SegWit, Tron, Cosmos secp256k1. |
 | [`mpc-signing-frost`](./mpc-signing-frost) | The **Schnorr/EdDSA** sibling: the same **2-of-3** non-custodial split, but via threshold **FROST** (Lit's Kudelski-audited `lit-frost` + `frost-dkg`, real distributed key generation in WASM). This build signs **Ed25519**, so the group key *is* a **Solana** address — no on-chain program, just sign a transfer. Flip the FROST ciphersuite + rebuild the wasm and the same flow covers **Bitcoin Taproot** (BIP-340), **Zcash** (Sapling/Orchard), **Polkadot/Substrate**, and other Schnorr/EdDSA chains. Atomic single-call signing (no reusable nonce), CID-locked + hash-pinned action, no-Lit hot+cold recovery. Verified on Solana devnet. |
 
+## Production applications (in this repo)
+
+Not in `examples/`, but the best end-to-end reference for the structural
+patterns in the docs ([Derived Actions](../docs/lit-actions/derived-actions.mdx),
+[Signed Data in Untrusted Storage](../docs/lit-actions/signed-storage.mdx)).
+
+| Project | What it shows |
+| --- | --- |
+| [`lit-agent-keychain`](../lit-agent-keychain) | Owner-authorized agent access to credentials. Every secret is its own derived action; an authority action signs policies that live in ordinary Postgres; agents present Ed25519-signed requests and get action-signed, HPKE-encrypted results. Execute-only usage keys, client-side TEE attestation, no PKPs, no trusted backend. |
+
 ## Lit Triggers (event-driven)
 
 These add the [Lit Triggers](https://triggers.litprotocol.com) service: a

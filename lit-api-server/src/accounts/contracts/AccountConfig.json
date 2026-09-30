@@ -193,6 +193,17 @@
     {
       "inputs": [
         {
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        }
+      ],
+      "name": "OnlyConfigOperatorOrOwner",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
           "internalType": "uint256",
           "name": "apiKeyHash",
           "type": "uint256"
@@ -225,6 +236,17 @@
         }
       ],
       "name": "UsageApiKeyDoesNotExist",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "usageApiKeyHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "UsageApiKeyExpired",
       "type": "error"
     },
     {
@@ -445,6 +467,44 @@
       "anonymous": false,
       "inputs": [
         {
+          "indexed": false,
+          "internalType": "string",
+          "name": "key",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "value",
+          "type": "string"
+        }
+      ],
+      "name": "NodeConfigurationSet",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "derivationPath",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "masterHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "PathOwnerBackfilled",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
           "indexed": true,
           "internalType": "uint256",
           "name": "apiKeyHash",
@@ -464,6 +524,25 @@
         }
       ],
       "name": "PkpAddedToGroup",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "pkpId",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "masterHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "PkpOwnerBackfilled",
       "type": "event"
     },
     {
@@ -1451,6 +1530,44 @@
       "inputs": [
         {
           "internalType": "uint256",
+          "name": "derivationPath",
+          "type": "uint256"
+        }
+      ],
+      "name": "getPathOwnerMaster",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "pkpId",
+          "type": "address"
+        }
+      ],
+      "name": "getPkpOwnerMaster",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
           "name": "apiKeyHash",
           "type": "uint256"
         },
@@ -2096,17 +2213,6 @@
         }
       ],
       "name": "NotContractOwner",
-      "type": "error"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "address",
-          "name": "caller",
-          "type": "address"
-        }
-      ],
-      "name": "OnlyConfigOperatorOrOwner",
       "type": "error"
     },
     {

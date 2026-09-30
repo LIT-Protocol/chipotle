@@ -8,9 +8,12 @@ use crate::actions::client::{
     MAX_MAX_RETRIES, MAX_MEMORY_LIMIT_MB, MAX_TIMEOUT_MS,
 };
 use crate::actions::grpc::GrpcClientPool;
+use crate::core::cache_metadata::CacheMetadataIndex;
 use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::{LitActionRequest, LitBinaryActionRequest};
-use crate::core::v1::models::response::{LitActionClientConfigResponse, LitActionResponse};
+use crate::core::v1::models::response::{
+    CacheEntryMetadataItem, CacheMetadataResponse, LitActionClientConfigResponse, LitActionResponse,
+};
 use crate::observability::RequestSpan;
 use crate::stripe::StripeState;
 use crate::utils::parse_with_hash::ipfs_cid_to_u256;
@@ -32,6 +35,7 @@ pub async fn lit_action(
     api_key: &str,
     grpc_client_pool: &GrpcClientPool<tonic::transport::Channel>,
     ipfs_cache: &Cache<String, Arc<String>>,
+    cache_metadata: Arc<CacheMetadataIndex>,
     http_client: &reqwest::Client,
     chain_config: Arc<ChainConfig>,
     stripe_state: Option<Arc<StripeState>>,
@@ -67,6 +71,33 @@ pub async fn lit_action(
         .insert(derived_ipfs_id.clone(), Arc::new(code_to_run.clone()))
         .await;
 
+    // CPL-351: correlate the cached binary with the caller's master account so
+    // its metadata can be surfaced by `GET /cache_metadata`. Spawned off the
+    // request path: resolving the account wallet is an uncached on-chain call,
+    // and this is best-effort bookkeeping that must add neither latency to nor
+    // failure modes for action execution. `record_execution` is eventually
+    // consistent — a slightly-late write only affects the metadata endpoint.
+    {
+        let cache_metadata = cache_metadata.clone();
+        let api_key = api_key.to_string();
+        let ipfs_id = derived_ipfs_id.clone();
+        let size_bytes = code_to_run.len() as u64;
+        tokio::spawn(async move {
+            match crate::accounts::get_account_wallet_address(&api_key).await {
+                Ok(account_address) => cache_metadata.record_execution(
+                    &ipfs_id,
+                    size_bytes,
+                    &account_address,
+                    std::time::SystemTime::now(),
+                ),
+                Err(e) => tracing::debug!(
+                    %ipfs_id,
+                    "cache_metadata: skipped recording (wallet lookup failed): {e}"
+                ),
+            }
+        });
+    }
+
     let deno_execution_env = DenoExecutionEnv {
         ipfs_cache: Some(moka::future::Cache::clone(ipfs_cache)),
         http_client: Some(reqwest::Client::clone(http_client)),
@@ -97,6 +128,7 @@ pub async fn lit_action(
         code: code_to_run,
         globals: js_params.clone(),
         action_ipfs_id: Some(derived_ipfs_id),
+        startup_script: None,
     };
 
     let result = match client
@@ -123,6 +155,69 @@ pub async fn lit_action(
     };
 
     Ok(lit_action_response)
+}
+
+/// CPL-351: metadata about the action code cached for the caller's master
+/// account. Resolves the API key to its on-chain account wallet address (the
+/// identity shared by the master key and all its usage keys) and returns the
+/// secondary-index metadata for that account. Never returns cached code.
+pub async fn get_cache_metadata(
+    api_key: &str,
+    cache_metadata: &CacheMetadataIndex,
+) -> Result<CacheMetadataResponse, ApiStatus> {
+    let account_address = crate::accounts::get_account_wallet_address(api_key)
+        .await
+        .map_err(|e| {
+            // An unknown/unregistered key is a credential failure, not a bad
+            // request — map it to 401 to match the billing path's convention
+            // (see accounts::UnknownApiKey). Anything else (RPC/contract
+            // failure) is a transient 500.
+            let msg = format!("{e}");
+            if msg.contains("no wallet address") || msg.contains("AccountDoesNotExist") {
+                ApiStatus::unauthorized("The provided API key is not registered.".to_string())
+            } else {
+                ApiStatus::internal_server_error(
+                    anyhow::anyhow!("failed to resolve account for API key: {e}"),
+                    "Could not resolve the account for the provided API key.",
+                )
+            }
+        })?;
+
+    let mut entries: Vec<CacheEntryMetadataItem> = cache_metadata
+        .entries_for_account(&account_address)
+        .into_iter()
+        .map(|m| CacheEntryMetadataItem {
+            ipfs_id: m.ipfs_id,
+            size_bytes: m.size_bytes,
+            created_at_ms: system_time_to_millis(m.created_at),
+            last_run_at_ms: system_time_to_millis(m.last_run_at),
+            run_count: m.run_count,
+            // The API-server IPFS cache is capacity-bounded (LRU), not
+            // time-expired, so there is no per-entry TTL to report.
+            ttl_seconds: None,
+        })
+        .collect();
+
+    // Most recently executed first.
+    entries.sort_by(|a, b| b.last_run_at_ms.cmp(&a.last_run_at_ms));
+
+    let total_size_bytes = entries.iter().map(|e| e.size_bytes).sum();
+
+    Ok(CacheMetadataResponse {
+        account_address,
+        entry_count: entries.len() as u64,
+        total_size_bytes,
+        entries,
+    })
+}
+
+/// Convert a `SystemTime` to Unix-epoch milliseconds. Pre-epoch times saturate
+/// to 0; a value beyond `u64::MAX` ms (~year 584 million) saturates to
+/// `u64::MAX` rather than silently truncating the `u128`.
+fn system_time_to_millis(t: std::time::SystemTime) -> u64 {
+    t.duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
 }
 
 /// Execute an any-language action **bundle** on the gVisor runner.
@@ -177,6 +272,23 @@ pub async fn lit_binary_action(
         return Err(ApiStatus::forbidden(msg));
     }
 
+    // F1b (#75/#600): a request may override the bundle's own entrypoint with
+    // its own `startup_script`, but that script is not part of the
+    // content-addressed bundle. Deriving CID key material (and PKP-wallet
+    // authorization) from the bundle checksum alone would let anyone authorized
+    // to *execute* the bundle run arbitrary code that wields the audited
+    // bundle's key. Bind the override into a distinct key-derivation id so a
+    // different script ⇒ a different derived key and independent authorization;
+    // the audited bundle running its own entrypoint (no override) keeps deriving
+    // from the bare checksum, so existing keys and registrations are unchanged.
+    let startup_script = request
+        .startup_script
+        .clone()
+        .filter(|s| !s.trim().is_empty());
+    let key_derivation_id = startup_script
+        .as_deref()
+        .map(|script| bind_startup_script_to_checksum(&checksum, script));
+
     // The gVisor runner still routes ops (fetch, key derivation, …) back
     // through this server's op handlers, so wire the same execution env the JS
     // path uses.
@@ -201,6 +313,12 @@ pub async fn lit_binary_action(
         .socket_path(gvisor_socket)
         .client_grpc_channels((*grpc_client_pool).clone());
 
+    // Only set when a request-supplied startup script overrides the bundle's
+    // entrypoint; otherwise the client falls back to `ipfs_id` (the checksum).
+    if let Some(id) = key_derivation_id {
+        builder.key_derivation_id(id);
+    }
+
     if let Some(stripe) = stripe_state {
         builder.stripe_state(stripe);
     }
@@ -214,6 +332,10 @@ pub async fn lit_binary_action(
         code: code_for_runner,
         globals: request.js_params.clone(),
         action_ipfs_id: Some(checksum),
+        // Rides beside the bundle so different scripts reuse the runner's
+        // cached bundle; the runner falls back to the bundle's own
+        // startup.sh when absent. Already normalized above (empty ⇒ None).
+        startup_script,
     };
 
     let result = match client
@@ -260,6 +382,32 @@ fn get_lit_action_ipfs_id(code: &str) -> String {
 /// derived here is exactly what `can_execute_action` authorizes against.
 fn get_lit_action_ipfs_id_bytes(bytes: &[u8]) -> String {
     IpfsHasher::default().compute(bytes)
+}
+
+/// Bind a request-supplied gVisor startup script into a key-derivation identity
+/// distinct from the bundle checksum (issue #75 F1b / #600).
+///
+/// The bundle checksum is content-addressed but the override script is not, so
+/// deriving key material from the checksum alone would let any caller
+/// authorized to execute the bundle run their own script under the audited
+/// bundle's key. A domain-separated, length-prefixed keccak over
+/// (checksum, script) yields a stable id that (a) changes whenever the script
+/// changes — so a different script gets a different derived key and independent
+/// wallet authorization — and (b) carries a fixed prefix so it can never
+/// collide with a real bundle CID or on-chain registration. Downstream key
+/// derivation and authorization only keccak the id string, so any stable
+/// string is a valid id.
+fn bind_startup_script_to_checksum(checksum: &str, startup_script: &str) -> String {
+    use alloy::primitives::keccak256;
+    // Length-prefix each field so no (checksum, script) pair can be confused
+    // with a different split of the same concatenated bytes.
+    let mut preimage = Vec::with_capacity(checksum.len() + startup_script.len() + 51);
+    preimage.extend_from_slice(b"lit-binary-action/startup-script/v1");
+    preimage.extend_from_slice(&(checksum.len() as u64).to_be_bytes());
+    preimage.extend_from_slice(checksum.as_bytes());
+    preimage.extend_from_slice(&(startup_script.len() as u64).to_be_bytes());
+    preimage.extend_from_slice(startup_script.as_bytes());
+    format!("lit-binary-script-{:x}", keccak256(&preimage))
 }
 
 /// Resolve the action code and its IPFS ID without modifying the cache.
@@ -582,6 +730,52 @@ mod tests {
     fn resolve_binary_bundle_requires_bundle_or_checksum() {
         let err = resolve_binary_bundle(&None, &None).unwrap_err();
         assert_eq!(err.status, rocket::http::Status::BadRequest);
+    }
+
+    #[test]
+    fn bind_startup_script_is_deterministic() {
+        // Same inputs must always yield the same id, or a legitimate override
+        // would derive a fresh (unrecoverable) key on every request.
+        let a = bind_startup_script_to_checksum("QmBundle", "echo hi");
+        let b = bind_startup_script_to_checksum("QmBundle", "echo hi");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn bind_startup_script_changes_with_script() {
+        // The security property: a different override script ⇒ a different id
+        // ⇒ a different derived key, so it cannot wield the bundle's key.
+        let base = bind_startup_script_to_checksum("QmBundle", "echo hi");
+        let other = bind_startup_script_to_checksum("QmBundle", "echo evil");
+        assert_ne!(base, other);
+    }
+
+    #[test]
+    fn bind_startup_script_changes_with_checksum() {
+        // The same override under two different bundles must not collide.
+        let a = bind_startup_script_to_checksum("QmBundleA", "echo hi");
+        let b = bind_startup_script_to_checksum("QmBundleB", "echo hi");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn bind_startup_script_never_collides_with_bare_checksum() {
+        // The audited bundle running its own entrypoint keys on the bare
+        // checksum; an override-bound id must be distinguishable from it so an
+        // override can never land on the audited identity.
+        let checksum = "QmBundle";
+        let bound = bind_startup_script_to_checksum(checksum, "echo hi");
+        assert_ne!(bound, checksum);
+        assert!(bound.starts_with("lit-binary-script-"));
+    }
+
+    #[test]
+    fn bind_startup_script_length_prefix_avoids_boundary_collision() {
+        // Without length-prefixing, ("ab","c") and ("a","bc") would hash the
+        // same concatenated bytes to the same id. They must differ.
+        let a = bind_startup_script_to_checksum("ab", "c");
+        let b = bind_startup_script_to_checksum("a", "bc");
+        assert_ne!(a, b);
     }
 
     #[test]

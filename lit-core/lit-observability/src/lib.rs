@@ -8,6 +8,27 @@ use tracing_subscriber::{fmt, prelude::*};
 use lit_core::error::Result;
 pub const PRIVACY_MODE_TAG: &str = "lit_privacy_mode";
 
+/// Operator opt-IN env var for logging user-supplied sensitive request data.
+/// See [`sensitive_logging_enabled`].
+pub const LOG_SENSITIVE_DATA_ENV: &str = "LIT_LOG_SENSITIVE_DATA";
+
+/// Whether user-supplied sensitive request data (`js_params`, request headers,
+/// `auth_context`) may be written to logs.
+///
+/// Redacted by **default** so customer secrets never leave the TEE via logs or
+/// their downstream GCP Cloud Logging export (CPL-369). Operators opt IN for
+/// local debugging by setting `LIT_LOG_SENSITIVE_DATA=true`. This is read once
+/// from the process environment and is **never** client-controllable, unlike
+/// the request-scoped privacy-mode tag.
+pub fn sensitive_logging_enabled() -> bool {
+    use std::sync::LazyLock;
+    static ENABLED: LazyLock<bool> = LazyLock::new(|| {
+        std::env::var(LOG_SENSITIVE_DATA_ENV)
+            .is_ok_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+    });
+    *ENABLED
+}
+
 #[cfg(feature = "channels")]
 pub mod channels;
 mod error;

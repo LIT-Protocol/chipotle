@@ -1,0 +1,8 @@
+node_modules
+generated
+web/dist
+sdk/dist
+target
+test-results
+package-lock.json
+actions/archive

@@ -23,6 +23,18 @@ pub async fn find_by_email(pool: &PgPool, email: &str) -> Result<Option<User>> {
     Ok(row.map(|(id, email)| User { id, email }))
 }
 
+/// Look up only the user's `id` by email, avoiding materializing the email
+/// (PII) into memory. Used by callers that just need a non-PII log identifier.
+pub async fn find_id_by_email(pool: &PgPool, email: &str) -> Result<Option<Uuid>> {
+    let row =
+        sqlx::query_as::<_, (Uuid,)>("SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1")
+            .bind(email)
+            .fetch_optional(pool)
+            .await?;
+
+    Ok(row.map(|(id,)| id))
+}
+
 pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<User>> {
     let row = sqlx::query_as::<_, (Uuid, String)>("SELECT id, email FROM users WHERE id = $1")
         .bind(id)

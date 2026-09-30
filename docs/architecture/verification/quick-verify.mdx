@@ -48,24 +48,40 @@ cast call 0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC \
   --rpc-url https://mainnet.base.org
 # Expect: true
 
-# 3. Is the TLS cert pinned to the TEE-attested cert?
+# 3. Is the TLS cert bound to the TEE by the attestation quote?
+#    First anchor the evidence to the hardware: the evidence quote's reportData
+#    must equal SHA-256(sha256sum.txt). Without this step, comparing the live
+#    cert to /evidences/cert-*.pem is a tautology — both come from the same
+#    server, so it passes even for an un-attested relay.
+curl -sf https://api.chipotle.litprotocol.com/evidences/sha256sum.txt > sha256sum.txt
+REPORT_DATA=$(curl -sf https://api.chipotle.litprotocol.com/evidences/quote.json \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["report_data"][:64])')
+CHAIN=$(openssl dgst -sha256 -hex sha256sum.txt | awk '{print $NF}')
+[ "$REPORT_DATA" = "$CHAIN" ] \
+  && echo "Evidence bound to TEE quote" \
+  || { echo "MISMATCH: evidence not attested by the quote"; exit 1; }
+
+# Now the evidence cert is TEE-attested, so matching the live cert to it is
+# meaningful. (Confirm cert-*.pem is listed in sha256sum.txt — the file the
+# reportData commits to — so the attested checksum actually covers it.)
+CERT_FILE=$(curl -sf https://api.chipotle.litprotocol.com/evidences/ \
+  | grep -o 'href="cert-[^"]*\.pem"' | sed 's/href="//;s/"//')
+grep -q "$CERT_FILE" sha256sum.txt || { echo "cert not covered by attested checksum"; exit 1; }
 LIVE=$(openssl s_client -connect api.chipotle.litprotocol.com:443 \
   -servername api.chipotle.litprotocol.com </dev/null 2>/dev/null \
   | openssl x509 -outform DER 2>/dev/null \
   | openssl dgst -sha256 -hex | awk '{print $NF}')
-ATTESTED=$(curl -sf "https://api.chipotle.litprotocol.com/evidences/$(
-  curl -sf https://api.chipotle.litprotocol.com/evidences/ \
-    | grep -o 'href="cert-[^"]*\.pem"' | sed 's/href="//;s/"//')" \
+ATTESTED=$(curl -sf "https://api.chipotle.litprotocol.com/evidences/$CERT_FILE" \
   | openssl x509 -outform DER 2>/dev/null \
   | openssl dgst -sha256 -hex | awk '{print $NF}')
-[ "$LIVE" = "$ATTESTED" ] && echo "TLS cert matches TEE evidence" || echo "MISMATCH"
+[ "$LIVE" = "$ATTESTED" ] && echo "TLS cert matches TEE-attested evidence" || echo "MISMATCH"
 ```
 
 For the full end-to-end verification — including replaying the RTMR3 event log, verifying image signatures with Sigstore, and walking the on-chain governance Safe — see the [Full Verification Guide](/architecture/verification/full-verification).
 
 ## On-chain governance you can audit
 
-Three smart contracts on Base together define what Lit Chipotle is allowed to do. All three are administered by a Safe multisig — no single party can change them.
+Smart contracts on Base together define what Lit Chipotle is allowed to do. Lit's own governance contracts are administered by a Lit-controlled Safe multisig — no single party can change them. The Phala KMS contract is a shared Phala-operated contract governed by a separate Phala-controlled Safe.
 
 <CardGroup cols={2}>
   <Card
@@ -80,14 +96,14 @@ Three smart contracts on Base together define what Lit Chipotle is allowed to do
     icon="key"
     href="https://basescan.org/address/0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C"
   >
-    `0x2f83…Ba9C` — whitelists allowed dstack OS images and KMS instance measurements. Gatekeeps key release to the CVM.
+    `0x2f83…Ba9C` — whitelists allowed dstack OS images and KMS instance measurements. Gatekeeps key release to the CVM. This is a shared Phala-operated contract, governed by a separate Phala-controlled Safe ([`0x3926…a663`](https://basescan.org/address/0x3926658a072F82BAEa5e5a15e1Fed8a776F4a663)), not the Lit Safe below.
   </Card>
   <Card
     title="Safe Multisig"
     icon="users"
     href="https://basescan.org/address/0xF688411c0FFc300cAb33EB1dA651DBb3E6891098"
   >
-    `0xF688…1098` — owns both contracts above. Any deployment or config change requires multiple Lit signers.
+    `0xF688…1098` — Lit's governance Safe. Owns the DstackApp contract above (and Lit's AccountConfig). Any Lit deployment or config change requires multiple Lit signers.
   </Card>
   <Card
     title="On-Chain KMS Deep Dive"

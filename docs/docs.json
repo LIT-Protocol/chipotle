@@ -26,6 +26,8 @@
               "lit-actions/index",
               "lit-actions/examples",
               "lit-actions/patterns",
+              "lit-actions/derived-actions",
+              "lit-actions/signed-storage",
               "lit-actions/secrets",
               "lit-actions/imports",
               "lit-actions/wasm",
@@ -77,15 +79,34 @@
                   "architecture/verification/attestation",
                   "architecture/verification/onchain-kms",
                   "architecture/verification/upgrade-governance",
+                  "architecture/verification/full-verification",
                   "architecture/verification/chain-of-trust",
-                  "architecture/verification/full-verification"
+                  "architecture/verification/bug-bounty"
                 ]
               }
             ]
           },
           {
-            "group": "Reference",
-            "pages": ["lit-actions/chipotle"]
+            "group": "Actions Reference",
+            "pages": [
+              "lit-actions/chipotle"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Lit Agent Keychain",
+        "pages": [
+          "keychain/index",
+          "keychain/quickstart",
+          {
+            "group": "Guides",
+            "pages": [
+              "keychain/agents",
+              "keychain/connected-services",
+              "keychain/sign-in-and-recovery",
+              "keychain/security"
+            ]
           }
         ]
       }

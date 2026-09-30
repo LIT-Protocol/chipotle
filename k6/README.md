@@ -83,4 +83,10 @@ ACCOUNTS_FILE=./data/my-accounts.json k6 run k6/loadtest/soak.spec.ts
 - `litApiServer.ts` – Generated TypeScript client (do not edit manually)
 - `k6-script.sample.ts` – Sample script exercising all endpoints
 - `smoke.spec.ts` – Minimal smoke test for `get_node_chain_config`
-- `LitActionCode/` – Shared Lit Action code (Hello World, Encrypt, Decrypt) for tests
+- `gvisor-smoke.spec.ts` – gVisor deploy smoke test: runs a Python hello-world
+  bundle (with a `pip install`) through `POST /lit_binary_action`. Staging/next
+  only (gVisor is off by default; see CPL-359)
+- `gvisorBundle.ts` – Minimal tar builder that packs a gVisor action bundle for
+  `gvisor-smoke.spec.ts`
+- `LitActionCode/` – Shared Lit Action code (Hello World, Encrypt, Decrypt) for
+  tests; `LitActionCode/gvisor/` holds the Python bundle source
