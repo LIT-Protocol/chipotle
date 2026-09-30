@@ -132,7 +132,7 @@ await client.addGroup({ apiKey: masterKey, groupName: "vault-123",
   pkpIdsPermitted: [], cidHashesPermitted: [hash] });
 ```
 
-Newly granted permissions are eventually consistent. Poll the real path (run the action with the real key) rather than sleeping a fixed amount. See the [API guide](/management/api_direct#7-run-lit-action).
+Newly granted permissions are eventually consistent. Poll the real path (run the action with the real key) rather than sleeping a fixed amount. See the [API guide](/management/api_direct#7-run-lit-action) for how, and [Read-after-write staleness](/management/account_modes#read-after-write-staleness) for why (the per-instance authorization cache and its ~10s catch-up window).
 
 ### 5. Execute by sending the source
 

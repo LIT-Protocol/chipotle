@@ -74,6 +74,32 @@ async function main({ pkpId }) {
 ```
  Choose the API key (account or usage key) to use for the request, then click **Execute**. The node runs the action and returns signatures, response, and logs. The key you use must be allowed to run that action (via the group and IPFS CID configuration).
 
+## When a permission change takes a moment to apply
+
+The dashboard's tables (keys, groups, wallets, actions) read live from the
+chain, so they always show current state. But **running an action** goes
+through a short-lived per-server authorization cache that a listener keeps
+in sync by polling the chain about every **10 seconds**.
+
+So right after a permission change lands on-chain — especially a
+**ChainSecured (wallet-signed) write**, or a change made from another
+device or directly against the contract — there's a brief window where the
+server that runs your action may still apply the *previous* permissions: a
+**just-granted** permission can still be rejected, or a **just-revoked** one
+can still work. It resolves on its own within a few seconds. If a run's
+result surprises you right after a permission change, wait a moment and try
+again.
+
+<Note>
+If a server is having trouble keeping up, the dashboard shows an amber
+banner near the top of the page: *"This server is catching up to recent
+on-chain changes..."* It means that server is more than 30 seconds behind on
+syncing permission changes, so recently changed permissions may take longer
+than usual to take effect when you run actions (the tables you see stay
+accurate). The banner clears automatically once the server catches up — no
+action is needed on your part.
+</Note>
+
 ## Daily Usage
 
 The dashboard is just your human-friendly configuration tool. Once your account and keys are set up to your liking, you can simply call the lit-action endpoint with your usage key each time you, your dApp or cron job needs to execute a lit action. So the only daily use step is
