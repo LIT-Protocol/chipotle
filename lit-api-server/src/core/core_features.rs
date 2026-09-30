@@ -272,6 +272,23 @@ pub async fn lit_binary_action(
         return Err(ApiStatus::forbidden(msg));
     }
 
+    // F1b (#75/#600): a request may override the bundle's own entrypoint with
+    // its own `startup_script`, but that script is not part of the
+    // content-addressed bundle. Deriving CID key material (and PKP-wallet
+    // authorization) from the bundle checksum alone would let anyone authorized
+    // to *execute* the bundle run arbitrary code that wields the audited
+    // bundle's key. Bind the override into a distinct key-derivation id so a
+    // different script ⇒ a different derived key and independent authorization;
+    // the audited bundle running its own entrypoint (no override) keeps deriving
+    // from the bare checksum, so existing keys and registrations are unchanged.
+    let startup_script = request
+        .startup_script
+        .clone()
+        .filter(|s| !s.trim().is_empty());
+    let key_derivation_id = startup_script
+        .as_deref()
+        .map(|script| bind_startup_script_to_checksum(&checksum, script));
+
     // The gVisor runner still routes ops (fetch, key derivation, …) back
     // through this server's op handlers, so wire the same execution env the JS
     // path uses.
@@ -296,6 +313,12 @@ pub async fn lit_binary_action(
         .socket_path(gvisor_socket)
         .client_grpc_channels((*grpc_client_pool).clone());
 
+    // Only set when a request-supplied startup script overrides the bundle's
+    // entrypoint; otherwise the client falls back to `ipfs_id` (the checksum).
+    if let Some(id) = key_derivation_id {
+        builder.key_derivation_id(id);
+    }
+
     if let Some(stripe) = stripe_state {
         builder.stripe_state(stripe);
     }
@@ -311,11 +334,8 @@ pub async fn lit_binary_action(
         action_ipfs_id: Some(checksum),
         // Rides beside the bundle so different scripts reuse the runner's
         // cached bundle; the runner falls back to the bundle's own
-        // startup.sh when absent.
-        startup_script: request
-            .startup_script
-            .clone()
-            .filter(|s| !s.trim().is_empty()),
+        // startup.sh when absent. Already normalized above (empty ⇒ None).
+        startup_script,
     };
 
     let result = match client
@@ -362,6 +382,32 @@ fn get_lit_action_ipfs_id(code: &str) -> String {
 /// derived here is exactly what `can_execute_action` authorizes against.
 fn get_lit_action_ipfs_id_bytes(bytes: &[u8]) -> String {
     IpfsHasher::default().compute(bytes)
+}
+
+/// Bind a request-supplied gVisor startup script into a key-derivation identity
+/// distinct from the bundle checksum (issue #75 F1b / #600).
+///
+/// The bundle checksum is content-addressed but the override script is not, so
+/// deriving key material from the checksum alone would let any caller
+/// authorized to execute the bundle run their own script under the audited
+/// bundle's key. A domain-separated, length-prefixed keccak over
+/// (checksum, script) yields a stable id that (a) changes whenever the script
+/// changes — so a different script gets a different derived key and independent
+/// wallet authorization — and (b) carries a fixed prefix so it can never
+/// collide with a real bundle CID or on-chain registration. Downstream key
+/// derivation and authorization only keccak the id string, so any stable
+/// string is a valid id.
+fn bind_startup_script_to_checksum(checksum: &str, startup_script: &str) -> String {
+    use alloy::primitives::keccak256;
+    // Length-prefix each field so no (checksum, script) pair can be confused
+    // with a different split of the same concatenated bytes.
+    let mut preimage = Vec::with_capacity(checksum.len() + startup_script.len() + 51);
+    preimage.extend_from_slice(b"lit-binary-action/startup-script/v1");
+    preimage.extend_from_slice(&(checksum.len() as u64).to_be_bytes());
+    preimage.extend_from_slice(checksum.as_bytes());
+    preimage.extend_from_slice(&(startup_script.len() as u64).to_be_bytes());
+    preimage.extend_from_slice(startup_script.as_bytes());
+    format!("lit-binary-script-{:x}", keccak256(&preimage))
 }
 
 /// Resolve the action code and its IPFS ID without modifying the cache.
@@ -684,6 +730,52 @@ mod tests {
     fn resolve_binary_bundle_requires_bundle_or_checksum() {
         let err = resolve_binary_bundle(&None, &None).unwrap_err();
         assert_eq!(err.status, rocket::http::Status::BadRequest);
+    }
+
+    #[test]
+    fn bind_startup_script_is_deterministic() {
+        // Same inputs must always yield the same id, or a legitimate override
+        // would derive a fresh (unrecoverable) key on every request.
+        let a = bind_startup_script_to_checksum("QmBundle", "echo hi");
+        let b = bind_startup_script_to_checksum("QmBundle", "echo hi");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn bind_startup_script_changes_with_script() {
+        // The security property: a different override script ⇒ a different id
+        // ⇒ a different derived key, so it cannot wield the bundle's key.
+        let base = bind_startup_script_to_checksum("QmBundle", "echo hi");
+        let other = bind_startup_script_to_checksum("QmBundle", "echo evil");
+        assert_ne!(base, other);
+    }
+
+    #[test]
+    fn bind_startup_script_changes_with_checksum() {
+        // The same override under two different bundles must not collide.
+        let a = bind_startup_script_to_checksum("QmBundleA", "echo hi");
+        let b = bind_startup_script_to_checksum("QmBundleB", "echo hi");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn bind_startup_script_never_collides_with_bare_checksum() {
+        // The audited bundle running its own entrypoint keys on the bare
+        // checksum; an override-bound id must be distinguishable from it so an
+        // override can never land on the audited identity.
+        let checksum = "QmBundle";
+        let bound = bind_startup_script_to_checksum(checksum, "echo hi");
+        assert_ne!(bound, checksum);
+        assert!(bound.starts_with("lit-binary-script-"));
+    }
+
+    #[test]
+    fn bind_startup_script_length_prefix_avoids_boundary_collision() {
+        // Without length-prefixing, ("ab","c") and ("a","bc") would hash the
+        // same concatenated bytes to the same id. They must differ.
+        let a = bind_startup_script_to_checksum("ab", "c");
+        let b = bind_startup_script_to_checksum("a", "bc");
+        assert_ne!(a, b);
     }
 
     #[test]

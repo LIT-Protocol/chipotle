@@ -11,8 +11,9 @@ use sqlx::PgPool;
 use time::OffsetDateTime;
 
 use super::rate_limit::RateLimiter;
+use super::session::{RawBearer, SessionUser};
 use super::user::{self, User};
-use super::{agent, session, token, MAGIC_LINK_TTL_SECONDS, SESSION_COOKIE_NAME};
+use super::{agent, pairing, session, token, MAGIC_LINK_TTL_SECONDS, SESSION_COOKIE_NAME};
 use crate::config::Config;
 use crate::mail::Mailer;
 
@@ -177,9 +178,81 @@ pub async fn logout(pool: &State<PgPool>, cookies: &CookieJar<'_>) -> Status {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct AgentAuthorizeRequest {
-    pub challenge: String,
+pub struct AgentPairStartRequest {
+    /// `base64url(sha256(raw_token))` computed by the agent. Never the raw token.
+    pub token_hash: String,
     pub label: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AgentPairStartResponse {
+    pub authorize_url: String,
+    /// Human-readable code the agent shows the user to confirm in the browser.
+    pub user_code: String,
+    pub expires_in_seconds: i64,
+}
+
+/// Agent-initiated pairing start (unauthenticated). Records the agent's token
+/// hash server-side and returns a single-use authorize URL. The binding target
+/// is fixed here by the token holder, not chosen by the browser later.
+#[post("/agent/pair", data = "<req>")]
+pub async fn pair_start(
+    pool: &State<PgPool>,
+    config: &State<Config>,
+    req: Json<AgentPairStartRequest>,
+) -> Result<Json<AgentPairStartResponse>, Status> {
+    let req = req.into_inner();
+    let started = pairing::start(pool.inner(), &req.token_hash, req.label.as_deref())
+        .await
+        .map_err(|e| {
+            tracing::info!("agent pair start rejected: {e}");
+            Status::BadRequest
+        })?;
+    let Some(started) = started else {
+        // Pending-pairing cap reached — shed load rather than grow unbounded.
+        return Err(Status::TooManyRequests);
+    };
+    let authorize_url = format!(
+        "{}/agent/authorize?code={}",
+        config.public_base_url, started.code
+    );
+    Ok(Json(AgentPairStartResponse {
+        authorize_url,
+        user_code: started.user_code,
+        expires_in_seconds: started.expires_in_seconds,
+    }))
+}
+
+#[derive(Debug, Serialize)]
+pub struct AgentPairInfoResponse {
+    pub label: String,
+    pub user_code: String,
+}
+
+/// Info shown on the authorize page so the signed-in user can confirm the
+/// pairing matches the one their own agent displayed.
+#[get("/agent/pair?<code>")]
+pub async fn pair_info(
+    _user: SessionUser,
+    pool: &State<PgPool>,
+    code: &str,
+) -> Result<Json<AgentPairInfoResponse>, Status> {
+    match pairing::display_info(pool.inner(), code).await {
+        Ok(Some(info)) => Ok(Json(AgentPairInfoResponse {
+            label: info.label,
+            user_code: info.user_code,
+        })),
+        Ok(None) => Err(Status::NotFound),
+        Err(e) => {
+            tracing::info!("agent pair info rejected: {e}");
+            Err(Status::BadRequest)
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AgentAuthorizeRequest {
+    pub code: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -188,23 +261,99 @@ pub struct AgentAuthorizeResponse {
     pub user_email: String,
 }
 
+/// User-facing approval: the signed-in account owner approves a pending pairing.
+/// This only marks approval; the token is bound once the agent proves possession
+/// via `POST /agent/pair/complete`.
 #[post("/agent/authorize", data = "<req>")]
 pub async fn authorize_agent(
-    user: User,
+    user: SessionUser,
     pool: &State<PgPool>,
     req: Json<AgentAuthorizeRequest>,
 ) -> Result<Json<AgentAuthorizeResponse>, Status> {
+    let user = user.0;
     let req = req.into_inner();
-    agent::authorize_hash(pool.inner(), &req.challenge, user.id, req.label.as_deref())
+    let approved = pairing::approve(pool.inner(), &req.code, user.id)
         .await
         .map_err(|e| {
-            tracing::warn!(user_id = %user.id, "agent token authorize failed: {e}");
+            tracing::warn!(user_id = %user.id, "agent authorize rejected: {e}");
             Status::BadRequest
         })?;
+    if !approved {
+        return Err(Status::NotFound);
+    }
     Ok(Json(AgentAuthorizeResponse {
         ok: true,
         user_email: user.email,
     }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AgentPairCompleteRequest {
+    pub code: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AgentPairCompleteResponse {
+    pub status: &'static str,
+}
+
+/// Agent-side completion poll. Requires `Authorization: Bearer <raw token>` as
+/// proof of possession of the preimage registered at pairing start.
+#[post("/agent/pair/complete", data = "<req>")]
+pub async fn pair_complete(
+    bearer: RawBearer,
+    pool: &State<PgPool>,
+    req: Json<AgentPairCompleteRequest>,
+) -> Result<Json<AgentPairCompleteResponse>, Status> {
+    let req = req.into_inner();
+    match pairing::complete(pool.inner(), &req.code, &bearer.0).await {
+        Ok(pairing::CompleteOutcome::Authorized) => Ok(Json(AgentPairCompleteResponse {
+            status: "authorized",
+        })),
+        Ok(pairing::CompleteOutcome::Pending) => {
+            Ok(Json(AgentPairCompleteResponse { status: "pending" }))
+        }
+        Ok(pairing::CompleteOutcome::Mismatch) => Err(Status::Forbidden),
+        Ok(pairing::CompleteOutcome::NotFound) => Err(Status::NotFound),
+        Err(e) => {
+            tracing::info!("agent pair complete rejected: {e}");
+            Err(Status::BadRequest)
+        }
+    }
+}
+
+/// Agent self-revoke: revoke the presented bearer token. Holding the raw token is
+/// proof of ownership.
+#[post("/agent/revoke")]
+pub async fn revoke_agent_token(bearer: RawBearer, pool: &State<PgPool>) -> Status {
+    match agent::revoke_by_token(pool.inner(), &bearer.0).await {
+        Ok(_) => Status::NoContent,
+        Err(e) => {
+            tracing::info!("agent self-revoke rejected: {e}");
+            Status::BadRequest
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct RevokeAllResponse {
+    pub revoked: u64,
+}
+
+/// User-facing revoke-all: a signed-in user cuts off every agent bound to their
+/// account, without needing to hold any raw token.
+#[post("/api/agent/revoke-all")]
+pub async fn revoke_all_agent_tokens(
+    user: User,
+    pool: &State<PgPool>,
+) -> Result<Json<RevokeAllResponse>, Status> {
+    let revoked = agent::revoke_all_for_user(pool.inner(), user.id)
+        .await
+        .map_err(|e| {
+            tracing::warn!(user_id = %user.id, "agent revoke-all failed: {e}");
+            Status::InternalServerError
+        })?;
+    Ok(Json(RevokeAllResponse { revoked }))
 }
 
 #[get("/api/me")]

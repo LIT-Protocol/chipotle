@@ -502,9 +502,17 @@ contract ViewsFacet {
             return false;
         }
 
-        //  wildcard scenario
+        // Wildcard usage key (executeInGroups contains group 0): the key may
+        // execute in ANY of its account's groups, so the per-group
+        // executeInGroups permission below is skipped. But the request must
+        // still resolve to at least one group in THIS account — `groupIds` is
+        // the (cid[, wallet]) match set the caller built from the account's own
+        // groups. A bare `return true` here let a wildcard key authorize
+        // actions/PKPs never registered to its account, reaching another
+        // tenant's PKP in the shared node keystore (issue #62 — cross-account
+        // PKP crypto ops).
         if (usageApiKey.executeInGroups.contains(0)) {
-            return true;
+            return groupIds.length > 0;
         }
 
         for (uint256 i = 0; i < groupIds.length; i++) {
@@ -581,9 +589,10 @@ contract ViewsFacet {
             return false; // expired key authorizes nothing
         }
 
-        if (usageApiKey.executeInGroups.contains(0)) {
-            return true; // wildcard: can execute in any group
-        }
+        // Wildcard (group 0) skips the per-group executeInGroups permission but
+        // the action must still resolve to a group in this account, so the key
+        // cannot authorize an action never registered to it (issue #62).
+        bool isWildcard = usageApiKey.executeInGroups.contains(0);
 
         uint256 len = account.groupList.length();
         for (uint256 i = 0; i < len; i++) {
@@ -592,7 +601,7 @@ contract ViewsFacet {
             if (
                 (group.cidHash.contains(cidHash) ||
                     group.cidHash.contains(0)) &&
-                usageApiKey.executeInGroups.contains(groupId)
+                (isWildcard || usageApiKey.executeInGroups.contains(groupId))
             ) {
                 return true;
             }
@@ -615,9 +624,11 @@ contract ViewsFacet {
             return false; // expired key authorizes nothing
         }
 
-        if (usageApiKey.executeInGroups.contains(0)) {
-            return true; // wildcard
-        }
+        // Wildcard (group 0) skips the per-group executeInGroups permission but
+        // the (cid, wallet) must still resolve to a group in this account, so a
+        // wildcard key cannot reach another account's PKP in the shared node
+        // keystore (issue #62).
+        bool isWildcard = usageApiKey.executeInGroups.contains(0);
 
         uint256 len = account.groupList.length();
         for (uint256 i = 0; i < len; i++) {
@@ -628,7 +639,7 @@ contract ViewsFacet {
                     group.cidHash.contains(0)) &&
                 (group.pkpId.contains(walletAddress) ||
                     group.pkpId.contains(address(0))) &&
-                usageApiKey.executeInGroups.contains(groupId)
+                (isWildcard || usageApiKey.executeInGroups.contains(groupId))
             ) {
                 return true;
             }
@@ -653,9 +664,10 @@ contract ViewsFacet {
             return (false, false); // expired key authorizes nothing
         }
 
-        if (usageApiKey.executeInGroups.contains(0)) {
-            return (true, true); // wildcard: both trivially true
-        }
+        // Wildcard (group 0) skips the per-group executeInGroups permission but
+        // the request must still resolve to a group in this account, so a
+        // wildcard key cannot reach another account's action/PKP (issue #62).
+        bool isWildcard = usageApiKey.executeInGroups.contains(0);
 
         uint256 len = account.groupList.length();
         for (uint256 i = 0; i < len; i++) {
@@ -668,7 +680,8 @@ contract ViewsFacet {
                 group.cidHash.contains(0);
             if (!cidMatch) continue;
 
-            bool groupPermitted = usageApiKey.executeInGroups.contains(groupId);
+            bool groupPermitted = isWildcard ||
+                usageApiKey.executeInGroups.contains(groupId);
             if (!groupPermitted) continue;
 
             canExecute = true;

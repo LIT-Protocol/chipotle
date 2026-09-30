@@ -1625,6 +1625,7 @@ interface AccountConfig {
     error OnlyConfigOperatorOrOwner(address caller);
     error PkpDoesNotExist(uint256 apiKeyHash, uint256 groupId, address pkpId);
     error UsageApiKeyDoesNotExist(uint256 apiKeyHash, uint256 usageApiKeyHash);
+    error UsageApiKeyExpired(uint256 usageApiKeyHash);
 
     event AccountConvertedToChainSecured(uint256 indexed apiKeyHash, address indexed newAdminWalletAddress);
     event AccountCreated(uint256 indexed apiKeyHash, address indexed admin, bool managed);
@@ -4277,6 +4278,17 @@ interface AccountConfig {
         "internalType": "uint256"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "UsageApiKeyExpired",
+    "inputs": [
+      {
+        "name": "usageApiKeyHash",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   }
 ]
 ```*/
@@ -5964,6 +5976,84 @@ pub mod AccountConfig {
                     <alloy::sol_types::sol_data::Uint<256> as alloy_sol_types::SolType>::tokenize(
                         &self.apiKeyHash,
                     ),
+                    <alloy::sol_types::sol_data::Uint<256> as alloy_sol_types::SolType>::tokenize(
+                        &self.usageApiKeyHash,
+                    ),
+                )
+            }
+            #[inline]
+            fn abi_decode_raw_validate(data: &[u8]) -> alloy_sol_types::Result<Self> {
+                <Self::Parameters<'_> as alloy_sol_types::SolType>::abi_decode_sequence_validate(
+                    data,
+                )
+                .map(Self::new)
+            }
+        }
+    };
+    #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
+    /*Custom error with signature `UsageApiKeyExpired(uint256)` and selector `0xfb79b024`.
+    ```solidity
+    error UsageApiKeyExpired(uint256 usageApiKeyHash);
+    ```*/
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
+    #[derive(Clone)]
+    pub struct UsageApiKeyExpired {
+        #[allow(missing_docs)]
+        pub usageApiKeyHash: alloy::sol_types::private::primitives::aliases::U256,
+    }
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
+    const _: () = {
+        use alloy::sol_types as alloy_sol_types;
+        #[doc(hidden)]
+        #[allow(dead_code)]
+        type UnderlyingSolTuple<'a> = (alloy::sol_types::sol_data::Uint<256>,);
+        #[doc(hidden)]
+        type UnderlyingRustTuple<'a> = (alloy::sol_types::private::primitives::aliases::U256,);
+        #[cfg(test)]
+        #[allow(dead_code, unreachable_patterns)]
+        fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
+            match _t {
+                alloy_sol_types::private::AssertTypeEq::<
+                    <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
+                >(_) => {}
+            }
+        }
+        #[automatically_derived]
+        #[doc(hidden)]
+        impl ::core::convert::From<UsageApiKeyExpired> for UnderlyingRustTuple<'_> {
+            fn from(value: UsageApiKeyExpired) -> Self {
+                (value.usageApiKeyHash,)
+            }
+        }
+        #[automatically_derived]
+        #[doc(hidden)]
+        impl ::core::convert::From<UnderlyingRustTuple<'_>> for UsageApiKeyExpired {
+            fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
+                Self {
+                    usageApiKeyHash: tuple.0,
+                }
+            }
+        }
+        #[automatically_derived]
+        impl alloy_sol_types::SolError for UsageApiKeyExpired {
+            type Parameters<'a> = UnderlyingSolTuple<'a>;
+            type Token<'a> = <Self::Parameters<'a> as alloy_sol_types::SolType>::Token<'a>;
+            const SIGNATURE: &'static str = "UsageApiKeyExpired(uint256)";
+            const SELECTOR: [u8; 4] = [251u8, 121u8, 176u8, 36u8];
+            #[inline]
+            fn new<'a>(
+                tuple: <Self::Parameters<'a> as alloy_sol_types::SolType>::RustType,
+            ) -> Self {
+                tuple.into()
+            }
+            #[inline]
+            fn tokenize(&self) -> Self::Token<'_> {
+                (
                     <alloy::sol_types::sol_data::Uint<256> as alloy_sol_types::SolType>::tokenize(
                         &self.usageApiKeyHash,
                     ),
@@ -22310,6 +22400,8 @@ pub mod AccountConfig {
         PkpDoesNotExist(PkpDoesNotExist),
         #[allow(missing_docs)]
         UsageApiKeyDoesNotExist(UsageApiKeyDoesNotExist),
+        #[allow(missing_docs)]
+        UsageApiKeyExpired(UsageApiKeyExpired),
     }
     impl AccountConfigErrors {
         // All the selectors of this enum.
@@ -22338,6 +22430,7 @@ pub mod AccountConfig {
             [207u8, 71u8, 145u8, 129u8],
             [212u8, 168u8, 71u8, 55u8],
             [239u8, 37u8, 208u8, 45u8],
+            [251u8, 121u8, 176u8, 36u8],
             [255u8, 65u8, 39u8, 203u8],
         ];
         // The names of the variants in the same order as `SELECTORS`.
@@ -22361,6 +22454,7 @@ pub mod AccountConfig {
             ::core::stringify!(InsufficientBalance),
             ::core::stringify!(AccountDoesNotExist),
             ::core::stringify!(ActionDoesNotExist),
+            ::core::stringify!(UsageApiKeyExpired),
             ::core::stringify!(NotContractOwner),
         ];
         // The signatures in the same order as `SELECTORS`.
@@ -22384,6 +22478,7 @@ pub mod AccountConfig {
             <InsufficientBalance as alloy_sol_types::SolError>::SIGNATURE,
             <AccountDoesNotExist as alloy_sol_types::SolError>::SIGNATURE,
             <ActionDoesNotExist as alloy_sol_types::SolError>::SIGNATURE,
+            <UsageApiKeyExpired as alloy_sol_types::SolError>::SIGNATURE,
             <NotContractOwner as alloy_sol_types::SolError>::SIGNATURE,
         ];
         // Returns the signature for the given selector, if known.
@@ -22409,7 +22504,7 @@ pub mod AccountConfig {
     impl alloy_sol_types::SolInterface for AccountConfigErrors {
         const NAME: &'static str = "AccountConfigErrors";
         const MIN_DATA_LENGTH: usize = 32usize;
-        const COUNT: usize = 20usize;
+        const COUNT: usize = 21usize;
         #[inline]
         fn selector(&self) -> [u8; 4] {
             match self {
@@ -22470,6 +22565,9 @@ pub mod AccountConfig {
                 }
                 Self::UsageApiKeyDoesNotExist(_) => {
                     <UsageApiKeyDoesNotExist as alloy_sol_types::SolError>::SELECTOR
+                }
+                Self::UsageApiKeyExpired(_) => {
+                    <UsageApiKeyExpired as alloy_sol_types::SolError>::SELECTOR
                 }
             }
         }
@@ -22663,6 +22761,15 @@ pub mod AccountConfig {
                             .map(AccountConfigErrors::ActionDoesNotExist)
                     }
                     ActionDoesNotExist
+                },
+                {
+                    fn UsageApiKeyExpired(
+                        data: &[u8],
+                    ) -> alloy_sol_types::Result<AccountConfigErrors> {
+                        <UsageApiKeyExpired as alloy_sol_types::SolError>::abi_decode_raw(data)
+                            .map(AccountConfigErrors::UsageApiKeyExpired)
+                    }
+                    UsageApiKeyExpired
                 },
                 {
                     fn NotContractOwner(
@@ -22898,6 +23005,17 @@ pub mod AccountConfig {
                     ActionDoesNotExist
                 },
                 {
+                    fn UsageApiKeyExpired(
+                        data: &[u8],
+                    ) -> alloy_sol_types::Result<AccountConfigErrors> {
+                        <UsageApiKeyExpired as alloy_sol_types::SolError>::abi_decode_raw_validate(
+                            data,
+                        )
+                        .map(AccountConfigErrors::UsageApiKeyExpired)
+                    }
+                    UsageApiKeyExpired
+                },
+                {
                     fn NotContractOwner(
                         data: &[u8],
                     ) -> alloy_sol_types::Result<AccountConfigErrors> {
@@ -23020,6 +23138,11 @@ pub mod AccountConfig {
                         inner,
                     )
                 }
+                Self::UsageApiKeyExpired(inner) => {
+                    <UsageApiKeyExpired as alloy_sol_types::SolError>::abi_encoded_size(
+                        inner,
+                    )
+                }
             }
         }
         #[inline]
@@ -23100,6 +23223,9 @@ pub mod AccountConfig {
                     <UsageApiKeyDoesNotExist as alloy_sol_types::SolError>::abi_encode_raw(
                         inner, out,
                     )
+                }
+                Self::UsageApiKeyExpired(inner) => {
+                    <UsageApiKeyExpired as alloy_sol_types::SolError>::abi_encode_raw(inner, out)
                 }
             }
         }

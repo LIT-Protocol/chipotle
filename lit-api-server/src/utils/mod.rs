@@ -18,18 +18,18 @@ pub fn generate_unique_derivation_path() -> (U256, String) {
     let derivation_bytes = keccak256(seed_bytes);
     let derivation_u256 = U256::from_be_bytes(derivation_bytes.0);
     // feels redundant, but it's a good way to ensure the derivation path is always the same for a given seed
-    let derivation_path = u256_to_derviation_path(derivation_u256);
+    let derivation_path = u256_to_derivation_path(derivation_u256);
     (derivation_u256, derivation_path)
 }
 
-pub fn u256_to_derviation_path(u256: U256) -> String {
+pub fn u256_to_derivation_path(u256: U256) -> String {
     bytes_to_hex(u256.to_be_bytes::<32>())
 }
 
 pub fn generate_lit_action_derivation_path(ipfs_id: &str) -> String {
     let ipfs_id_hash = keccak256(ipfs_id.as_bytes());
     let ipfs_id_hash_u256 = U256::from_be_bytes(ipfs_id_hash.0);
-    u256_to_derviation_path(ipfs_id_hash_u256)
+    u256_to_derivation_path(ipfs_id_hash_u256)
 }
 
 pub fn evm_address_from_public_key(public_key: &str) -> Result<Address> {
@@ -49,10 +49,10 @@ pub fn evm_address_from_public_key(public_key: &str) -> Result<Address> {
 mod tests {
     use super::*;
 
-    // ── u256_to_derviation_path ─────────────────────────────────────────
+    // ── u256_to_derivation_path ─────────────────────────────────────────
     #[test]
     fn u256_to_derivation_path_zero() {
-        let path = u256_to_derviation_path(U256::ZERO);
+        let path = u256_to_derivation_path(U256::ZERO);
         // bytes_to_hex produces 64 hex chars without "0x" prefix
         assert_eq!(path.len(), 64);
         assert!(path.chars().all(|c| c == '0'));
@@ -61,7 +61,7 @@ mod tests {
     #[test]
     fn u256_to_derivation_path_deterministic() {
         let val = U256::from(12345u64);
-        assert_eq!(u256_to_derviation_path(val), u256_to_derviation_path(val));
+        assert_eq!(u256_to_derivation_path(val), u256_to_derivation_path(val));
     }
 
     // ── generate_unique_derivation_path ─────────────────────────────────
@@ -71,7 +71,7 @@ mod tests {
         assert_eq!(path.len(), 64);
         assert!(path.chars().all(|c| c.is_ascii_hexdigit()));
         // The path should match the u256 value
-        assert_eq!(path, u256_to_derviation_path(u256_val));
+        assert_eq!(path, u256_to_derivation_path(u256_val));
     }
 
     #[test]

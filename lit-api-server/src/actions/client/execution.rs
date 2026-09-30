@@ -248,6 +248,16 @@ impl Client {
                         Some(self.ipfs_id.clone())
                     },
                     startup_script,
+                    // Binary lane: when a request overrides the entrypoint, tell
+                    // the runner the running code's key identity so the guest's
+                    // own key/public-key/wallet-address lookups match the private
+                    // key it gets. Empty (JS lane / no override) ⇒ the runner
+                    // uses the bundle CID. See #75 (F1b) / #600.
+                    action_identity: if self.key_derivation_id.is_empty() {
+                        None
+                    } else {
+                        Some(self.key_derivation_id.clone())
+                    },
                 }
                 .into(),
             )

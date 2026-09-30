@@ -66,6 +66,15 @@ value exceeds 64 KiB (1 MiB total); `lit params` always has the full data.
 Typical script: read params from the environment, fetch/decrypt keys via
 `lit`, then exec the bundle's binary.
 
+js-params are untrusted request input, so **interpreter-control env names are
+also dropped** from injection: the `LD_*` loader family and shell/runtime
+code-injection knobs (`BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS`,
+`PROMPT_COMMAND`, `PS4`, `PYTHONPATH`, `PYTHONSTARTUP`, `NODE_OPTIONS`,
+`PERL5OPT`, `RUBYOPT`, `LUA_INIT`, …). Otherwise a caller with only execute
+access could set e.g. `BASH_ENV='$(lit get-action-private-key)'` — sourced by
+`/bin/bash` before the audited `startup.sh` runs — and steal the bundle's key
+without ever supplying a `startup_script` override (#75 F1b / #600).
+
 An optional `lit.json` manifest at the bundle root may carry metadata:
 
 ```json
@@ -82,8 +91,23 @@ An optional `lit.json` manifest at the bundle root may carry metadata:
 - A legacy `entrypoint` field is ignored: incoming bundles are re-written to
   the startup-script contract.
 
-Note authorization keys on the **bundle** CID alone; the per-request startup
-script is authenticated by API-key authorization, not content-addressing.
+**Execute** authorization keys on the **bundle** CID alone: an API key
+authorized to run the bundle may run any startup script against it (running
+sandboxed code is not the threat). **CID-derived key material and PKP-wallet
+access, however, are keyed on the code that actually runs.** When a request
+supplies its own `startup_script` (overriding the bundle's `startup.sh`), the
+api-server binds that script into a distinct key-derivation id
+(`hash(bundle_checksum ‖ startup_script)`), so an override gets a *different*
+derived key and independent wallet authorization and can never wield the
+audited bundle's key. A bundle running its own audited `startup.sh` keys on the
+bare CID, so its keys and on-chain registrations are unchanged. This closes the
+cross-account key-theft path in issue #75 (F1b) / #600.
+
+When an override binds a distinct id, the api-server also sends it as the
+request's `action_identity`, so the guest's own identity (`LIT_ACTION_IPFS_ID`
+and `lit`'s default `get-action-public-key` / `get-action-wallet-address`
+lookups) matches the private key the override actually receives. The bundle
+cache is still keyed on the CID, so this never changes which bytes run.
 
 Execution semantics are serverless/CLI-style: **the run ends when the
 startup script exits**. `lit set-response` only *records* the response

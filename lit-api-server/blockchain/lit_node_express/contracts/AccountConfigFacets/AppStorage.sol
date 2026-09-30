@@ -40,6 +40,7 @@ library AppStorage {
     error NotAllowedToAddPkpToGroup(uint256 apiKeyHash, uint256 groupId);
     error NotAllowedToRemovePkpFromGroup(uint256 apiKeyHash, uint256 groupId);
     error NotAllowedToManageIPFSIdsInGroup(uint256 apiKeyHash, uint256 groupId);
+    error UsageApiKeyExpired(uint256 usageApiKeyHash);
     error InvalidRequest(string message);
     error OnlyConfigOperatorOrOwner(address caller);
 
@@ -154,6 +155,18 @@ library AppStorage {
     /// @notice Returns whether the account exists and the caller is allowed to mutate it (api_payer for managed accounts, or the creator).
     /// @param apiKeyHash Keccak256 hash of the account or usage API key (resolves to master account).
     /// @return True if the account exists and msg.sender may mutate it.
+    /// @dev Policy: this is a coarse *account-level* gate — "does the master
+    ///      account exist and is `sender` allowed to touch it" — and it
+    ///      deliberately does NOT enforce a usage key's `expiration`. It resolves
+    ///      any usage-key hash to its master and authorizes the api_payer /
+    ///      admin wallet, none of which depend on which (possibly expired) usage
+    ///      key was presented; it is also used on read paths. Usage-key
+    ///      expiration is instead enforced at the per-scope management guards in
+    ///      SecurityLib (revertIfUsageKeyExpired), which are the only paths a
+    ///      non-master key can drive a mutation through, and at the execute/read
+    ///      views in ViewsFacet (_isExpired). Enforcing expiry here as well would
+    ///      be redundant for writes and would wrongly reject master-key and
+    ///      read-only callers.
     function accountExistsAndIsMutable(
         uint256 apiKeyHash,
         address sender

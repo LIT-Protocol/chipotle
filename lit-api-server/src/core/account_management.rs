@@ -291,7 +291,7 @@ pub async fn delete_wallet(
 pub async fn create_wallet_with_signature(
     req: Json<CreateWalletWithSignatureRequest>,
 ) -> Result<CreateWalletWithSignatureResponse, ApiStatus> {
-    let signer = crate::core::eip712::verify_eip712_signature_allow_contract_wallet(
+    let signer = crate::core::eip712::verify_eip712_signature_allow_contract_wallet_single_use(
         &req.typed_data,
         &req.signature,
         crate::core::eip712::PRIMARY_TYPE_CREATE_WALLET,
@@ -354,7 +354,7 @@ pub async fn prepare_wallet() -> Result<PrepareWalletResponse, ApiStatus> {
 pub async fn add_usage_api_key_with_signature(
     req: Json<AddUsageApiKeyWithSignatureRequest>,
 ) -> Result<AddUsageApiKeyWithSignatureResponse, ApiStatus> {
-    let signer = crate::core::eip712::verify_eip712_signature_allow_contract_wallet(
+    let signer = crate::core::eip712::verify_eip712_signature_allow_contract_wallet_single_use(
         &req.typed_data,
         &req.signature,
         crate::core::eip712::PRIMARY_TYPE_ADD_USAGE_API_KEY,
@@ -406,7 +406,7 @@ pub async fn convert_to_chain_secured_account(
         ));
     }
 
-    let signer = crate::core::eip712::verify_eip712_signature_allow_contract_wallet(
+    let signer = crate::core::eip712::verify_eip712_signature_allow_contract_wallet_single_use(
         &req.typed_data,
         &req.signature,
         crate::core::eip712::PRIMARY_TYPE_CONVERT_ACCOUNT,

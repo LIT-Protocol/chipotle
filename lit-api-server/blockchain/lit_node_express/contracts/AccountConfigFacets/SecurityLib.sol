@@ -173,6 +173,27 @@ library SecurityLib {
         return s.allApiKeyHashesToMaster[apiKeyHash];
     }
 
+    /// @notice Reverts when a usage API key's on-chain expiration has passed.
+    /// @dev Mirrors ViewsFacet._isExpired: an `expiration` of 0 is the "never
+    ///      expires" sentinel; any non-zero value at or before block.timestamp
+    ///      de-authorizes the key. The execute/read views return `false` on
+    ///      expiry, but the management guards below must *revert* so an expired
+    ///      key can never mutate the account's permission graph (create/delete
+    ///      groups, register PKPs/wallet derivations, change membership, or swap
+    ///      a group's action-CID set). Reads `block.timestamp`; the seconds-level
+    ///      drift a miner can introduce is irrelevant at the day-scale
+    ///      expirations these keys use.
+    function revertIfUsageKeyExpired(
+        AppStorage.UsageApiKey storage usageApiKey
+    ) private view {
+        if (
+            usageApiKey.expiration != 0 &&
+            block.timestamp >= usageApiKey.expiration
+        ) {
+            revert AppStorage.UsageApiKeyExpired(usageApiKey.apiKeyHash);
+        }
+    }
+
     function canAccountAddPkpToGroup(
         uint256 usageApiKeyHash,
         uint256 groupId
@@ -182,6 +203,7 @@ library SecurityLib {
         AppStorage.UsageApiKey storage usageApiKey = s
             .accounts[accountApiKeyHash]
             .usageApiKeys[usageApiKeyHash];
+        revertIfUsageKeyExpired(usageApiKey);
         if (!usageApiKey.addPkpToGroups.contains(groupId)) {
             revert AppStorage.NotAllowedToAddPkpToGroup(
                 usageApiKeyHash,
@@ -199,6 +221,7 @@ library SecurityLib {
         AppStorage.UsageApiKey storage usageApiKey = s
             .accounts[accountApiKeyHash]
             .usageApiKeys[usageApiKeyHash];
+        revertIfUsageKeyExpired(usageApiKey);
         if (!usageApiKey.removePkpFromGroups.contains(groupId)) {
             revert AppStorage.NotAllowedToRemovePkpFromGroup(
                 usageApiKeyHash,
@@ -216,6 +239,7 @@ library SecurityLib {
         AppStorage.UsageApiKey storage usageApiKey = s
             .accounts[accountApiKeyHash]
             .usageApiKeys[usageApiKeyHash];
+        revertIfUsageKeyExpired(usageApiKey);
         if (!usageApiKey.manageIPFSIdsInGroups.contains(groupId)) {
             revert AppStorage.NotAllowedToManageIPFSIdsInGroup(
                 usageApiKeyHash,
@@ -230,6 +254,7 @@ library SecurityLib {
         AppStorage.UsageApiKey storage usageApiKey = s
             .accounts[accountApiKeyHash]
             .usageApiKeys[usageApiKeyHash];
+        revertIfUsageKeyExpired(usageApiKey);
         if (!usageApiKey.createGroups) {
             revert AppStorage.NotAllowedToCreateGroup(usageApiKeyHash);
         }
@@ -241,6 +266,7 @@ library SecurityLib {
         AppStorage.UsageApiKey storage usageApiKey = s
             .accounts[accountApiKeyHash]
             .usageApiKeys[usageApiKeyHash];
+        revertIfUsageKeyExpired(usageApiKey);
         if (!usageApiKey.deleteGroups) {
             revert AppStorage.NotAllowedToDeleteGroup(usageApiKeyHash);
         }
@@ -252,6 +278,7 @@ library SecurityLib {
         AppStorage.UsageApiKey storage usageApiKey = s
             .accounts[accountApiKeyHash]
             .usageApiKeys[usageApiKeyHash];
+        revertIfUsageKeyExpired(usageApiKey);
         if (!usageApiKey.createPKPs) {
             revert AppStorage.NotAllowedToCreatePkp(usageApiKeyHash);
         }

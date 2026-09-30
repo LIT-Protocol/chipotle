@@ -215,6 +215,14 @@ button.danger { color: var(--danger); border-color: var(--danger); }
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
 }
+.user-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  margin: 8px 0;
+  color: var(--accent);
+}
 .json-details { margin-top: 10px; }
 .json-details summary { cursor: pointer; color: var(--muted); }
 .json-details pre { white-space: pre-wrap; font-size: 13px; }
