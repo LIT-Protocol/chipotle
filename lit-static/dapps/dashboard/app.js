@@ -12,7 +12,6 @@ import { initKeys, loadUsageKeys } from './keys.js';
 import { initActions, loadActions } from './actions.js';
 import { initWallets, loadWallets } from './wallets.js';
 import { initActionRunner } from './runner.js';
-import { initGvisorRunner } from './gvisor_runner.js';
 import { initAbout } from './about.js';
 
 // ----- Preload all tables (with error visibility) -----
@@ -104,7 +103,7 @@ function initChainSecuredRpc() {
 
 // Standalone sections get their own full-page view (like tabs); selecting one
 // hides the scrollable main sections and every other standalone section.
-const STANDALONE_SECTION_IDS = ['action-runner', 'gvisor-runner'];
+const STANDALONE_SECTION_IDS = ['action-runner'];
 const MAIN_SECTION_IDS = ['overview', 'usage-keys', 'groups', 'actions', 'wallets'];
 
 /**
@@ -318,7 +317,6 @@ function init() {
   initGroups();
   initActions();
   initActionRunner();
-  initGvisorRunner();
   initSidebar();
   initHeader();
   initBilling();

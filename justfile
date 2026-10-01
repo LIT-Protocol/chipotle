@@ -6,7 +6,6 @@ image_base := env('DOCKER_IMAGE', 'litptcl/chipotle')
 # DOCKER_TAG to reuse a previously-pushed image (digest files must then exist).
 image_tag := env('DOCKER_TAG', `uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '\n'`)
 image_lit_actions        := image_base + '-lit-actions:'        + image_tag
-image_lit_actions_gvisor := image_base + '-lit-actions-gvisor:' + image_tag
 image_lit_api_server     := image_base + '-lit-api-server:'     + image_tag
 image_otel_collector     := image_base + '-otel-collector:'     + image_tag
 # main → chipotle-dev; any other branch → chipotle-next (override with PHALA_APP_NAME)
