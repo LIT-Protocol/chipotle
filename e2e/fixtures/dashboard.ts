@@ -38,12 +38,17 @@ export class DashboardPage {
 
   /** Switch the login card to the "Existing User" tab. */
   async showExistingUserTab(): Promise<void> {
-    await this.page.locator('#login-tab-existing').click();
+    if (await this.page.locator('#login-panel-existing').isVisible()) return;
+    // Main currently uses tabs; #719 replaces them with native route links.
+    await this.page.locator('#login-tab-existing, #login-sign-in-link a').click();
+    await expect(this.page.locator('#login-panel-existing')).toBeVisible();
   }
 
   /** Switch the login card to the "New User" tab. */
   async showNewUserTab(): Promise<void> {
-    await this.page.locator('#login-tab-new').click();
+    if (await this.page.locator('#login-panel-new').isVisible()) return;
+    await this.page.locator('#login-tab-new, #login-create-link a').click();
+    await expect(this.page.locator('#login-panel-new')).toBeVisible();
   }
 
   /** Log in with an existing API key (API mode). */
