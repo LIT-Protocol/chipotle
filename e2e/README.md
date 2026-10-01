@@ -7,7 +7,8 @@ plus ChainSecured (wallet) flows that the k6 tests don't cover.
 
 ## Account-access CI
 
-`Dashboard Auth` runs on every PR targeting `main`, pushes to `main`, and merge
+`Dashboard account access` runs on every PR targeting `main` (and the temporary
+#727 stack base), pushes to `main`, and merge
 queue checks. Its stable check name is **Dashboard account access**. After this
 workflow is merged and has reported once, add that check to `main`'s required
 status checks (with GitHub Actions as its source). Until that ruleset change,
@@ -19,23 +20,31 @@ the Rust API, deployed AccountConfig contracts on a disposable Anvil chain, and
 the pinned dstack simulator. It tests desktop and mobile signup, the returned
 API key, an independent account-existence read, session restoration, logout,
 login with the issued key, rejected keys, missing fields, API-error recovery,
-and keyboard access-mode selection. Only error-injection tests replace API
-responses; the successful account-creation and login paths use the real API.
+and keyboard access-mode selection. It also runs password signup, email
+verification, ciphertext storage, wrong-password rejection, autofill-style login,
+and password changes against the real Worker/D1 and Rust API on both viewports
+(14 checks total). Password fields are filled without keyboard/input events and
+submitted by Enter/button with successful navigation checks. Only error-injection
+tests replace API responses; successful requests use the real API. Outbound email
+is captured by the test harness; no provider credentials or real email are used.
+Native browser/extension save and generate prompts require the manual matrix in
+`lit-dashboard-auth/README.md`; this suite does not claim to automate those UIs.
 
 This is an account-access check, not complete system coverage: real TEE hardware,
 Stripe, wallet connection/signing, and Lit Action execution are not exercised.
 The existing EOA/WalletConnect/Action suites below cover those other local flows.
 No production accounts, paid transactions, or secrets are used. The HTML report,
 screenshots, failure traces/videos, and service logs are uploaded as
-`dashboard-account-access` for seven days. The suite uses both current tab
-navigation and PR #719's native links, so either PR can merge first.
+`dashboard-account-access` for seven days. This PR is stacked on #727 and requires
+its email/password implementation. Merge #727 first, then retarget this PR to main.
 
 To run locally, use Node 22, Python 3, Foundry (`anvil`, `cast`), `jq`, and the
-dstack simulator. Ports 8545, 8000, and 8088 must be free; the launcher refuses
+dstack simulator. Ports 8545, 8000, 8088, and 8787 must be free; the launcher refuses
 to reuse running services. Build once from the repository root:
 
 ```sh
 corepack enable
+(cd lit-dashboard-auth && pnpm install --frozen-lockfile && pnpm build)
 (cd e2e && pnpm install --frozen-lockfile && pnpm exec playwright install chromium)
 npm ci --prefix lit-api-server/blockchain/lit_node_express
 (cd lit-api-server/blockchain/lit_node_express && npx hardhat compile)

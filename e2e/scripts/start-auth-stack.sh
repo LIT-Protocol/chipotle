@@ -42,7 +42,7 @@ done
 # Refuse to reuse a developer's running chain/API or overwrite their config.
 python3 - <<'PY'
 import socket
-for port in (8545, 8000, 8088):
+for port in (8545, 8000, 8088, 8787):
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', port))
 PY
@@ -124,8 +124,10 @@ wait_for "${PIDS[2]}" curl --fail --silent --max-time 3 http://localhost:8000/co
 
 # Start static hosting last: Playwright's readiness probe now implies the API
 # and chain are ready too. Keep all runtime files outside the working tree.
-python3 -m http.server 8088 --bind 127.0.0.1 --directory "$REPO_DIR/lit-static" > "$RUN_DIR/static.log" 2>&1 &
+# Real auth Worker + D1; only outbound email is captured by this test harness.
+DASHBOARD_TEST_PORT=8088 node "$REPO_DIR/lit-dashboard-auth/test/browser-server.mjs" > "$RUN_DIR/auth-storage.log" 2>&1 &
 PIDS+=("$!")
+wait_for "${PIDS[3]}" curl --fail --silent --max-time 3 http://localhost:8787/health
 while true; do
   for pid in "${PIDS[@]}"; do
     kill -0 "$pid" 2>/dev/null || { echo 'Account-access service stopped' >&2; exit 1; }

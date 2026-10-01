@@ -1,8 +1,8 @@
-name: Dashboard Auth
+name: Dashboard account access
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, glitch003/email-password-login]
   push:
     branches: [main]
   merge_group:
@@ -57,6 +57,11 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm exec playwright install --with-deps chromium
+      - name: Build password auth Worker and check browser types
+        run: |
+          corepack pnpm@10.11.0 --dir lit-dashboard-auth install --frozen-lockfile
+          corepack pnpm@10.11.0 --dir lit-dashboard-auth build
+          corepack pnpm@10.11.0 --dir e2e typecheck
       - name: Compile local contracts
         working-directory: lit-api-server/blockchain/lit_node_express
         run: |
