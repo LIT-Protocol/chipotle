@@ -75,10 +75,16 @@ staging and production:
    invalid credentials, and the custom-domain cookie/CORS behavior in staging.
 6. Set repository variable `LIT_AUTH_STAGING_URL` / `LIT_AUTH_PROD_URL` to the
    corresponding HTTPS **origin**, then run the existing static deployment.
-   The main/next Pages projects use staging; production uses the explicit
-   production static workflow. An empty variable disables the password choice
-   and keeps the existing API-key/wallet UI. Do not point arbitrary Pages preview
-   domains at production auth.
+   The main Pages project (`dashboard.dev.litprotocol.com`) uses staging;
+   production uses the explicit production static workflow. An empty variable
+   disables the password choice and keeps the existing API-key/wallet UI. Do not
+   point arbitrary Pages preview domains at production auth.
+
+   The Worker accepts exactly one dashboard origin (`AUTH_DASHBOARD_URL`), and
+   its `SameSite=Lax` cookie is only sent when the auth domain is same-site with
+   the dashboard. `*.pages.dev` is a public suffix, so a dashboard served only
+   from `pages.dev` can never use this service. The `next` Pages project
+   (`lit-static-next.pages.dev`) therefore deploys with password login disabled.
 
 The auth Worker doesn't serve static files or proxy Lit API traffic. It has a
 separate deployment so frontend and auth versions can be staged independently.

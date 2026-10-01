@@ -627,6 +627,19 @@ async function routes(request: Request, env: Env, ctx: ExecutionContext) {
     await reauthenticate(u, b.authSecret);
     const hash = await sha256(token(b.token)),
       claim = randomHex(32);
+    // Fail early with a clear status when the verified address was registered by
+    // someone else after the link was sent; the transactional batch below still
+    // guards the race (its UNIQUE violation surfaces as a generic failure).
+    const taken = await env.DB.prepare(
+      "SELECT 1 FROM auth_users WHERE id!=? AND email=(SELECT email FROM auth_tokens WHERE hash=? AND user_id=? AND purpose='email')",
+    )
+      .bind(u.id, hash, u.id)
+      .first();
+    if (taken)
+      return fail(
+        409,
+        "That email address is already in use by another account.",
+      );
     const notice = await notification(
       env,
       u.email,

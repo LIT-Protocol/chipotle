@@ -6,6 +6,7 @@ import {
   signOutService,
   validateNewPassword,
   clearAuthSession,
+  hasAuthSession,
 } from "./password-client.js";
 import {
   setMode,
@@ -20,15 +21,19 @@ import {
 import { showStatus } from "./ui-utils.js";
 const MARKER = "chipotle_password_identity";
 const PENDING = "chipotle_password_pending";
+const NOTICE = "chipotle_password_notice";
 const $ = (id) => document.getElementById(id);
 let verified = null;
 const help =
   "Save this password in your password manager. There’s no “Forgot password” option, and we can’t reset it for you.";
 export function resetPasswordIdentity() {
+  // API-key and wallet sign-outs call this too; only contact the auth service
+  // when this tab actually held a password identity or storage session.
+  const hadIdentity = sessionStorage.getItem(MARKER) !== null;
   sessionStorage.removeItem(MARKER);
   const button = $("password-settings-open");
   if (button) button.hidden = true;
-  void signOutService();
+  if (hadIdentity || hasAuthSession()) void signOutService();
 }
 function enter(record, apiKey) {
   verified = null;
@@ -53,7 +58,9 @@ async function busy(form, fn, status = "login-status") {
       // A real same-origin navigation signals successful submission to password
       // managers. Leave submitted fields intact until this document unloads;
       // never put passwords in the URL, storage, or a network form submission.
-      window.location.replace(window.location.pathname + window.location.search);
+      window.location.replace(
+        window.location.pathname + window.location.search,
+      );
     }
   } catch (e) {
     showStatus(
@@ -63,9 +70,10 @@ async function busy(form, fn, status = "login-status") {
     );
   } finally {
     buttons.forEach((b) => (b.disabled = false));
-    if (!navigate) form
-      .querySelectorAll('input[type="password"], input[data-password]')
-      .forEach((i) => (i.value = ""));
+    if (!navigate)
+      form
+        .querySelectorAll('input[type="password"], input[data-password]')
+        .forEach((i) => (i.value = ""));
   }
 }
 function showCreate(record) {
@@ -176,15 +184,22 @@ async function createAccount(password) {
   $("password-backup-key").value = "";
   $("password-backup").hidden = true;
   enter(record, pending.apiKey);
-  showStatus("dashboard-status", help, "info");
+  // The success navigation reloads the page; show the reminder after it.
+  sessionStorage.setItem(NOTICE, help);
   return true;
 }
 export function initPasswordLogin() {
   if (!enabled()) return;
-  const notice = sessionStorage.getItem("chipotle_password_notice");
+  const notice = sessionStorage.getItem(NOTICE);
   if (notice) {
-    sessionStorage.removeItem("chipotle_password_notice");
-    showStatus("login-status", notice, "success");
+    sessionStorage.removeItem(NOTICE);
+    // dashboard-status is cleared by the table preload, so use the overview
+    // status area once signed in.
+    showStatus(
+      isAuthenticated() ? "overview-status" : "login-status",
+      notice,
+      isAuthenticated() ? "info" : "success",
+    );
   }
   const marker = () => {
     try {
@@ -284,8 +299,10 @@ export function initPasswordLogin() {
         });
         clearAuthSession();
         logOut();
-        sessionStorage.setItem("chipotle_password_notice",
-          "Password changed. Save it in your password manager, then sign in again.");
+        sessionStorage.setItem(
+          NOTICE,
+          "Password changed. Save it in your password manager, then sign in again.",
+        );
         return true;
       },
       "password-settings-status",

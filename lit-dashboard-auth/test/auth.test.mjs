@@ -415,7 +415,7 @@ test("email change cannot replace encrypted keys; conflicting email rolls back t
         client,
       )
     ).status,
-    503,
+    409,
   );
   assert.equal(
     (

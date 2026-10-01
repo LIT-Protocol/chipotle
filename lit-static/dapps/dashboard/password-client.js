@@ -20,6 +20,7 @@ export function authBaseUrl() {
 export const enabled = () => !!authBaseUrl();
 let current = null;
 let signingOut = null;
+export const hasAuthSession = () => current !== null;
 export function clearAuthSession() {
   current = null;
 }
@@ -30,31 +31,41 @@ export async function request(path, body, method = "POST") {
 async function send(path, body, method = "POST") {
   if (!enabled())
     throw new Error("Email sign-in is not available on this dashboard.");
-  const response = await fetch(`${authBaseUrl()}/auth/v1/${path}`, {
-    method,
-    credentials: "include",
-    cache: "no-store",
-    signal: AbortSignal.timeout(30000),
-    headers: {
-      "X-Chipotle-Auth": "1",
-      ...(method !== "GET" ? { "Content-Type": "application/json" } : {}),
-      ...(current?.csrf ? { "X-CSRF-Token": current.csrf } : {}),
-    },
-    ...(method !== "GET"
-      ? {
-          body: JSON.stringify({
-            ...(current?.parameters
-              ? {
-                  id: current.parameters.id,
-                  version: current.parameters.version,
-                }
-              : {}),
-            ...body,
-          }),
-        }
-      : {}),
-  });
-  const result = await response.json();
+  let response;
+  try {
+    response = await fetch(`${authBaseUrl()}/auth/v1/${path}`, {
+      method,
+      credentials: "include",
+      cache: "no-store",
+      signal: AbortSignal.timeout(30000),
+      headers: {
+        "X-Chipotle-Auth": "1",
+        ...(method !== "GET" ? { "Content-Type": "application/json" } : {}),
+        ...(current?.csrf ? { "X-CSRF-Token": current.csrf } : {}),
+      },
+      ...(method !== "GET"
+        ? {
+            body: JSON.stringify({
+              ...(current?.parameters
+                ? {
+                    id: current.parameters.id,
+                    version: current.parameters.version,
+                  }
+                : {}),
+              ...body,
+            }),
+          }
+        : {}),
+    });
+  } catch (e) {
+    throw new Error(
+      e?.name === "TimeoutError" || e?.name === "AbortError"
+        ? "Account service timed out. Please try again."
+        : "Unable to reach the account service. Check your connection and try again.",
+    );
+  }
+  // Edge/CDN errors can return HTML; never surface a JSON parse error to the user.
+  const result = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(result.error || "Account service unavailable.");
     error.status = response.status;
