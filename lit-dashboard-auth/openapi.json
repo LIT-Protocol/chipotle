@@ -199,7 +199,8 @@
     },
     "/auth/v1/signup/begin": {
       "post": {
-        "summary": "Claim exactly one client creation attempt",
+        "summary": "Claim exactly one client creation attempt, or release a definitively rejected attempt",
+        "description": "Without `retry`, moves `reserved` to `creating` and returns the operation id. With `retry: true` and the `operation` of the current `creating` attempt, releases that claim after the browser received an HTTP 4xx rejection from the Lit API (nothing was created) and returns a fresh operation id. Ambiguous failures (5xx, network) must not be retried.",
         "parameters": [
           {
             "in": "header",
@@ -263,7 +264,16 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CredentialRequest"
+                "allOf": [
+                  { "$ref": "#/components/schemas/CredentialRequest" },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "retry": { "type": "boolean" },
+                      "operation": { "type": "string", "pattern": "^[0-9a-f]{32}$" }
+                    }
+                  }
+                ]
               }
             }
           }

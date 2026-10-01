@@ -199,6 +199,31 @@ test("signup replay, creation claim, upload idempotency, CSRF, login and atomic 
       .status,
     409,
   );
+  // A definitive Lit API rejection lets the same attempt be released and
+  // retried under a fresh operation id; the released id can no longer upload.
+  assert.equal(
+    (
+      await call(
+        "signup/begin",
+        {
+          authSecret: user.authSecret,
+          retry: true,
+          operation: "00".repeat(16),
+        },
+        user.client,
+      )
+    ).status,
+    409,
+  );
+  const released = await call(
+    "signup/begin",
+    { authSecret: user.authSecret, retry: true, operation: user.operation },
+    user.client,
+  );
+  assert.equal(released.status, 200);
+  assert.notEqual(released.data.operation, user.operation);
+  const staleOperation = user.operation;
+  user.operation = released.data.operation;
   const encrypted = await operate({
       operation: "encrypt",
       password,
@@ -211,6 +236,17 @@ test("signup replay, creation claim, upload idempotency, CSRF, login and atomic 
       operation: user.operation,
       envelope: encrypted.envelope,
     };
+  assert.equal(
+    (
+      await call(
+        "envelope",
+        { ...upload, operation: staleOperation },
+        user.client,
+        "PUT",
+      )
+    ).status,
+    409,
+  );
   assert.equal(
     (await call("envelope", upload, { ...user.client, csrf: "bad" }, "PUT"))
       .status,

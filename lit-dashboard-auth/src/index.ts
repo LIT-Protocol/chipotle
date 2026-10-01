@@ -506,6 +506,22 @@ async function routes(request: Request, env: Env, ctx: ExecutionContext) {
   if (path === "/auth/v1/signup/begin") {
     if (s.scope !== "signup") return fail(403, "Signup session required.");
     await reauthenticate(u, b.authSecret);
+    if (b.retry === true) {
+      // The browser received a definitive HTTP rejection (4xx) from the Lit API
+      // for the attempt it names, so no account was created. Release that claim
+      // under a fresh operation id; a stale tab cannot release a newer attempt.
+      if (typeof b.operation !== "string" || b.operation !== u.operation)
+        return fail(409, "Wrong signup operation.");
+      const operation = randomHex(16);
+      const result = await env.DB.prepare(
+        "UPDATE auth_users SET operation=? WHERE id=? AND state='creating' AND operation=? AND version=? AND verifier=?",
+      )
+        .bind(operation, u.id, u.operation, u.version, u.verifier)
+        .run();
+      if (!result.meta.changes)
+        return fail(409, "Account creation is not in a retryable state.");
+      return json({ operation });
+    }
     const result = await env.DB.prepare(
       "UPDATE auth_users SET state='creating' WHERE id=? AND state='reserved' AND version=? AND verifier=?",
     )

@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 const password = "a long password from my manager",
   key = Buffer.alloc(32, 8).toString("base64");
 let creates = 0;
+let rejectNextCreate = false;
 async function submitAndNavigate(page: Page, selector: string) {
   await Promise.all([page.waitForNavigation(), page.locator(selector).click()]);
 }
@@ -20,7 +21,20 @@ test.beforeEach(async ({ page }) => {
     let result: unknown = [];
     if (path.endsWith("/new_account")) {
       creates++;
-      result = { api_key: key, wallet_address: "0x" + "34".repeat(20) };
+      if (rejectNextCreate) {
+        rejectNextCreate = false;
+        await route.fulfill({
+          status: 402,
+          json: { error: "Payment required: account limit reached" },
+        });
+        return;
+      }
+      // Account bindings are UNIQUE in the auth database: give each created
+      // account its own wallet address, as the real API does.
+      result = {
+        api_key: key,
+        wallet_address: "0x" + "34".repeat(18) + creates.toString(16).padStart(4, "0"),
+      };
     } else if (path.endsWith("/account_exists")) result = true;
     else if (path.includes("billing"))
       result = { enabled: false, billing_enabled: false };
@@ -266,4 +280,51 @@ test("password is the default even after wallet use, with accessible access expl
   await page.screenshot({ path: "../.context/password-login-tooltip.png" });
   await page.keyboard.press("Escape");
   await expect(page.locator("#login-help-password")).toBeHidden();
+});
+
+test("a definitive Lit API rejection releases the creation claim so the same tab can retry", async ({
+  page,
+  request,
+}) => {
+  creates = 0;
+  await page.goto("./");
+  await page.locator("#login-tab-new").click();
+  await page.locator("#password-signup-email").fill("retry@example.com");
+  await page.locator("#password-signup-form button").click();
+  let link = "";
+  await expect
+    .poll(async () => {
+      const messages = await (
+        await request.get("http://localhost:8080/__test/mail")
+      ).json();
+      link =
+        messages
+          .find((m: any) => m.to === "retry@example.com")
+          ?.text.match(/http:\/\/localhost:8080\/\S+/)?.[0] || "";
+      return !!link;
+    })
+    .toBe(true);
+  await page.goto(link);
+  await page.locator("#password-verify-form button").click();
+  await expect(page.locator("#password-create-form")).toBeVisible();
+  rejectNextCreate = true;
+  await page.locator("#password-create-password").fill(password);
+  await page.locator("#password-create-submit").click();
+  await expect(page.locator("#login-status")).toContainText("rejected");
+  await expect(page.locator("#login-status")).toContainText("try again");
+  await expect(page.locator("body")).not.toHaveClass(/has-api-key/);
+  expect(creates).toBe(1);
+  const records = async () =>
+    (await (await request.get("http://localhost:8080/__test/records")).json())
+      .find((r: any) => r.email === "retry@example.com");
+  expect((await records()).state).toBe("creating");
+  // Same tab, password re-entered: the claim is released and creation retried.
+  await page.locator("#password-create-password").fill(password);
+  await submitAndNavigate(page, "#password-create-submit");
+  await expect(page.locator("body")).toHaveClass(/has-api-key/);
+  expect(creates).toBe(2);
+  expect((await records()).state).toBe("active");
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("accountconfig_api_key")),
+  ).toBe(key);
 });

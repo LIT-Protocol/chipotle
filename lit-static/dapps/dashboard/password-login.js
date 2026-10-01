@@ -129,11 +129,20 @@ async function createAccount(password) {
     enter(record, apiKey);
     return true;
   }
-  if (record.state === "reserved") {
-    if (pending)
+  // A previous attempt in this tab was definitively rejected by the Lit API
+  // (HTTP 4xx, so nothing was created). Release that claim and try again.
+  const rejected = record.state === "creating" && pending?.rejected === true;
+  if (record.state === "reserved" || rejected) {
+    if (pending && !rejected)
       throw new Error("An account is already pending. Please sign in again.");
-    const claimed = await request("signup/begin", { authSecret });
-    // Mark the attempt before calling the non-idempotent legacy API. Never auto-retry.
+    const claimed = await request(
+      "signup/begin",
+      rejected
+        ? { authSecret, retry: true, operation: pending.operation }
+        : { authSecret },
+    );
+    // Mark the attempt before calling the non-idempotent legacy API. Never
+    // auto-retry an ambiguous (network/5xx) failure.
     pending = {
       id: record.parameters.id,
       operation: claimed.operation,
@@ -142,12 +151,26 @@ async function createAccount(password) {
     sessionStorage.setItem(PENDING, JSON.stringify(pending));
     setMode("api");
     const client = await getClient();
-    const result = await client.newAccount({
-      accountName:
-        $("password-account-name").value.trim() || record.email.split("@")[0],
-      accountDescription: "",
-      email: record.email,
-    });
+    let result;
+    try {
+      result = await client.newAccount({
+        accountName:
+          $("password-account-name").value.trim() || record.email.split("@")[0],
+        accountDescription: "",
+        email: record.email,
+      });
+    } catch (e) {
+      // Only a received 4xx proves the request was rejected before creation.
+      // 5xx and network errors can follow an on-chain create; keep those uncertain.
+      if (Number.isInteger(e?.status) && e.status >= 400 && e.status < 500) {
+        pending = { ...pending, uncertain: false, rejected: true };
+        sessionStorage.setItem(PENDING, JSON.stringify(pending));
+        throw new Error(
+          `Account creation was rejected (${e.message}). Nothing was created; you can try again.`,
+        );
+      }
+      throw e;
+    }
     pending = {
       ...pending,
       apiKey: result.api_key,
