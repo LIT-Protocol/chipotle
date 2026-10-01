@@ -1,0 +1,14 @@
+{
+  "name": "chipotle-dashboard-auth-local",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-10-11",
+  "workers_dev": false,
+  "vars": {
+    "ENVIRONMENT": "local",
+    "DASHBOARD_URL": "http://localhost:8080/dapps/dashboard/",
+    "MAIL_FROM": "Chipotle <accounts@example.com>"
+  },
+  "d1_databases": [{"binding":"DB","database_name":"chipotle-auth-local","database_id":"local","migrations_dir":"migrations"}],
+  "triggers": {"crons":["*/5 * * * *"]},
+  "observability": {"enabled": false}
+}

@@ -48,6 +48,7 @@ export class DashboardPage {
 
   /** Log in with an existing API key (API mode). */
   async loginWithApiKey(apiKey: string): Promise<void> {
+    await this.page.locator('#login-auth-mode-api').click();
     await this.showExistingUserTab();
     await this.page.locator('#login-api-key').fill(apiKey);
     await this.page.locator('#btn-login').click();
@@ -64,6 +65,7 @@ export class DashboardPage {
     name: string;
     description?: string;
   }): Promise<string> {
+    await this.page.locator('#login-auth-mode-api').click();
     await this.showNewUserTab();
     await this.page.locator('#new-account-email').fill(input.email);
     await this.page.locator('#new-account-name').fill(input.name);
