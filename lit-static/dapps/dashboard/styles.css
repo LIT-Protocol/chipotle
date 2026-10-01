@@ -553,6 +553,24 @@ body.has-api-key .dashboard-wrap {
   white-space: nowrap;
 }
 
+/* Topbar "sync balance from Stripe" button — icon-only, sits by the balance */
+.btn-refresh-balance {
+  padding: 0.25rem 0.5rem;
+  line-height: 1;
+  color: var(--text-muted);
+}
+.btn-refresh-balance .refresh-icon {
+  display: inline-block;
+  font-size: 0.9375rem;
+}
+.btn-refresh-balance:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.btn-refresh-balance.is-refreshing .refresh-icon {
+  animation: action-spinner-spin 0.7s linear infinite;
+}
+
 /* Payment not required badge (topbar) */
 .billing-not-required {
   font-size: 0.75rem;

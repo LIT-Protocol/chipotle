@@ -1691,9 +1691,17 @@
         "tags": [
           "Billing"
         ],
-        "description": "GET /billing/balance — returns the current credit balance for the authenticated user.",
+        "description": "GET /billing/balance — returns the current credit balance for the authenticated user.\n\n`force=true` drops the cached balance before reading so a credit added directly in Stripe surfaces immediately, without waiting out the 10-minute cache TTL or having to run a Lit Action. A plain re-read is not enough: the stale-while-revalidate background refresh deliberately ignores credit *increases* (it only adopts a balance that went up, to preserve optimistic charge decrements), so the cache must be invalidated to pick up a top-up.",
         "operationId": "billing_balance",
         "parameters": [
+          {
+            "name": "force",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "nullable": true
+            }
+          },
           {
             "name": "X-Api-Key",
             "in": "header",

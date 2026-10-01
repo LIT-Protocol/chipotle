@@ -280,15 +280,15 @@ async function billingRequestOptions(signal) {
 export function refreshBillingUI() {
   const capturedKey = billingAuthKey();
   const balanceEl = document.getElementById('billing-balance-display');
+  const refreshBtn = document.getElementById('btn-refresh-balance');
   const addFundsBtn = document.getElementById('btn-add-funds');
-  const refreshBalanceBtn = document.getElementById('btn-refresh-balance');
   const notRequiredEl = document.getElementById('billing-not-required');
   const billingBanner = document.getElementById('billing-disabled-banner');
   const noFundsWarning = document.getElementById('no-funds-warning');
   if (!capturedKey || hasUsageKeyOverride()) {
     if (balanceEl) balanceEl.style.display = 'none';
+    if (refreshBtn) refreshBtn.style.display = 'none';
     if (addFundsBtn) addFundsBtn.style.display = 'none';
-    if (refreshBalanceBtn) refreshBalanceBtn.style.display = 'none';
     if (notRequiredEl) notRequiredEl.style.display = 'none';
     if (billingBanner) billingBanner.style.display = 'none';
     if (noFundsWarning) noFundsWarning.style.display = 'none';
@@ -298,13 +298,12 @@ export function refreshBillingUI() {
     if (billingAuthKey() !== capturedKey) return;
     if (available) {
       if (balanceEl) balanceEl.style.display = '';
+      // Offer an explicit refresh in both modes. Sovereign balances load
+      // silently only while a wallet-auth cache is live (after it expires the
+      // balance falls back to "—"), and managed (API-key) accounts need it to
+      // surface a credit added directly in Stripe past the node's balance cache.
+      if (refreshBtn) refreshBtn.style.display = '';
       if (addFundsBtn) addFundsBtn.style.display = '';
-      // Sovereign balances load silently only while a wallet-auth cache is
-      // live; after it expires the balance falls back to "—" and would only
-      // reappear via Add Funds. Offer an explicit refresh so the user can
-      // re-pull it with a single wallet signature. Managed (API-key) accounts
-      // refresh automatically and don't need it.
-      if (refreshBalanceBtn) refreshBalanceBtn.style.display = getMode() === 'sovereign' ? '' : 'none';
       if (notRequiredEl) notRequiredEl.style.display = 'none';
       if (billingBanner) billingBanner.style.display = 'none';
       // In sovereign mode never auto-trigger a wallet popup just to render
@@ -324,8 +323,8 @@ export function refreshBillingUI() {
       }
     } else {
       if (balanceEl) balanceEl.style.display = 'none';
+      if (refreshBtn) refreshBtn.style.display = 'none';
       if (addFundsBtn) addFundsBtn.style.display = 'none';
-      if (refreshBalanceBtn) refreshBalanceBtn.style.display = 'none';
       if (notRequiredEl) notRequiredEl.style.display = '';
       if (billingBanner) billingBanner.style.display = '';
       if (noFundsWarning) noFundsWarning.style.display = 'none';
@@ -380,7 +379,7 @@ function refreshBalanceFromApiCall(methodName) {
   }, BALANCE_REFRESH_DEBOUNCE_MS);
 }
 
-async function loadBillingBalance() {
+async function loadBillingBalance(force = false) {
   const apiKey = billingAuthKey();
   if (!apiKey) return;
   const el = document.getElementById('billing-balance-display');
@@ -391,6 +390,7 @@ async function loadBillingBalance() {
     const client = await getClient();
     if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
     const opts = await billingRequestOptions(ctrl.signal);
+    if (force) opts.force = true;
     if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
     const data = await client.getBillingBalance(apiKey, opts);
     if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
@@ -411,29 +411,40 @@ async function loadBillingBalance() {
 }
 
 /**
- * Manual, user-initiated balance refresh for ChainSecured/sovereign mode.
+ * Manual, user-initiated balance refresh (topbar ↻ button).
  *
- * The topbar balance is only ever loaded silently while a valid wallet-auth
- * cache exists — we never auto-prompt a wallet popup just to render it
- * (CPL-285). Once that ~4-min cache expires the balance falls back to "—" and,
- * without this, would only reappear as a side effect of opening Add Funds.
- * This handler lets the user explicitly opt into the single EIP-712 BillingAuth
- * signature needed to re-fetch the balance on demand: `getWalletAuthHeader()`
- * pops the wallet on a cache miss, then we pull the balance.
+ * Forces a live re-read that bypasses the node's ~10-minute Stripe balance
+ * cache (`?force=true`), so a credit added directly in Stripe — e.g. a manual
+ * grant — surfaces immediately instead of waiting out the TTL or needing a Lit
+ * Action to be run. The node's background refresh deliberately ignores credit
+ * increases, so only an explicit cache bypass picks a top-up up.
+ *
+ * In sovereign/ChainSecured mode the topbar balance is only loaded silently
+ * while a valid wallet-auth cache exists — we never auto-prompt a wallet popup
+ * just to render it (CPL-285). Once that ~4-min cache expires the balance falls
+ * back to "—" and, without this, would only reappear via Add Funds. Here the
+ * user explicitly opts into the single EIP-712 BillingAuth signature needed to
+ * re-fetch: `getWalletAuthHeader()` pops the wallet on a cache miss. Managed
+ * (API-key) accounts skip the signature and just force the read.
  */
 export async function refreshBalanceManually() {
-  if (getMode() !== 'sovereign') return;
   const btn = document.getElementById('btn-refresh-balance');
+  if (btn && btn.disabled) return; // ignore rapid double-clicks while a sync is in flight
   const el = document.getElementById('billing-balance-display');
   const prev = el ? el.textContent : '';
-  if (btn) btn.disabled = true;
-  if (el) el.textContent = '…';
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add('is-refreshing');
+  }
   try {
-    // Prompts the wallet for a BillingAuth signature when the cache is empty
-    // or expired; returns the cached header otherwise (no popup).
-    await getWalletAuthHeader();
+    // Sovereign mode: prompt the wallet for a BillingAuth signature when the
+    // cache is empty/expired (returns the cached header otherwise, no popup).
+    if (getMode() === 'sovereign') {
+      await getWalletAuthHeader();
+    }
+    // Force a cache-bypassing read so direct Stripe credits show immediately.
     // loadBillingBalance handles its own errors and updates the display.
-    await loadBillingBalance();
+    await loadBillingBalance(true);
   } catch (e) {
     // The only thrower here is getWalletAuthHeader (e.g. the user rejected the
     // signature, or no wallet is connected). Restore the prior display and
@@ -444,7 +455,10 @@ export async function refreshBalanceManually() {
     }
     if (el) el.textContent = prev || '—';
   } finally {
-    if (btn) btn.disabled = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove('is-refreshing');
+    }
   }
 }
 

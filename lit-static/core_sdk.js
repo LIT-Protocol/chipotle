@@ -1793,13 +1793,19 @@ export class LitNodeSimpleApiClient {
    * GET /core/v1/billing/balance
    * Returns the current credit balance for the authenticated user.
    * @param {string} apiKey - Raw API key. Ignored when `options.walletAuthHeader` is set.
-   * @param {{walletAuthHeader?: string, signal?: AbortSignal}} [options]
+   * @param {{walletAuthHeader?: string, signal?: AbortSignal, force?: boolean}} [options]
    *   walletAuthHeader: base64(JSON{typed_data, signature}) for EIP-712 ChainSecured auth (CPL-285, CPL-286).
    *   signal: AbortController signal to cancel the request mid-flight.
+   *   force: bypass the node's balance cache so a credit added directly in Stripe
+   *     surfaces immediately (no Lit Action required). Use sparingly — it forces a
+   *     live Stripe read.
    * @returns {Promise<{balance_cents: number, balance_display: string}>}
    */
   async getBillingBalance(apiKey, options = {}) {
-    const res = await fetch(`${this.baseUrl}/billing/balance`, {
+    const url = options.force
+      ? `${this.baseUrl}/billing/balance?force=true`
+      : `${this.baseUrl}/billing/balance`;
+    const res = await fetch(url, {
       headers: billingHeaders(apiKey, options.walletAuthHeader),
       signal: options.signal,
     });
