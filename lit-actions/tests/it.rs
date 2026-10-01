@@ -636,6 +636,87 @@ async fn fetch_blocks_hostname_resolving_to_loopback(mut client: TestClient) {
     assert!(client.received::<ExecutionResult>().success);
 }
 
+/// A custom `Deno.createHttpClient()` must not be usable to tunnel around the
+/// egress filter. In deno_fetch, `op_fetch_custom_client` builds its client with
+/// `dns_resolver: dns::Resolver::default()` (plain getaddrinfo) — it does *not*
+/// use the `fetch_dns_resolver` wired into `WorkerServiceOptions`, so a
+/// `fetch(url, { client })` through a custom client would bypass the CPL-295
+/// hostname/DNS-rebinding filter and reach TEE-internal services (kubo on
+/// loopback, control-plane hostnames, cloud metadata). PatchDeno.js closes this
+/// by deleting `Deno.createHttpClient`/`Deno.HttpClient`, and the fetch wrapper
+/// strips the `client` option as defense in depth.
+///
+/// This mirrors `fetch_blocks_hostname_resolving_to_loopback` but drives the
+/// attack through a custom client: the surface must be gone, the attempt must be
+/// blocked, and the loopback-bound mock must observe zero requests.
+#[rstest]
+#[tokio::test]
+async fn fetch_custom_http_client_cannot_bypass_egress(mut client: TestClient) {
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&mock_server)
+        .await;
+
+    // Reach the loopback-bound mock by hostname — the exact surface the custom
+    // client's unfiltered resolver would have reached past `deny_net`.
+    let port = mock_server.address().port();
+    let code = formatdoc! {r#"
+        async function main() {{
+            let outcome;
+            try {{
+                // createHttpClient is deleted, so this throws before any fetch.
+                const httpClient = Deno.createHttpClient({{}});
+                await fetch("http://localhost:{port}/", {{ client: httpClient }});
+                outcome = "REACHED";
+            }} catch (e) {{
+                outcome = "BLOCKED";
+            }}
+            Lit.Actions.setResponse({{ response:
+                "createHttpClient=" + (typeof Deno.createHttpClient) +
+                ";HttpClient=" + (typeof Deno.HttpClient) +
+                ";outcome=" + outcome
+            }});
+        }}
+        "#,
+        port = port
+    };
+
+    // No IncrementFetchCountResponse is queued: the throw happens before the
+    // fetch wrapper runs, so `op_increment_fetch_count` never fires.
+    client
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    let response = client.received::<SetResponseRequest>().response;
+    assert!(
+        response.contains("createHttpClient=undefined"),
+        "Deno.createHttpClient must be deleted, got: {response}"
+    );
+    assert!(
+        response.contains("HttpClient=undefined"),
+        "Deno.HttpClient must be deleted, got: {response}"
+    );
+    assert!(
+        response.contains("outcome=BLOCKED"),
+        "custom-client fetch must be blocked, got: {response}"
+    );
+
+    let hits = mock_server.received_requests().await.unwrap_or_default();
+    assert!(
+        hits.is_empty(),
+        "no request may reach the internal service via a custom client, got {} hit(s)",
+        hits.len()
+    );
+
+    assert!(client.received::<ExecutionResult>().success);
+}
+
 /// `Lit.Actions.proxiedFetch` is a separate egress surface (a raw `reqwest`
 /// op that never touches Deno's permission engine), so it must be filtered
 /// independently (CPL-295). A *direct* (proxy-less) proxiedFetch to a loopback
