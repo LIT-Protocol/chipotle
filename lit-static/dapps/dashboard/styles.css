@@ -2353,7 +2353,7 @@ textarea.input.textarea-sm {
   background: var(--card-bg);
   flex-shrink: 0;
 }
-.app-topbar-right { display: flex; align-items: center; gap: 0.6rem; margin-left: auto; }
+.app-topbar-right { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-left: auto; min-width: 0; }
 .app-topbar .topbar-title { min-height: 0; }
 
 .dashboard-body { flex: 1; display: flex; align-items: stretch; min-height: 0; }
@@ -2543,6 +2543,8 @@ textarea.input.textarea-sm {
 
 @media (max-width: 560px) {
   .app-topbar { height: auto; flex-wrap: wrap; padding: 14px 20px; }
+  .app-topbar-right { width: 100%; margin-left: 0; }
+  .access-options { grid-template-columns: 1fr; }
   .metric-grid { grid-template-columns: 1fr; }
   .metric-cell {
     padding-left: 0 !important;
