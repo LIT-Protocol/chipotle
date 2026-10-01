@@ -16,37 +16,74 @@ It covers the browser-based authorization handshake step by step.
 
 ## Authorize
 
-Access is granted from a logged-in browser session. Generate a local random
-bearer token, build an authorization URL containing only a hash challenge of it,
-and have the user approve it in the browser:
+Access is granted through pairing with a logged-in browser session. Generate
+(or reuse) a local bearer token, then send its SHA-256 hash to `POST /agent/pair`.
+The server returns a single-use authorization URL and a confirmation code.
+
+Run this command and leave it running while you approve in the browser:
 
 ```bash
-# 1. create a local token
 mkdir -p ~/.lit-triggers
 python3 - <<'PY'
-import pathlib, secrets
+import base64, hashlib, json, pathlib, secrets, time, urllib.error, urllib.parse, urllib.request
+
+base = 'https://triggers.litprotocol.com'
 p = pathlib.Path.home() / '.lit-triggers' / 'agent-token'
 if not p.exists():
-    p.write_text(secrets.token_urlsafe(48)); p.chmod(0o600)
-print(p.read_text().strip())
-PY
+    p.write_text(secrets.token_urlsafe(48))
+p.chmod(0o600)
+raw = p.read_text().strip()
 
-# 2. build the authorize URL (open in a logged-in browser, click "Authorize")
-python3 - <<'PY'
-import base64, hashlib, pathlib, urllib.parse
-raw = (pathlib.Path.home() / '.lit-triggers' / 'agent-token').read_text().strip()
-challenge = base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest()).rstrip(b'=').decode()
-print('https://triggers.litprotocol.com/agent/authorize?' + urllib.parse.urlencode({'challenge': challenge}))
+def post(path, body, token=None):
+    headers = {'content-type': 'application/json'}
+    if token:
+        headers['authorization'] = 'Bearer ' + token
+    req = urllib.request.Request(base + path, data=json.dumps(body).encode(), headers=headers, method='POST')
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as error:
+        raise SystemExit(f'{path}: HTTP {error.code}. Rerun this command to start a fresh pairing.')
+
+token_hash = base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest()).rstrip(b'=').decode()
+started_at = time.monotonic()
+pairing = post('/agent/pair', {'token_hash': token_hash, 'label': 'local-agent'})
+print('Authorize URL:', pairing['authorize_url'], flush=True)
+print('Confirmation code:', pairing['user_code'], flush=True)
+print('Open the URL, sign in if needed, and only click "Authorize agent" if the code matches.', flush=True)
+code = urllib.parse.parse_qs(urllib.parse.urlparse(pairing['authorize_url']).query)['code'][0]
+deadline = started_at + pairing['expires_in_seconds']
+while time.monotonic() < deadline:
+    result = post('/agent/pair/complete', {'code': code}, raw)
+    if result.get('status') == 'authorized':
+        print('Agent authorized.')
+        break
+    if result.get('status') != 'pending':
+        raise SystemExit('Unexpected pairing response: ' + json.dumps(result))
+    time.sleep(3)
+else:
+    raise SystemExit('Pairing expired. Rerun this command to start a fresh pairing.')
 PY
 ```
 
-The raw token never leaves your machine — only its SHA-256 challenge is in the
-URL. After approval, the token works as `Authorization: Bearer <token>`:
+Open the printed URL, sign in via email if needed, and compare the code on the
+page with the printed **confirmation code** before clicking **Authorize agent**.
+The pairing expires after 10 minutes. The command polls `POST /agent/pair/complete`
+until approval is complete, proving possession of the token with a bearer header.
+The raw token is never included in the browser URL; it is sent to the service
+in the authorization header for completion and subsequent API calls.
+
+After the command reports `Agent authorized.`, load the saved token into your
+shell and verify API access. Use this same `$TOKEN` for the examples below:
 
 ```bash
+TOKEN="$(cat ~/.lit-triggers/agent-token)"
 curl -fsS -H "authorization: Bearer $TOKEN" https://triggers.litprotocol.com/api/me
 # { "id": "...", "email": "you@example.com" }
 ```
+
+If pairing fails or expires, rerun the pairing command to get a fresh URL while
+keeping the saved token. A `401` from `/api/me` also means you need to pair again.
 
 ## Create a webhook trigger
 
