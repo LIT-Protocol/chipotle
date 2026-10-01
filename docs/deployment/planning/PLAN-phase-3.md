@@ -1,6 +1,6 @@
 # Phase 3: Verification Automation
 
-**Parent**: [PLAN.md](PLAN.md) | **Requirements**: [requirements.md](requirements.md)
+**Parent**: [PLAN.md](/deployment/planning/PLAN) | **Requirements**: [requirements.md](/deployment/planning/requirements)
 
 ## Goal
 
@@ -60,4 +60,4 @@ Company-run verification and published results. Automated verification uses the 
 
 ## Next Phase
 
-→ [PLAN-phase-4.md](PLAN-phase-4.md) (Documentation)
+→ [PLAN-phase-4.md](/deployment/planning/PLAN-phase-4) (Documentation)

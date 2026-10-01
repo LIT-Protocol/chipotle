@@ -147,6 +147,41 @@ const hashes = Object.fromEntries(
   Object.entries(templates).map(([id, code]) => [id, sha256(code)]),
 );
 hashes.discovery = sha256(discovery);
+
+// Archive: every template version ever released, by content hash, committed under
+// actions/archive/<template>/<sha256>.js. Deployed vaults and secrets pin the CID of
+// exact bytes, so the server must be able to reproduce any historical version to
+// verify receipts and restores, and clients fetch old versions from it by hash.
+// Append-only: the build refuses to run if an archived file is missing or altered.
+const archiveDir = path.join(root, "actions/archive");
+const archive: Record<string, Record<string, string>> = {};
+for (const name of (await readdir(archiveDir, { withFileTypes: true }))
+  .filter((d) => d.isDirectory())
+  .map((d) => d.name)
+  .sort()) {
+  archive[name] = {};
+  for (const file of (await readdir(path.join(archiveDir, name))).sort()) {
+    const match = /^([0-9a-f]{64})\.js$/.exec(file);
+    if (!match) fail(`actions/archive/${name}/${file}: unexpected file`);
+    const code = await readFile(path.join(archiveDir, name, file), "utf8");
+    if (sha256(code) !== match[1])
+      fail(
+        `actions/archive/${name}/${file} does not hash to its name; archived bytes are immutable`,
+      );
+    archive[name][match[1]] = code;
+  }
+}
+for (const [name, code] of Object.entries(templates)) {
+  const hash = hashes[name];
+  if (archive[name]?.[hash]) continue;
+  if (!updateLock)
+    fail(
+      `${name} template ${hash.slice(0, 12)}… is not in actions/archive; run --update-lock to release it`,
+    );
+  await mkdir(path.join(archiveDir, name), { recursive: true });
+  await writeFile(path.join(archiveDir, name, `${hash}.js`), code);
+  (archive[name] ??= {})[hash] = code;
+}
 const lock = { v: 1, templates: hashes };
 let existing: typeof lock | undefined;
 try {
@@ -184,6 +219,32 @@ await generated(
     " as Record<string, string>;\n",
 );
 await generated("templates.json", JSON.stringify(templates) + "\n");
+// Newest-first per template as [hash, code] pairs: the current release, then
+// archived versions (arrays so consumers without ordered maps keep the order).
+const ordered = Object.fromEntries(
+  Object.entries(archive).map(([name, versions]) => [
+    name,
+    Object.entries(versions).sort(([a], [b]) =>
+      a === hashes[name] ? -1 : b === hashes[name] ? 1 : a.localeCompare(b),
+    ),
+  ]),
+);
+await generated("archive.json", JSON.stringify(ordered) + "\n");
+// Clients bundle only current templates plus this index of every released hash,
+// so they can fetch an older version by hash from the registry and verify it.
+await generated(
+  "archive-index.ts",
+  "export default " +
+    JSON.stringify(
+      Object.fromEntries(
+        Object.entries(ordered).map(([name, versions]) => [
+          name,
+          versions.map(([hash]) => hash),
+        ]),
+      ),
+    ) +
+    " as Record<string, string[]>;\n",
+);
 await generated(
   "catalog.ts",
   `import type { Catalog } from "${LIBRARY}/schema";\nexport default ${JSON.stringify(catalog, null, 2)} as Catalog;\n`,

@@ -1,4 +1,4 @@
-# Keychain v2 security contract
+# Keychain security contract
 
 ## What the cryptography enforces
 
@@ -33,6 +33,98 @@ lookup (a lying RPC can only cause false rejections or accept a hash the Safe ne
 whitelisted). The policy constants are compiled into the client, so the same
 "verified client release" caveat above applies.
 
+## Authenticated live discovery
+
+`POST /api/agents/challenge` issues a 60-second random challenge naming the agent's
+public key, exact configured service audience, protocol version and dedicated
+`lit-keychain/discovery/v2` domain. The client validates those fields before signing
+the canonical SHA-256 digest with its local Ed25519 key. `/api/agents/discover`
+strictly verifies possession and atomically deletes the exact unexpired challenge
+in PostgreSQL. A proof is valid for one discovery, including across replicas.
+Tampered, unknown, replayed and expired challenges fail. There is no agent session
+cookie or bearer authorization token, and no private key transport.
+
+Discovery returns only locators for current enabled, unexpired owner-signed grants
+covering the release operation and selected envelope version/hash, plus each
+approved vault's already-provisioned execution-only billing key. Manifest, envelope
+and policy receipts are verified before disclosure. No plaintext, other-agent
+labels/grant lists, owner sessions, master/bootstrap or account-management keys are
+returned. The SDK verifies bundles against its separately trusted Lit origin, which
+discovery cannot replace. Every live list/get/use discovers again. Exact
+`vaultId/secretId` IDs avoid cross-vault confusion; ambiguous names fail. The
+unchanged Lit action remains the final owner/agent authorization boundary.
+
+These billing keys are deliberately reusable, not new access authority. A former
+agent retaining one can consume sponsored execution for that vault until rotation,
+but an honest policy lookup still denies revoked secret access. Rotation is picked
+up on the next live discovery. This preserves the existing billing abuse limit
+below. Discovery never mints a grant and is not exactly-once execution.
+
+Challenges have per-minute global (10,000) and peer (600) issuance/verification
+budgets, a 60-second TTL and expiry cleanup on issuance. Global checks precede
+peer budget rows; existing budget expiry cleanup applies. JSON bodies retain the
+service's 256 KiB cap. Queries are limited to 1,001 candidates and reject above
+1,000 rather than hiding additions through truncation. Responses are `no-store`;
+agents must not log billing bootstrap responses. Discovery has the same documented
+operator-rollback trust as policy lookup. Revocation applies on the next request,
+not already received plaintext or already-authorized in-flight operations.
+
+## Authenticator-app two-factor login
+
+Optional RFC 6238 TOTP (SHA-1, six digits, 30-second steps, one step of clock
+skew) gates **hosted Keychain login** for every approved owner method. A first
+factor produces only a hashed, single-use, five-minute pending token; no session
+or execution key is returned until the second factor succeeds. Authenticator
+steps cannot be reused. Verification is serialized under the vault lock, and
+failed attempts are limited across sessions and pending tokens (10 per vault per
+five-minute budget window, plus an IP limit).
+
+Enrollment requires a fresh Lit owner receipt for a server nonce bound to the
+current session and setup operation. The pending enrollment expires after ten
+minutes and is activated only after a valid code. Disabling 2FA or replacing
+recovery codes requires another operation-bound owner receipt and a current
+TOTP or unused recovery code. Enabling, disabling, and regenerating codes revoke
+other browser sessions and outstanding login/setup challenges. Credential changes
+also invalidate pending login/setup challenges. Successful changes and recovery
+code consumption are audited in their database transaction.
+
+TOTP seeds are application login credentials, separate from user-stored vault
+secrets. The API necessarily returns the seed once during setup and verifies
+codes server-side. Seeds are encrypted at rest with AES-256-GCM, vault-bound AAD,
+and a key derived by HMAC-SHA-256 from `USAGE_KEY_ENCRYPTION_KEY` with the label
+`lit-keychain/totp-encryption/v1`; this key is distinct from the usage-key cipher
+key. QR codes are rendered locally. Ten random 128-bit recovery codes are shown
+once, stored only as domain- and vault-bound SHA-256 hashes, and atomically
+consumed. Logs and audit entries contain neither seeds nor codes. Security
+responses use `Cache-Control: no-store`.
+
+This is an additional **server-enforced login control**, not a change to Lit's
+immutable owner authorization or existing secret releases. It does not revoke
+agent grants, add a second factor to direct Lit execution, protect against a
+compromised Keychain operator, or require codes again on each request in an
+existing authenticated session. A code alone cannot sign in without an approved
+owner method. Recovery owner methods do not bypass 2FA. Loss of both the
+authenticator and all recovery codes locks out hosted login; there is no automatic
+email or owner-only bypass. Encrypted vault exports intentionally exclude seeds
+and recovery codes. A complete server database restore must also retain the 2FA
+records and encryption key; a vault-only restore after complete DB loss does not
+restore hosted-login 2FA settings.
+
+## Agent-side plaintext handling
+
+`get`, the `get_secret` MCP tool and `keychain run` all deliver plaintext to the
+agent host; from there the client is trusted. `run` avoids stdout and passes the
+value through the child process's environment. The Keychain CLI itself does not
+print it; the child program can still log or disclose it, including into agent
+transcripts. It is also within reach of other processes running as
+the same user (`ps eww`, `/proc/<pid>/environ`). `--file` writes plaintext to a
+mode-0600 file that is created before the child starts, never overwrites an existing
+path, and is unlinked when the child exits; a SIGKILL of the CLI leaves it behind and
+the bytes may survive on disk after unlink. Neither mode is a sandbox. The CLI zeroes
+its copy of the agent key and drops its references to the fetched values once the
+child has started; JavaScript strings cannot be scrubbed, so the plaintext may linger
+in the CLI process heap briefly before it exits.
+
 ## Accepted operator trust
 
 The database holds signed policy records and chooses the current record. The action
@@ -44,8 +136,10 @@ Revision/hash chains give honest concurrency checks, not rollback protection.
 Rollback does not create a new agent identity or extend signed expiry. A requester
 still needs an allowed private key. An operator colluding with a formerly allowed
 agent can restore that agent's prior access while the old permission remains valid.
-Owner credential membership may be indefinite; access policies are always finite
-and capped at 90 days. Credential receipts never make Google session keys permanent.
+Owner credential membership may be indefinite. Access policies default to 30 days and
+the owner chooses their lifetime, including none; a longer lifetime widens the window
+in which a replayed policy stays valid, so the expiry is the owner's rollback bound.
+Credential receipts never make Google session keys permanent.
 The root owner is the initial state when no credential policy exists; withholding a
 later credential policy can restore that initial owner, as part of the accepted model.
 
@@ -61,7 +155,7 @@ complete after its authorization window if already started.
 
 - Wallet: EOA EIP-712 authorization, fixed domain/version and vault salt, exact object
   digest/operation, nonce and short validity. Wallet picker availability is not proof
-  of ERC-1271/6492 support; those wallet types are deliberately outside v2.
+  of ERC-1271/6492 support; those wallet types are deliberately unsupported.
 - Passkey: P-256 WebAuthn signature over authenticator data and client-data hash;
   exact origin, RP-ID hash, operation challenge, user presence and user verification.
   Cross-origin assertions are rejected. Registration uses discoverable credentials;
@@ -70,15 +164,45 @@ complete after its authorization window if already started.
 - Google: fixed Google JWKS HTTPS URL, RS256, issuer, exact audience/subject, expiry,
   issued time, optional authorized-party check and nonce binding. A 10-minute client
   session's Ed25519 public key, random nonce, scope, network, registry and lifetime
-  are hashed into the Google nonce. Each object approval proves session-key possession.
-  Google account issuance/recovery is accepted custody. Email is not the identity.
+  are hashed into the Google nonce. A successful fresh Google login also issues a
+  domain-separated device approval signed by that exact authority release. It binds
+  the owner, vault and session key, with an expiry 30 days after the nonce session
+  began. Each approval proves session-key possession and rechecks owner membership.
+  A device approval cannot renew itself or extend its expiry. It needs no Google
+  JWKS fetch after issuance, so Google token expiry/key rotation do not end it.
+  The browser persists the device key, approval and original token in localStorage;
+  sign-out clears them. Access to that browser storage confers the remaining device
+  authority. Google account issuance/recovery is accepted custody. Email is not the identity.
+  Archived authorities retain their original checks and receive the 10-minute
+  Google proof (compatible with their 15-minute maximum); after that window the UI
+  requests fresh Google sign-in for older secrets. Existing secrets are not migrated.
 
 The immutable authorization action signs a domain-separated receipt for an exact
-object while the owner proof is valid. An old ID token cannot mint new receipts after
-expiry. Durable ciphertext/permission receipts survive token expiration; they are not
-reusable management sessions. Keychain sessions only authorize storage/UI operations
+object while the owner proof is valid. An owner proof covers either one document or a
+**batch** (`operation: "batch"`, object hash = digest of `{ kind: "batch", vaultId,
+documents[] }`, at most eight manifest/envelope/policy documents, never sign-in or
+owner-credential documents). The action verifies the proof once, applies every
+per-document invariant, and issues one ordinary receipt per document, so verifiers of
+receipts cannot tell (and need not care) how many prompts the owner saw. Reordering,
+dropping, adding or altering any document, or replaying a single-document proof as a
+batch (or vice versa), changes the signed digest and is refused. To fetch a new
+secret's encryption key before its manifest is approved, the API lets the signed-in
+owner enrol the derived action unsigned (`/api/actions/prepare`); enrolment only
+permits the vault's own billing key to run the vault's own action and is bounded by
+the same plan headroom as signed enrolment. An old ID token cannot mint a new device approval after
+expiry. An existing device approval can authorize exact-object receipts until its
+own signed expiry. Durable ciphertext/permission receipts survive these expirations;
+they are not reusable management sessions. Keychain sessions only authorize storage/UI operations
 and never replace a receipt. They are HttpOnly, SameSite=Strict, Secure on HTTPS and
-expire after 12 hours. Credential changes invalidate existing metadata sessions.
+expire after 30 days (persistent cookie; a page refresh keeps the vault open). Credential changes invalidate existing metadata sessions.
+
+Deleting a secret is a session operation without a receipt. It removes the registry
+entry every agent request is checked against, all signed policies and every
+ciphertext version in one transaction, then retires the derived action's execution
+grant. No action ever verifies "deleted": absence is the denial, so there is nothing
+to forge. A session holder can therefore deny service, which the operator can already
+do by withholding data; it cannot grant anything. Nothing remains for the operator to
+roll back to. An owner who kept an encrypted backup can restore the secret deliberately.
 
 ## Encryption protocol
 
@@ -106,6 +230,38 @@ Random keys and byte buffers are cleared where practical; JavaScript strings, ga
 collection and provider/browser internals do not offer guaranteed memory erasure.
 No secrets, owner private keys or agent private keys are persisted by the API.
 Names, public identities, permissions and traffic metadata are not encrypted.
+
+## Authority releases
+
+The immutable authorization action is released in versions, and every released
+version is kept forever in `actions/archive/` (content-addressed, append-only; the
+build refuses to run if an archived file is missing or altered). A vault's identity is
+the hash of its owner document, not of any code, so a vault keeps working across
+releases:
+
+- The API accepts a sign-in receipt from any released authority version bound to the
+  vault's owner document. The version that verifies is recorded for the vault
+  (`kc_vault_authorities`) and granted to its execution group the first time it is
+  used. The vault's current authority only ever moves to a newer release.
+- Each secret pins the authority release that approved it. Policy updates, rotations
+  and restores for that secret are verified, by the API and by the secret action
+  itself, under exactly that release. Clients run the pinned release's bytes,
+  fetched by hash from `/api/templates/<sha256>` and checked against the hash list
+  compiled into the client, so the registry cannot introduce a release the client was
+  not built to trust.
+- New secrets pin the newest release the client knows. Sign-in tries the newest
+  release first and falls back to the vault's recorded release if the newest denies
+  the owner.
+
+Credentials (the vault's owner set) are receipted by whichever release approved
+them, and a release can only verify its own receipts. A release that cannot verify
+the current credentials receipt treats the vault as having no credentials policy:
+the root owner from the vault document is accepted and nothing else is. This grants
+no capability beyond the documented operator trust, since the operator can already
+serve a null credentials state for any vault, and it never accepts an unverifiable
+owner set. Consequence: a vault whose root owner was replaced under release A keeps
+operating under A (its recorded release) until the root owner, or an owner approved
+under a newer release, re-approves the owner set there.
 
 ## "Use inside Lit" actions
 
@@ -135,7 +291,7 @@ bytes are pinned in `actions/catalog.lock.json`; deprecated actions stay restora
 
 The master management key and wildcard bootstrap execution key stay server-side.
 Per-vault execution-only usage keys are intentionally returned to authenticated owners
-and included in agent configs. They are encrypted in the DB with AES-256-GCM, a separate
+and returned through authenticated live discovery. They are encrypted in the DB with AES-256-GCM, a separate
 operator-held key, random nonces and vault-bound AAD. The operator can recover those
 billing keys, but they do not grant owner/agent authority or decrypt secrets by themselves.
 Protect exported configs as billing credentials. Rotation persists pending revocation
@@ -178,8 +334,8 @@ the root authority descriptor, and signed recovery credential settings. They con
 neither private keys nor historical ciphertext versions. Credential restoration only
 initializes a missing vault and cannot overwrite existing credential settings. Restoring does not overwrite a different existing secret. Google-only users
 recover by signing in to the same Google account. Alternative recovery credentials
-must be approved while an existing owner is available; retain the root vault descriptor
-when changing credentials. Lost owner credentials without an approved recovery path
+must be approved while an existing owner is available; download a fresh encrypted
+export when changing credentials, since it carries the root authority descriptor. Lost owner credentials without an approved recovery path
 cannot be replaced by an operator-issued reset token.
 
 ## Release validation boundaries

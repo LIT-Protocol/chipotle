@@ -8,6 +8,10 @@ const pkg = path.resolve(root, "..");
 // Markdown from the package root published alongside the app so agents can
 // fetch docs from the deployed origin (linked from the homepage and llms.txt).
 const publishedDocs: [string, string][] = [
+  ["/README.md", "README.md"],
+  ["/PROVIDERS.md", "PROVIDERS.md"],
+  ["/BILLING.md", "BILLING.md"],
+  ["/ADVERSARIAL_REVIEW.md", "ADVERSARIAL_REVIEW.md"],
   ["/SKILL.md", "SKILL.md"],
   ["/SECURITY.md", "SECURITY.md"],
   ["/sdk/README.md", "sdk/README.md"],

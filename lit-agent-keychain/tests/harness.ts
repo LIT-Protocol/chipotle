@@ -39,6 +39,7 @@ export const json = (value: unknown, status = 200) =>
     headers: { "content-type": "application/json" },
   });
 export class Harness {
+  now?: number;
   registry = new Map<string, any>();
   extraFetch: typeof fetch | undefined;
   calls: { url: string; init?: RequestInit }[] = [];
@@ -57,7 +58,16 @@ export class Harness {
     return this.runCode(actionSource(manifest), cid, params);
   }
   async runCode(code: string, cid: string, params: unknown) {
+    const clock = this.now;
     const context = vm.createContext({
+      Date:
+        clock === undefined
+          ? Date
+          : class extends Date {
+              static now() {
+                return clock * 1000;
+              }
+            },
       crypto: webcrypto,
       fetch: this.fetch,
       TextEncoder,
@@ -105,6 +115,18 @@ export const SAMPLE_CREDENTIALS: Record<string, string> = {
   openai_chat: "sk-" + "a".repeat(40),
   github_read_file: "ghp_" + "A".repeat(36),
   slack_post_message: "xoxb-1234567890-abcdefghijkl",
+  supabase_tables: JSON.stringify({
+    ref: "abcdefghijklmnopqrst",
+    key: "sb_secret_" + "k".repeat(40),
+    tables: {
+      orders: {
+        select: ["id", "status", "total_cents"],
+        filter: ["id", "status"],
+        insert: ["status"],
+        maxRows: 50,
+      },
+    },
+  }),
 };
 export const operationFor = (release: string) => {
   const definition = catalog[release];
@@ -207,13 +229,13 @@ export async function fixture(
     signedRequest: { request, signature: signAgent(request, agentKey) },
     envelope: sign(envelope),
   };
-  async function ownerProof(document: Document): Promise<any> {
+  async function ownerProof(document: { kind: string }): Promise<any> {
     const challenge: Challenge = {
       v: V,
       domain: "lit-keychain/authorize/v2",
       vaultId,
       objectHash: digest(document),
-      operation: document.kind,
+      operation: document.kind as Challenge["operation"],
       nonce: randomId(),
       issuedAt: now,
       expiresAt: now + 120,

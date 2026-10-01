@@ -19,7 +19,8 @@ test.describe('smoke', () => {
   test('dashboard renders the login page on first visit', async ({ dashboardPage }) => {
     await dashboardPage.goto();
     await dashboardPage.expectLoggedOut();
-    // Existing User / API mode card is the default-active tab.
+    // Select the API-key path explicitly; password login may be the default.
+    await dashboardPage.page.locator('#login-auth-mode-api').click();
     await expect(dashboardPage.page.locator('#btn-login')).toBeVisible();
     // New User tab houses the create-account button; verify the tab switches.
     await dashboardPage.showNewUserTab();

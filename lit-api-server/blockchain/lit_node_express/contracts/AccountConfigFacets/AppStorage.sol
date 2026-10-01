@@ -40,6 +40,7 @@ library AppStorage {
     error NotAllowedToAddPkpToGroup(uint256 apiKeyHash, uint256 groupId);
     error NotAllowedToRemovePkpFromGroup(uint256 apiKeyHash, uint256 groupId);
     error NotAllowedToManageIPFSIdsInGroup(uint256 apiKeyHash, uint256 groupId);
+    error UsageApiKeyExpired(uint256 usageApiKeyHash);
     error InvalidRequest(string message);
     error OnlyConfigOperatorOrOwner(address caller);
 
@@ -125,6 +126,19 @@ library AppStorage {
         // function of the public path). Deliberately NOT cleared by
         // removeWalletDerivation — only the first owner may ever (re-)register.
         mapping(address => uint256) pkpIdToOwnerMaster;
+        // derivationPath => master apiKeyHash that first registered it.
+        // Companion to pkpIdToOwnerMaster that closes the path-aliasing hole:
+        // pkpIdToOwnerMaster binds the *address label*, but the private key is a
+        // stateless function of the *derivationPath*, and paths are public
+        // (WalletDerivationRegistered data + getWalletDerivation). Without this,
+        // an attacker could register a fresh, self-owned pkpId carrying a victim's
+        // public path and drive the node to release the victim's key. Binding the
+        // path itself to its first owner makes that registration revert. The key is
+        // the uint256 derivationPath directly (already fixed-width; no hashing
+        // needed). Like pkpIdToOwnerMaster, it is deliberately NOT cleared by
+        // removeWalletDerivation — only the first owner may ever (re-)register a
+        // path, keeping the recovery flow intact.
+        mapping(uint256 => uint256) pathToOwnerMaster;
     }
 
     function getStorage()
@@ -141,6 +155,18 @@ library AppStorage {
     /// @notice Returns whether the account exists and the caller is allowed to mutate it (api_payer for managed accounts, or the creator).
     /// @param apiKeyHash Keccak256 hash of the account or usage API key (resolves to master account).
     /// @return True if the account exists and msg.sender may mutate it.
+    /// @dev Policy: this is a coarse *account-level* gate — "does the master
+    ///      account exist and is `sender` allowed to touch it" — and it
+    ///      deliberately does NOT enforce a usage key's `expiration`. It resolves
+    ///      any usage-key hash to its master and authorizes the api_payer /
+    ///      admin wallet, none of which depend on which (possibly expired) usage
+    ///      key was presented; it is also used on read paths. Usage-key
+    ///      expiration is instead enforced at the per-scope management guards in
+    ///      SecurityLib (revertIfUsageKeyExpired), which are the only paths a
+    ///      non-master key can drive a mutation through, and at the execute/read
+    ///      views in ViewsFacet (_isExpired). Enforcing expiry here as well would
+    ///      be redundant for writes and would wrongly reject master-key and
+    ///      read-only callers.
     function accountExistsAndIsMutable(
         uint256 apiKeyHash,
         address sender

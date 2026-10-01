@@ -9,20 +9,20 @@ use crate::{
     models::{field, number, valid_hex, Authority, Manifest, Signed},
 };
 use anyhow::{bail, Result};
-use rocket::{get, http::Status, post, put, serde::json::Json, State};
+use rocket::{delete, get, http::Status, post, put, serde::json::Json, State};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::{PgPool, Postgres, Transaction};
 
-async fn key_for_vault(pool: &PgPool, lit: &Chipotle, vault: &str) -> Result<String, ApiError> {
-    let cid: String = sqlx::query_scalar("SELECT authority_cid FROM kc_vaults WHERE id=$1")
-        .bind(vault)
-        .fetch_one(pool)
-        .await
-        .map_err(api::internal)?;
-    lit.public_key(&cid)
-        .await
-        .map_err(|_| api::err(Status::BadGateway, "lit_unavailable"))
+use crate::authority;
+fn parse_manifest(body: &SecretWrite) -> Result<Manifest> {
+    Ok(serde_json::from_value(
+        body.manifest
+            .document
+            .get("manifest")
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("missing manifest"))?,
+    )?)
 }
 async fn audit(
     tx: &mut Transaction<'_, Postgres>,
@@ -71,6 +71,8 @@ fn validate_policy(
 ) -> Result<()> {
     crypto::verify_signed(signed, key, vault)?;
     let p = &signed.document;
+    // Access policies have no maximum lifetime: the owner chooses the expiry, or
+    // none at all (`expiresAt: null`). Owner credentials keep the one-year bound.
     let max = if let Some((id, cid)) = secret {
         if field(p, "kind")? != "policy"
             || field(p, "secretId")? != id
@@ -78,26 +80,26 @@ fn validate_policy(
         {
             bail!("policy mismatch");
         }
-        90 * 86400
+        None
     } else {
         if field(p, "kind")? != "credentials" {
             bail!("credentials required");
         }
-        366 * 86400
+        Some(366 * 86400)
     };
     let start = number(p, "notBefore")?;
-    if secret.is_none() && p.get("expiresAt") == Some(&Value::Null) {
-        if number(p, "epoch")? < 1 || start > time::OffsetDateTime::now_utc().unix_timestamp() {
-            bail!("invalid credentials window");
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    if p.get("expiresAt") == Some(&Value::Null) {
+        if number(p, "epoch")? < 1 || start > now + 30 {
+            bail!("invalid policy window");
         }
         return Ok(());
     }
     let end = number(p, "expiresAt")?;
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
     if number(p, "epoch")? < 1
         || start > now + 30
         || end <= start
-        || end - start > max
+        || max.is_some_and(|max| end - start > max)
         || (!allow_expired && end <= now)
     {
         bail!("invalid policy window");
@@ -155,10 +157,13 @@ pub async fn update_credentials(
     pool: &State<PgPool>,
     lit: &State<Chipotle>,
 ) -> ApiResult<Value> {
-    let key = key_for_vault(pool, lit, &session.vault_id).await?;
+    // Credentials may be approved by any authority release of the vault. Each
+    // release reads the owner set it can verify itself (see actions/authority.ts).
+    let (cid, key) = authority::verify_any(pool, lit, &session.vault_id, &body).await?;
     validate_policy(&body, &session.vault_id, &key, None, false).map_err(api::denied)?;
     let mut tx = pool.begin().await.map_err(api::internal)?;
     lock_vault(&mut tx, &session.vault_id).await?;
+    authority::ensure_granted(&mut tx, lit, &session.vault_id, &cid).await?;
     commit_policy(
         &mut tx,
         &session.vault_id,
@@ -173,6 +178,7 @@ pub async fn update_credentials(
         .execute(&mut *tx)
         .await
         .map_err(api::internal)?;
+    crate::two_factor::invalidate_pending(&mut tx, &session.vault_id).await?;
     tx.commit().await.map_err(api::internal)?;
     Ok(Json(json!({"ok":true,"signInRequired":true})))
 }
@@ -183,19 +189,22 @@ pub struct SecretWrite {
     pub envelope: Signed,
     pub policy: Signed,
 }
-struct Validated {
+pub(crate) struct Validated {
     manifest: Manifest,
     cid: String,
     name: String,
     version: i64,
     envelope_hash: String,
 }
-fn validate_write(
+/// `current_only` requires the newest release of the action (new secrets); restores
+/// and rotations accept any archived release the secret was created under.
+pub(crate) fn validate_write(
     body: &SecretWrite,
     vault: &str,
     key: &str,
     cfg: &Config,
     restoring: bool,
+    current_only: bool,
 ) -> Result<Validated> {
     crypto::verify_signed(&body.manifest, key, vault)?;
     crypto::verify_signed(&body.envelope, key, vault)?;
@@ -204,19 +213,14 @@ fn validate_write(
     {
         bail!("invalid document kinds");
     }
-    let manifest: Manifest = serde_json::from_value(
-        body.manifest
-            .document
-            .get("manifest")
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("missing manifest"))?,
-    )?;
+    let manifest = parse_manifest(body)?;
     manifest.validate(cfg)?;
     if manifest.vault_id != vault {
         bail!("wrong vault");
     }
-    let cid = actions::cid(&actions::secret_source(&manifest)?);
-    if field(&body.manifest.document, "actionCid")? != cid {
+    let cids = actions::secret_cids(&manifest)?;
+    let cid = field(&body.manifest.document, "actionCid")?.to_owned();
+    if !cids.contains(&cid) || (current_only && cids[0] != cid) {
         bail!("wrong CID");
     }
     let meta = body
@@ -266,9 +270,10 @@ async fn write_secret(
     cfg: &Config,
     restoring: bool,
 ) -> ApiResult<Value> {
-    let key = key_for_vault(pool, lit, &session.vault_id).await?;
-    let checked =
-        validate_write(&body, &session.vault_id, &key, cfg, restoring).map_err(api::denied)?;
+    let manifest = parse_manifest(&body).map_err(api::invalid)?;
+    let key = authority::key_for(pool, lit, &session.vault_id, &manifest.authority_cid).await?;
+    let checked = validate_write(&body, &session.vault_id, &key, cfg, restoring, !restoring)
+        .map_err(api::denied)?;
     if !restoring && checked.version != 1 {
         return Err(api::err(Status::BadRequest, "initial_version_must_be_one"));
     }
@@ -281,15 +286,13 @@ async fn write_secret(
     }
     let mut tx = pool.begin().await.map_err(api::internal)?;
     lock_vault(&mut tx, &session.vault_id).await?;
-    let authority_cid: String =
-        sqlx::query_scalar("SELECT authority_cid FROM kc_vaults WHERE id=$1")
-            .bind(&session.vault_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(api::internal)?;
-    if checked.manifest.authority_cid != authority_cid {
-        return Err(api::err(Status::Forbidden, "wrong_authority"));
-    }
+    authority::ensure_granted(
+        &mut tx,
+        lit,
+        &session.vault_id,
+        &checked.manifest.authority_cid,
+    )
+    .await?;
     // Retrying a partially completed backup must not roll the registry back.
     // An already-present exact envelope is a no-op, even after later rotation.
     if restoring {
@@ -380,7 +383,7 @@ pub async fn list(session: Session, after: Option<&str>, pool: &State<PgPool>) -
     if after.is_some_and(|cursor| !valid_hex(cursor, 32)) {
         return Err(api::err(Status::BadRequest, "invalid_cursor"));
     }
-    let mut rows:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('secretId',s.id,'name',s.name,'actionCid',s.action_cid,'version',s.current_version,'release',s.manifest->'document'->'manifest'->'release','disabled',p.signed->'document'->'disabled','expiresAt',p.signed->'document'->'expiresAt','agentCount',jsonb_array_length(p.signed->'document'->'grants')) FROM kc_secrets s JOIN kc_registry r ON r.scope='secret:'||s.id JOIN kc_policies p ON p.hash=r.policy_hash WHERE s.vault_id=$1 AND s.id>$2 ORDER BY s.id LIMIT 201")
+    let mut rows:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('secretId',s.id,'name',s.name,'actionCid',s.action_cid,'version',s.current_version,'release',s.manifest->'document'->'manifest'->'release','disabled',p.signed->'document'->'disabled','expiresAt',p.signed->'document'->'expiresAt','agentCount',jsonb_array_length(p.signed->'document'->'grants'),'agents',p.signed->'document'->'grants') FROM kc_secrets s JOIN kc_registry r ON r.scope='secret:'||s.id JOIN kc_policies p ON p.hash=r.policy_hash WHERE s.vault_id=$1 AND s.id>$2 ORDER BY s.id LIMIT 201")
         .bind(&session.vault_id).bind(after.unwrap_or("")).fetch_all(pool.inner()).await.map_err(api::internal)?;
     let next = if rows.len() > 200 {
         rows.pop();
@@ -412,15 +415,18 @@ pub async fn update_policy(
     pool: &State<PgPool>,
     lit: &State<Chipotle>,
 ) -> ApiResult<Value> {
-    let cid: Option<String> =
-        sqlx::query_scalar("SELECT action_cid FROM kc_secrets WHERE id=$1 AND vault_id=$2")
-            .bind(secret)
-            .bind(&session.vault_id)
-            .fetch_optional(pool.inner())
-            .await
-            .map_err(api::internal)?;
-    let cid = cid.ok_or_else(|| api::err(Status::NotFound, "not_found"))?;
-    let key = key_for_vault(pool, lit, &session.vault_id).await?;
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT action_cid,manifest->'document'->'manifest'->>'authorityCid' FROM kc_secrets WHERE id=$1 AND vault_id=$2",
+    )
+    .bind(secret)
+    .bind(&session.vault_id)
+    .fetch_optional(pool.inner())
+    .await
+    .map_err(api::internal)?;
+    let (cid, authority_cid) = row.ok_or_else(|| api::err(Status::NotFound, "not_found"))?;
+    // Policies are approved by the authority release the secret pins, since only
+    // that release's key is what the secret action itself verifies.
+    let key = authority::key_for(pool, lit, &session.vault_id, &authority_cid).await?;
     validate_policy(&body, &session.vault_id, &key, Some((secret, &cid)), false)
         .map_err(api::denied)?;
     let mut tx = pool.begin().await.map_err(api::internal)?;
@@ -436,6 +442,75 @@ pub async fn update_policy(
     tx.commit().await.map_err(api::internal)?;
     Ok(Json(json!({"ok":true})))
 }
+/// Deletes a secret: its selected policy and every earlier one, the registry entry
+/// the derived action consults, and all ciphertext versions go in one transaction,
+/// so the next agent request is denied and nothing remains to serve or roll back.
+/// The action's execution grant is retired afterwards and the slot is freed.
+///
+/// A session suffices. Deletion grants nothing: it is the same outcome an operator
+/// can always produce by withholding data, and it needs no receipt because no
+/// action ever verifies "deleted" — absence is the denial. An owner who keeps an
+/// encrypted backup can restore the secret deliberately later.
+#[delete("/api/secrets/<secret>")]
+pub async fn delete_secret(
+    _origin: SameOrigin,
+    session: Session,
+    secret: &str,
+    pool: &State<PgPool>,
+    lit: &State<Chipotle>,
+) -> ApiResult<Value> {
+    if !valid_hex(secret, 32) {
+        return Err(api::err(Status::BadRequest, "invalid_id"));
+    }
+    let mut tx = pool.begin().await.map_err(api::internal)?;
+    lock_vault(&mut tx, &session.vault_id).await?;
+    let owned: Option<String> =
+        sqlx::query_scalar("SELECT id FROM kc_secrets WHERE id=$1 AND vault_id=$2 FOR UPDATE")
+            .bind(secret)
+            .bind(&session.vault_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(api::internal)?;
+    if owned.is_none() {
+        return Err(api::err(Status::NotFound, "not_found"));
+    }
+    let scope = format!("secret:{secret}");
+    sqlx::query("DELETE FROM kc_registry WHERE scope=$1 AND vault_id=$2")
+        .bind(&scope)
+        .bind(&session.vault_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(api::internal)?;
+    sqlx::query("DELETE FROM kc_policies WHERE scope=$1 AND vault_id=$2")
+        .bind(&scope)
+        .bind(&session.vault_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(api::internal)?;
+    // Envelopes cascade.
+    sqlx::query("DELETE FROM kc_secrets WHERE id=$1 AND vault_id=$2")
+        .bind(secret)
+        .bind(&session.vault_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(api::internal)?;
+    sqlx::query("UPDATE kc_execution_actions SET removing=true WHERE vault_id=$1 AND secret_id=$2")
+        .bind(&session.vault_id)
+        .bind(secret)
+        .execute(&mut *tx)
+        .await
+        .map_err(api::internal)?;
+    audit(&mut tx, &session.vault_id, "secret_deleted", secret).await?;
+    tx.commit().await.map_err(api::internal)?;
+    // Best effort now; the worker finishes it if Chipotle is unavailable.
+    if crate::sponsorship::retire(pool, lit, &session.vault_id, secret)
+        .await
+        .is_err()
+    {
+        tracing::warn!("deferred execution grant retirement");
+    }
+    Ok(Json(json!({"ok":true})))
+}
 #[post("/api/secrets/<secret>/rotate", format = "json", data = "<body>")]
 pub async fn rotate(
     _origin: SameOrigin,
@@ -446,9 +521,10 @@ pub async fn rotate(
     lit: &State<Chipotle>,
     cfg: &State<Config>,
 ) -> ApiResult<Value> {
-    let key = key_for_vault(pool, lit, &session.vault_id).await?;
+    let manifest = parse_manifest(&body).map_err(api::invalid)?;
+    let key = authority::key_for(pool, lit, &session.vault_id, &manifest.authority_cid).await?;
     let checked =
-        validate_write(&body, &session.vault_id, &key, cfg, false).map_err(api::denied)?;
+        validate_write(&body, &session.vault_id, &key, cfg, false, false).map_err(api::denied)?;
     if checked.manifest.secret_id != secret {
         return Err(api::err(Status::Forbidden, "wrong_secret"));
     }
@@ -534,16 +610,14 @@ pub async fn restore_credentials(
     billing::reserve(pool, "challenge-global", 3600, 10000).await?;
     billing::reserve(pool, &format!("challenge:{}", peer.0), 3600, 100).await?;
     let vault = body.authority.vault_id().map_err(api::invalid)?;
-    let cid = actions::cid(&actions::authority_source(&body.authority).map_err(api::invalid)?);
-    let key = lit
-        .public_key(&cid)
-        .await
-        .map_err(|_| api::err(Status::BadGateway, "lit_unavailable"))?;
+    let (cid, key) =
+        authority::verify_with(lit, &body.authority, &vault, &body.credentials).await?;
     validate_policy(&body.credentials, &vault, &key, None, false).map_err(api::denied)?;
     let mut tx = pool.begin().await.map_err(api::internal)?;
     let inserted = sqlx::query("INSERT INTO kc_vaults(id,authority,authority_cid) VALUES($1,$2,$3) ON CONFLICT(id) DO NOTHING")
         .bind(&vault).bind(serde_json::to_value(&body.authority).map_err(api::invalid)?).bind(&cid)
         .execute(&mut *tx).await.map_err(api::internal)?.rows_affected();
+    authority::ensure_granted(&mut tx, lit, &vault, &cid).await?;
     if inserted == 1 {
         commit_policy(
             &mut tx,

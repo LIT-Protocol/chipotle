@@ -102,15 +102,18 @@ async fn reconcile_locked(
             }
             return Ok(None);
         }
-        let authority: String =
-            sqlx::query_scalar("SELECT authority_cid FROM kc_vaults WHERE id=$1")
-                .bind(vault)
-                .fetch_one(&mut **tx)
-                .await
-                .map_err(api::internal)?;
+        // Every authority release this vault has signed in with, so secrets created
+        // under any of them stay manageable.
+        let mut owner_cids: Vec<String> = sqlx::query_scalar(
+            "SELECT authority_cid FROM kc_vault_authorities WHERE vault_id=$1 ORDER BY created_at",
+        )
+        .bind(vault)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(api::internal)?;
+        owner_cids.push(actions::cid(actions::PUBLIC_KEY));
         // Both groups are independent on-chain writes; issue them concurrently so
         // first sign-in pays for two transaction confirmations, not three.
-        let owner_cids = [authority, actions::cid(actions::PUBLIC_KEY)];
         let (group, secret_group) = rocket::tokio::try_join!(
             lit.create_group(vault, &owner_cids),
             lit.create_group(vault, &[]),
@@ -151,6 +154,7 @@ async fn reconcile_locked(
         }
     }
     if !issue {
+        retire_locked(tx, lit, vault, secret_group, None).await?;
         // Bulk group replacement is capped at 10 CIDs by Chipotle's contract.
         // Incremental addition has no such cap and is idempotent. A bounded batch
         // resumes abandoned enrollments in the worker. Foreground enrollment
@@ -194,6 +198,85 @@ async fn reconcile_locked(
         .await
         .map_err(api::internal)?;
     Ok(Some(key))
+}
+/// Retires the group grants of deleted secrets, under the vault lock. Rows that
+/// were never applied on chain are simply dropped. A removal that fails is
+/// retried by the worker; after `MAX_REMOVE_ATTEMPTS` the row is abandoned, since
+/// a grant for an action whose policy and ciphertext no longer exist authorizes
+/// nothing, and the row must not occupy enrolment headroom forever. Failures
+/// never block the caller: enrolment and key issuance proceed regardless.
+const MAX_REMOVE_ATTEMPTS: i32 = 5;
+async fn retire_locked(
+    tx: &mut Transaction<'_, Postgres>,
+    lit: &Chipotle,
+    vault: &str,
+    secret_group: i64,
+    only_secret: Option<&str>,
+) -> Result<(), ApiError> {
+    sqlx::query(
+        "DELETE FROM kc_execution_actions WHERE vault_id=$1 AND removing AND NOT applied AND ($2::text IS NULL OR secret_id=$2)",
+    )
+    .bind(vault)
+    .bind(only_secret)
+    .execute(&mut **tx)
+    .await
+    .map_err(api::internal)?;
+    let pending: Vec<(String, String, i32)> = sqlx::query_as(
+        "SELECT secret_id,action_cid,remove_attempts FROM kc_execution_actions WHERE vault_id=$1 AND removing AND applied AND ($2::text IS NULL OR secret_id=$2) ORDER BY created_at,action_cid LIMIT 10",
+    )
+    .bind(vault)
+    .bind(only_secret)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(api::internal)?;
+    for (secret, cid, attempts) in pending {
+        let removed = lit.remove_action(secret_group, &cid).await.is_ok();
+        let event = if removed {
+            "action_removed"
+        } else if attempts + 1 >= MAX_REMOVE_ATTEMPTS {
+            tracing::warn!("abandoning action removal after repeated failures");
+            "action_removal_abandoned"
+        } else {
+            sqlx::query("UPDATE kc_execution_actions SET remove_attempts=remove_attempts+1 WHERE vault_id=$1 AND secret_id=$2")
+                .bind(vault).bind(&secret).execute(&mut **tx).await.map_err(api::internal)?;
+            continue;
+        };
+        sqlx::query("DELETE FROM kc_execution_actions WHERE vault_id=$1 AND secret_id=$2")
+            .bind(vault)
+            .bind(&secret)
+            .execute(&mut **tx)
+            .await
+            .map_err(api::internal)?;
+        sqlx::query("INSERT INTO kc_audit(vault_id,event,object_hash) VALUES($1,$2,$3)")
+            .bind(vault)
+            .bind(event)
+            .bind(&cid)
+            .execute(&mut **tx)
+            .await
+            .map_err(api::internal)?;
+    }
+    Ok(())
+}
+/// Foreground retirement of one deleted secret's grant. Called after the
+/// deletion itself has committed; the vault lock serializes it with enrolment.
+pub async fn retire(
+    pool: &PgPool,
+    lit: &Chipotle,
+    vault: &str,
+    secret: &str,
+) -> Result<(), ApiError> {
+    let mut tx = pool.begin().await.map_err(api::internal)?;
+    subscriptions::lock(&mut tx, vault).await?;
+    let group: Option<i64> =
+        sqlx::query_scalar("SELECT secret_group_id FROM kc_execution_accounts WHERE vault_id=$1")
+            .bind(vault)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(api::internal)?;
+    if let Some(group) = group {
+        retire_locked(&mut tx, lit, vault, group, Some(secret)).await?;
+    }
+    tx.commit().await.map_err(api::internal)
 }
 pub async fn reconcile(
     pool: &PgPool,
@@ -280,28 +363,74 @@ pub async fn enroll(
     cfg: &State<Config>,
 ) -> ApiResult<Value> {
     let vault = &session.vault_id;
-    let mut tx = pool.begin().await.map_err(api::internal)?;
-    let plan = subscriptions::require_capacity(&mut tx, vault, false).await?;
-    let authority: String = sqlx::query_scalar("SELECT authority_cid FROM kc_vaults WHERE id=$1")
-        .bind(vault)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(api::internal)?;
-    let key = lit.public_key(&authority).await.map_err(unavailable)?;
-    crypto::verify_signed(&body, &key, vault).map_err(api::denied)?;
     if field(&body.document, "kind").map_err(api::invalid)? != "manifest" {
         return Err(api::err(Status::BadRequest, "manifest_required"));
     }
     let manifest: Manifest =
         serde_json::from_value(body.document["manifest"].clone()).map_err(api::invalid)?;
     manifest.validate(cfg).map_err(api::invalid)?;
-    let cid = actions::cid(&actions::secret_source(&manifest).map_err(api::invalid)?);
-    if manifest.vault_id != *vault
-        || manifest.authority_cid != authority
-        || field(&body.document, "actionCid").map_err(api::invalid)? != cid
-    {
+    // The manifest names the authority release that approved it; it must be one of
+    // this vault's releases, and its receipt must verify under that release's key.
+    let key = crate::authority::key_for(pool, lit, vault, &manifest.authority_cid).await?;
+    crypto::verify_signed(&body, &key, vault).map_err(api::denied)?;
+    let cid = field(&body.document, "actionCid")
+        .map_err(api::invalid)?
+        .to_owned();
+    enroll_cid(vault, &manifest, &cid, pool, lit, cfg).await
+}
+/// Unsigned request to make a not-yet-approved secret action executable by the
+/// vault's own execution key.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PrepareAction {
+    pub manifest: Manifest,
+    pub action_cid: String,
+}
+/// Enrolls a secret's derived action before the owner has signed its manifest.
+///
+/// The browser must execute the derived action once (its key-binding operation)
+/// to learn the encryption key it encrypts the secret to, and only then can the
+/// owner approve manifest, envelope and policy together with one signature. The
+/// CID is a pure function of the manifest, the session is already authenticated,
+/// and enrolment grants nothing to anyone: it only lets this vault's scoped
+/// billing key run this vault's own action. The same capacity checks apply as
+/// for a signed enrolment, so an owner cannot grow the sponsored group past the
+/// plan's headroom by preparing actions that are never written.
+#[post("/api/actions/prepare", format = "json", data = "<body>")]
+pub async fn prepare(
+    _origin: SameOrigin,
+    session: Session,
+    body: Json<PrepareAction>,
+    pool: &State<PgPool>,
+    lit: &State<Chipotle>,
+    cfg: &State<Config>,
+) -> ApiResult<Value> {
+    let vault = &session.vault_id;
+    let PrepareAction {
+        manifest,
+        action_cid,
+    } = body.into_inner();
+    manifest.validate(cfg).map_err(api::invalid)?;
+    // Must name one of this vault's authority releases (key_for enforces that);
+    // the key itself is not needed because nothing is signed yet.
+    crate::authority::key_for(pool, lit, vault, &manifest.authority_cid).await?;
+    enroll_cid(vault, &manifest, &action_cid, pool, lit, cfg).await
+}
+async fn enroll_cid(
+    vault: &str,
+    manifest: &Manifest,
+    cid: &str,
+    pool: &PgPool,
+    lit: &Chipotle,
+    cfg: &Config,
+) -> ApiResult<Value> {
+    let mut tx = pool.begin().await.map_err(api::internal)?;
+    let plan = subscriptions::require_capacity(&mut tx, vault, false).await?;
+    let cids = actions::secret_cids(manifest).map_err(api::invalid)?;
+    if manifest.vault_id != *vault || !cids.iter().any(|c| c == cid) {
         return Err(api::err(Status::Forbidden, "wrong_manifest"));
     }
+    crate::authority::ensure_granted(&mut tx, lit, vault, &manifest.authority_cid).await?;
     let existing: Option<String> = sqlx::query_scalar(
         "SELECT action_cid FROM kc_execution_actions WHERE vault_id=$1 AND secret_id=$2",
     )
@@ -335,7 +464,7 @@ pub async fn enroll(
         )
         .bind(vault)
         .bind(&manifest.secret_id)
-        .bind(&cid)
+        .bind(cid)
         .execute(&mut *tx)
         .await
         .map_err(api::internal)?;
@@ -343,7 +472,7 @@ pub async fn enroll(
             "INSERT INTO kc_audit(vault_id,event,object_hash) VALUES($1,'action_enrolled',$2)",
         )
         .bind(vault)
-        .bind(&cid)
+        .bind(cid)
         .execute(&mut *tx)
         .await
         .map_err(api::internal)?;
@@ -352,7 +481,7 @@ pub async fn enroll(
     // retried from durable state without leaving an untracked granted CID.
     tx.commit().await.map_err(api::internal)?;
     let mut tx = pool.begin().await.map_err(api::internal)?;
-    reconcile_locked(&mut tx, lit, cfg, vault, false, Some(&cid)).await?;
+    reconcile_locked(&mut tx, lit, cfg, vault, false, Some(cid)).await?;
     tx.commit().await.map_err(api::internal)?;
     Ok(Json(json!({"ok":true})))
 }

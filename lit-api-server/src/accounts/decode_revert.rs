@@ -60,6 +60,7 @@ const ACCOUNT_CONFIG_ERROR_SIGNATURES: &[(&str, &str)] = &[
         "UsageApiKeyDoesNotExist",
         "UsageApiKeyDoesNotExist(uint256,uint256)",
     ),
+    ("UsageApiKeyExpired", "UsageApiKeyExpired(uint256)"),
 ];
 
 fn account_config_error_name(data: &[u8]) -> Option<&'static str> {

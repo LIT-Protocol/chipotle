@@ -1,0 +1,102 @@
+# Deploy lit-triggers to Railway
+#
+# Mirrors the lit-static release flow (see deploy-static.yml /
+# deploy-prod-3-static.yml), but the deploy target is Railway instead of
+# Cloudflare Pages:
+#
+#   * push to `main`     -> Railway "staging" environment
+#   * push of a `v*` tag -> Railway "production" environment
+#
+# Deployment uses the Railway CLI (`railway up`) authenticated with an
+# environment-scoped Railway *project token* passed as RAILWAY_TOKEN. A project
+# token encodes both the Railway project and its environment, so there is no
+# `railway link` step — we only pass the service name.
+#
+# lit-triggers is self-contained: its Dockerfile `COPY . .`s from the
+# `lit-triggers/` directory, so `railway up` runs from that directory (Railway
+# service root = lit-triggers, config = lit-triggers/railway.json).
+# (See lit-triggers/README.md → "Railway deployment".)
+#
+# Required repository secrets:
+#   RAILWAY_TOKEN_TRIGGERS_STAGING     Railway project token — lit-triggers
+#                                      project, "staging" environment.
+#   RAILWAY_TOKEN_TRIGGERS_PRODUCTION  Railway project token — lit-triggers
+#                                      project, "production" environment.
+#
+# Optional repository variables (defaults shown):
+#   RAILWAY_TRIGGERS_SERVICE           Railway service name (default: lit-triggers)
+
+name: Deploy lit-triggers (Railway)
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Railway environment to deploy'
+        required: true
+        default: staging
+        type: choice
+        options:
+          - staging
+          - production
+
+concurrency:
+  group: deploy-lit-triggers-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-staging:
+    if: >
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
+    runs-on: self-hosted
+    environment: staging
+    defaults:
+      run:
+        working-directory: lit-triggers
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli@5.57.2
+
+      - name: Deploy to Railway (staging)
+        # Build context = lit-triggers/ to match the Dockerfile's `COPY . .`.
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_TRIGGERS_STAGING }}
+        run: railway up --ci --service "${{ vars.RAILWAY_TRIGGERS_SERVICE || 'lit-triggers' }}"
+
+  deploy-production:
+    if: >
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.environment == 'production')
+    runs-on: self-hosted
+    environment: production
+    defaults:
+      run:
+        working-directory: lit-triggers
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli@5.57.2
+
+      - name: Deploy to Railway (production)
+        # Build context = lit-triggers/ to match the Dockerfile's `COPY . .`.
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_TRIGGERS_PRODUCTION }}
+        run: railway up --ci --service "${{ vars.RAILWAY_TRIGGERS_SERVICE || 'lit-triggers' }}"

@@ -4,7 +4,8 @@ import { p256 } from "@noble/curves/nist.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { generateKeyPair, exportJWK, SignJWT } from "jose";
 import { Harness, json, pubFor, keyFor } from "./harness.ts";
-import { actionCid } from "../protocol/actions.ts";
+import { readFile, readdir } from "node:fs/promises";
+import { actionCid, actionSource } from "../protocol/actions.ts";
 import {
   randomBytes,
   randomId,
@@ -17,8 +18,10 @@ import {
   signAgent,
   nowSeconds,
   makeReceipt,
+  signAction,
 } from "../protocol/crypto.ts";
 import {
+  GOOGLE_APPROVAL_LIFETIME,
   DOMAIN,
   V,
   type Authority,
@@ -250,12 +253,215 @@ test("credential replacement is owner-receipted; forged registry owners fail", a
     ).ok,
     false,
   );
+  // Tampering with the signed document breaks its receipt. An unverifiable
+  // receipt is treated exactly like a null credential state (the operator could
+  // serve null anyway): the root owner is accepted again, nothing else is.
   signed.document.owners = [f.authority.owner as any];
   assert.equal(
     (
       await f.h.run(f.authority, {
         document: f.policy,
         proof: await f.ownerProof(f.policy),
+      })
+    ).ok,
+    true,
+  );
+  const forged = await f.ownerProof(f.policy);
+  forged.owner = { kind: "wallet", address: "0x" + "1".repeat(40) };
+  assert.equal(
+    (await f.h.run(f.authority, { document: f.policy, proof: forged })).ok,
+    false,
+  );
+});
+
+test("Google device approvals survive token expiry, bind possession and stop at 30 days", async () => {
+  const { publicKey, privateKey } = await generateKeyPair("RS256");
+  const jwk = {
+    ...(await exportJWK(publicKey)),
+    kid: "device-key",
+    alg: "RS256",
+    use: "sig",
+  };
+  const owner: Extract<Owner, { kind: "google" }> = {
+    kind: "google",
+    subject: "device-owner",
+    clientId: "test.apps.googleusercontent.com",
+  };
+  const f = objects(owner);
+  const key = randomBytes();
+  const session: GoogleSession = {
+    v: V,
+    domain: "lit-keychain/google-session/v2",
+    network: "test",
+    registry: f.authority.registry,
+    publicKey: agentPublicKey(key),
+    nonce: randomId(),
+    issuedAt: f.now,
+    expiresAt: f.now + 600,
+    scope: "authorize",
+  };
+  const token = await new SignJWT({
+    iss: "https://accounts.google.com",
+    aud: owner.clientId,
+    sub: owner.subject,
+    iat: f.now,
+    exp: f.now + 3600,
+    nonce: b64u(unhex(digest(session))),
+  })
+    .setProtectedHeader({ alg: "RS256", kid: "device-key" })
+    .sign(privateKey);
+  f.h.extraFetch = async () => json({ keys: [jwk] });
+  const fresh = {
+    kind: "google",
+    owner,
+    session,
+    token,
+    challenge: f.challenge,
+    signature: signAgent(f.challenge, key),
+  };
+  const login = await f.h.run(f.authority, {
+    document: f.document,
+    proof: fresh,
+  });
+  assert.equal(login.ok, true);
+  const approval = login.googleApproval;
+  assert.equal(
+    approval.payload.session.expiresAt,
+    f.now + GOOGLE_APPROVAL_LIFETIME,
+  );
+  // The same ten-minute proof works with every immutable legacy release.
+  for (const file of await readdir(
+    new URL("../actions/archive/authority/", import.meta.url),
+  )) {
+    const code = await readFile(
+      new URL("../actions/archive/authority/" + file, import.meta.url),
+      "utf8",
+    );
+    const cid = await actionCid(f.authority, code);
+    assert.equal(
+      (
+        await f.h.runCode(actionSource(f.authority, code), cid, {
+          document: f.document,
+          proof: fresh,
+        })
+      ).ok,
+      true,
+      file,
+    );
+  }
+  f.h.extraFetch = async () => {
+    throw new Error("No Google JWKS after login");
+  };
+  const later = f.now + 29 * 86400;
+  f.h.now = later;
+  const document = { ...f.document, expiresAt: later + 120 };
+  const challenge = {
+    ...f.challenge,
+    objectHash: digest(document),
+    issuedAt: later,
+    expiresAt: later + 120,
+  };
+  const proof = {
+    ...fresh,
+    token: "",
+    approval,
+    session: approval.payload.session,
+    challenge,
+    signature: signAgent(challenge, key),
+  };
+  const run = (p = proof) => f.h.run(f.authority, { document, proof: p });
+  const resumed = await run();
+  assert.equal(resumed.ok, true);
+  assert.equal(
+    resumed.googleApproval,
+    undefined,
+    "certificate cannot renew itself",
+  );
+  assert.equal(
+    (await run({ ...proof, signature: signAgent(challenge, randomBytes()) }))
+      .ok,
+    false,
+  );
+  for (const mutate of [
+    (a: any) => a.payload.session.expiresAt++,
+    (a: any) => (a.payload.owner.subject = "other"),
+    (a: any) => (a.payload.vaultId = randomId()),
+    (a: any) => (a.payload.session.registry = "https://other.test"),
+    (a: any) => (a.payload.session.network = "other"),
+    (a: any) => (a.payload.session.publicKey = agentPublicKey(randomBytes())),
+  ]) {
+    const tampered = structuredClone(approval);
+    mutate(tampered);
+    assert.equal(
+      (
+        await run({
+          ...proof,
+          approval: tampered,
+          session: tampered.payload.session,
+        })
+      ).ok,
+      false,
+    );
+  }
+  const forged = structuredClone(approval);
+  forged.signature = signAction(forged.payload, randomBytes());
+  assert.equal((await run({ ...proof, approval: forged })).ok, false);
+  const cid = await actionCid(f.authority);
+  // Even an authentic certificate must obey the protocol lifetime cap.
+  const oversized = structuredClone(approval);
+  oversized.payload.session.expiresAt++;
+  oversized.signature = signAction(oversized.payload, keyFor(cid));
+  assert.equal(
+    (
+      await run({
+        ...proof,
+        approval: oversized,
+        session: oversized.payload.session,
+      })
+    ).ok,
+    false,
+  );
+  const removed = {
+    v: V,
+    domain: DOMAIN,
+    kind: "credentials",
+    vaultId: f.vaultId,
+    epoch: 1,
+    previousHash: null,
+    owners: [{ kind: "wallet", address: "0x" + "11".repeat(20) }],
+    notBefore: f.now,
+    expiresAt: null,
+  };
+  f.h.registry.set(
+    `${f.authority.registry}/api/registry/credentials/${f.vaultId}`,
+    { document: removed, receipt: makeReceipt(removed, keyFor(cid), f.now) },
+  );
+  assert.equal(
+    (await run()).ok,
+    false,
+    "removed owners cannot use device approval",
+  );
+  f.h.registry.clear();
+  f.h.now = approval.payload.session.expiresAt;
+  const expiredDocument = {
+    ...document,
+    expiresAt: approval.payload.session.expiresAt + 120,
+  };
+  const expiredChallenge = {
+    ...challenge,
+    objectHash: digest(expiredDocument),
+    issuedAt: f.h.now,
+    expiresAt: approval.payload.session.expiresAt + 120,
+  };
+  assert.equal(
+    (
+      await f.h.run(f.authority, {
+        document: expiredDocument,
+        proof: {
+          ...proof,
+          challenge: expiredChallenge,
+          signature: signAgent(expiredChallenge, key),
+        },
       })
     ).ok,
     false,

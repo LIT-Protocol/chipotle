@@ -46,6 +46,11 @@ jobs:
       - name: Inject lit-payments URL
         run: sed -i "s|__LIT_PAYMENTS_BASE_URL__|${{ vars.LIT_PAYMENTS_PROD_URL }}|g" lit-static/dapps/dashboard/auth.js
 
+      - name: Configure password auth service
+        env:
+          AUTH_URL: ${{ vars.LIT_AUTH_PROD_URL }}
+        run: python3 lit-dashboard-auth/scripts/configure-static.py
+
       - name: Resolve dashboard git commit
         id: resolve_sha
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"

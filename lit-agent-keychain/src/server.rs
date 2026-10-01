@@ -1,6 +1,6 @@
 use crate::{
     api, auth, billing, chipotle::Chipotle, config::Config, registry, sponsorship, stripe::Stripe,
-    subscriptions,
+    subscriptions, templates,
 };
 use rocket::{
     catch, catchers,
@@ -30,6 +30,8 @@ pub fn build(cfg: Config, pool: PgPool, lit: Chipotle, stripe: Stripe) -> Rocket
             "/",
             routes![
                 health,
+                crate::discovery::challenge,
+                crate::discovery::discover,
                 config,
                 index,
                 auth::challenge,
@@ -37,6 +39,15 @@ pub fn build(cfg: Config, pool: PgPool, lit: Chipotle, stripe: Stripe) -> Rocket
                 auth::login,
                 auth::logout,
                 auth::me,
+                crate::two_factor::status,
+                crate::two_factor::challenge,
+                crate::two_factor::setup,
+                crate::two_factor::confirm,
+                crate::two_factor::disable,
+                crate::two_factor::regenerate,
+                crate::two_factor::login,
+                templates::index,
+                templates::template,
                 billing::execute,
                 subscriptions::status,
                 subscriptions::refresh_route,
@@ -46,6 +57,7 @@ pub fn build(cfg: Config, pool: PgPool, lit: Chipotle, stripe: Stripe) -> Rocket
                 sponsorship::key,
                 sponsorship::rotate,
                 sponsorship::enroll,
+                sponsorship::prepare,
                 registry::credentials,
                 registry::restore_credentials,
                 registry::policy,
@@ -56,6 +68,7 @@ pub fn build(cfg: Config, pool: PgPool, lit: Chipotle, stripe: Stripe) -> Rocket
                 registry::bundle,
                 registry::update_policy,
                 registry::rotate,
+                registry::delete_secret,
                 registry::audit_log
             ],
         )
@@ -70,7 +83,7 @@ fn health() -> &'static str {
 fn config(cfg: &State<Config>) -> Json<Value> {
     Json(
         json!({"protocol":2,"network":cfg.network,"registry":cfg.public_base_url,"googleClientId":cfg.google_client_id,
-    "maxSecretBytes":16384,"maxPolicyDays":90,"revocationTrust":"operator_can_replay_prior_signed_permissions",
+    "maxSecretBytes":16384,"maxPolicyDays":Value::Null,"revocationTrust":"operator_can_replay_prior_signed_permissions",
     "pricing":{"priceCents":1000,"currency":"usd","interval":"month","secretLimit":1000,"freeSecretLimit":5,"contactEmail":cfg.contact_email}}),
     )
 }

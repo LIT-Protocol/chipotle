@@ -5922,34 +5922,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lit-actions-gvisor-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "clap",
- "flate2",
- "flume",
- "lit-actions-grpc",
- "lit-observability",
- "nix 0.30.1",
- "pretty_assertions",
- "prost",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tar",
- "temp-file",
- "tempfile",
- "tokio",
- "tokio-stream",
- "tonic",
- "tonic-build",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "lit-actions-server"
 version = "0.1.0"
 dependencies = [
@@ -5965,6 +5937,7 @@ dependencies = [
  "hyper-util",
  "indoc",
  "ipfs-hasher",
+ "ipnetwork",
  "lit-actions-ext",
  "lit-actions-grpc",
  "lit-actions-snapshot",

@@ -26,6 +26,12 @@ impl Client {
         self.socket_path.clone().unwrap_or_default()
     }
 
+    /// The action identity used to gate and derive per-action key material and
+    /// PKP-wallet access: the content id (`ipfs_id`, the bundle checksum).
+    pub(crate) fn action_key_id(&self) -> &str {
+        &self.ipfs_id
+    }
+
     pub fn client_timeout(&self) -> Duration {
         Duration::from_millis(self.timeout_ms + self.client_timeout_ms_buffer)
     }

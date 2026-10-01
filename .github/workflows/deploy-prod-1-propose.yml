@@ -107,7 +107,7 @@ jobs:
           # with deploy-staging.yml's DEPLOY_PATHS (minus the staging-only entries:
           # the workflow files and k6/, which don't affect prod image content).
           IMAGE_PATHS=(lit-actions/ lit-api-server/ lit-billing-core/ lit-core/ \
-            otel-collector/ Dockerfile.lit-actions Dockerfile.lit-actions-gvisor \
+            otel-collector/ Dockerfile.lit-actions \
             Dockerfile.lit-api-server Dockerfile.otel-collector docker-compose.phala.yml)
 
           # 1. Most recent first-parent ancestor carrying a perf-gate/soak status.
@@ -179,8 +179,6 @@ jobs:
         include:
           - service: lit-actions
             dockerfile: Dockerfile.lit-actions
-          - service: lit-actions-gvisor
-            dockerfile: Dockerfile.lit-actions-gvisor
           - service: lit-api-server
             dockerfile: Dockerfile.lit-api-server
           - service: otel-collector
@@ -252,19 +250,16 @@ jobs:
       - name: Prepare docker-compose for deployment (digest-pinned)
         run: |
           DIGEST_LIT_ACTIONS=$(cat digest-lit-actions.txt | tr -d '\n' | sed 's/}[}]*$//')
-          DIGEST_LIT_ACTIONS_GVISOR=$(cat digest-lit-actions-gvisor.txt | tr -d '\n' | sed 's/}[}]*$//')
           DIGEST_LIT_API_SERVER=$(cat digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
           DIGEST_OTEL_COLLECTOR=$(cat digest-otel-collector.txt | tr -d '\n' | sed 's/}[}]*$//')
           DOMAIN="api.chipotle.litprotocol.com"
           sed \
             -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|${{ vars.DOCKER_IMAGE }}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
-            -e "s|\${DOCKER_IMAGE_LIT_ACTIONS_GVISOR}|${{ vars.DOCKER_IMAGE }}-lit-actions-gvisor@${DIGEST_LIT_ACTIONS_GVISOR}|g" \
             -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|${{ vars.DOCKER_IMAGE }}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
             -e "s|\${DOCKER_IMAGE_OTEL_COLLECTOR}|${{ vars.DOCKER_IMAGE }}-otel-collector@${DIGEST_OTEL_COLLECTOR}|g" \
             -e "s|\${GCP_PROJECT_ID}|chipotle-prod|g" \
             -e "s|\${CERTBOT_DOMAIN}|${DOMAIN}|g" \
             -e "s|\${CERTBOT_AWS_REGION}|${{ vars.CERTBOT_AWS_REGION }}|g" \
-            -e "s|\${LIT_GVISOR_ENABLED}|false|g" \
             docker-compose.phala.yml > docker-compose.deploy.yml
 
       - name: Setup Node.js
@@ -298,6 +293,9 @@ jobs:
           # the list of allowed environment variable keys. The actual secret
           # values are encrypted client-side in a separate step and sent
           # during the Phase 2 commit call.
+          # Provision must update allowed_envs too, matching Phase 2's
+          # update_env_vars=true. Otherwise Phala hashes the old key list
+          # here, then changes the manifest (and hash) when committing.
           COMPOSE_CONTENT=$(cat docker-compose.deploy.yml)
           PROVISION_FILE=$(mktemp)
           trap 'rm -f "$PROVISION_FILE"' EXIT
@@ -306,6 +304,7 @@ jobs:
             '{
               name: "",
               docker_compose_file: $dc,
+              update_env_vars: true,
               allowed_envs: [
                 "STRIPE_SECRET_KEY",
                 "STRIPE_PUBLISHABLE_KEY",
@@ -317,7 +316,8 @@ jobs:
                 "CERTBOT_AWS_SECRET_ACCESS_KEY",
                 "CERTBOT_AWS_ROLE_ARN",
                 "CERTBOT_AWS_REGION",
-                "LIT_INTERNAL_SHARED_SECRET"
+                "LIT_INTERNAL_SHARED_SECRET",
+                "NEW_ACCOUNT_RATE_LIMIT_ENABLED"
               ]
             }' > "$PROVISION_FILE"
           echo "Request payload size: $(wc -c < "$PROVISION_FILE") bytes"
@@ -457,6 +457,8 @@ jobs:
               { key: "CERTBOT_AWS_ROLE_ARN", value: process.env.CERTBOT_AWS_ROLE_ARN },
               { key: "CERTBOT_AWS_REGION", value: process.env.CERTBOT_AWS_REGION },
               { key: "LIT_INTERNAL_SHARED_SECRET", value: process.env.LIT_INTERNAL_SHARED_SECRET },
+              // Shared gateway IP makes the per-IP new-account limit a global cap.
+              { key: "NEW_ACCOUNT_RATE_LIMIT_ENABLED", value: "false" },
             ];
             const pubkey = process.env.ENCRYPT_PUBKEY;
             encryptEnvVars(envs, pubkey).then(hex => process.stdout.write(hex));

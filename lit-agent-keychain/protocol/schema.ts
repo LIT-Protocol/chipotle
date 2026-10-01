@@ -1,3 +1,5 @@
+import type { GoogleApproval } from "./google-approval.ts";
+export type { GoogleApproval } from "./google-approval.ts";
 import { z } from "zod";
 import {
   releaseIdSchema,
@@ -8,7 +10,6 @@ import {
 export const V = 2 as const;
 export const DOMAIN = "lit-keychain/v2" as const;
 export const MAX_SECRET_BYTES = 16 * 1024;
-export const MAX_POLICY_SECONDS = 90 * 86400;
 const hex = (bytes: number) =>
   z.string().regex(new RegExp(`^[0-9a-f]{${bytes * 2}}$`));
 export const hashSchema = hex(32);
@@ -127,7 +128,8 @@ export const policySchema = z.strictObject({
   previousHash: hashSchema.nullable(),
   disabled: z.boolean(),
   notBefore: integer,
-  expiresAt: integer,
+  /** Unix seconds, or null for a policy the owner chose not to expire. */
+  expiresAt: integer.nullable(),
   grants: z.array(grantSchema).max(100),
 });
 export type Policy = z.infer<typeof policySchema>;
@@ -161,6 +163,28 @@ export const documentSchema = z.discriminatedUnion("kind", [
   loginSchema,
 ]);
 export type Document = z.infer<typeof documentSchema>;
+/**
+ * Several documents approved with one owner signature. The owner signs the
+ * digest of this wrapper (operation `batch`) and the authority action issues an
+ * ordinary per-document receipt for each entry, so consumers are unchanged. Only
+ * secret objects may be batched; sign-in and owner-credential changes stay single.
+ */
+export const BATCH_KINDS = ["manifest", "envelope", "policy"] as const;
+export const batchSchema = z.strictObject({
+  kind: z.literal("batch"),
+  vaultId: hashSchema,
+  documents: z
+    .array(
+      z.discriminatedUnion("kind", [
+        envelopeSchema,
+        policySchema,
+        manifestDocumentSchema,
+      ]),
+    )
+    .min(1)
+    .max(8),
+});
+export type Batch = z.infer<typeof batchSchema>;
 export const receiptSchema = z.strictObject({
   payload: z.strictObject({
     v: z.literal(V),
@@ -181,7 +205,7 @@ export const challengeSchema = z.strictObject({
   vaultId: hashSchema,
   objectHash: hashSchema,
   operation: documentSchema.options[0].shape.kind.or(
-    z.enum(["policy", "credentials", "manifest", "login"]),
+    z.enum(["policy", "credentials", "manifest", "login", "batch"]),
   ),
   nonce: hashSchema,
   issuedAt: integer,
@@ -200,6 +224,7 @@ export const googleSessionSchema = z.strictObject({
   scope: z.literal("authorize"),
 });
 export type GoogleSession = z.infer<typeof googleSessionSchema>;
+export const GOOGLE_APPROVAL_LIFETIME = 30 * 86400;
 export type OwnerProof =
   | {
       kind: "wallet";
@@ -220,6 +245,7 @@ export type OwnerProof =
       owner: Extract<Owner, { kind: "google" }>;
       challenge: Challenge;
       token: string;
+      approval?: GoogleApproval;
       session: GoogleSession;
       signature: string;
     };

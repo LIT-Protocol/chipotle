@@ -17,6 +17,7 @@
 //!   stripe_report --days 7                    # last 7 days
 //!   stripe_report --out /tmp/april            # writes /tmp/april.csv and /tmp/april.html
 //!   stripe_report --csv-only                  # skip the HTML file
+//!   stripe_report --csv-stdout                # CSV to stdout; no files or customer logs
 //!   stripe_report --email a@b.com             # only customer(s) with this email
 //!   stripe_report --wallet 0xABC…             # only customer(s) with this wallet
 //!
@@ -41,6 +42,7 @@ struct Args {
     days: u32,
     out: String,
     csv_only: bool,
+    csv_stdout: bool,
     email: Option<String>,
     wallet: Option<String>,
 }
@@ -49,6 +51,7 @@ fn parse_args() -> Result<Args, String> {
     let mut days = DEFAULT_DAYS;
     let mut out = DEFAULT_OUT.to_string();
     let mut csv_only = false;
+    let mut csv_stdout = false;
     let mut email: Option<String> = None;
     let mut wallet: Option<String> = None;
     let mut it = std::env::args().skip(1);
@@ -91,6 +94,7 @@ fn parse_args() -> Result<Args, String> {
                 wallet = Some(v);
             }
             "--csv-only" => csv_only = true,
+            "--csv-stdout" => csv_stdout = true,
             "-h" | "--help" => {
                 print_help();
                 std::process::exit(0);
@@ -102,6 +106,7 @@ fn parse_args() -> Result<Args, String> {
         days,
         out,
         csv_only,
+        csv_stdout,
         email,
         wallet,
     })
@@ -157,6 +162,8 @@ OPTIONS:
     --wallet <ADDR>  Only include customer(s) with this wallet_address
                      (case-insensitive). Combined with --email, both must match.
     --csv-only       Skip the HTML file.
+    --csv-stdout     Write only CSV to stdout, without files or customer logs.
+                     Overrides --out and --csv-only; fails on incomplete data.
     -h, --help       Show this message.
 
 ENVIRONMENT:
@@ -209,7 +216,11 @@ async fn main() -> ExitCode {
     let customers = match stripe::list_all_customers(&stripe_state).await {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("error: list_all_customers failed: {e}");
+            if args.csv_stdout {
+                eprintln!("error: list_all_customers failed");
+            } else {
+                eprintln!("error: list_all_customers failed: {e}");
+            }
             return ExitCode::from(1);
         }
     };
@@ -218,7 +229,7 @@ async fn main() -> ExitCode {
     // Narrow to the requested account(s) before the expensive per-customer
     // balance-transaction fetch below.
     let customers = filter_customers(customers, args.email.as_deref(), args.wallet.as_deref());
-    if args.email.is_some() || args.wallet.is_some() {
+    if !args.csv_stdout && (args.email.is_some() || args.wallet.is_some()) {
         let mut parts = Vec::new();
         if let Some(e) = &args.email {
             parts.push(format!("email={e}"));
@@ -240,7 +251,7 @@ async fn main() -> ExitCode {
     for (i, c) in customers.iter().enumerate() {
         match stripe::list_balance_transactions_since(&stripe_state, &c.id, since).await {
             Ok(txs) => {
-                if !txs.is_empty() {
+                if !args.csv_stdout && !txs.is_empty() {
                     eprintln!(
                         "  [{}/{}] {} ({}): {} txs",
                         i + 1,
@@ -253,6 +264,10 @@ async fn main() -> ExitCode {
                 transactions.extend(txs);
             }
             Err(e) => {
+                if args.csv_stdout {
+                    eprintln!("error: list_balance_transactions failed; no report emitted");
+                    return ExitCode::from(1);
+                }
                 eprintln!(
                     "  [{}/{}] {}: list_balance_transactions failed: {e}",
                     i + 1,
@@ -265,6 +280,18 @@ async fn main() -> ExitCode {
     eprintln!("  {} transactions total", transactions.len());
 
     let rows = aggregate_report_rows(&customers, &transactions);
+
+    if args.csv_stdout {
+        use std::io::Write as _;
+        if let Err(e) = std::io::stdout()
+            .lock()
+            .write_all(render_csv(&rows).as_bytes())
+        {
+            eprintln!("error: writing CSV to stdout: {e}");
+            return ExitCode::from(1);
+        }
+        return ExitCode::SUCCESS;
+    }
 
     let csv_path = format!("{}.csv", args.out);
     if let Err(e) = std::fs::write(&csv_path, render_csv(&rows)) {

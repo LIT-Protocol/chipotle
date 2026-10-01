@@ -14,13 +14,13 @@
 //! name[:runtime[:runtime...]]|method[,method...]
 //! ```
 //!
-//! e.g. `javascript|raw_script; python:python3.13:python3.12|raw_script,bundle; rust|bundle`
+//! e.g. `javascript|raw_script`
 //!
 //! The first runtime listed for a language is its default. Omitting the
-//! runtime list for a runtime-bearing language (e.g. `python|raw_script`)
-//! enables all runtimes this build knows about, with the first as default;
-//! list them explicitly to restrict to a subset. Repeated `|` are tolerated
-//! on parse (`javascript||raw_script` == `javascript|raw_script`).
+//! runtime list for a runtime-bearing language enables all runtimes this build
+//! knows about, with the first as default; list them explicitly to restrict to
+//! a subset. Repeated `|` are tolerated on parse (`javascript||raw_script` ==
+//! `javascript|raw_script`).
 
 use anyhow::{Context, Result, anyhow, bail};
 use rocket_okapi::okapi::schemars::JsonSchema;
@@ -37,7 +37,7 @@ pub struct LanguageFeature {
     pub name: String,
     /// Human label, e.g. "Python".
     pub display_name: String,
-    /// Underlying runner: "deno" (JS) or "gvisor" (everything else).
+    /// Underlying runner: "deno" (JS).
     pub execution_model: ExecutionModel,
     /// Provisionable runtime versions — each maps to an install recipe and a
     /// cache profile (NOT baked into the image). Multiple may coexist
@@ -57,8 +57,7 @@ pub struct LanguageRuntime {
     /// Chosen when the client omits `runtime`.
     pub is_default: bool,
     /// True once this profile's install layers are materialized in the
-    /// gVisor runner's cache. Always false until the install cache lands
-    /// (CPL-349 phase 2); pre-warm status is wired in phase 5.
+    /// runner's cache. Always false today.
     pub prewarmed: bool,
 }
 
@@ -98,7 +97,6 @@ impl ExecutionMethod {
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionModel {
     Deno,
-    Gvisor,
 }
 
 /// A language this build knows how to run, independent of whether this
@@ -114,33 +112,13 @@ struct KnownLanguage {
 
 /// Everything the codebase can run. `LIT_SUPPORTED_LANGUAGES` selects a
 /// subset of this table; anything outside it is rejected at startup.
-const KNOWN_LANGUAGES: &[KnownLanguage] = &[
-    KnownLanguage {
-        name: "javascript",
-        display_name: "JavaScript",
-        execution_model: ExecutionModel::Deno,
-        runtimes: &[],
-        methods: &[ExecutionMethod::RawScript],
-    },
-    KnownLanguage {
-        name: "python",
-        display_name: "Python",
-        execution_model: ExecutionModel::Gvisor,
-        runtimes: &[("python3.13", "3.13.1"), ("python3.12", "3.12.7")],
-        methods: &[
-            ExecutionMethod::RawScript,
-            ExecutionMethod::Bundle,
-            ExecutionMethod::OciBundle,
-        ],
-    },
-    KnownLanguage {
-        name: "rust",
-        display_name: "Rust (compiled binary)",
-        execution_model: ExecutionModel::Gvisor,
-        runtimes: &[],
-        methods: &[ExecutionMethod::Bundle, ExecutionMethod::OciBundle],
-    },
-];
+const KNOWN_LANGUAGES: &[KnownLanguage] = &[KnownLanguage {
+    name: "javascript",
+    display_name: "JavaScript",
+    execution_model: ExecutionModel::Deno,
+    runtimes: &[],
+    methods: &[ExecutionMethod::RawScript],
+}];
 
 /// The parsed, validated language allowlist — Rocket managed state, built
 /// once at startup from `LIT_SUPPORTED_LANGUAGES`.
@@ -282,8 +260,7 @@ impl SupportedLanguages {
         &self.languages
     }
 
-    /// Whether this node admits `(language, method)`; drives request
-    /// admission for `/lit_raw_action` and `/lit_binary_action`.
+    /// Whether this node admits `(language, method)`.
     pub fn allows(&self, language: &str, method: ExecutionMethod) -> bool {
         self.languages
             .iter()
@@ -319,40 +296,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_the_planned_next_allowlist() {
-        let parsed = SupportedLanguages::parse(
-            "javascript||raw_script; python:python3.13:python3.12|raw_script,bundle; rust||bundle",
-        )
-        .unwrap();
+    fn parses_the_javascript_allowlist() {
+        let parsed = SupportedLanguages::parse("javascript||raw_script").unwrap();
 
         let langs = parsed.languages();
-        assert_eq!(langs.len(), 3);
+        assert_eq!(langs.len(), 1);
 
         assert_eq!(langs[0].name, "javascript");
         assert_eq!(langs[0].execution_model, ExecutionModel::Deno);
         assert!(langs[0].runtimes.is_empty());
         assert_eq!(langs[0].methods, vec![ExecutionMethod::RawScript]);
-
-        assert_eq!(langs[1].name, "python");
-        assert_eq!(langs[1].execution_model, ExecutionModel::Gvisor);
-        assert_eq!(langs[1].runtimes.len(), 2);
-        assert_eq!(langs[1].runtimes[0].id, "python3.13");
-        assert_eq!(langs[1].runtimes[0].version, "3.13.1");
-        assert!(langs[1].runtimes[0].is_default);
-        assert!(!langs[1].runtimes[1].is_default);
-        assert_eq!(
-            langs[1].methods,
-            vec![ExecutionMethod::RawScript, ExecutionMethod::Bundle]
-        );
-
-        assert_eq!(langs[2].name, "rust");
-        assert_eq!(langs[2].methods, vec![ExecutionMethod::Bundle]);
     }
 
     #[test]
     fn canonical_form_round_trips() {
-        let canonical =
-            "javascript|raw_script; python:python3.13:python3.12|raw_script,bundle; rust|bundle";
+        let canonical = "javascript|raw_script";
         let parsed = SupportedLanguages::parse(canonical).unwrap();
         assert_eq!(parsed.to_string(), canonical);
         assert_eq!(
@@ -392,39 +350,15 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_runtime() {
-        let err = SupportedLanguages::parse("python:python2.7|bundle").unwrap_err();
-        assert!(err.to_string().contains("unknown runtime"), "{err}");
-    }
-
-    #[test]
-    fn runtime_bearing_language_without_listed_runtimes_gets_all_known() {
-        // `python|...` with no runtime list must not advertise an empty
-        // `runtimes` (and no default) — it enables every known runtime.
-        let parsed = SupportedLanguages::parse("python|raw_script,bundle").unwrap();
-        let python = &parsed.languages()[0];
-        assert_eq!(python.runtimes.len(), 2);
-        assert_eq!(python.runtimes[0].id, "python3.13");
-        assert!(python.runtimes[0].is_default);
-        assert_eq!(python.runtimes[1].id, "python3.12");
-        assert!(!python.runtimes[1].is_default);
-    }
-
-    #[test]
-    fn runtime_less_language_without_runtimes_stays_empty() {
-        let parsed = SupportedLanguages::parse("rust|bundle").unwrap();
-        assert!(parsed.languages()[0].runtimes.is_empty());
-    }
-
-    #[test]
     fn rejects_runtime_for_language_without_runtimes() {
-        let err = SupportedLanguages::parse("rust:rust1.80|bundle").unwrap_err();
+        // JavaScript declares no runtimes, so any runtime token is rejected.
+        let err = SupportedLanguages::parse("javascript:js1.0|raw_script").unwrap_err();
         assert!(err.to_string().contains("unknown runtime"), "{err}");
     }
 
     #[test]
     fn rejects_unknown_method() {
-        let err = SupportedLanguages::parse("python|wasm").unwrap_err();
+        let err = SupportedLanguages::parse("javascript|wasm").unwrap_err();
         let chain = format!("{err:#}");
         assert!(chain.contains("unknown execution method"), "{chain}");
     }
@@ -437,7 +371,8 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_language() {
-        let err = SupportedLanguages::parse("python|bundle; python|raw_script").unwrap_err();
+        let err =
+            SupportedLanguages::parse("javascript|raw_script; javascript|raw_script").unwrap_err();
         assert!(err.to_string().contains("more than once"), "{err}");
     }
 
@@ -449,17 +384,15 @@ mod tests {
 
     #[test]
     fn rejects_entry_without_methods() {
-        let err = SupportedLanguages::parse("python").unwrap_err();
+        let err = SupportedLanguages::parse("javascript").unwrap_err();
         assert!(err.to_string().contains("missing methods"), "{err}");
     }
 
     #[test]
     fn allows_checks_language_and_method() {
-        let parsed =
-            SupportedLanguages::parse("python:python3.13|raw_script,bundle; rust|bundle").unwrap();
-        assert!(parsed.allows("python", ExecutionMethod::RawScript));
-        assert!(parsed.allows("rust", ExecutionMethod::Bundle));
-        assert!(!parsed.allows("rust", ExecutionMethod::RawScript));
-        assert!(!parsed.allows("javascript", ExecutionMethod::RawScript));
+        let parsed = SupportedLanguages::parse("javascript|raw_script").unwrap();
+        assert!(parsed.allows("javascript", ExecutionMethod::RawScript));
+        assert!(!parsed.allows("javascript", ExecutionMethod::Bundle));
+        assert!(!parsed.allows("python", ExecutionMethod::RawScript));
     }
 }

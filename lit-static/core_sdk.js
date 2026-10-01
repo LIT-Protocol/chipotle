@@ -975,41 +975,6 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
-   * POST /core/v1/lit_binary_action
-   * Executes an any-language action bundle on the gVisor runner. Supply exactly
-   * one bundle source: `bundle` (base64-encoded tar/tar.gz of the payload) or
-   * `checksum` (the content id of a bundle the runner already cached). Like
-   * {@link litAction}, this is a thin passthrough — the server is the single
-   * source of truth and returns a clean 400 if neither is supplied (and derives
-   * the authoritative checksum from the bundle bytes if both are). The sandbox
-   * always runs `bash startup.sh`: `startupScript` here overrides the bundle's
-   * own `startup.sh`. Top-level `jsParams` values are injected as environment
-   * variables. Same billing, auth, and response shape as {@link litAction}.
-   * @param {Object} options
-   * @param {string} options.apiKey - Usage or account API key
-   * @param {string} [options.bundle] - Base64-encoded tar/tar.gz bundle
-   * @param {string} [options.checksum] - Content id (CID) of a cached bundle
-   * @param {string} [options.startupScript] - Bash entrypoint script
-   * @param {*} [options.jsParams] - Parameters exposed to the action
-   * @returns {Promise<LitActionResponse>} { response, logs, has_error }
-   */
-  async litBinaryAction({ apiKey, bundle, checksum, startupScript, jsParams } = {}) {
-    // `js_params` is always sent (as null when absent) to mirror litAction; the
-    // server accepts a missing key too, but keeping the shape identical avoids
-    // divergence between the two execution paths.
-    const body = { js_params: jsParams ?? null };
-    if (bundle) body.bundle = bundle;
-    if (checksum) body.checksum = checksum;
-    if (startupScript) body.startup_script = startupScript;
-    const res = await fetch(`${this.baseUrl}/lit_binary_action`, {
-      method: 'POST',
-      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
-      body: JSON.stringify(body),
-    });
-    return parseResponse(res, 'lit_binary_action');
-  }
-
-  /**
    * POST /core/v1/add_group
    * Add a group to an account with permitted action hashes and PKP hashes.
    * @param {AddGroupOptions} options
@@ -1778,9 +1743,9 @@ export class LitNodeSimpleApiClient {
   /**
    * GET /core/v1/get_supported_languages
    * Advertises the node's language capability surface. Each entry carries an
-   * `execution_model` of `"deno"` (JavaScript) or `"gvisor"` (any-language
-   * runner). Unauthenticated — clients use it to discover capability before
-   * uploading. See lit-api-server `actions::languages`.
+   * `execution_model` of `"deno"` (JavaScript). Unauthenticated — clients use it
+   * to discover capability before uploading. See lit-api-server
+   * `actions::languages`.
    * @returns {Promise<{ languages: Array<{ name: string, display_name: string, execution_model: string, runtimes: object[], methods: string[] }> }>}
    */
   async getSupportedLanguages() {
@@ -1828,13 +1793,19 @@ export class LitNodeSimpleApiClient {
    * GET /core/v1/billing/balance
    * Returns the current credit balance for the authenticated user.
    * @param {string} apiKey - Raw API key. Ignored when `options.walletAuthHeader` is set.
-   * @param {{walletAuthHeader?: string, signal?: AbortSignal}} [options]
+   * @param {{walletAuthHeader?: string, signal?: AbortSignal, force?: boolean}} [options]
    *   walletAuthHeader: base64(JSON{typed_data, signature}) for EIP-712 ChainSecured auth (CPL-285, CPL-286).
    *   signal: AbortController signal to cancel the request mid-flight.
+   *   force: bypass the node's balance cache so a credit added directly in Stripe
+   *     surfaces immediately (no Lit Action required). Use sparingly — it forces a
+   *     live Stripe read.
    * @returns {Promise<{balance_cents: number, balance_display: string}>}
    */
   async getBillingBalance(apiKey, options = {}) {
-    const res = await fetch(`${this.baseUrl}/billing/balance`, {
+    const url = options.force
+      ? `${this.baseUrl}/billing/balance?force=true`
+      : `${this.baseUrl}/billing/balance`;
+    const res = await fetch(url, {
       headers: billingHeaders(apiKey, options.walletAuthHeader),
       signal: options.signal,
     });

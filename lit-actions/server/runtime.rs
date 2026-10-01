@@ -61,8 +61,7 @@ pub(crate) const DEFAULT_MEMORY_LIMIT_MB: usize = 64; // 64MB
 // far larger than any host can honor: an effectively unbounded timeout pins a
 // worker forever, and an oversized heap request outruns the near-heap OOM
 // guard so the host OOM-killer takes down the runner (and any co-located
-// lit_node) instead. Mirrors the sibling gvisor-server's clamps
-// (`supervisor.rs`); see CPL-371.
+// lit_node) instead. See CPL-371.
 const MAX_TIMEOUT_MS: u64 = 1000 * 60 * 150; // 150 minutes
 pub(crate) const MAX_MEMORY_LIMIT_MB: usize = 2048; // 2GB
 
@@ -92,7 +91,7 @@ static PERMISSION_DESC_PARSER: LazyLock<Arc<RuntimePermissionDescriptorParser<Re
     LazyLock::new(|| Arc::new(RuntimePermissionDescriptorParser::new(RealSys)));
 
 static BASE_PERMISSIONS: LazyLock<Permissions> = LazyLock::new(|| {
-    Permissions::from_options(
+    let mut perms = Permissions::from_options(
         PERMISSION_DESC_PARSER.as_ref(),
         &PermissionsOptions {
             // Empty `allow_net` = allow all outbound hosts (so `fetch()` works),
@@ -107,7 +106,16 @@ static BASE_PERMISSIONS: LazyLock<Permissions> = LazyLock::new(|| {
             ..Default::default()
         },
     )
-    .expect("valid permissions")
+    .expect("valid permissions");
+    // `deny_net`'s string parser (deno_permissions v0.107) cannot express IPv6
+    // CIDR subnets, so literal IPv6-range URLs (fc00::/7 ULA incl. IMDSv6,
+    // fe80::/10 link-local) would slip past the net permission built above and,
+    // being literal IPs, never reach the DNS resolver either. Rebuild the `net`
+    // permission with those ranges added as `Host::IpSubnet` deny descriptors
+    // (F-01). Supersedes the `deny_net` above, which is retained so removing this
+    // line degrades to IPv4-only filtering rather than allow-all.
+    perms.net = crate::egress::base_net_permission();
+    perms
 });
 
 pub(crate) type ActionCodeCache = Arc<RwLock<ActionCodeCacheState>>;

@@ -167,30 +167,54 @@ contract ViewsFacet {
         // Cross-account hijack defense (#575). This view is the exact read the
         // node uses to resolve a derivation path before signing/decrypting, so
         // enforce the global first-owner binding HERE, not just at registration:
-        // the resolving (master) account must be the pkpId's owner, otherwise
-        // the local pkpData entry is a stale hijack registration — fail closed
-        // instead of leaking the victim's path.
-        //
-        // registerWalletDerivation always sets pkpIdToOwnerMaster when it writes
-        // pkpData, and the one-time #575 backfill bound every pre-existing PKP,
-        // so a non-zero derivation always has a non-zero owner. An owner of 0
-        // here therefore means an unexpected/legacy state and fails closed.
+        // if the wallet has an owner and the resolving (master) account is not
+        // that owner, the local pkpData entry is a stale pre-fix hijack
+        // registration — fail closed instead of leaking the victim's path.
+        // owner == 0 means a pre-migration wallet not yet backfilled: fall
+        // through for deployments that have not migrated. Completed bindings
+        // survive removal of the historical backfill entry point.
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        uint256 owner = s.pkpIdToOwnerMaster[walletAddress];
         uint256 resolvedMaster = s.allApiKeyHashesToMaster[apiKeyHash];
-        if (owner != resolvedMaster) {
-            revert AppStorage.InvalidRequest("PKP owned by another account");
+        uint256 owner = s.pkpIdToOwnerMaster[walletAddress];
+        if (owner != 0) {
+            if (owner != resolvedMaster) {
+                revert AppStorage.InvalidRequest("PKP owned by another account");
+            }
+        }
+        // Path-aliasing defense (companion to the pkpId binding above). The pkpId
+        // binding only protects the address label; the key is derived from the
+        // path. If a resolving account is not the path's first owner, this is a
+        // stale pre-fix aliasing registration pointing at someone else's key —
+        // fail closed instead of releasing it. owner == 0 means a pre-migration
+        // path not yet backfilled. Keep the legacy fallback for deployments that
+        // have not migrated; completed bindings survive removal of the backfill.
+        uint256 pathOwner = s.pathToOwnerMaster[derivation];
+        if (pathOwner != 0 && pathOwner != resolvedMaster) {
+            revert AppStorage.InvalidRequest("derivation path owned by another account");
         }
         return derivation;
     }
 
-    /// @notice Return the master apiKeyHash that owns a pkpId, or 0 if the pkpId
-    ///         has never been registered.
-    /// @dev The binding survives removeWalletDerivation by design; used to audit
-    ///      the global first-owner rule.
+    /// @notice Return the master apiKeyHash that first registered a pkpId, or 0 if
+    ///         the pkpId has never been bound (pre-migration wallet or never registered).
+    /// @dev The binding survives removeWalletDerivation by design; used to audit the
+    ///      global first-owner rule and the one-time backfill migration.
     function getPkpOwnerMaster(address pkpId) public view returns (uint256) {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         return s.pkpIdToOwnerMaster[pkpId];
+    }
+
+    /// @notice Return the master apiKeyHash that first registered a derivationPath,
+    ///         or 0 if the path has never been bound (pre-migration wallet or never
+    ///         registered).
+    /// @dev Companion to getPkpOwnerMaster. The binding survives
+    ///      removeWalletDerivation by design; used to audit the path first-owner
+    ///      rule and the backfillPathOwners migration.
+    function getPathOwnerMaster(
+        uint256 derivationPath
+    ) public view returns (uint256) {
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        return s.pathToOwnerMaster[derivationPath];
     }
 
     function listApiKeys(
@@ -427,6 +451,22 @@ contract ViewsFacet {
         return account;
     }
 
+    /// @notice Returns true when a usage API key's on-chain expiration has passed.
+    /// @dev The `expiration` field is stored on-chain and surfaced to users as a
+    ///      real access-control deadline, so every authorization path must honor
+    ///      it. An expiration of 0 is the "never expires" sentinel (a key created
+    ///      without an explicit deadline); any non-zero value in the past
+    ///      de-authorizes the key. Reads `block.timestamp`, so this must only be
+    ///      called from view functions that already tolerate miner timestamp
+    ///      drift (seconds-level, irrelevant at day-scale expirations).
+    function _isExpired(
+        AppStorage.UsageApiKey storage usageApiKey
+    ) internal view returns (bool) {
+        return
+            usageApiKey.expiration != 0 &&
+            block.timestamp >= usageApiKey.expiration;
+    }
+
     function canExecuteAction(
         uint256 apiKeyHash,
         uint256 cidHash
@@ -457,9 +497,22 @@ contract ViewsFacet {
             apiKeyHash
         ];
 
-        //  wildcard scenario
+        // An expired usage key authorizes nothing, regardless of its scopes.
+        if (_isExpired(usageApiKey)) {
+            return false;
+        }
+
+        // Wildcard usage key (executeInGroups contains group 0): the key may
+        // execute in ANY of its account's groups, so the per-group
+        // executeInGroups permission below is skipped. But the request must
+        // still resolve to at least one group in THIS account — `groupIds` is
+        // the (cid[, wallet]) match set the caller built from the account's own
+        // groups. A bare `return true` here let a wildcard key authorize
+        // actions/PKPs never registered to its account, reaching another
+        // tenant's PKP in the shared node keystore (issue #62 — cross-account
+        // PKP crypto ops).
         if (usageApiKey.executeInGroups.contains(0)) {
-            return true;
+            return groupIds.length > 0;
         }
 
         for (uint256 i = 0; i < groupIds.length; i++) {
@@ -532,9 +585,14 @@ contract ViewsFacet {
             apiKeyHash
         ];
 
-        if (usageApiKey.executeInGroups.contains(0)) {
-            return true; // wildcard: can execute in any group
+        if (_isExpired(usageApiKey)) {
+            return false; // expired key authorizes nothing
         }
+
+        // Wildcard (group 0) skips the per-group executeInGroups permission but
+        // the action must still resolve to a group in this account, so the key
+        // cannot authorize an action never registered to it (issue #62).
+        bool isWildcard = usageApiKey.executeInGroups.contains(0);
 
         uint256 len = account.groupList.length();
         for (uint256 i = 0; i < len; i++) {
@@ -543,7 +601,7 @@ contract ViewsFacet {
             if (
                 (group.cidHash.contains(cidHash) ||
                     group.cidHash.contains(0)) &&
-                usageApiKey.executeInGroups.contains(groupId)
+                (isWildcard || usageApiKey.executeInGroups.contains(groupId))
             ) {
                 return true;
             }
@@ -562,9 +620,15 @@ contract ViewsFacet {
             apiKeyHash
         ];
 
-        if (usageApiKey.executeInGroups.contains(0)) {
-            return true; // wildcard
+        if (_isExpired(usageApiKey)) {
+            return false; // expired key authorizes nothing
         }
+
+        // Wildcard (group 0) skips the per-group executeInGroups permission but
+        // the (cid, wallet) must still resolve to a group in this account, so a
+        // wildcard key cannot reach another account's PKP in the shared node
+        // keystore (issue #62).
+        bool isWildcard = usageApiKey.executeInGroups.contains(0);
 
         uint256 len = account.groupList.length();
         for (uint256 i = 0; i < len; i++) {
@@ -575,7 +639,7 @@ contract ViewsFacet {
                     group.cidHash.contains(0)) &&
                 (group.pkpId.contains(walletAddress) ||
                     group.pkpId.contains(address(0))) &&
-                usageApiKey.executeInGroups.contains(groupId)
+                (isWildcard || usageApiKey.executeInGroups.contains(groupId))
             ) {
                 return true;
             }
@@ -596,9 +660,14 @@ contract ViewsFacet {
             apiKeyHash
         ];
 
-        if (usageApiKey.executeInGroups.contains(0)) {
-            return (true, true); // wildcard: both trivially true
+        if (_isExpired(usageApiKey)) {
+            return (false, false); // expired key authorizes nothing
         }
+
+        // Wildcard (group 0) skips the per-group executeInGroups permission but
+        // the request must still resolve to a group in this account, so a
+        // wildcard key cannot reach another account's action/PKP (issue #62).
+        bool isWildcard = usageApiKey.executeInGroups.contains(0);
 
         uint256 len = account.groupList.length();
         for (uint256 i = 0; i < len; i++) {
@@ -611,7 +680,8 @@ contract ViewsFacet {
                 group.cidHash.contains(0);
             if (!cidMatch) continue;
 
-            bool groupPermitted = usageApiKey.executeInGroups.contains(groupId);
+            bool groupPermitted = isWildcard ||
+                usageApiKey.executeInGroups.contains(groupId);
             if (!groupPermitted) continue;
 
             canExecute = true;

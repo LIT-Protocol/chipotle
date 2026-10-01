@@ -74,7 +74,8 @@
                   "architecture/verification/onchain-kms",
                   "architecture/verification/upgrade-governance",
                   "architecture/verification/full-verification",
-                  "architecture/verification/chain-of-trust"
+                  "architecture/verification/chain-of-trust",
+                  "architecture/verification/bug-bounty"
                 ]
               }
             ]
@@ -83,6 +84,22 @@
             "group": "Actions Reference",
             "pages": [
               "lit-actions/chipotle"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Lit Agent Keychain",
+        "pages": [
+          "keychain/index",
+          "keychain/quickstart",
+          {
+            "group": "Guides",
+            "pages": [
+              "keychain/agents",
+              "keychain/connected-services",
+              "keychain/sign-in-and-recovery",
+              "keychain/security"
             ]
           }
         ]

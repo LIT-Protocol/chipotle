@@ -128,7 +128,7 @@ export function getAccountCredits(
   client: LitApiServerClient,
   authHeaders: { "X-Api-Key": string },
 ): number {
-  const res = client.billingBalance(authHeaders);
+  const res = client.billingBalance(undefined, authHeaders);
   if (res.response.status !== 200) {
     return 0;
   }

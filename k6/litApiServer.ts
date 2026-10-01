@@ -144,42 +144,6 @@ export interface LitActionRequest {
 }
 
 /**
- * Parameters passed to the action: exposed to guest code via `lit params`, and top-level values are injected into the sandbox environment.
- * @nullable
- */
-export type LitBinaryActionRequestJsParams = unknown | null;
-
-/**
- * POST /lit_binary_action
-
-Executes an any-language action **bundle** in the gVisor runner. Provide either `bundle` (a base64-encoded tar/tar.gz of payload files) or `checksum` (the content id of a bundle the runner already cached). When `bundle` is supplied the server derives the checksum from the decoded tar bytes and authorizes on that derived value — a client-supplied `checksum` is only a hint and is ignored if it disagrees.
-
-The sandbox only ever executes `bash startup.sh` (CPL-355): the `startup_script` sent here, or the `startup.sh` at the bundle root.
- */
-export interface LitBinaryActionRequest {
-  /**
-   * Base64-encoded tar or tar.gz bundle. Optional when `checksum` refers to a previously-submitted bundle the runner still has cached.
-   * @nullable
-   */
-  bundle?: string | null;
-  /**
-   * Content id (IPFS CID) of the bundle. Required when `bundle` is omitted; when `bundle` is present it is only a hint, validated against the value derived from the bundle bytes.
-   * @nullable
-   */
-  checksum?: string | null;
-  /**
-   * Bash script executed as the sandbox entrypoint (`bash startup.sh`). Sent separately from `bundle` so different scripts reuse the same cached bundle. Optional when the bundle ships a `startup.sh` at its root; the request-supplied script wins when both exist.
-   * @nullable
-   */
-  startup_script?: string | null;
-  /**
-   * Parameters passed to the action: exposed to guest code via `lit params`, and top-level values are injected into the sandbox environment.
-   * @nullable
-   */
-  js_params?: LitBinaryActionRequestJsParams;
-}
-
-/**
  * Response for add_group, includes the on-chain group ID.
  */
 export interface AddGroupResponse {
@@ -495,7 +459,7 @@ export interface LanguageFeature {
   name: string;
   /** Human label, e.g. "Python". */
   display_name: string;
-  /** Underlying runner: "deno" (JS) or "gvisor" (everything else). */
+  /** Underlying runner: "deno" (JS). */
   execution_model: ExecutionModel;
   /** Provisionable runtime versions — each maps to an install recipe and a cache profile (NOT baked into the image). Multiple may coexist (e.g. 3.12 and 3.13). Empty for compiled/static languages. */
   runtimes: LanguageRuntime[];
@@ -509,7 +473,6 @@ export type ExecutionModel =
 // eslint-disable-next-line @typescript-eslint/no-redeclare
 export const ExecutionModel = {
   deno: "deno",
-  gvisor: "gvisor",
 } as const;
 
 export interface LanguageRuntime {
@@ -519,7 +482,7 @@ export interface LanguageRuntime {
   version: string;
   /** Chosen when the client omits `runtime`. */
   is_default: boolean;
-  /** True once this profile's install layers are materialized in the gVisor runner's cache. Always false until the install cache lands (CPL-349 phase 2); pre-warm status is wired in phase 5. */
+  /** True once this profile's install layers are materialized in the runner's cache. Always false today. */
   prewarmed: boolean;
 }
 
@@ -669,7 +632,8 @@ export type ConvertToChainSecuredAccountHeaders = {
 };
 
 export type ConvertToChainSecuredAccountDefault =
-  AccountOpResponse | ErrMessage;
+  | AccountOpResponse
+  | ErrMessage;
 
 export type AccountExistsHeaders = {
   /**
@@ -699,7 +663,8 @@ export type CreateWalletPostHeaders = {
 export type CreateWalletPostDefault = CreateWalletResponse | ErrMessage;
 
 export type CreateWalletWithSignatureDefault =
-  CreateWalletWithSignatureResponse | ErrMessage;
+  | CreateWalletWithSignatureResponse
+  | ErrMessage;
 
 export type PrepareWalletDefault = PrepareWalletResponse | ErrMessage;
 
@@ -720,15 +685,6 @@ export type LitActionHeaders = {
 };
 
 export type LitActionDefault = LitActionResponse | ErrMessage;
-
-export type LitBinaryActionHeaders = {
-  /**
-   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
-   */
-  "X-Api-Key": string;
-};
-
-export type LitBinaryActionDefault = LitActionResponse | ErrMessage;
 
 export type GetLitActionIpfsIdDefault = string | ErrMessage;
 
@@ -805,7 +761,8 @@ export type AddUsageApiKeyHeaders = {
 export type AddUsageApiKeyDefault = AddUsageApiKeyResponse | ErrMessage;
 
 export type AddUsageApiKeyWithSignatureDefault =
-  AddUsageApiKeyWithSignatureResponse | ErrMessage;
+  | AddUsageApiKeyWithSignatureResponse
+  | ErrMessage;
 
 export type UpdateUsageApiKeyHeaders = {
   /**
@@ -954,7 +911,8 @@ export type GetNodeChainConfigDefault = NodeChainConfigResponse | ErrMessage;
 export type GetChainConfigKeysDefault = ChainConfigKeysResponse | ErrMessage;
 
 export type GetLitActionClientConfigDefault =
-  LitActionClientConfigResponse | ErrMessage;
+  | LitActionClientConfigResponse
+  | ErrMessage;
 
 export type GetCacheMetadataHeaders = {
   /**
@@ -966,13 +924,21 @@ export type GetCacheMetadataHeaders = {
 export type GetCacheMetadataDefault = CacheMetadataResponse | ErrMessage;
 
 export type GetSupportedLanguagesDefault =
-  SupportedLanguagesResponse | ErrMessage;
+  | SupportedLanguagesResponse
+  | ErrMessage;
 
 export type GetApiPayersDefault = string[] | ErrMessage;
 
 export type GetAdminApiPayerDefault = string | ErrMessage;
 
 export type BillingStripeConfigDefault = StripeConfigResponse | ErrMessage;
+
+export type BillingBalanceParams = {
+  /**
+   * @nullable
+   */
+  force?: boolean | null;
+};
 
 export type BillingBalanceHeaders = {
   /**
@@ -991,7 +957,8 @@ export type BillingCreatePaymentIntentHeaders = {
 };
 
 export type BillingCreatePaymentIntentDefault =
-  CreatePaymentIntentResponse | ErrMessage;
+  | CreatePaymentIntentResponse
+  | ErrMessage;
 
 export type BillingConfirmPaymentHeaders = {
   /**
@@ -1461,56 +1428,6 @@ NOT IDEMPOTENT: every call returns a brand-new wallet (a fresh random derivation
       response,
       data,
       operationId: "lit_action",
-    };
-  }
-
-  /**
-   * Execute an any-language action bundle on the gVisor runner. Same billing, CPU-gating, and response shape as `/lit_action`; differs only in payload (a tar bundle instead of JS) and backend socket. The sandbox always runs `bash startup.sh` — the request's `startup_script`, or the bundle's root `startup.sh` — so one cached bundle serves many different scripts, and top-level `js_params` are injected as environment variables.
-   */
-  litBinaryAction(
-    litBinaryActionRequest: LitBinaryActionRequest,
-    headers: LitBinaryActionHeaders,
-    requestParameters?: Params,
-  ): {
-    response: Response;
-    data: LitBinaryActionDefault;
-    operationId: string;
-  } {
-    const k6url = new URL(this.cleanBaseUrl + `/lit_binary_action`);
-    const mergedRequestParameters = this._mergeRequestParameters(
-      requestParameters || {},
-      this.commonRequestParameters,
-    );
-    const response = http.request(
-      "POST",
-      k6url.toString(),
-      JSON.stringify(litBinaryActionRequest),
-      {
-        ...mergedRequestParameters,
-        headers: {
-          ...mergedRequestParameters?.headers,
-          "Content-Type": "application/json",
-          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
-          ...Object.fromEntries(
-            Object.entries(headers || {}).map(([key, value]) => [
-              key,
-              String(value),
-            ]),
-          ),
-        },
-      },
-    );
-    let data;
-
-    try {
-      data = response.json();
-    } catch {
-      data = response.body;
-    }
-    return {
-      response,
-      data,
-      operationId: "lit_binary_action",
     };
   }
 
@@ -2692,9 +2609,12 @@ NOT IDEMPOTENT: every call returns a brand-new wallet (a fresh random derivation
   }
 
   /**
-   * GET /billing/balance — returns the current credit balance for the authenticated user.
-   */
+ * GET /billing/balance — returns the current credit balance for the authenticated user.
+
+`force=true` drops the cached balance before reading so a credit added directly in Stripe surfaces immediately, without waiting out the 10-minute cache TTL or having to run a Lit Action. A plain re-read is not enough: the stale-while-revalidate background refresh deliberately ignores credit *increases* (it only adopts a balance that went up, to preserve optimistic charge decrements), so the cache must be invalidated to pick up a top-up.
+ */
   billingBalance(
+    params?: BillingBalanceParams,
     headers?: BillingBalanceHeaders,
     requestParameters?: Params,
   ): {
@@ -2702,7 +2622,11 @@ NOT IDEMPOTENT: every call returns a brand-new wallet (a fresh random derivation
     data: BillingBalanceDefault;
     operationId: string;
   } {
-    const k6url = new URL(this.cleanBaseUrl + `/billing/balance`);
+    const k6url = new URL(
+      this.cleanBaseUrl +
+        `/billing/balance` +
+        `?${new URLSearchParams(params).toString()}`,
+    );
     const mergedRequestParameters = this._mergeRequestParameters(
       requestParameters || {},
       this.commonRequestParameters,

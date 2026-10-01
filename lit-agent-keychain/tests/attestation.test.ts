@@ -7,6 +7,7 @@ import {
   verifyQuote,
   replayEventLog,
   CHIPOTLE_ATTESTATION_POLICY,
+  BASE_PUBLIC_RPC_URLS,
   LitConnection,
   Keychain,
 } from "../sdk/src/index.ts";
@@ -44,6 +45,8 @@ type Overrides = Partial<{
   checksums: string;
   cert: string;
   rpc: (data: string) => string;
+  /** Per-endpoint responder; wins over `rpc` for the matching URL. */
+  rpcByUrl: Record<string, (data: string) => Response>;
 }>;
 /** Serves the fixtures and a fake Base RPC; records every call. */
 function serve(overrides: Overrides = {}) {
@@ -66,6 +69,10 @@ function serve(overrides: Overrides = {}) {
       return text(overrides.checksums ?? checksums);
     if (url === `${ORIGIN}/evidences/cert-api.chipotle.litprotocol.com.pem`)
       return text(overrides.cert ?? certPem);
+    if (overrides.rpcByUrl?.[url]) {
+      const { params } = JSON.parse(String(init?.body));
+      return overrides.rpcByUrl[url](params[0].data);
+    }
     if (url === CHIPOTLE_ATTESTATION_POLICY.rpcUrl) {
       const { params } = JSON.parse(String(init?.body));
       const data: string = params[0].data;
@@ -298,5 +305,98 @@ test("a failed attestation blocks execution and is retried, not cached", async (
     assert.ok(await lit.attest());
   } finally {
     restore();
+  }
+});
+
+test("the governance check rotates through fallback RPCs and names every failure", async () => {
+  const [primary, second, third] = BASE_PUBLIC_RPC_URLS;
+  assert.deepEqual(CHIPOTLE_ATTESTATION_POLICY.fallbackRpcUrls, [
+    second,
+    third,
+    BASE_PUBLIC_RPC_URLS[3],
+  ]);
+  const answer = (result: string) => json({ jsonrpc: "2.0", id: 1, result });
+  // Rate limited primary, RPC-level error on the second, third answers.
+  let served = serve({
+    rpcByUrl: {
+      [primary]: () => json({ message: "too many requests" }, 429),
+      [second]: () =>
+        json({ jsonrpc: "2.0", id: 1, error: { message: "upstream down" } }),
+      [third]: () => answer(TRUE),
+    },
+  });
+  try {
+    const report = await verifyAttestation(
+      ORIGIN,
+      CHIPOTLE_ATTESTATION_POLICY,
+      { now: NOW },
+    );
+    assert.ok(report.checks.includes("onchain-governance"));
+    const hosts = (u: string) => new URL(u).host;
+    for (const url of [primary, second, third])
+      assert.equal(
+        served.calls.filter((u) => u === url).length,
+        2,
+        `${hosts(url)} is asked once per lookup`,
+      );
+    assert.equal(
+      served.calls.filter((u) => u === BASE_PUBLIC_RPC_URLS[3]).length,
+      0,
+    );
+  } finally {
+    served.restore();
+  }
+  // A definitive "not whitelisted" from the first endpoint that answers is final.
+  served = serve({
+    rpcByUrl: {
+      [primary]: () => json({}, 503),
+      [second]: () => answer(FALSE),
+      [third]: () => answer(TRUE),
+    },
+  });
+  try {
+    await assert.rejects(
+      verifyAttestation(ORIGIN, CHIPOTLE_ATTESTATION_POLICY, { now: NOW }),
+      /not whitelisted/,
+    );
+    assert.equal(served.calls.filter((u) => u === third).length, 0);
+  } finally {
+    served.restore();
+  }
+  // Every endpoint failing produces one actionable message.
+  served = serve({
+    rpcByUrl: Object.fromEntries(
+      BASE_PUBLIC_RPC_URLS.map((u) => [u, () => json({}, 429)]),
+    ),
+  });
+  try {
+    await assert.rejects(
+      verifyAttestation(ORIGIN, CHIPOTLE_ATTESTATION_POLICY, { now: NOW }),
+      (error: Error) => {
+        assert.match(
+          error.message,
+          /^Attestation: no Base RPC endpoint answered/,
+        );
+        assert.match(error.message, /mainnet\.base\.org: 429 rate limited/);
+        assert.match(error.message, /KEYCHAIN_BASE_RPC_URL/);
+        return true;
+      },
+    );
+  } finally {
+    served.restore();
+  }
+  // An operator-pinned endpoint with no fallbacks is the only one consulted.
+  const pinned = "https://rpc.example/base";
+  served = serve({ rpcByUrl: { [pinned]: () => answer(TRUE) } });
+  try {
+    await verifyAttestation(
+      ORIGIN,
+      { ...CHIPOTLE_ATTESTATION_POLICY, rpcUrl: pinned, fallbackRpcUrls: [] },
+      { now: NOW },
+    );
+    assert.equal(served.calls.filter((u) => u === pinned).length, 2);
+    assert.ok(!served.calls.some((u) => BASE_PUBLIC_RPC_URLS.includes(u)));
+  } finally {
+    served.restore();
   }
 });

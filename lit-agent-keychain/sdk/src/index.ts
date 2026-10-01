@@ -1,5 +1,13 @@
-import { actionCid, actionSource } from "../../protocol/actions.ts";
+import { parseGoogleApproval } from "../../protocol/google-approval.ts";
+import {
+  actionCid,
+  actionSource,
+  cidForCode,
+  templateStore,
+  type Template,
+} from "../../protocol/actions.ts";
 import discoverySource from "../../generated/discovery.ts";
+import { peerCertificateSha256 } from "./tls-runtime.ts";
 import catalog from "../../generated/catalog.ts";
 import {
   shapeToZod,
@@ -9,8 +17,14 @@ import {
   type Shape,
 } from "@lit-protocol/agent-keychain-library/schema";
 export { shapeToJsonSchema };
+export {
+  LiveKeychain,
+  type LiveKeychainOptions,
+  type LiveSecretInfo,
+} from "./live.ts";
 import {
   authoritySchema,
+  type GoogleApproval,
   manifestSchema,
   manifestDocumentSchema,
   envelopeSchema,
@@ -22,6 +36,7 @@ import {
   V,
   DOMAIN,
   type Authority,
+  type Batch,
   type OwnerProof,
   type Document,
   type Challenge,
@@ -52,7 +67,7 @@ import {
   decode,
   responseContext,
 } from "../../protocol/crypto.ts";
-import { jsonFetch } from "../../protocol/http.ts";
+import { jsonFetch, HttpError } from "../../protocol/client-http.ts";
 import {
   ATTESTED_ORIGINS,
   verifyAttestation,
@@ -65,15 +80,18 @@ export {
   replayEventLog,
   CHIPOTLE_ATTESTATION_POLICY,
   ATTESTED_ORIGINS,
+  BASE_PUBLIC_RPC_URLS,
 } from "../../protocol/attestation.ts";
 export type {
   AttestationPolicy,
   AttestationReport,
 } from "../../protocol/attestation.ts";
 export { authorizationTypedData } from "../../protocol/identity.ts";
+export { HttpError } from "../../protocol/client-http.ts";
 export {
   actionCid,
   actionSource,
+  templateStore,
   digest,
   agentPublicKey,
   randomBytes,
@@ -94,6 +112,7 @@ export type {
   Credentials,
 };
 export const DEFAULT_LIT_API_URL = "https://api.chipotle.litprotocol.com";
+export const DEFAULT_KEYCHAIN_SERVICE_URL = "https://keychain.litprotocol.com";
 /**
  * The action catalog compiled into this client: every release id an owner can
  * choose for a secret, with the single operation it permits and, for "use inside
@@ -101,7 +120,9 @@ export const DEFAULT_LIT_API_URL = "https://api.chipotle.litprotocol.com";
  */
 export const ACTIONS: Catalog = catalog;
 export function actionDefinition(release: string): ActionDefinition {
-  const definition = ACTIONS[release];
+  const definition = Object.hasOwn(ACTIONS, release)
+    ? ACTIONS[release]
+    : undefined;
   requireThat(definition, `Unknown action release ${release}`);
   return definition;
 }
@@ -110,7 +131,10 @@ export const availableActions = (tier?: ActionDefinition["tier"]) =>
   Object.values(ACTIONS).filter(
     (d) => !d.deprecated && (tier === undefined || d.tier === tier),
   );
-export type OwnerSigner = (challenge: Challenge) => Promise<OwnerProof>;
+export type OwnerSigner = (
+  challenge: Challenge,
+  authorityRelease?: string,
+) => Promise<OwnerProof>;
 export type SecretBundle = {
   manifest: Signed<Extract<Document, { kind: "manifest" }>>;
   envelope: Signed<Envelope>;
@@ -151,7 +175,16 @@ export function describeCredential(
   if (typeof value !== "string") return "unknown";
   const s = value.trim();
   if (/^(0x)?[0-9a-fA-F]{64}$/.test(s)) return "agent-private-key";
-  if (s.startsWith("{")) return "unknown";
+  if (s.startsWith("{")) {
+    // The raw text of an identity or config file, as an agent that just read
+    // the file from disk would hold it.
+    try {
+      const parsed: unknown = JSON.parse(s);
+      return isRecord(parsed) ? describeCredential(parsed) : "unknown";
+    } catch {
+      return "unknown";
+    }
+  }
   // Chipotle usage keys are currently base64 of 32 random bytes (44 chars).
   if (/^[A-Za-z0-9+/]{43}=$/.test(s)) return "usage-api-key";
   return "unknown";
@@ -189,8 +222,23 @@ export function assertAgentIdentity(
       /^[0-9a-f]{64}$/.test(identity.privateKey),
     "Agent identity privateKey must be 64 lowercase hex characters from `keychain init`",
   );
+  requireThat(
+    !Object.hasOwn(identity, "v") || identity.v === V,
+    "Unsupported agent identity version",
+  );
+  if (Object.hasOwn(identity, "publicKey")) {
+    const key = unhex(identity.privateKey);
+    try {
+      requireThat(
+        identity.publicKey === agentPublicKey(key),
+        "Agent identity publicKey does not match privateKey",
+      );
+    } finally {
+      key.fill(0);
+    }
+  }
 }
-/** Validates the agent config downloaded from Keychain (*.keychain.json). */
+/** Validates an existing legacy static agent config (*.keychain.json). */
 export function assertAgentConfig(
   config: unknown,
 ): asserts config is AgentConfig {
@@ -248,6 +296,34 @@ export type AttestationHooks = {
   /** Re-verify after this many milliseconds. Default one hour. */
   maxAgeMs?: number;
 };
+/** Retry policy for the first request made with a freshly minted usage key. */
+export type FreshKeySettle = {
+  /** Give up after this many milliseconds. Default 45000. */
+  ms?: number;
+  /** Base backoff step in milliseconds; doubles per round, capped at 5 steps. */
+  stepMs?: number;
+  /** Called before each wait with the 1-based retry count. */
+  onWait?: (retry: number) => void;
+};
+/**
+ * Authority releases published before batched approval existed. Secrets pinned
+ * to one of these are still rotated under it, one signature per document.
+ * Append-only: a release's bytes never change, so this list never shrinks.
+ */
+export const PRE_BATCH_AUTHORITY_HASHES: ReadonlySet<string> = new Set([
+  "29314b8876a199afde0396711530c4de9de25eca7f99202a09a4d68f32cd0a66",
+  "1c042eed5e526f747a7533cedb0f3b02dff8ad05143d07299717193b4f6e8e2b",
+]);
+/**
+ * Authority releases whose bytes still enforce a 90-day policy lifetime. Secrets
+ * pinned to one of them keep that cap until they are recreated under a newer
+ * release; later releases leave the lifetime to the owner. Append-only.
+ */
+export const CAPPED_POLICY_AUTHORITY_HASHES: ReadonlySet<string> = new Set([
+  ...PRE_BATCH_AUTHORITY_HASHES,
+  "4ca83f7cd984356d56c8bdd455f8ee358cb3dfaa423d7693b34212a0c1b0f3e6",
+]);
+const LEGACY_POLICY_CAP_DAYS = 90;
 export class LitConnection {
   readonly url: string;
   private readonly keys = new Map<string, string>();
@@ -279,22 +355,30 @@ export class LitConnection {
     const maxAge = this.attestationHooks.maxAgeMs ?? 3600000;
     if (!this.attested || Date.now() - this.attestedAt > maxAge) {
       this.attestedAt = Date.now();
-      this.attested = verifyAttestation(this.url, this.attestationPolicy, {
-        timeoutMs: this.timeoutMs,
-        tlsCertificateSha256: this.attestationHooks.tlsCertificateSha256,
-      }).catch((error) => {
+      this.attested = (async () => {
+        const tlsCertificateSha256 =
+          this.attestationHooks.tlsCertificateSha256 ??
+          (await peerCertificateSha256(this.url, this.timeoutMs));
+        return verifyAttestation(this.url, this.attestationPolicy!, {
+          timeoutMs: this.timeoutMs,
+          tlsCertificateSha256,
+        });
+      })().catch((error) => {
         this.attested = undefined;
         throw error;
       });
     }
     return this.attested;
   }
-  async publicKey(cid: string) {
+  async publicKey(cid: string, settle?: FreshKeySettle) {
     const cached = this.keys.get(cid);
     if (cached) return cached;
     // Deliberately direct to the caller-configured trusted Lit endpoint. Never
     // take a replacement endpoint/key from Keychain's API or a secret bundle.
-    const result = await this.direct(discoverySource, { cid });
+    const result = await this.settled(
+      () => this.direct(discoverySource, { cid }),
+      settle,
+    );
     requireThat(
       typeof result.public_key === "string" &&
         /^(0x)?(?:02|03)[0-9a-f]{64}$|^(0x)?04[0-9a-f]{128}$/.test(
@@ -305,6 +389,34 @@ export class LitConnection {
       this.keys.delete(this.keys.keys().next().value!);
     this.keys.set(cid, result.public_key);
     return result.public_key;
+  }
+  /**
+   * Runs `attempt`, retrying while Chipotle answers 401/403. A usage key that was
+   * minted moments ago is an on-chain write; Chipotle's authorization reads go
+   * through load-balanced RPC backends and one may not have imported that block
+   * yet, and a denial is cached there for ~30 seconds. Bounded by `settle.ms`
+   * (default 45 seconds) so a genuinely unauthorized key still fails.
+   */
+  private async settled<T>(
+    attempt: () => Promise<T>,
+    settle: FreshKeySettle | undefined,
+  ): Promise<T> {
+    if (!settle) return attempt();
+    const deadline = Date.now() + (settle.ms ?? 45000);
+    const step = settle.stepMs ?? 1000;
+    for (let round = 0; ; round++) {
+      try {
+        return await attempt();
+      } catch (error) {
+        const denied =
+          error instanceof HttpError &&
+          (error.status === 401 || error.status === 403);
+        const wait = Math.min(step * 2 ** round, 5 * step);
+        if (!denied || Date.now() + wait > deadline) throw error;
+        settle.onWait?.(round + 1);
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    }
   }
   private async direct(code: string, params: unknown) {
     requireThat(
@@ -325,7 +437,17 @@ export class LitConnection {
         },
       },
       this.timeoutMs,
-    );
+    ).catch((error: unknown) => {
+      // Chipotle answers 401 when the scoped execution key no longer resolves,
+      // which for an agent almost always means the owner replaced it. Keep the
+      // HttpError type and status: login() retries 401/403 for fresh keys.
+      if (error instanceof HttpError && error.status === 401)
+        throw new HttpError(
+          401,
+          `${(error.detail || "execution key rejected").replace(/[.\s]+$/, "")}. The scoped execution key is not accepted by Lit. Use LiveKeychain or the CLI/MCP with only your existing identity file to discover current approvals and execution credentials. If live discovery still returns a rejected key, contact Keychain support. Legacy static clients may override CHIPOTLE_USAGE_API_KEY`,
+        );
+      throw error;
+    });
     requireThat(result.has_error === false, "Lit execution failed");
     requireThat(
       result.response?.ok === true,
@@ -335,17 +457,31 @@ export class LitConnection {
     );
     return result.response;
   }
-  async execute(manifest: Authority | Manifest, params: unknown) {
-    if (this.usageApiKey) return this.direct(actionSource(manifest), params);
+  /**
+   * Runs the action for `manifest`. `template` selects an earlier release of its
+   * template (exact bytes, verified by hash); by default the current release runs.
+   */
+  async execute(
+    manifest: Authority | Manifest,
+    params: unknown,
+    template?: Template,
+  ) {
+    const code = actionSource(manifest, template?.code);
+    if (this.usageApiKey) return this.direct(code, params);
     requireThat(
       "owner" in manifest && (params as any)?.document?.kind === "login",
       "Sign in before executing actions",
     );
     const kind = "owner" in manifest ? "authority" : "secret";
-    const expected = await actionCid(manifest);
+    const expected = await cidForCode(code);
     const result = await jsonFetch(
       `${manifest.registry}/api/execute`,
-      post({ kind, manifest, params }),
+      post({
+        kind,
+        manifest,
+        params,
+        ...(template ? { template: template.hash } : {}),
+      }),
       this.timeoutMs,
     );
     requireThat(result.actionCid === expected, "Action identity mismatch");
@@ -388,16 +524,29 @@ export class OwnerClient {
    * take roughly 30 seconds.
    */
   progress?: (message: string) => void;
+  /** Prompt for an authenticator/recovery code and call verify. Resolve only
+   * after verification succeeds; reject to cancel. A failed code can be retried.
+   * Without a handler, login fails closed for vaults requiring 2FA. */
+  secondFactor?: (verify: (code: string) => Promise<void>) => Promise<void>;
   constructor(
     authority: Authority,
     readonly signer: OwnerSigner,
     lit = new LitConnection(),
     readonly managementTimeoutMs = 120000,
+    options: { authorityRelease?: string } = {},
   ) {
     this.authority = authoritySchema.parse(authority);
     this.vaultId = digest(this.authority);
     this.lit = lit;
+    this.authorityRelease = options.authorityRelease;
   }
+  /**
+   * Template hash of the authority release to sign in and approve new objects
+   * with. Defaults to the newest release bundled in this client. Recovery tooling
+   * and tests can pin an earlier archived release here.
+   */
+  readonly authorityRelease: string | undefined;
+  googleApproval?: { approval: GoogleApproval; authorityRelease: string };
   async api(path: string, init: RequestInit = {}) {
     return jsonFetch(
       this.authority.registry + path,
@@ -405,17 +554,107 @@ export class OwnerClient {
       this.managementTimeoutMs,
     );
   }
-  async authorize<T extends Document>(document: T): Promise<Signed<T>> {
+  /**
+   * Authority releases are versioned. Secrets pin the release that approved them,
+   * so approvals for an existing secret run that exact release; everything else
+   * (sign-in, new secrets, credentials) uses the newest release this client knows.
+   */
+  private async authorityTemplate(authorityCid?: string): Promise<Template> {
+    if (authorityCid !== undefined)
+      return templateStore.resolve(this.authority, authorityCid);
+    return this.authorityRelease === undefined
+      ? templateStore.current(this.authority)
+      : templateStore.byHash(
+          "authority",
+          this.authorityRelease,
+          this.authority.registry,
+        );
+  }
+  /** CID of the authority release this client signs in and approves new objects with. */
+  async currentAuthorityCid() {
+    return actionCid(this.authority, (await this.authorityTemplate()).code);
+  }
+  /** Whether `cid` is a legitimate authority release for this vault. */
+  async isAuthorityVersion(cid: string) {
+    return templateStore.resolve(this.authority, cid).then(
+      () => true,
+      () => false,
+    );
+  }
+  async authorize<T extends Document>(
+    document: T,
+    authorityCid?: string,
+  ): Promise<Signed<T>> {
     if (!this.lit.usageApiKey) await this.login();
-    const signed = await this.approve(document);
+    const template = await this.authorityTemplate(authorityCid);
+    const signed = await this.approve(document, template);
     verifyReceipt(
       signed,
-      await this.lit.publicKey(await actionCid(this.authority)),
+      await this.lit.publicKey(await actionCid(this.authority, template.code)),
       this.vaultId,
     );
     return signed;
   }
-  private async approve<T extends Document>(document: T): Promise<Signed<T>> {
+  /**
+   * Approves several secret objects (manifest, envelope, policy) with a single
+   * owner signature and a single authority execution. Each document still comes
+   * back with its own exact-object receipt, so storage and verification are
+   * unchanged. Authority releases from before batching exist (secrets pinned to
+   * them are rotated under that release), so those fall back to one signature
+   * per document.
+   */
+  async authorizeAll<T extends Batch["documents"][number]>(
+    documents: T[],
+    authorityCid?: string,
+  ): Promise<Signed<T>[]> {
+    requireThat(documents.length >= 1 && documents.length <= 8);
+    if (!this.lit.usageApiKey) await this.login();
+    const template = await this.authorityTemplate(authorityCid);
+    if (PRE_BATCH_AUTHORITY_HASHES.has(template.hash)) {
+      const signed: Signed<T>[] = [];
+      for (const document of documents)
+        signed.push(await this.authorize(document, authorityCid));
+      return signed as any;
+    }
+    const batch: Batch = { kind: "batch", vaultId: this.vaultId, documents };
+    const now = nowSeconds();
+    const challenge: Challenge = {
+      v: V,
+      domain: "lit-keychain/authorize/v2",
+      vaultId: this.vaultId,
+      objectHash: digest(batch),
+      operation: "batch",
+      nonce: randomId(),
+      issuedAt: now,
+      expiresAt: now + 120,
+    };
+    const proof = await this.signer(challenge, template.hash);
+    const response = await this.lit.execute(
+      this.authority,
+      { documents, proof },
+      template,
+    );
+    requireThat(
+      Array.isArray(response.receipts) &&
+        response.receipts.length === documents.length,
+      "Authority returned the wrong number of receipts",
+    );
+    const publicKey = await this.lit.publicKey(
+      await actionCid(this.authority, template.code),
+    );
+    return documents.map((document, i) => {
+      const signed = {
+        document,
+        receipt: receiptSchema.parse(response.receipts[i]),
+      };
+      verifyReceipt(signed, publicKey, this.vaultId);
+      return signed;
+    }) as any;
+  }
+  private async approve<T extends Document>(
+    document: T,
+    template: Template,
+  ): Promise<Signed<T>> {
     requireThat(document.vaultId === this.vaultId);
     const now = nowSeconds();
     const challenge: Challenge = {
@@ -428,23 +667,74 @@ export class OwnerClient {
       issuedAt: now,
       expiresAt: now + 120,
     };
-    const proof = await this.signer(challenge);
-    const response = await this.lit.execute(this.authority, {
-      document,
-      proof,
-    });
+    const proof = await this.signer(challenge, template.hash);
+    const response = await this.lit.execute(
+      this.authority,
+      { document, proof },
+      template,
+    );
+    if (document.kind === "login") {
+      this.googleApproval =
+        response.googleApproval === undefined
+          ? undefined
+          : {
+              approval: parseGoogleApproval(response.googleApproval),
+              authorityRelease: template.hash,
+            };
+    }
     return { document, receipt: receiptSchema.parse(response.receipt) };
   }
   async login() {
     this.progress?.("Requesting a sign-in challenge…");
-    const document = await this.api("/auth/challenge", post(this.authority));
+    const { authorityCid: recorded, ...document } = await this.api(
+      "/auth/challenge",
+      post(this.authority),
+    );
     requireThat(document.kind === "login" && document.vaultId === this.vaultId);
     this.progress?.("Verifying owner authorization…");
-    const authorization = await this.approve(document);
-    const result = await this.api(
+    // Sign in with the newest release, which moves the vault forward. If that
+    // release cannot verify this owner (its owner set was approved under the
+    // release the vault currently uses), fall back to that release.
+    let template = await this.authorityTemplate();
+    let authorization: Signed<Document>;
+    try {
+      authorization = await this.approve(document, template);
+    } catch (error) {
+      if (
+        typeof recorded !== "string" ||
+        recorded === (await actionCid(this.authority, template.code))
+      )
+        throw error;
+      template = await templateStore.resolve(this.authority, recorded);
+      this.progress?.("Retrying with the vault's current authority release…");
+      authorization = await this.approve(document, template);
+    }
+    let result = await this.api(
       "/auth/login",
       post({ authority: this.authority, authorization }),
     );
+    if (result.twoFactorRequired === true) {
+      requireThat(
+        !!this.secondFactor,
+        "Two-factor authentication required. Configure a secondFactor handler to enter an authenticator or recovery code.",
+      );
+      requireThat(
+        typeof result.token === "string" && /^[0-9a-f]{64}$/.test(result.token),
+      );
+      const token = result.token;
+      let verified = false;
+      this.progress?.("Enter your two-factor authentication code…");
+      await this.secondFactor!(async (code) => {
+        const completed = await this.api(
+          "/auth/two-factor",
+          post({ token, code }),
+        );
+        requireThat(completed.vaultId === this.vaultId);
+        result = completed;
+        verified = true;
+      });
+      requireThat(verified, "Two-factor authentication was not completed");
+    }
     this.progress?.(
       "Preparing your vault's execution key on the Lit network… " +
         "The first sign-in takes about 30 seconds.",
@@ -459,9 +749,28 @@ export class OwnerClient {
       this.progress?.("Verifying the Lit endpoint and sign-in receipt…");
       verifyReceipt(
         authorization,
-        await this.lit.publicKey(await actionCid(this.authority)),
+        await this.lit.publicKey(
+          await actionCid(this.authority, template.code),
+          {
+            onWait: () =>
+              this.progress?.(
+                "Waiting for the Lit network to recognize your new execution key…",
+              ),
+          },
+        ),
         this.vaultId,
       );
+      if (this.googleApproval) {
+        const { approval } = this.googleApproval;
+        requireThat(approval.payload.vaultId === this.vaultId);
+        verifyAction(
+          approval.payload,
+          approval.signature,
+          await this.lit.publicKey(
+            await actionCid(this.authority, template.code),
+          ),
+        );
+      }
     } catch (error) {
       this.lit.usageApiKey = undefined;
       await this.api("/auth/logout", { method: "POST" }).catch(() => {});
@@ -486,20 +795,25 @@ export class OwnerClient {
       network: this.authority.network,
       registry: this.authority.registry,
       vaultId: this.vaultId,
-      authorityCid: await actionCid(this.authority),
+      authorityCid: await this.currentAuthorityCid(),
       secretId: randomId(),
       release,
     };
     const cid = await actionCid(manifest);
-    const signedManifest = await this.authorize({
+    // Make the derived action executable by this vault's billing key before it
+    // is approved, so its encryption key can be fetched and manifest, envelope
+    // and policy approved together with one owner signature below.
+    this.progress?.("Preparing the secret's action on the Lit network…");
+    await this.api("/api/actions/prepare", post({ manifest, actionCid: cid }));
+    const manifestDocument = {
       v: V,
       domain: DOMAIN,
-      kind: "manifest",
+      kind: "manifest" as const,
       vaultId: this.vaultId,
       manifest,
       actionCid: cid,
-    });
-    await this.api("/api/actions", post(signedManifest));
+    };
+    this.progress?.("Encrypting the secret in your browser…");
     const key = await this.lit.encryptionPublicKey(manifest);
     const envelope = await encryptEnvelope(
       {
@@ -515,9 +829,8 @@ export class OwnerClient {
       key,
       plaintext,
     );
-    const signedEnvelope = await this.authorize(envelope);
     const now = nowSeconds();
-    const policy = await this.authorize({
+    const policyDocument: Policy = {
       v: V,
       domain: DOMAIN,
       kind: "policy",
@@ -530,7 +843,13 @@ export class OwnerClient {
       notBefore: now,
       expiresAt: now + 30 * 86400,
       grants: [],
-    });
+    };
+    this.progress?.("Approving the secret with one signature…");
+    const [signedManifest, signedEnvelope, policy] = (await this.authorizeAll([
+      manifestDocument,
+      envelope,
+      policyDocument,
+    ])) as [Signed<typeof manifestDocument>, Signed<Envelope>, Signed<Policy>];
     const bundle: SecretBundle = {
       manifest: signedManifest,
       envelope: signedEnvelope,
@@ -545,36 +864,87 @@ export class OwnerClient {
     await verifyBundle(bundle, this.lit, this.vaultId);
     requireThat(bundle.manifest.document.manifest.secretId === secretId);
     requireThat(
-      bundle.manifest.document.manifest.authorityCid ===
-        (await actionCid(this.authority)),
+      await this.isAuthorityVersion(
+        bundle.manifest.document.manifest.authorityCid,
+      ),
+      "Secret was approved by an authority release this client does not know",
     );
     return bundle;
   }
+  /**
+   * Longest policy lifetime this secret's pinned release accepts, in days, or
+   * null when the owner may choose any lifetime including none.
+   */
+  async policyLifetimeCapDays(bundle: SecretBundle): Promise<number | null> {
+    const template = await this.authorityTemplate(
+      bundle.manifest.document.manifest.authorityCid,
+    );
+    return CAPPED_POLICY_AUTHORITY_HASHES.has(template.hash)
+      ? LEGACY_POLICY_CAP_DAYS
+      : null;
+  }
+  /**
+   * Re-signs the policy. `days` sets a new expiry that many days from now
+   * (default 30); `null` removes the expiry so the policy lasts until the owner
+   * revokes or disables it. Secrets pinned to an older release still cap
+   * lifetimes at 90 days (see `policyLifetimeCapDays`). `preserveExpiry` keeps
+   * the exact existing expiry (including null) and cannot be combined with `days`.
+   */
   async setPolicy(
     bundle: SecretBundle,
-    changes: { grants?: Grant[]; disabled?: boolean; days?: number },
+    changes: {
+      grants?: Grant[];
+      disabled?: boolean;
+      days?: number | null;
+      preserveExpiry?: boolean;
+    },
   ) {
     const old = bundle.policy.document;
     const now = nowSeconds();
-    const days = changes.days ?? 30;
-    requireThat(Number.isInteger(days) && days >= 1 && days <= 90);
+    const days = changes.days === undefined ? 30 : changes.days;
+    requireThat(
+      days === null ||
+        (Number.isInteger(days) &&
+          days >= 1 &&
+          Number.isSafeInteger(now + days * 86400)),
+    );
+    requireThat(!(changes.preserveExpiry && changes.days !== undefined));
+    const expiresAt = changes.preserveExpiry
+      ? old.expiresAt
+      : days === null
+        ? null
+        : now + days * 86400;
+    requireThat(expiresAt === null || expiresAt > now);
+    const cap = await this.policyLifetimeCapDays(bundle);
+    if (cap !== null && (expiresAt === null || expiresAt > now + cap * 86400))
+      throw new Error(
+        `This secret was created under an earlier Keychain release that limits permissions to ${cap} days. Recreate the secret to choose a longer or unlimited lifetime.`,
+      );
     const policy = policySchema.parse({
       ...old,
       epoch: old.epoch + 1,
       previousHash: digest(old),
       notBefore: now,
-      expiresAt: now + days * 86400,
+      expiresAt,
       grants: changes.grants ?? old.grants,
       disabled: changes.disabled ?? old.disabled,
     });
-    const signed = await this.authorize(policy);
+    const signed = await this.authorize(
+      policy,
+      bundle.manifest.document.manifest.authorityCid,
+    );
     await this.api(`/api/secrets/${old.secretId}/policy`, {
       ...post(signed),
       method: "PUT",
     });
     return { ...bundle, policy: signed };
   }
-  async delegate(bundle: SecretBundle, publicKey: string, label: string) {
+  async delegate(
+    bundle: SecretBundle,
+    publicKey: string,
+    label: string,
+    options: { preserveExpiry?: boolean } = {},
+  ) {
     const grant: Grant = {
       agentPublicKey: publicKey,
       label,
@@ -589,6 +959,7 @@ export class OwnerClient {
       ],
     };
     return this.setPolicy(bundle, {
+      preserveExpiry: options.preserveExpiry,
       grants: [
         ...bundle.policy.document.grants.filter(
           (g) => g.agentPublicKey !== publicKey,
@@ -607,24 +978,36 @@ export class OwnerClient {
       await this.lit.encryptionPublicKey(manifest),
       plaintext,
     );
-    const signedEnvelope = await this.authorize(envelope);
     const now = nowSeconds();
-    const policy = await this.authorize({
-      ...bundle.policy.document,
-      epoch: bundle.policy.document.epoch + 1,
-      previousHash: digest(bundle.policy.document),
-      notBefore: now,
-      expiresAt: now + 30 * 86400,
-      grants: bundle.policy.document.grants.map((g) => ({
-        ...g,
-        versions: [
-          {
-            version: envelope.metadata.version,
-            envelopeHash: digest(envelope),
-          },
-        ],
-      })),
-    });
+    const [signedEnvelope, policy] = (await this.authorizeAll(
+      [
+        envelope,
+        {
+          ...bundle.policy.document,
+          epoch: bundle.policy.document.epoch + 1,
+          previousHash: digest(bundle.policy.document),
+          notBefore: now,
+          // Rotating the value must not shorten (or silently extend) a lifetime
+          // the owner already approved, including "never"; an expired policy
+          // restarts at the default.
+          expiresAt:
+            bundle.policy.document.expiresAt === null ||
+            bundle.policy.document.expiresAt > now
+              ? bundle.policy.document.expiresAt
+              : now + 30 * 86400,
+          grants: bundle.policy.document.grants.map((g) => ({
+            ...g,
+            versions: [
+              {
+                version: envelope.metadata.version,
+                envelopeHash: digest(envelope),
+              },
+            ],
+          })),
+        },
+      ],
+      manifest.authorityCid,
+    )) as [Signed<Envelope>, Signed<Policy>];
     const updated = {
       manifest: bundle.manifest,
       envelope: signedEnvelope,
@@ -633,17 +1016,71 @@ export class OwnerClient {
     await this.api(`/api/secrets/${manifest.secretId}/rotate`, post(updated));
     return updated;
   }
+  async securityStatus(): Promise<{
+    enabled: boolean;
+    recoveryCodesRemaining: number;
+  }> {
+    return this.api("/api/security");
+  }
+  private async securityApproval(
+    operation: "setup" | "disable" | "regenerate",
+  ) {
+    const { authorityCid, ...document } = await this.api(
+      "/api/security/challenge",
+      post({ operation }),
+    );
+    requireThat(document.kind === "login" && document.vaultId === this.vaultId);
+    return this.authorize(document, authorityCid);
+  }
+  async setupTwoFactor(): Promise<{ secret: string; uri: string }> {
+    return this.api(
+      "/api/security/totp/setup",
+      post(await this.securityApproval("setup")),
+    );
+  }
+  async confirmTwoFactor(code: string): Promise<{ recoveryCodes: string[] }> {
+    return this.api("/api/security/totp/confirm", post({ code }));
+  }
+  async disableTwoFactor(code: string): Promise<void> {
+    await this.api(
+      "/api/security/totp/disable",
+      post({ authorization: await this.securityApproval("disable"), code }),
+    );
+  }
+  async regenerateRecoveryCodes(
+    code: string,
+  ): Promise<{ recoveryCodes: string[] }> {
+    return this.api(
+      "/api/security/totp/regenerate",
+      post({ authorization: await this.securityApproval("regenerate"), code }),
+    );
+  }
   async getCredentials(): Promise<Signed<Credentials> | null> {
     const state = await this.api(`/api/registry/credentials/${this.vaultId}`);
     requireThat(Object.hasOwn(state, "policy"));
     if (state.policy === null) return null;
     const signed = signedSchema(credentialsSchema).parse(state.policy);
-    verifyReceipt(
-      signed,
-      await this.lit.publicKey(await actionCid(this.authority)),
-      this.vaultId,
-    );
+    await this.verifyByAnyAuthority(signed);
     return signed;
+  }
+  /** Verifies a receipt against every authority release this client knows for the vault. */
+  private async verifyByAnyAuthority(signed: Signed<unknown>) {
+    for (const hash of templateStore.hashes("authority")) {
+      try {
+        const { code } = await templateStore.byHash(
+          "authority",
+          hash,
+          this.authority.registry,
+        );
+        verifyReceipt(
+          signed,
+          await this.lit.publicKey(await actionCid(this.authority, code)),
+          this.vaultId,
+        );
+        return;
+      } catch {}
+    }
+    throw new Error("Receipt was not issued by a known authority release");
   }
   async updateCredentials(owners: Authority["owner"][]) {
     const previous = (await this.getCredentials())?.document;
@@ -672,6 +1109,16 @@ export class OwnerClient {
       credentials: await this.getCredentials(),
       bundles,
     };
+  }
+  /**
+   * Deletes a secret. The registry entry every agent request is checked
+   * against, all signed policies and every ciphertext version are removed in one
+   * transaction, so the next request from any agent is denied and the slot is
+   * freed. An encrypted backup taken earlier can still restore it deliberately.
+   */
+  async deleteSecret(secretId: string) {
+    requireThat(/^[0-9a-f]{64}$/.test(secretId), "Invalid secret id");
+    await this.api(`/api/secrets/${secretId}`, { method: "DELETE" });
   }
   async listSecrets() {
     const secrets: any[] = [];
@@ -710,12 +1157,26 @@ export class OwnerClient {
     // A fresh device may have no usage key before recovery/sign-in. Upload only
     // the signed public backup; the API and immutable authority action verify it.
     // Sign-in then bootstraps direct Chipotle verification before any secret use.
-    if (lit.usageApiKey)
-      verifyReceipt(
-        credentials,
-        await lit.publicKey(await actionCid(authority)),
-        digest(authority),
-      );
+    if (lit.usageApiKey) {
+      let verified = false;
+      for (const hash of templateStore.hashes("authority")) {
+        try {
+          const { code } = await templateStore.byHash(
+            "authority",
+            hash,
+            authority.registry,
+          );
+          verifyReceipt(
+            credentials,
+            await lit.publicKey(await actionCid(authority, code)),
+            digest(authority),
+          );
+          verified = true;
+          break;
+        } catch {}
+      }
+      requireThat(verified, "Credentials receipt is from an unknown release");
+    }
     await jsonFetch(
       authority.registry + "/auth/restore-credentials",
       post({ authority, credentials }),
@@ -736,13 +1197,66 @@ export class OwnerClient {
     for (const bundle of backup.bundles) {
       await verifyBundle(bundle, this.lit, this.vaultId);
       requireThat(
-        bundle.manifest.document.manifest.authorityCid ===
-          (await actionCid(this.authority)),
+        await this.isAuthorityVersion(
+          bundle.manifest.document.manifest.authorityCid,
+        ),
+        "Backup was approved by an authority release this client does not know",
       );
       await this.api("/api/actions", post(bundle.manifest));
       await this.api("/api/restore", post(bundle));
     }
   }
+}
+/**
+ * Why the signed policy in a bundle would make the action refuse this agent's
+ * request, or `undefined` when it permits it. The action never says why it
+ * refused (its only failure answer is `access_denied`, so nothing about the
+ * policy or the upstream call leaks), so the client explains what it can see
+ * before spending an execution.
+ */
+export function explainDenial(
+  policy: Policy,
+  agentPublicKey: string,
+  operation: string,
+  version: number,
+  envelopeHash: string,
+  now = nowSeconds(),
+): string | undefined {
+  const when = (seconds: number) => new Date(seconds * 1000).toISOString();
+  if (policy.disabled)
+    return "the owner disabled this secret. Ask them to enable it in Keychain.";
+  if (now < policy.notBefore)
+    return `the policy is not valid until ${when(policy.notBefore)}. Check this machine's clock.`;
+  if (policy.expiresAt !== null && now >= policy.expiresAt)
+    return `the owner's permission expired at ${when(policy.expiresAt)}. Ask them to renew it in Keychain.`;
+  const grant = policy.grants.find((g) => g.agentPublicKey === agentPublicKey);
+  if (!grant)
+    return `agent ${agentPublicKey} is not approved for this secret. Give the owner this public key to approve, or check that the identity file matches the approved agent.`;
+  if (!grant.operations.includes(operation))
+    return `agent "${grant.label}" is approved for ${grant.operations.join(", ")}, not ${operation}.`;
+  if (
+    !grant.versions.some(
+      (v) => v.version === version && v.envelopeHash === envelopeHash,
+    )
+  )
+    return `agent "${grant.label}" is approved for version ${grant.versions
+      .map((v) => v.version)
+      .join(
+        ", ",
+      )} of this secret, not the current version ${version}. Ask the owner to re-approve it after the rotation.`;
+  return undefined;
+}
+/**
+ * Message for an `access_denied` answer that arrived even though the signed
+ * policy permitted the request. For "use inside Lit" actions that almost always
+ * means the upstream call failed, but the enclave does not say.
+ */
+function refusedByAction(name: string, definition: ActionDefinition) {
+  if (definition.kind === "use") {
+    const hosts = definition.allowedHosts.join(", ");
+    return `Access denied: Lit ran the ${definition.name} action for "${name}" but it did not complete. The owner's policy permits this request, so the call to ${hosts} most likely failed (a rejected or expired credential, or an input the service refused); the enclave reports no detail. Check the credential with its provider or ask the owner to rotate it.`;
+  }
+  return `Access denied: Lit refused to release "${name}" although the policy this client fetched permits it. The policy may have just changed; retry once, then ask the owner to check this agent's approval in Keychain.`;
 }
 export async function verifyBundle(
   bundle: SecretBundle,
@@ -755,8 +1269,9 @@ export async function verifyBundle(
   const m = signedManifest.document.manifest;
   requireThat(signedManifest.document.vaultId === m.vaultId);
   requireThat(!vaultId || m.vaultId === vaultId);
-  const cid = await actionCid(m);
-  requireThat(bundle.manifest.document.actionCid === cid);
+  const cid = bundle.manifest.document.actionCid;
+  // Throws unless some known release of this action binds to exactly this CID.
+  await templateStore.resolve(m, cid);
   const key = await lit.publicKey(m.authorityCid);
   const env = signedSchema(envelopeSchema).parse(bundle.envelope);
   const policy = signedSchema(policySchema).parse(bundle.policy);
@@ -775,6 +1290,10 @@ export async function verifyBundle(
 }
 export class Keychain {
   private readonly key: Uint8Array<ArrayBuffer>;
+  private destroyed = false;
+  private assertActive() {
+    requireThat(!this.destroyed, "Keychain client has been destroyed");
+  }
   readonly publicKey: string;
   readonly lit: LitConnection;
   constructor(
@@ -785,24 +1304,46 @@ export class Keychain {
       usageApiKey?: string;
       attestation?: AttestationOption;
       tlsCertificateSha256?: string;
+      /**
+       * Reuse an attested connection whose usage key already matches this
+       * config, instead of attesting a fresh one. Used by the live client.
+       */
+      lit?: LitConnection;
     } = {},
   ) {
+    requireThat(
+      !isRecord(privateKey),
+      describeCredential(privateKey) === "agent-config"
+        ? "The first argument is an agent config (*.keychain.json); pass identity.privateKey first and the config second."
+        : "Pass identity.privateKey (the 64-hex string from `keychain init`), not the whole identity object.",
+    );
     assertAgentIdentity({ privateKey });
     assertAgentConfig(config);
     if (options.usageApiKey !== undefined)
       assertUsageApiKey(options.usageApiKey);
     this.key = unhex(privateKey);
     this.publicKey = agentPublicKey(this.key);
-    this.lit = new LitConnection(
-      config.litApiUrl,
-      options.timeoutMs,
-      options.usageApiKey ?? config.usageApiKey,
-      options.attestation,
-      { tlsCertificateSha256: options.tlsCertificateSha256 },
-    );
+    const usageApiKey = options.usageApiKey ?? config.usageApiKey;
+    if (options.lit) {
+      requireThat(
+        options.lit.url === origin(config.litApiUrl) &&
+          options.lit.usageApiKey === usageApiKey,
+        "Shared Lit connection does not match this agent config",
+      );
+      this.lit = options.lit;
+    } else {
+      this.lit = new LitConnection(
+        config.litApiUrl,
+        options.timeoutMs,
+        usageApiKey,
+        options.attestation,
+        { tlsCertificateSha256: options.tlsCertificateSha256 },
+      );
+    }
   }
   /** Attests the Lit endpoint now instead of lazily on the first read. */
   attest() {
+    this.assertActive();
     return this.lit.attest();
   }
   /** Secret names with the single operation each release permits and its input shape, if any. */
@@ -827,6 +1368,7 @@ export class Keychain {
     return { privateKey: hex(key), publicKey: agentPublicKey(key) };
   }
   destroy() {
+    this.destroyed = true;
     this.key.fill(0);
   }
   /** Decrypts an export-release secret locally and returns its value. */
@@ -839,12 +1381,13 @@ export class Keychain {
    * and again inside the enclave. Returns the action's bounded result object.
    */
   async use(name: string, input?: Record<string, unknown>): Promise<any> {
+    this.assertActive();
+    this.requireSecret(name);
     const locator = this.config.secrets[name];
-    requireThat(locator, "Unknown secret");
     const definition = actionDefinition(locator.manifest.release);
     requireThat(
       definition.kind === "use",
-      "Secret is an export release; call get()",
+      `Secret "${name}" is a stored secret; call get("${name}") or \`keychain run\` instead of use(). Only connected services have an action to run.`,
     );
     let validated: Record<string, unknown> | undefined;
     if (definition.input) {
@@ -865,21 +1408,32 @@ export class Keychain {
   async stripeBalance(name: string) {
     return this.use(name);
   }
+  /** Names the config's secrets in the error so a typo is obvious. */
+  private requireSecret(name: string) {
+    const names = Object.keys(this.config.secrets);
+    requireThat(
+      Object.hasOwn(this.config.secrets, name),
+      `Unknown secret "${name}". This agent config contains: ${names.join(", ") || "no secrets"}`,
+    );
+  }
   private async read(
     name: string,
     operation: string,
     input?: Record<string, unknown>,
   ): Promise<string> {
+    this.assertActive();
+    this.requireSecret(name);
     const locator = this.config.secrets[name];
-    requireThat(locator, "Unknown secret");
     const manifest = manifestSchema.parse(locator.manifest);
+    // The exact release this secret was created under; fetched by hash if older
+    // than this client's bundled template.
+    const template = await templateStore.resolve(manifest, locator.actionCid);
+    const definition = actionDefinition(manifest.release);
     requireThat(
-      (await actionCid(manifest)) === locator.actionCid,
-      "Pinned action CID mismatch",
-    );
-    requireThat(
-      actionDefinition(manifest.release).operation === operation,
-      "Unsupported release operation",
+      definition.operation === operation,
+      definition.kind === "use"
+        ? `Secret "${name}" was created with the ${definition.name} action (${manifest.release}); call use("${name}") instead of get(). Its value never leaves the enclave.`
+        : `Secret "${name}" is a stored secret; call get("${name}") instead of use().`,
     );
     const bundle: SecretBundle = await jsonFetch(
       `${manifest.registry}/api/secrets/${manifest.secretId}/bundle`,
@@ -892,6 +1446,17 @@ export class Keychain {
       "Manifest substitution",
     );
     const now = nowSeconds();
+    // The action answers every failure with a bare access_denied. Explain what
+    // the signed policy already shows before paying for an execution.
+    const denial = explainDenial(
+      bundle.policy.document,
+      this.publicKey,
+      operation,
+      bundle.envelope.document.metadata.version,
+      digest(bundle.envelope.document),
+      now,
+    );
+    requireThat(denial === undefined, `Access denied: ${denial}`);
     const responseKey = randomBytes();
     const request = requestSchema.parse({
       v: V,
@@ -911,11 +1476,22 @@ export class Keychain {
       expiresAt: now + 90,
     });
     try {
-      const result = await this.lit.execute(manifest, {
-        operation,
-        signedRequest: { request, signature: signAgent(request, this.key) },
-        envelope: bundle.envelope,
-      });
+      let result;
+      try {
+        result = await this.lit.execute(
+          manifest,
+          {
+            operation,
+            signedRequest: { request, signature: signAgent(request, this.key) },
+            envelope: bundle.envelope,
+          },
+          template,
+        );
+      } catch (error) {
+        if (error instanceof Error && error.message === "Access denied")
+          throw new Error(refusedByAction(name, definition));
+        throw error;
+      }
       const protectedResult = result.result as ProtectedResponse;
       requireThat(
         protectedResult?.payload?.v === V &&

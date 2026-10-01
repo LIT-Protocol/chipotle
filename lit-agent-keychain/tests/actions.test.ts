@@ -14,8 +14,11 @@ import {
   makeReceipt,
   encryptEnvelope,
   encryptionKey,
+  verifyReceipt,
+  nowSeconds,
 } from "../protocol/crypto.ts";
 import { actionCid } from "../protocol/actions.ts";
+import { V, DOMAIN } from "../protocol/schema.ts";
 
 test("owner EIP-712 authorization issues a verifiable exact-object receipt", async () => {
   const f = await fixture();
@@ -40,6 +43,112 @@ test("owner EIP-712 authorization issues a verifiable exact-object receipt", asy
       (await f.h.run(f.authority, { document: f.policy, proof: altered })).ok,
       false,
     );
+  }
+});
+test("one owner signature approves a batch and yields one exact-object receipt per document", async () => {
+  const f = await fixture();
+  const manifestDocument = {
+    v: V,
+    domain: DOMAIN,
+    kind: "manifest" as const,
+    vaultId: f.manifest.vaultId,
+    manifest: f.manifest,
+    actionCid: f.cid,
+  };
+  const documents = [manifestDocument, f.envelope, f.policy];
+  const batch = { kind: "batch", vaultId: f.manifest.vaultId, documents };
+  const proof = await f.ownerProof(batch as any);
+  const out = await f.h.run(f.authority, { documents, proof });
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(out.receipts.length, 3);
+  assert.equal(out.receipt, undefined);
+  documents.forEach((document, i) => {
+    verifyAction(
+      out.receipts[i].payload,
+      out.receipts[i].signature,
+      pubFor(f.authorityCid),
+    );
+    assert.equal(out.receipts[i].payload.objectHash, digest(document));
+    // Receipts are indistinguishable from single-document ones.
+    verifyReceipt(
+      { document, receipt: out.receipts[i] },
+      pubFor(f.authorityCid),
+      f.manifest.vaultId,
+    );
+  });
+  // Only the exact batch is approved: reordering, dropping, adding or altering a
+  // document, or presenting the batch proof for a single document, is refused.
+  const denied = async (params: unknown) =>
+    assert.equal((await f.h.run(f.authority, params as any)).ok, false);
+  await denied({ documents: [f.envelope, manifestDocument, f.policy], proof });
+  await denied({ documents: [manifestDocument, f.envelope], proof });
+  await denied({ documents: [...documents, f.policy], proof });
+  await denied({
+    documents: [
+      manifestDocument,
+      f.envelope,
+      { ...f.policy, expiresAt: f.policy.expiresAt! + 1 },
+    ],
+    proof,
+  });
+  await denied({ document: f.policy, proof });
+  await denied({ document: f.policy, documents, proof });
+  // A single-document proof cannot be replayed as a batch of one.
+  const single = await f.ownerProof(f.policy);
+  await denied({ documents: [f.policy], proof: single });
+  // Sign-in and owner-credential documents are never batched.
+  const login = {
+    v: V,
+    domain: DOMAIN,
+    kind: "login" as const,
+    vaultId: f.manifest.vaultId,
+    challenge: digest({ any: 1 }),
+    expiresAt: f.now + 60,
+  };
+  const withLogin = [manifestDocument, login];
+  await denied({
+    documents: withLogin,
+    proof: await f.ownerProof({
+      kind: "batch",
+      vaultId: f.manifest.vaultId,
+      documents: withLogin,
+    } as any),
+  });
+  // Per-document invariants still apply inside a batch.
+  const badPolicy = { ...f.policy, expiresAt: f.policy.notBefore };
+  const bad = [manifestDocument, badPolicy];
+  await denied({
+    documents: bad,
+    proof: await f.ownerProof({
+      kind: "batch",
+      vaultId: f.manifest.vaultId,
+      documents: bad,
+    } as any),
+  });
+});
+test("policy lifetime is the owner's choice: multi-year and never-expiring policies are approved and honored", async () => {
+  for (const expiresAt of [null, nowSeconds() + 10 * 366 * 86400]) {
+    const f = await fixture();
+    f.policy.expiresAt = expiresAt;
+    const proof = await f.ownerProof(f.policy);
+    const approved = await f.h.run(f.authority, { document: f.policy, proof });
+    assert.equal(
+      approved.ok,
+      true,
+      `authority approves expiresAt=${expiresAt}`,
+    );
+    f.request.policyHash = digest(f.policy);
+    f.params.signedRequest = {
+      request: f.request,
+      signature: signAgent(f.request, f.agentKey),
+    };
+    f.h.registry.set(f.registryUrl, f.sign(f.policy));
+    const out = await f.h.run(f.manifest, f.params);
+    assert.equal(out.ok, true, `secret action honors expiresAt=${expiresAt}`);
+    // A never-expiring policy still fails closed on every other check.
+    f.policy.disabled = true;
+    f.h.registry.set(f.registryUrl, f.sign(f.policy));
+    assert.equal((await f.h.run(f.manifest, f.params)).ok, false);
   }
 });
 test("local HPKE import and signed recipient-encrypted release round trip", async () => {
@@ -256,4 +365,56 @@ test("Stripe redirects, upstream errors and reflected strings never expose a cre
       error: "access_denied",
     });
   }
+});
+test("authority treats a credentials receipt from another release like the original credential", async () => {
+  // A vault whose owner set was approved under a different authority release:
+  // this release cannot verify that receipt, so it sees only the root owner.
+  const f = await fixture();
+  const otherOwner = {
+    kind: "wallet" as const,
+    address: "0x" + "2".repeat(40),
+  };
+  const credentials = {
+    v: 2 as const,
+    domain: "lit-keychain/v2" as const,
+    kind: "credentials" as const,
+    vaultId: f.manifest.vaultId,
+    epoch: 1,
+    previousHash: null,
+    owners: [otherOwner],
+    notBefore: f.now - 10,
+    expiresAt: null,
+  };
+  const foreignKey = keyFor("Qm" + "z".repeat(44));
+  f.h.registry.set(
+    `${f.authority.registry}/api/registry/credentials/${f.manifest.vaultId}`,
+    {
+      document: credentials,
+      receipt: makeReceipt(credentials, foreignKey, f.now),
+    },
+  );
+  // Root owner still authorizes (equivalent to the operator serving null)…
+  const proof = await f.ownerProof(f.policy);
+  const out = await f.h.run(f.authority, { document: f.policy, proof });
+  assert.equal(out.ok, true);
+  // …but the unverifiable owner set grants nothing: a forged owner is denied.
+  const forged = structuredClone(proof);
+  forged.owner = otherOwner;
+  assert.equal(
+    (await f.h.run(f.authority, { document: f.policy, proof: forged })).ok,
+    false,
+  );
+  // A receipt from this release with the root owner removed is honoured (fail closed for root).
+  const replaced = { ...credentials, owners: [otherOwner] };
+  f.h.registry.set(
+    `${f.authority.registry}/api/registry/credentials/${f.manifest.vaultId}`,
+    {
+      document: replaced,
+      receipt: makeReceipt(replaced, keyFor(f.authorityCid), f.now),
+    },
+  );
+  assert.equal(
+    (await f.h.run(f.authority, { document: f.policy, proof })).ok,
+    false,
+  );
 });

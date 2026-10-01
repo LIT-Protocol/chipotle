@@ -1,6 +1,6 @@
 # Phase 1: Prerequisites & Configuration
 
-**Parent**: [PLAN.md](PLAN.md) | **Requirements**: [requirements.md](requirements.md)
+**Parent**: [PLAN.md](/deployment/planning/PLAN) | **Requirements**: [requirements.md](/deployment/planning/requirements)
 
 ## Goal
 
@@ -74,4 +74,4 @@ Establish attestation source, digest pinning, and deployment configuration. No c
 
 ## Next Phase
 
-→ [PLAN-phase-2.md](PLAN-phase-2.md) (Verifier Crate)
+→ [PLAN-phase-2.md](/deployment/planning/PLAN-phase-2) (Verifier Crate)

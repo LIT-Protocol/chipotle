@@ -223,6 +223,17 @@ test(
     await assert.rejects(otherPayer.get("BILLING_SECRET"), /403/);
     // Another vault's manifest is rejected on Free and Standard alike.
     await assert.rejects(b.api("/api/actions", post(bundle.manifest)), /403/);
+    // Unsigned preparation is bound to the session's vault the same way.
+    await assert.rejects(
+      b.api(
+        "/api/actions/prepare",
+        post({
+          manifest: bundle.manifest.document.manifest,
+          actionCid: bundle.manifest.document.actionCid,
+        }),
+      ),
+      /403/,
+    );
     await subscribe(b);
     await assert.rejects(b.api("/api/actions", post(bundle.manifest)), /403/);
     const oldKey = a.lit.usageApiKey!;

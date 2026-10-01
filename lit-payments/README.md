@@ -347,6 +347,25 @@ railway link        # choose or create the lit-payments project
 railway up          # from repo root; service config path should be lit-payments/railway.json
 ```
 
+### CI/CD (GitHub Actions)
+
+`.github/workflows/deploy-lit-payments.yml` deploys automatically via the
+Railway CLI, mirroring the `lit-static` release flow:
+
+- push to `main` → Railway **staging** environment
+- push of a `v*` tag → Railway **production** environment
+
+It runs `railway up` from the repo root (so the Dockerfile can reach
+`lit-billing-core`) and selects the service with `--service`. Auth uses
+environment-scoped Railway **project tokens**, so no `railway link` is needed.
+
+Required repo secrets:
+
+- `RAILWAY_TOKEN_PAYMENTS_STAGING` — project token, `staging` environment
+- `RAILWAY_TOKEN_PAYMENTS_PRODUCTION` — project token, `production` environment
+
+Optional repo variable: `RAILWAY_PAYMENTS_SERVICE` (defaults to `lit-payments`).
+
 ### 2. Add Postgres
 
 Use Railway's Postgres plugin for the cheapest/simple path:

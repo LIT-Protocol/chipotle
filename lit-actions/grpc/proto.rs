@@ -104,12 +104,7 @@ impl std::fmt::Debug for DebugExecutionRequest<'_> {
         } else {
             s.field("http_headers", &REDACTED);
         }
-        s.field("ipfs_id", &req.ipfs_id)
-            .field(
-                "startup_script",
-                &req.startup_script.as_ref().map(String::len),
-            )
-            .finish()
+        s.field("ipfs_id", &req.ipfs_id).finish()
     }
 }
 

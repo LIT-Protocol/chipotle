@@ -1,9 +1,12 @@
-# Lit Agent Keychain v2
+# Lit Agent Keychain
 
 A React client, Rust API and immutable Lit Actions for owner-authorized agent access
 to credentials. Secrets are encrypted locally; PostgreSQL stores ciphertext and
 owner-authorized policy records. Wallet, passkey and Google-only sign-in are alternatives.
-Google users need neither a wallet nor a passkey.
+Google users need neither a wallet nor a passkey. User-facing documentation (overview,
+quickstart, SDK/CLI/MCP reference, connected services, sign-in and recovery, security
+model) is at https://developer.litprotocol.com/keychain; the files in this directory are
+the operator, contributor and agent references published alongside the app.
 
 ```mermaid
 sequenceDiagram
@@ -17,7 +20,8 @@ sequenceDiagram
     Lit-->>Owner: Signed receipt for each exact object
     Owner->>API: Ciphertext + signed receipts
     API-->>Owner: Per-vault execution-only Chipotle usage key
-    Owner-->>Agent: Scoped execution key + public secret config
+    Agent->>API: One-use, audience-bound Ed25519 discovery proof
+    API-->>Agent: Current approved locators + execution-only billing bootstrap
     Agent->>Lit: Signed request + scoped usage key, directly through Chipotle
     Lit->>API: Fetch selected signed policy
     Lit->>Lit: Verify owner receipt, agent proof, scope, expiry, ciphertext
@@ -28,22 +32,113 @@ The operator is trusted to serve the latest signed policy. It can replay old val
 permissions, including undoing a revocation, but cannot forge owner authorization.
 The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md).
 
+## SDK release coordination
+
+This source prepares SDK **2.2.3**. It adds authenticator-app 2FA enrollment,
+recovery-code management, and the owner client's second-factor login callback.
+The accompanying owner UI/API enforce hosted-login 2FA; no action templates or
+catalog locks change.
+
+SDK 2.2.2 updated error guidance and documentation to use live discovery after
+removing agent-config downloads from the website.
+
+SDK 2.2.1 added
+Lit-signed Google device approvals lasting 30 days, with local persistence across
+page reloads, and fixed short-lived Google proofs for archived authorities. It was
+a template release: the catalog lock and archived templates include new versions.
+Existing secrets keep their pinned releases and require recent Google reapproval;
+agent clients need this SDK version to recognize secrets created under the new release.
+Publish the SDK before deploying the owner UI/API.
+
+SDK 2.2.0 added `OwnerClient.deleteSecret()`: owners can delete a secret, which
+revokes every agent and removes the ciphertext in one transaction, frees the slot
+and retires the action's execution grant.
+
+SDK 2.1.1 hardened live discovery (#707). SDK 2.1.0 added `LiveKeychain`,
+authenticated live discovery and configless CLI/MCP.
+Owners approve on the website; running clients observe changes on the next request
+without downloading configs. Use **Connect to a session** on the agent page or approval confirmation for setup
+using the existing local identity. Agent config downloads have been removed.
+The static SDK API remains compatible with existing integrations.
+
+SDK 2.0.7 previously added explicit expiry preservation and guided owner onboarding.
+
+2.0.6 was
+an ordinary SDK release with no template change: clearer client-side messages
+(`use()` on a stored secret, an identity object passed where the private key string
+belongs), `describeCredential` accepting the raw JSON text of an identity or config
+file. Existing agents
+on 2.0.5 keep working. The notes below describe the previous, template-changing
+release and still apply to secrets pinned to it.
+
+Merging
+to `main` publishes the SDK (see Publishing below), before the owner UI/API deploy.
+Until the package is on the registry, registry installation of that version is not
+an acceptance test and reviewers should use the locally packed tarball.
+
+2.0.5 is a **template release**: it removes the 90-day maximum on agent permission
+lifetimes (the owner now chooses any expiry, or none: `expiresAt: null`), which
+changed the shared protocol schema, so every template in `actions/catalog.lock.json`
+(authority and catalog) has new bytes, archived under `actions/archive/`.
+Consequences, all handled by the release mechanism described in
+[SECURITY.md](SECURITY.md#authority-releases):
+
+- Existing vaults keep signing in; their recorded authority release moves forward on
+  the first sign-in with the new web app. Existing secrets keep their pinned releases
+  and are read, rotated and restored under them.
+- Secrets created after the deploy pin the new catalog release. An agent still running
+  SDK 2.0.4 or older does not know those template hashes and cannot read them until it
+  upgrades, so publish 2.0.5 first and tell agent operators to update.
+- Secrets pinned to any earlier release still enforce the old 90-day cap inside the
+  enclave. The SDK (`CAPPED_POLICY_AUTHORITY_HASHES`, `policyLifetimeCapDays`) and the
+  web app refuse longer or unlimited lifetimes for them with a message telling the
+  owner to recreate the secret. Rotating a secret pinned to a pre-batch authority
+  release still takes one signature per document (`PRE_BATCH_AUTHORITY_HASHES`).
+
+Release checks: run `npm test` and `npm run build`, publish through the normal
+maintainer release process, verify `npm view @lit-protocol/keychain@2.2.3 version`,
+then repeat the strict external TypeScript consumer and attestation-enabled Node
+smoke test from the registry artifact. Only then deploy the owner UI/API and create,
+rotate and read a secret against production. See the QA reports under `docs/` for
+actual production coverage and remaining provider/auth/billing tests.
+
+## Live agent discovery
+
+Use `new LiveKeychain(identity.privateKey)` or `keychain mcp identity.json`.
+`KEYCHAIN_SERVICE_URL` / SDK `serviceUrl` selects a stable Keychain origin; the Lit
+origin is a separate local trust setting. `list`, `get` and `use` fetch current
+owner-approved grants on every call. Use returned `vaultId/secretId` IDs where names
+collide. Legacy static configs remain optional. See [SDK guide](sdk/README.md).
+
+The migration adds one-use discovery challenges. Per-minute global (10,000) and
+peer (600) budgets bound requests and storage; expired challenges are removed on
+issuance. Discovery rejects over 1,000 candidates, never silently truncates.
+Deploy the migration/API before pointing live clients at the service; old clients
+keep working. Immediate revocation means the next request, not recalling already
+released plaintext or cancelling authorized in-flight operations.
+
 ## Features
 
 - RainbowKit/wagmi EOA wallet connection, native WebAuthn P-256 passkeys, Google JWT
   verification inside Lit with a nonce-bound, locally held session key.
 - One immutable encryption action per secret; an immutable owner authorization action
-  produces durable receipts without retaining Google tokens in the database.
+  produces durable receipts without retaining Google tokens in the database. Creating
+  or rotating a secret approves its manifest, ciphertext and policy with **one** owner
+  signature (one wallet prompt, one passkey touch); each object still gets its own
+  exact-object receipt.
 - X25519/HKDF-SHA256/AES-256-GCM HPKE key wrapping and response encryption; local
   AES-256-GCM payload encryption. Action signatures authenticate results as well as keys.
-- Explicit agent public-key enrollment, exact ciphertext/version scopes, disable/revoke,
+- Explicit agent public-key enrollment, exact ciphertext/version scopes, disable/revoke/delete,
   owner-approved renewal, atomic rotation, and credential replacement/recovery.
-- New secrets grant no agent access. Permissions default to 30 days, with a 90-day maximum.
-  Owner credential membership is independent and normally lasts until revoked.
+- New secrets grant no agent access. Permissions default to 30 days; the owner may
+  choose any lifetime, including no expiry. Owner credential membership is independent
+  and normally lasts until revoked.
 - "Use inside Lit" action catalog from the public
   [agent-keychain-library](https://github.com/LIT-Protocol/agent-keychain-library)
   repo, pinned to a commit in `package.json`: Stripe balance, OpenAI chat, GitHub
-  file reads, Slack messages. Each action's manifest pins the hosts it may reach,
+  file reads, Slack messages, Supabase table reads and inserts under an
+  owner-written allowlist. Each action's manifest pins the hosts it may reach
+  (exact, or one label under a `*.` provider domain such as `*.supabase.co`),
   the credential shape, agent input and result shapes; the harness in
   `actions/secret-common.ts` enforces them in the enclave. No credential-export,
   arbitrary URL, code, redirect, or migration path. Contributors add actions by PR
@@ -53,11 +148,94 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 - Stripe Checkout and customer portal, period-end cancellation, retained encrypted backups.
 - Transactional mutation audit, paginated secrets/activity, scoped user execution keys.
 - Agent SDK, CLI and a local stdio MCP server (`npx @lit-protocol/keychain mcp`);
-  agent keys are generated locally. No management bearer tokens, operator grant
+  agent keys are generated locally. `keychain run -- <command>` hands secrets to a
+  child process as environment variables or short-lived mode-0600 files without
+  printing them. No management bearer tokens, operator grant
   signer, PKP vault provisioning, chain registry, relayer, or paymaster.
-- Client-side remote attestation of the Lit endpoint before any request: TDX quote
+- Client-side remote attestation before execution requests to configured/pinned production Lit origins (unknown origins are not automatically attested): TDX quote
   chain to a pinned Intel root, event-log replay, measured app/compose identity,
   on-chain governance whitelist, and (Node) TLS certificate binding.
+
+## Owner setup and recovery
+
+For agent installation and the separate stored-secret (`get`/`run`) and connected-service
+(`use`) paths, see [SDK quickstarts](sdk/README.md). For provider credentials and
+exact inputs, see [provider recipes](PROVIDERS.md). An **export action** releases a
+raw secret to an approved agent; **encrypted backup export** saves ciphertext/policies.
+Agents discover their current permissions and execution credentials from the server.
+
+### Prepare recovery while you still have access
+
+1. Sign in at your existing Keychain origin. Open **Recovery & backups** and approve
+   an additional owner credential you control. Test it before retiring the first.
+2. Download an encrypted backup and store it privately off-device. Download a fresh
+   copy after every credential change and secret rotation. Backups contain current
+   ciphertext/policies, not private keys or historical secret versions.
+3. Retain the original provider credentials independently for connected services.
+   Strict-mode actions cannot export or migrate them; an action upgrade or loss of
+   Lit's derivation root cannot be repaired with ciphertext alone.
+
+### Restore walkthrough and credential-loss decisions
+
+- **New device, approved credential available:** choose **Recover an existing vault**
+  on the sign-in page, select your encrypted backup, then sign with an owner
+  credential approved for that vault. Use the original deployment/origin for
+  passkeys; a newly created passkey is not the old credential. Confirm the restored
+  secret list and permissions; live clients discover restored approvals on their next request.
+- **Google-only owner:** sign in with the same Google account, not simply the same
+  email spelling on a different account. If inaccessible, use Google's recovery
+  or a previously approved alternate owner; Keychain cannot reset Google identity.
+- **Missing vault:** restore can initialize credential settings from the signed
+  backup. **Existing vault:** restore cannot overwrite its credential settings or a
+  different existing secret. On a conflict, stop and compare the vault/secret and
+  backup versions; do not delete current data to force an old restore.
+- **Backup lost, credential available:** sign in and make a new backup if the
+  service still has the vault. A credential alone does not recreate lost ciphertext.
+- **All approved credentials lost:** a backup alone is insufficient. Recover through
+  the credential provider (for example a synced passkey or Google recovery) or use
+  a previously approved alternate credential. There is no operator reset token.
+- **Agent key lost:** generate a new identity on a trusted machine, approve its
+  public key per secret, revoke the old key and distribute new configs. The backup
+  does not recover the agent's private key.
+
+These steps describe supported behavior, not evidence of a successful live Google,
+physical-passkey or provider recovery test. See [security limits](SECURITY.md).
+
+### Rotations and revocation
+
+| Change                                 | Owner steps                                                                                                 | Agent consequence                                                                                                                             |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Secret value (without approval update) | Issue a replacement at the provider; rotate the secret; reapprove intended agents for the new exact version | Old version grants alone do not cover the new version                                                                                         |
+| Rotate & approve                       | Use the combined dashboard action to rotate and move existing agents to the new version                     | No separate reapproval is needed; live clients discover the new version on their next request                                                 |
+| Execution/billing key                  | Replace execution key in the owner dashboard                                                                | Live clients discover the replacement on their next request; migrate static clients to live discovery. Identity/secret approvals are separate |
+| Agent signing key                      | Generate a new identity, approve new public key, revoke old grants                                          | Never overwrite a working identity without a recovery plan; keep the new identity on the agent’s device                                       |
+| Immutable action release               | Keep old release available; reimport original credential into the new action and approve explicitly         | Changing client settings cannot migrate ciphertext; strict-mode backup cannot supply plaintext                                                |
+| Owner credential                       | Approve/test replacement before revoking old credential                                                     | Download a fresh encrypted backup; existing metadata sessions are invalidated                                                                 |
+
+For suspected exposure, revoke at the upstream provider too. With honest storage,
+revocation applies to subsequent policy lookups; in-flight calls may finish and
+plaintext already received cannot be recalled. The operator can replay older
+still-valid permissions, as documented in SECURITY.md. **Cancellation is not
+revocation.** Slack posts and Supabase inserts are not exactly-once: inspect provider
+state after uncertain completion; do not blindly retry writes.
+
+### Storage entitlements and charges
+
+| State                             | Storage                                    | Execution and recovery                                                               |
+| --------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------ |
+| Free                              | Up to 5 secrets                            | Sponsored enrolled actions under fair use; backups/revocation available              |
+| Standard                          | $10/month, up to 1,000 secrets             | Same authorization model; rotations use no additional slot                           |
+| Cancelled, still in paid period   | Paid entitlement until period end          | Cancellation does not revoke agent grants                                            |
+| Paid expired, at/below Free limit | Free entitlement                           | Sponsored execution continues on Free                                                |
+| Paid expired, above Free limit    | Storage mutations blocked while over limit | Login, revocation, deletion and encrypted backups remain; no automatic data deletion |
+
+There is no hard per-user execution or dollar cap and no automatic Keychain overage
+charge. A numerical fair-use quota is not specified here; contact Support via the
+app before high-volume usage or for custom storage limits. Report outages with
+operation/time and a sanitized error, never keys/configs. Provider API charges
+(OpenAI, Slack plan requirements, Supabase, etc.) are separate from the Keychain
+subscription. Check the owner billing page and refresh billing state after checkout;
+do not infer successful payment from a browser redirect alone.
 
 ## Local development
 
@@ -97,7 +275,11 @@ See [BILLING.md](BILLING.md) for Stripe setup and the custom-plan operator comma
 
 Google-only sign-in requires `GOOGLE_CLIENT_ID` and the frontend origin registered
 on that Google OAuth client. Its callback uses Google Identity Services' nonce
-parameter. Google session keys and ID tokens remain in browser memory and expire.
+parameter. Fresh Google login creates a Lit-signed 30-day device approval, persisted with its
+session key in localStorage and cleared on sign-out. Reloading restores approvals
+without a Google prompt. Secrets pinned to older authority releases still need a
+recent Google sign-in; their original token/session proof lasts 10 minutes. Google
+ID tokens are retained locally for that legacy path, never in the database.
 `VITE_WALLETCONNECT_PROJECT_ID` enables WalletConnect options at build time; injected
 wallets work without it. ERC-1271/6492 contract wallets are not supported in this release.
 
@@ -126,18 +308,23 @@ The image runs as an unprivileged user. For Railway, use repository root as the 
 context and `lit-agent-keychain/railway.json` as the config path; the Dockerfile path
 is relative to the repository root.
 
-Publish the agent SDK with `./publish.sh`. It builds, compares the packed contents
-with what npm serves for the current version, bumps the patch version only when
-they differ (`--bump minor|major` to choose), commits and tags
-`keychain-sdk-v<version>`, then publishes. `--dry-run` shows the decision without
-committing or publishing. A local `before=` cooldown in `~/.npmrc` does not affect
-it; the published tarball is fetched directly and integrity-checked.
+The agent SDK publishes on merge. `.github/workflows/keychain-publish.yml` runs on
+every push to `main` touching this directory, builds, and publishes
+`@lit-protocol/keychain` with provenance when `sdk/package.json` is ahead of the
+registry, then tags `keychain-sdk-v<version>`. The version bump belongs in the PR:
+PR CI runs `node scripts/publish-sdk.mjs --check`, which fails when the packed
+contents differ from the published version without a bump (`./publish.sh --dry-run`
+locally shows the same decision and bumps for you; `--bump minor|major` to choose).
+Unchanged contents are a no-op, so server-only merges publish nothing. The workflow
+authenticates through npm trusted publishing (this repo and workflow file registered
+on the package) or, failing that, an `NPM_TOKEN` repository secret. Manual
+`./publish.sh` still works and bumps, commits and publishes in one go. A local
+`before=` cooldown in `~/.npmrc` does not affect change detection; the published
+tarball is fetched directly and integrity-checked.
 
-This is a prelaunch, incompatible replacement. Migration `20260911000001` drops the
-legacy Keychain tables and their contents. Stop the old service before applying it.
-It does not delete upstream PKPs/usage keys from the old Lit account; retire those
-separately if that account will remain in use. No production deployment or DB reset is part of this PR.
-Live compatibility validation uses temporary Chipotle groups/keys and removes them.
+Keychain is prelaunch with no users, so there is no upgrade or compatibility path
+to maintain. The database can be reset freely.
+Live validation uses temporary Chipotle groups/keys and removes them.
 
 Deploy the private-key telemetry fix and billing-owner guards in `lit-api-server`
 and `lit-payments` before distributing user execution keys. No direct Phala access
@@ -147,9 +334,11 @@ each deployed release. Changing action bytes changes encryption keys.
 `actions/catalog.lock.json` pins the SHA-256 of every built template (authority and
 each catalog action); `npm run build:actions` fails on drift, so a rebuild against
 different sources or dependencies is an explicit `--update-lock` release, never a
-silent change. Introduce a new action id and an explicit owner-approved transition
-instead of changing a deployed one. "Use inside Lit" secrets require reimporting the
-original credential. An encrypted DB backup alone cannot recover
+silent change. Every released version is retained in `actions/archive/` and served
+by content hash from `/api/templates/<sha256>`, so vaults and secrets created under
+an earlier release keep working (see "Authority releases" in SECURITY.md). Introduce
+a new action id instead of changing a deployed one; "use inside Lit" secrets require
+reimporting the original credential to move to a new action. An encrypted DB backup alone cannot recover
 from loss of Lit's key derivation root or an incompatible network derivation change.
 
 ## Verification
@@ -184,3 +373,29 @@ key derivation, external Google issuance, and Stripe billing. It never calls pro
 
 Agent examples: [sdk/README.md](sdk/README.md). Security/operational limits:
 [SECURITY.md](SECURITY.md). Review findings: [ADVERSARIAL_REVIEW.md](ADVERSARIAL_REVIEW.md).
+
+## Security & sign-in
+
+The **Security & sign-in** page manages approved owner methods (passkeys,
+wallets, and Google accounts), authenticator-app 2FA, and encrypted vault backups.
+Each owner method can sign in independently; when 2FA is enabled, every method
+also needs a code from the authenticator or a single-use recovery code.
+
+To enable 2FA, approve setup with the current owner, scan the QR code (or enter
+the setup key), verify a six-digit code, and save the ten recovery codes outside
+this vault. Other browser sessions are signed out. Disabling 2FA and replacing
+recovery codes require owner approval plus a code; replacing codes invalidates
+the old set. Keep a fresh vault backup after changing owner methods, especially
+for signing in with a recovery wallet or Google account on a new device.
+
+2FA protects hosted login, not direct Lit owner authorization or existing agent
+grants. Authenticator and recovery codes are not included in vault backups. See
+[the security contract](SECURITY.md#authenticator-app-two-factor-login) for the
+trust boundary and recovery behavior. Existing vaults have 2FA off until enrolled;
+the database migration runs on server startup and uses the existing
+`USAGE_KEY_ENCRYPTION_KEY` with a separate derived encryption key.
+
+SDK owner clients can set `client.secondFactor = async (verify) => { ... }` to
+prompt for a code and call `await verify(code)`. Resolve only after verification
+succeeds, retry incorrect codes within the callback, or reject to cancel. A client
+without this callback cannot log in to a vault that requires 2FA.
