@@ -2886,3 +2886,26 @@ body.login-mode-password .login-card-chainsecured { display: none; }
 .password-settings form + form { border-top: 1px solid var(--border, #ddd); margin-top: 24px; padding-top: 12px; }
 @media(max-width: 600px) { .password-login-enabled .access-options { grid-template-columns: 1fr; } }
 .access-card[hidden] { display: none; }
+
+/* Shared width keeps access explanations readable on desktop and touch screens. */
+.access-options { position: relative; }
+.access-tooltip {
+  display: none;
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-bg);
+  color: var(--text);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 15%);
+  font-size: 13px;
+  font-weight: normal;
+  line-height: 1.5;
+  cursor: default;
+}
+.access-card:not(.tooltip-dismissed):is(:hover, :focus) .access-tooltip { display: block; }
+.access-options:has(.access-card:hover) .access-card:not(:hover) .access-tooltip { display: none; }

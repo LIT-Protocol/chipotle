@@ -759,7 +759,7 @@ export function initLogin() {
   const passwordChoice = document.getElementById('login-auth-mode-password');
   if (passwordChoice) passwordChoice.hidden = !passwordEnabled;
   document.body.classList.toggle('password-login-enabled', passwordEnabled);
-  let selected = getMode() === 'sovereign' ? 'sovereign' : (passwordEnabled ? 'password' : 'api');
+  let selected = passwordEnabled ? 'password' : (getMode() === 'sovereign' ? 'sovereign' : 'api');
   function applyLoginAuthMode(mode, focusActive = false) {
     selected = mode;
     setMode(mode === 'sovereign' ? 'sovereign' : 'api');
@@ -775,8 +775,14 @@ export function initLogin() {
     hideStatus('login-status');
   }
   for (const choice of choices) {
+    choice.addEventListener('pointerenter', () => choice.classList.remove('tooltip-dismissed'));
+    choice.addEventListener('focus', () => choice.classList.remove('tooltip-dismissed'));
     choice.addEventListener('click', () => applyLoginAuthMode(choice.dataset.authMode));
     choice.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        choice.classList.add('tooltip-dismissed');
+        return;
+      }
       if (!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) return;
       event.preventDefault();
       const available = choices.filter(c => !c.hidden);

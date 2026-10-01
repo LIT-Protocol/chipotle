@@ -219,3 +219,28 @@ test("unconfigured deployments retain the original API-key and wallet login", as
   await expect(page.locator("#btn-login")).toBeVisible();
   await expect(page.locator("#password-login-form")).toBeHidden();
 });
+
+test("password is the default even after wallet use, with accessible access explanations", async ({ page }) => {
+  await page.addInitScript(() => sessionStorage.setItem("accountconfig_mode", "sovereign"));
+  await page.goto("./");
+  const passwordChoice = page.locator("#login-auth-mode-password");
+  await expect(passwordChoice).toHaveAttribute("aria-checked", "true");
+  await expect(page.locator("#password-login-form")).toBeVisible();
+  for (const [mode, explanation] of [
+    ["password", "there is no password reset"],
+    ["api", "Existing API-key accounts cannot switch"],
+    ["chainsecured", "Your wallet controls account permissions"],
+  ]) {
+    const choice = page.locator("#login-auth-mode-" + mode);
+    await choice.hover();
+    await expect(page.locator("#login-help-" + mode)).toBeVisible();
+    await expect(choice).toHaveAccessibleDescription(new RegExp(explanation));
+  }
+  await page.mouse.move(0, 0);
+  await passwordChoice.focus();
+  await expect(page.locator("#login-help-password")).toBeVisible();
+  await mkdir("../.context", { recursive: true });
+  await page.screenshot({ path: "../.context/password-login-tooltip.png" });
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#login-help-password")).toBeHidden();
+});
