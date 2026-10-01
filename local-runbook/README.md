@@ -144,11 +144,9 @@ the **background**, logs to `/tmp/chipotle-local-stack.log`, and polls
 Health check when up:
 ```bash
 curl -s http://localhost:8000/core/v1/health
-# {"lit_actions_reachable":true,"lit_actions_gvisor_reachable":false,"cpu_available":true,"billing_keys_present":false}
+# {"lit_actions_reachable":true,"cpu_available":true,"billing_keys_present":false}
 ```
 `billing_keys_present:false` confirms Stripe is bypassed.
-`lit_actions_gvisor_reachable:false` is expected off-TEE (gVisor is Linux/TEE-only)
-and does not affect standard action execution.
 
 ### 6. Verify end-to-end — `05-verify-pkp-sign.sh` (test, offline)
 
@@ -213,12 +211,6 @@ assigning to them attempts a real `setgid()`/`setuid()`. Every script here uses
 No — that is expected with `LIT_DISABLE_BILLING=true`. Billing is intentionally off so
 the runtime makes zero Stripe calls. The verify script's credit check tolerates it and
 everything else works payment-free.
-
-**Q: The health check shows `"lit_actions_gvisor_reachable":false`. Is that a
-problem?**
-No. gVisor is Linux/TEE-only; off-TEE it is expected to be unreachable. The standard
-`lit_actions` runner (`"lit_actions_reachable":true`) is what these tests use, and it
-does not affect action execution.
 
 **Q: `04-run-local.sh` looks hung — nothing happens for minutes.**
 The first boot compiles Rust. `04-run-local.sh` waits up to 30 minutes for health;
@@ -390,11 +382,10 @@ addresses, PIDs, and CIDs will differ, but the shape and the ✅ lines should ma
    chain (anvil):         http://127.0.0.1:8545
    lit-api-server:        http://localhost:8000
    dashboard:             http://localhost:8080
-   health:                {"lit_actions_reachable":true,"lit_actions_gvisor_reachable":false,"cpu_available":true,"billing_keys_present":false}
+   health:                {"lit_actions_reachable":true,"cpu_available":true,"billing_keys_present":false}
 ```
 
-`billing_keys_present:false` confirms Stripe is bypassed; `lit_actions_gvisor_reachable:false`
-is expected off-TEE.
+`billing_keys_present:false` confirms Stripe is bypassed.
 
 ### `05-verify-pkp-sign.sh` — end-to-end PKP signing
 

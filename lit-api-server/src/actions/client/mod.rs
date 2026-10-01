@@ -51,23 +51,6 @@ pub struct Client {
     api_key: String,
     #[builder(default, setter(into))]
     ipfs_id: String,
-    /// gVisor binary lane only: the identity that gates CID-derived key material
-    /// and PKP-wallet access when a request supplies a `startup_script` that
-    /// overrides the bundle's own entrypoint. That override is *not* part of the
-    /// content-addressed bundle, so keying on the bundle checksum (`ipfs_id`)
-    /// alone would let anyone authorized to execute the bundle run arbitrary
-    /// code that wields the audited bundle's key. This id binds the script into
-    /// the checksum so a different script ⇒ a different derived key and
-    /// independent wallet authorization. Empty (the JS lane, or a binary action
-    /// running the bundle's own entrypoint) means "fall back to `ipfs_id`",
-    /// preserving existing keys and on-chain registrations. See #75 (F1b) / #600.
-    // `serde(default)` so a Client serialized by a pre-change binary (which has
-    // no such field) still deserializes on a newer binary during a rolling
-    // deploy — `String::default()` is the empty fallback sentinel. Matches the
-    // sibling `client_timeout_ms_buffer` convention below.
-    #[builder(default, setter(into))]
-    #[serde(default)]
-    key_derivation_id: String,
     // Config
     #[builder(default, setter(into, strip_option))]
     socket_path: Option<PathBuf>,

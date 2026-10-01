@@ -16,30 +16,6 @@ that produced this file (see "Audit method").
 
 ---
 
-## Reserved pages
-
-### `lit-actions/languages.mdx` — Language Support / `/get_supported_languages`
-
-- **Feature:** language capability registry + unauthenticated
-  `GET /get_supported_languages` discovery endpoint (CPL-349 phase 1).
-- **Landed on main:** PR #562 (`1d99c9e0`, 2026-07-12) — after v1.1.10
-  (tagged 2026-06-22 EDT / 2026-06-23 UTC; the changelog's release table uses
-  the tagger's local date). The endpoint does not exist in any released
-  server; the
-  page's claim that "the discovery endpoint is live everywhere" is only true
-  once a release containing #562 ships.
-- **To restore:**
-  1. `git mv docs-reserve/lit-actions/languages.mdx docs/lit-actions/languages.mdx`
-  2. In `docs/docs.json`, re-add `"lit-actions/languages",` to the
-     **Lit Actions** group, between `"lit-actions/secrets"` and
-     `"lit-actions/limits"`.
-  3. Before restoring, check whether later CPL-349 phases (execution paths for
-     Python `raw_script`, bundles, OCI bundles — tracked in
-     `plans/multi-language-lit-actions.md`) also made the release, and update
-     the page's phased-rollout notes accordingly.
-
----
-
 ## Other post-v1.1.10 changes to revisit at the next release cut
 
 These shipped on `main` after v1.1.10 **without** public-doc changes. When the
@@ -54,13 +30,7 @@ described on the live site, so nothing needed reserving):
 - **Enterprise net-30 committed-use billing** (PR #541) — candidate for
   `docs/management/pricing.mdx` if/when offered publicly (plan:
   `plans/enterprise-committed-billing.md`).
-- **Local `lit` CLI for testing any-language actions** (PR #564) — developer
-  tooling; candidate for a lit-actions docs page once the multi-language
-  execution phases are public.
-- **Any-language runner / gVisor sandbox server** (PR #557) and **in-process
-  TEE task supervision** (PR #529) — internal until the CPL-349 execution
-  phases are exposed; architecture material lives in
-  `architectureDocs/gvisor-server.md`.
+- **In-process TEE task supervision** (PR #529) — internal.
 - **Auto-fund API payer gas wallets + low-balance alerts** (PR #524) and
   **raw `get_api_payers` JSON funder allowlist** (PR #527) — operator-facing;
   self-hosting docs candidates.
