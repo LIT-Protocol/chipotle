@@ -71,6 +71,15 @@ doesn't describe endpoints the released server lacks.
   default for HTTP transports, which also shortens how long each signer lease
   is held.
 
+### Removed
+- The spent PKP-owner (#575) and path-owner (#699) backfill tooling —
+  the `backfill-pkp-owners`, `backfill-path-owners`, and `scan-path-aliases`
+  Hardhat tasks, the manual backfill workflow, and the test-only legacy
+  migration facet. Both one-time migrations are complete and verified on Base
+  mainnet; the runtime ownership checks (`pkpIdToOwnerMaster`,
+  `pathToOwnerMaster`) stay in place, and the retired on-chain entry points are
+  stripped on the next upgrade via `diamond-removals.json`.
+
 ### Security
 - `registerWalletDerivation` now enforces a global first-owner binding
   (`pkpId → master account`): a wallet address can only ever be registered —
