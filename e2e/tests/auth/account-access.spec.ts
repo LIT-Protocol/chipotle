@@ -201,6 +201,14 @@ test('password-manager style signup and autofill unlock a real account', async (
   // managers. Generated passwords must work without manually typing a character.
   await page.locator('#password-create-password').evaluate((input, value) => { (input as HTMLInputElement).value = value; }, password);
   expect(await signup.evaluate(form => Object.fromEntries(new FormData(form as HTMLFormElement)))).toMatchObject({ username: email, 'new-password': password });
+  // Simulate a pre-handler rate-limit rejection, then retry against the real
+  // API. The Worker must release only the rejected operation's creation claim.
+  await page.route(`${api}/new_account`, route => route.fulfill({ status: 429, json: { error: 'Too many account requests' } }));
+  await page.locator('#password-create-submit').click();
+  await expect(page.locator('#login-status')).toContainText('rejected');
+  await expect(page.locator('#dashboard-wrap')).toBeHidden();
+  await page.unroute(`${api}/new_account`);
+  await page.locator('#password-create-password').evaluate((input, value) => { (input as HTMLInputElement).value = value; }, password);
   const created = page.waitForResponse(`${api}/new_account`);
   await Promise.all([page.waitForNavigation(), page.locator('#password-create-submit').click()]);
   expect((await created).ok()).toBe(true);
