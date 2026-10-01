@@ -121,6 +121,7 @@ export function isAuthenticated() {
 
 /** Full sign-out: clears api-key, ChainSecured session, and the client cache. */
 export function logOut() {
+  hideStatus('login-status');
   resetPasswordIdentity();
   sessionStorage.removeItem(STORAGE_KEY_API);
   sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_WALLET);
@@ -562,6 +563,7 @@ function updateAuthUI() {
   // (hides Action Runner + Billing, shows owner pill, etc.).
   document.body.classList.toggle('has-api-key', authed);
   document.body.classList.toggle('is-chainsecured', isChainSecured);
+  syncLoginRoute();
   renderModeBadge();
   import('./billing.js').then((m) => m.refreshBillingUI()).catch(() => {});
   if (authed && _onAuthReady) {
@@ -738,6 +740,47 @@ export function keyPreview(key) {
   return key.slice(0, 4) + '…' + key.slice(-4);
 }
 
+// ----- Login routes -----
+
+const AUTH_ROUTES = new Set(['#sign-in', '#create-account']);
+
+/** Hash routes work on static hosting without server rewrites. Real anchors
+ * expose both destinations to browsers and agents; hashchange handles history. */
+function syncLoginRoute(focusHeading = false) {
+  const title = document.getElementById('login-title');
+  if (!title) return;
+  // Verification links share the fragment; password-login owns their lifecycle.
+  if (new URLSearchParams(location.hash.slice(1)).has('verify')) return;
+  if (isAuthenticated()) {
+    if (!location.hash || AUTH_ROUTES.has(location.hash)) history.replaceState(null, '', '#overview');
+    document.title = 'Chipotle Dashboard';
+    return;
+  }
+  if (!AUTH_ROUTES.has(location.hash)) history.replaceState(null, '', '#sign-in');
+  const creating = location.hash === '#create-account';
+  document.getElementById('login-panel-existing').hidden = creating;
+  document.getElementById('login-panel-new').hidden = !creating;
+  document.getElementById('login-create-link').hidden = creating;
+  document.getElementById('login-sign-in-link').hidden = !creating;
+  title.textContent = creating ? 'Create an account' : 'Sign in';
+  document.getElementById('login-subtitle').textContent = creating
+    ? 'Start building with Lit’s programmable keys.'
+    : 'Manage your wallets, keys, and Lit Actions.';
+  document.title = `${title.textContent} · Chipotle Dashboard`;
+  if (focusHeading) {
+    hideStatus('login-status');
+    title.focus();
+  }
+}
+
+// Programmatic transitions are synchronous, so success/error copy set just
+// after navigation cannot be cleared later by an asynchronous hashchange.
+export function navigateLogin(hash) {
+  if (!AUTH_ROUTES.has(hash)) return;
+  if (location.hash !== hash) history.pushState(null, '', hash);
+  syncLoginRoute(true);
+}
+
 // ----- Login -----
 
 export function initLogin() {
@@ -793,27 +836,23 @@ export function initLogin() {
   }
   applyLoginAuthMode(selected);
 
-  const tabExisting = document.getElementById('login-tab-existing');
-  const tabNew = document.getElementById('login-tab-new');
-  const panelExisting = document.getElementById('login-panel-existing');
-  const panelNew = document.getElementById('login-panel-new');
-  function switchLoginTab(toExisting) {
-    const isExisting = toExisting === true;
-    tabExisting.classList.toggle('is-active', isExisting);
-    tabNew.classList.toggle('is-active', !isExisting);
-    tabExisting.setAttribute('aria-selected', isExisting ? 'true' : 'false');
-    tabNew.setAttribute('aria-selected', !isExisting ? 'true' : 'false');
-    panelExisting.classList.toggle('is-active', isExisting);
-    panelNew.classList.toggle('is-active', !isExisting);
-    if (panelExisting) panelExisting.hidden = !isExisting;
-    if (panelNew) panelNew.hidden = isExisting;
-  }
-  tabExisting?.addEventListener('click', () => switchLoginTab(true));
-  tabNew?.addEventListener('click', () => switchLoginTab(false));
+  // Capture email tokens before normalizing any login route.
   initPasswordLogin();
+  for (const id of ['login-tab-existing', 'login-tab-new']) {
+    document.getElementById(id).addEventListener('click', event => {
+      // Preserve native link behavior for new tabs and modified clicks.
+      if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      navigateLogin(event.currentTarget.getAttribute('href'));
+    });
+  }
+  window.addEventListener('hashchange', () => syncLoginRoute(true));
+  syncLoginRoute();
 
   // ----- Card A (Existing): API-key login -----
-  document.getElementById('btn-login').addEventListener('click', async () => {
+  document.getElementById('sign-in-api-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (document.getElementById('btn-login').disabled) return;
     const key = (apiKeyInput.value || '').trim();
     if (!key) {
       showStatus('login-status', 'Enter an API key.', 'error');
@@ -828,6 +867,7 @@ export function initLogin() {
       const exists = await client.accountExists(key);
       if (exists) {
         resetPasswordIdentity();
+        apiKeyInput.value = '';
         setApiKey(key);
         showStatus('login-status', 'Logged in. You can now use the dashboard.', 'success');
       } else {
@@ -844,7 +884,10 @@ export function initLogin() {
   // ----- Card B (Existing): ChainSecured wallet login -----
   const btnLoginWallet = document.getElementById('btn-login-wallet');
   if (btnLoginWallet) {
-    btnLoginWallet.addEventListener('click', () => loginWithWallet(btnLoginWallet));
+    document.getElementById('sign-in-wallet-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!btnLoginWallet.disabled) loginWithWallet(btnLoginWallet);
+    });
   }
 
   // If a session already exists, trigger the auth-ready flow on load
@@ -853,7 +896,9 @@ export function initLogin() {
   }
 
   // ----- Card A (New): managed account creation -----
-  document.getElementById('btn-create-account').addEventListener('click', async () => {
+  document.getElementById('create-api-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (document.getElementById('btn-create-account').disabled) return;
     const name = document.getElementById('new-account-name').value.trim();
     const desc = document.getElementById('new-account-desc').value.trim();
     const email = document.getElementById('new-account-email').value.trim();
@@ -893,7 +938,10 @@ export function initLogin() {
   // ----- Card B (New): ChainSecured account creation -----
   const btnCreateChainSecured = document.getElementById('btn-create-chainsecured');
   if (btnCreateChainSecured) {
-    btnCreateChainSecured.addEventListener('click', () => createChainSecuredAccount(btnCreateChainSecured));
+    document.getElementById('create-wallet-form').addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!btnCreateChainSecured.disabled) createChainSecuredAccount(btnCreateChainSecured);
+    });
   }
 }
 
