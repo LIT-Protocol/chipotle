@@ -108,6 +108,16 @@ test("new password account verifies email, encrypts locally, reloads, signs in a
     Object.fromEntries(new FormData(form as HTMLFormElement)))).toMatchObject({
       username: "browser@example.com", "new-password": password,
     });
+  for (const body of ["<html>Upstream unavailable</html>", "{}", "null"]) {
+    await page.route("http://localhost:8787/auth/v1/envelope", route => route.fulfill({ status: 200, body }));
+    await autofill(page, { "password-create-password": password });
+    await page.locator("#password-create-submit").click();
+    await expect(page.locator("#login-status")).toContainText(/invalid response|did not confirm/);
+    await expect(page.locator("body")).not.toHaveClass(/has-api-key/);
+    expect(creates).toBe(1);
+  }
+  await page.unroute("http://localhost:8787/auth/v1/envelope");
+  await autofill(page, { "password-create-password": password });
   await submitAndNavigate(page, "#password-create-submit");
   await expect(page.locator("body")).toHaveClass(/has-api-key/);
   expect(creates).toBe(1);
@@ -328,3 +338,36 @@ test("a definitive Lit API rejection releases the creation claim so the same tab
     await page.evaluate(() => sessionStorage.getItem("accountconfig_api_key")),
   ).toBe(key);
 });
+
+for (const status of [408, 499, 503, "network"]) {
+  test(`ambiguous creation failure ${status} cannot create a second account`, async ({ page, request }) => {
+    const email = `uncertain-${status}@example.com`;
+    let attempts = 0;
+    await page.route("http://localhost:8000/core/v1/new_account", async route => {
+      attempts++;
+      if (status === "network") await route.abort("failed");
+      else await route.fulfill({ status: Number(status), json: { error: "Ambiguous upstream result" } });
+    });
+    await page.goto("./");
+    await page.locator("#login-tab-new").click();
+    await page.locator("#password-signup-email").fill(email);
+    await page.locator("#password-signup-form button").click();
+    let link = "";
+    await expect.poll(async () => {
+      const mail = await (await request.get("http://localhost:8080/__test/mail")).json();
+      link = mail.find((item: any) => item.to === email)?.text.match(/http:\/\/localhost:8080\/\S+/)?.[0] || "";
+      return !!link;
+    }).toBe(true);
+    await page.goto(link);
+    await page.locator("#password-verify-form button").click();
+    await page.locator("#password-create-password").fill(password);
+    await page.locator("#password-create-submit").click();
+    await expect(page.locator("#password-create-submit")).toBeEnabled();
+    expect(attempts).toBe(1);
+    await page.locator("#password-create-password").fill(password);
+    await page.locator("#password-create-submit").click();
+    await expect(page.locator("#login-status")).toContainText("Account creation may have completed");
+    expect(attempts).toBe(1);
+    await expect(page.locator("body")).not.toHaveClass(/has-api-key/);
+  });
+}

@@ -65,12 +65,14 @@ async function send(path, body, method = "POST") {
     );
   }
   // Edge/CDN errors can return HTML; never surface a JSON parse error to the user.
-  const result = await response.json().catch(() => ({}));
+  const result = await response.json().catch(() => null);
   if (!response.ok) {
-    const error = new Error(result.error || "Account service unavailable.");
+    const error = new Error(result?.error || "Account service unavailable.");
     error.status = response.status;
     throw error;
   }
+  if (!result || typeof result !== "object" || Array.isArray(result))
+    throw new Error("Account service returned an invalid response. Please try again.");
   if (result.parameters && result.csrf) {
     validateParameters(result.parameters);
     current = result;

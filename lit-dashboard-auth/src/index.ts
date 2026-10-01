@@ -507,7 +507,7 @@ async function routes(request: Request, env: Env, ctx: ExecutionContext) {
     if (s.scope !== "signup") return fail(403, "Signup session required.");
     await reauthenticate(u, b.authSecret);
     if (b.retry === true) {
-      // The browser received a definitive HTTP rejection (4xx) from the Lit API
+      // The browser reports a known pre-creation rejection from the Lit API
       // for the attempt it names, so no account was created. Release that claim
       // under a fresh operation id; a stale tab cannot release a newer attempt.
       if (typeof b.operation !== "string" || b.operation !== u.operation)
@@ -550,9 +550,9 @@ async function routes(request: Request, env: Env, ctx: ExecutionContext) {
       return json({ ok: true });
     }
     const result = await env.DB.prepare(
-      "UPDATE auth_users SET account=?,envelope=?,state='active' WHERE id=? AND state='creating' AND version=? AND verifier=?",
+      "UPDATE auth_users SET account=?,envelope=?,state='active' WHERE id=? AND state='creating' AND version=? AND verifier=? AND operation=?",
     )
-      .bind(b.envelope.account, encoded, u.id, u.version, u.verifier)
+      .bind(b.envelope.account, encoded, u.id, u.version, u.verifier, b.operation)
       .run();
     if (!result.meta.changes)
       return fail(409, "Account changed. Sign in again.");

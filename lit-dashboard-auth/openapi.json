@@ -200,7 +200,7 @@
     "/auth/v1/signup/begin": {
       "post": {
         "summary": "Claim exactly one client creation attempt, or release a definitively rejected attempt",
-        "description": "Without `retry`, moves `reserved` to `creating` and returns the operation id. With `retry: true` and the `operation` of the current `creating` attempt, releases that claim after the browser received an HTTP 4xx rejection from the Lit API (nothing was created) and returns a fresh operation id. Ambiguous failures (5xx, network) must not be retried.",
+        "description": "Without `retry`, moves `reserved` to `creating` and returns the operation id. With `retry: true` and the `operation` of the current `creating` attempt, releases that claim after the browser received a known pre-creation HTTP rejection (400, 401, 402, 403, 404, 405, 413, 415, 422, or 429) from the Lit API (nothing was created) and returns a fresh operation id. Ambiguous failures (408/499, unknown statuses, 5xx, network) must not be retried.",
         "parameters": [
           {
             "in": "header",

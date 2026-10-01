@@ -130,7 +130,7 @@ async function createAccount(password) {
     return true;
   }
   // A previous attempt in this tab was definitively rejected by the Lit API
-  // (HTTP 4xx, so nothing was created). Release that claim and try again.
+  // (a known pre-creation rejection). Release that claim and try again.
   const rejected = record.state === "creating" && pending?.rejected === true;
   if (record.state === "reserved" || rejected) {
     if (pending && !rejected)
@@ -141,6 +141,8 @@ async function createAccount(password) {
         ? { authSecret, retry: true, operation: pending.operation }
         : { authSecret },
     );
+    if (!/^[0-9a-f]{32}$/.test(claimed.operation || ""))
+      throw new Error("Account service returned an invalid creation claim. Sign in again.");
     // Mark the attempt before calling the non-idempotent legacy API. Never
     // auto-retry an ambiguous (network/5xx) failure.
     pending = {
@@ -160,9 +162,10 @@ async function createAccount(password) {
         email: record.email,
       });
     } catch (e) {
-      // Only a received 4xx proves the request was rejected before creation.
-      // 5xx and network errors can follow an on-chain create; keep those uncertain.
-      if (Number.isInteger(e?.status) && e.status >= 400 && e.status < 500) {
+      // Only known validation/access/rate-limit rejections permit retry. In
+      // particular, 408/499 may come from a proxy after the upstream committed.
+      // Unknown statuses, 5xx and network failures remain uncertain.
+      if ([400, 401, 402, 403, 404, 405, 413, 415, 422, 429].includes(e?.status)) {
         pending = { ...pending, uncertain: false, rejected: true };
         sessionStorage.setItem(PENDING, JSON.stringify(pending));
         throw new Error(
@@ -199,11 +202,13 @@ async function createAccount(password) {
     pending.envelope = envelope;
     sessionStorage.setItem(PENDING, JSON.stringify(pending));
   }
-  await request(
+  const saved = await request(
     "envelope",
     { authSecret, operation: pending.operation, envelope: pending.envelope },
     "PUT",
   );
+  if (saved.ok !== true)
+    throw new Error("Account storage did not confirm the save. Please try again.");
   $("password-backup-key").value = "";
   $("password-backup").hidden = true;
   enter(record, pending.apiKey);

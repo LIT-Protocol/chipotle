@@ -110,10 +110,10 @@ State transitions:
 - `creating`: a conditional `/signup/begin` write claimed the single creation
   attempt. The browser calls the unchanged Lit `new_account` endpoint, retains
   the returned API key in tab storage, encrypts it, then uploads ciphertext.
-  If that call returns an HTTP 4xx (rejected before anything was created), the
+  If that call returns an known pre-creation rejection (400, 401, 402, 403, 404, 405, 413, 415, 422, or 429), the
   same tab records the rejection and the next attempt releases the claim via
   `/signup/begin` with `retry: true` and the abandoned operation id, which
-  rotates the operation id. 5xx and network failures stay unresolved.
+  rotates the operation id. 408/499, other unknown statuses, 5xx, and network failures stay unresolved.
 - `active`: initial ciphertext saved. The account binding cannot be replaced.
   Repeating the same initial upload is idempotent; replacement is rejected.
 
@@ -126,7 +126,7 @@ Cron Trigger, with provider idempotency keys. Expired records are cleaned up.
 
 Signup is **not** an atomic transaction across D1 and the blockchain. A lost
 creation response or closed tab before saving its key can orphan an account.
-The UI never retries an ambiguous creation; only a received 4xx rejection in
+The UI never retries an ambiguous creation; only a received known pre-creation rejection in
 the same tab unlocks a retry. If upload fails after a key was received,
 that tab retains the original key and exact encrypted record for retry, and
 exposes a manual backup field. Do not clear site storage or create another

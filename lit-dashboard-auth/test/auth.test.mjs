@@ -552,3 +552,46 @@ test("expired sessions and signup tokens fail closed; fresh verification can res
       .first(),
   );
 });
+
+test("a retry that wins after the upload's session read prevents a stale ciphertext write", async () => {
+  const user = await signup("upload-race@example.com");
+  const { envelope } = await operate({ operation: "encrypt", password, parameters: user.p, apiKey: key, account: "0x" + "98".repeat(20) });
+  const { default: worker } = await import("../dist/worker.js");
+  const { timingSafeEqual } = await import("node:crypto");
+  const original = crypto.subtle.timingSafeEqual;
+  crypto.subtle.timingSafeEqual = timingSafeEqual;
+  let rotated = false;
+  try {
+    const response = await worker.fetch(new Request("https://auth.test/auth/v1/envelope", {
+      method: "PUT",
+      headers: { Origin: origin, "X-Chipotle-Auth": "1", "Content-Type": "application/json", Cookie: user.client.cookie, "X-CSRF-Token": user.client.csrf },
+      body: JSON.stringify({ ...user.client.binding, authSecret: user.authSecret, operation: user.operation, envelope }),
+    }), {
+      ENVIRONMENT: "test", DASHBOARD_URL: origin + "/dapps/dashboard/",
+      AUTH_SECRET: "test-only-secret-not-for-production-12345",
+      DB: {
+        prepare(sql) {
+          const statement = db.prepare(sql);
+          if (sql !== "SELECT * FROM auth_users WHERE id=?") return statement;
+          return { bind(...args) { return { async first() {
+            const snapshot = await statement.bind(...args).first();
+            // Real retry handler + D1, inserted deterministically between the
+            // upload's authorization read and its conditional ciphertext write.
+            const retry = await call("signup/begin", { authSecret: user.authSecret, retry: true, operation: user.operation }, user.client);
+            assert.equal(retry.status, 200);
+            rotated = true;
+            return snapshot;
+          } }; } };
+        },
+      },
+    }, {});
+    assert.equal(rotated, true);
+    assert.equal(response.status, 409);
+    const stored = await db.prepare("SELECT state,envelope FROM auth_users WHERE id=?").bind(user.p.id).first();
+    assert.equal(stored.state, "creating");
+    assert.equal(stored.envelope, null);
+  } finally {
+    if (original) crypto.subtle.timingSafeEqual = original;
+    else delete crypto.subtle.timingSafeEqual;
+  }
+});
