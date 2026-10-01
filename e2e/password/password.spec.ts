@@ -29,8 +29,7 @@ test.beforeEach(async ({ page }) => {
         });
         return;
       }
-      // Account bindings are UNIQUE in the auth database: give each created
-      // account its own wallet address, as the real API does.
+      // Give each created account its own wallet address, as the real API does.
       result = {
         api_key: key,
         wallet_address: "0x" + "34".repeat(18) + creates.toString(16).padStart(4, "0"),

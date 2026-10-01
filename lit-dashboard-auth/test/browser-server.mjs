@@ -1,6 +1,7 @@
 // Test-only local server: real Worker + D1 + static dashboard, simulated Lit API
 // and email delivery. No production fixture routes exist in the Worker.
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
+import { applyMigrations } from "./migrations.mjs";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve, extname } from "node:path";
@@ -31,16 +32,7 @@ const mf = new Miniflare(
   }),
 );
 const db = await mf.getD1Database("DB");
-for (const q of (
-  await readFile(
-    resolve(import.meta.dirname, "../migrations/0001_auth.sql"),
-    "utf8",
-  )
-)
-  .split(";")
-  .map((s) => s.trim())
-  .filter(Boolean))
-  await db.prepare(q).run();
+await applyMigrations(db);
 const auth = createServer(async (req, res) => {
   try {
     const chunks = [];

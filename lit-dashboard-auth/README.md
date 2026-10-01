@@ -135,6 +135,18 @@ idempotency limitation, not password recovery.
 
 ## Security and operations
 
+- Wallet addresses in encrypted records are unverified client metadata, not a
+  global identity or ownership proof. Duplicate addresses across users are allowed
+  so an attacker cannot reserve a victim's public wallet and block their signup.
+  Authentication and record access use the user's ID, verified email, password
+  credential, and session. The address remains authenticated by AES-GCM within
+  each user's record and cannot change during a password update.
+- Apply migration `0002_untrusted_wallet_metadata.sql` to any database initialized
+  with the original schema. It removes only wallet uniqueness, preserves user
+  and session records, and retains email uniqueness and foreign-key checks.
+  A blocked signup with its original key still in the tab can retry the upload
+  after migration. No password reset, API-key generation, or backend change is needed.
+
 - A D1 dump permits offline password guessing; Argon2id is the protection against
   that. Auth rate limits protect online attempts, not leaked ciphertext. The
   stored fast verifier hashes an already stretched, domain-separated secret,

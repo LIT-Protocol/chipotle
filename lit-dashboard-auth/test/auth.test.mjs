@@ -1,6 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { applyMigrations } from "./migrations.mjs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import { operate } from "../dist/crypto.js";
 import { KDF } from "../../lit-static/dapps/dashboard/password-protocol.js";
@@ -17,7 +17,7 @@ before(async () => {
           modules: true,
           scriptPath: "dist/worker.js",
           compatibilityDate: "2025-10-11",
-          d1Databases: ["DB"],
+          d1Databases: ["DB", "LEGACY"],
           bindings: {
             ENVIRONMENT: "test",
             DASHBOARD_URL: origin + "/dapps/dashboard/",
@@ -31,11 +31,7 @@ before(async () => {
     }),
   );
   db = await mf.getD1Database("DB");
-  for (const statement of (await readFile("migrations/0001_auth.sql", "utf8"))
-    .split(";")
-    .map((s) => s.trim())
-    .filter(Boolean))
-    await db.prepare(statement).run();
+  await applyMigrations(db);
 });
 after(async () => {
   await mf?.dispose();
@@ -594,4 +590,45 @@ test("a retry that wins after the upload's session read prevents a stale ciphert
     if (original) crypto.subtle.timingSafeEqual = original;
     else delete crypto.subtle.timingSafeEqual;
   }
+});
+
+test("an attacker claiming a public wallet cannot block its owner's encrypted signup", async () => {
+  const attacker = await signup("wallet-squatter@example.com");
+  const victim = await signup("wallet-owner@example.com");
+  const publicWallet = "0x" + "ab".repeat(20);
+  const attackerKey = Buffer.alloc(32, 91).toString("base64");
+  const victimKey = Buffer.alloc(32, 92).toString("base64");
+  for (const [user, apiKey] of [[attacker, attackerKey], [victim, victimKey]]) {
+    const { envelope } = await operate({ operation: "encrypt", password, parameters: user.p, apiKey, account: publicWallet });
+    const response = await call("envelope", { authSecret: user.authSecret, operation: user.operation, envelope }, user.client, "PUT");
+    assert.equal(response.status, 200, JSON.stringify(response.data));
+    const login = await call("login", { email: user === attacker ? "wallet-squatter@example.com" : "wallet-owner@example.com", authSecret: user.authSecret });
+    assert.equal(login.status, 200);
+    const decrypted = await operate({ operation: "decrypt", password, parameters: login.data.parameters, envelope: login.data.envelope });
+    assert.equal(decrypted.apiKey, apiKey);
+  }
+  const rows = await db.prepare("SELECT id,state FROM auth_users WHERE account=?").bind(publicWallet).all();
+  assert.equal(rows.results.length, 2);
+  assert.ok(rows.results.every(row => row.state === "active"));
+  const theft = await call("envelope", {}, { ...attacker.client, binding: victim.client.binding }, "GET");
+  // GET access resolves identity from the authenticated session, never wallet metadata.
+  assert.equal(theft.status, 200);
+  assert.equal(theft.data.parameters.id, attacker.p.id);
+  assert.notEqual(theft.data.parameters.id, victim.p.id);
+});
+
+test("wallet-metadata migration preserves populated accounts and their sessions", async () => {
+  const legacy = await mf.getD1Database("LEGACY");
+  await applyMigrations(legacy, ["0001_auth.sql"]);
+  await legacy.prepare("INSERT INTO auth_users (id,email,salt,verifier,version,state,account,envelope,operation,created_at) VALUES ('existing','existing@example.com','salt','verifier',3,'active','wallet','encrypted-record','operation',123)").run();
+  await legacy.prepare("INSERT INTO auth_sessions VALUES ('session','existing',3,'csrf','account',9999999999,9999999999)").run();
+  const before = await legacy.prepare("SELECT * FROM auth_users").first();
+  const session = await legacy.prepare("SELECT * FROM auth_sessions").first();
+  await applyMigrations(legacy, ["0002_untrusted_wallet_metadata.sql"]);
+  assert.deepEqual(await legacy.prepare("SELECT * FROM auth_users").first(), before);
+  assert.deepEqual(await legacy.prepare("SELECT * FROM auth_sessions").first(), session);
+  await legacy.prepare("INSERT INTO auth_users (id,email,salt,state,account,envelope,created_at) VALUES ('another','another@example.com','salt','active','wallet','other-ciphertext',124)").run();
+  await assert.rejects(legacy.prepare("INSERT INTO auth_users (id,email,salt,created_at) VALUES ('duplicate','existing@example.com','salt',125)").run(), /UNIQUE/);
+  await assert.rejects(legacy.prepare("INSERT INTO auth_sessions VALUES ('bad','missing',1,'csrf','account',9999999999,9999999999)").run(), /FOREIGN KEY/);
+  assert.deepEqual((await legacy.prepare("PRAGMA foreign_key_check").all()).results, []);
 });
