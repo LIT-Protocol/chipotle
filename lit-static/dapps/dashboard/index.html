@@ -34,23 +34,29 @@
                 <label for="password-verify-email">Current email</label><input id="password-verify-email" name="username" class="input" type="email" autocomplete="username">
                 <label for="password-verify-password">Current password</label><input id="password-verify-password" name="password" class="input" type="password" autocomplete="current-password">
               </div>
+              <button class="btn btn-primary" type="submit">Confirm email</button>
+            </form>
+          </section>
+          <div class="login-mode-selector">
+            <span class="login-mode-label" id="login-auth-mode-label">Account access</span>
+            <div class="login-tabs access-options" role="radiogroup" aria-labelledby="login-auth-mode-label">
               <button type="button" class="login-tab access-card" role="radio" id="login-auth-mode-password" aria-label="Email &amp; password" aria-describedby="login-help-password" aria-checked="false" data-auth-mode="password" hidden>
                 <span class="access-copy"><span class="access-title">Email &amp; password</span></span>
               <span class="access-tooltip" role="tooltip" id="login-help-password">Sign in with the email and password you chose when creating your account. Your password encrypts your API key in your browser. For new accounts only; there is no password reset, so save your password in a password manager.</span>
               </button>
               <button type="button" class="login-tab access-card is-active" role="radio" id="login-auth-mode-api" aria-label="API key" aria-describedby="login-help-api" aria-checked="true" data-auth-mode="api">
-                
+
                 <span class="access-copy">
                   <span class="access-title">API key</span>
-                  
+
                 </span>
               <span class="access-tooltip" role="tooltip" id="login-help-api">Sign in by pasting your existing account API key. The key grants access to your account, so keep it private and backed up. Existing API-key accounts cannot switch to email and password.</span>
               </button>
               <button type="button" class="login-tab access-card" role="radio" id="login-auth-mode-chainsecured" aria-label="Wallet" aria-describedby="login-help-chainsecured" aria-checked="false" data-auth-mode="sovereign">
-                
+
                 <span class="access-copy">
                   <span class="access-title">Wallet</span>
-                  
+
                 </span>
               <span class="access-tooltip" role="tooltip" id="login-help-chainsecured">Connect the wallet that administers your ChainSecured account. Your wallet controls account permissions and approves changes. Use this option for a wallet-managed account; an email password or API key does not replace your wallet.</span>
               </button>

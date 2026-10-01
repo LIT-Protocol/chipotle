@@ -2576,6 +2576,7 @@ body.login-mode-password .login-card-chainsecured { display: none; }
 /* Shared width keeps access explanations readable on desktop and touch screens. */
 .access-options { position: relative; }
 .access-tooltip {
+  text-align: left;
   display: none;
   position: absolute;
   bottom: 100%;

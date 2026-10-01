@@ -121,6 +121,7 @@ export function isAuthenticated() {
 
 /** Full sign-out: clears api-key, ChainSecured session, and the client cache. */
 export function logOut() {
+  hideStatus('login-status');
   resetPasswordIdentity();
   sessionStorage.removeItem(STORAGE_KEY_API);
   sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_WALLET);
@@ -766,8 +767,10 @@ function syncLoginRoute(focusHeading = false) {
     ? 'Start building with Lit’s programmable keys.'
     : 'Manage your wallets, keys, and Lit Actions.';
   document.title = `${title.textContent} · Chipotle Dashboard`;
-  hideStatus('login-status');
-  if (focusHeading) title.focus();
+  if (focusHeading) {
+    hideStatus('login-status');
+    title.focus();
+  }
 }
 
 // Programmatic transitions are synchronous, so success/error copy set just

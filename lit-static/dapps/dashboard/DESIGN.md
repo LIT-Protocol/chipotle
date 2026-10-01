@@ -188,8 +188,9 @@ action ("Run an Action") on the right. One primary action per view.
   `lit-static/assets/lit-logo.svg`. The logo is not a generic key or shield icon.
 - One flat form surface, a page-specific heading, and a persistent primary CTA.
   No nested cards, decorative icons, gradients, or hover-dependent CTA colors.
-- Account access selector above the form: API key / Wallet · ChainSecured.
-  The radio group supports arrow keys and persists its mode in sessionStorage.
+- Account access selector above the form: Email & password / API key / Wallet.
+  The radio group supports arrow keys. Password access is the default on reload
+  when configured; API-key and wallet choices remain available.
 - Native forms support Enter submission, required fields, and email validation.
   Inactive pages use `hidden`; inactive modes use `display: none`.
 
@@ -259,3 +260,17 @@ and survive page reloads.
 - No animations longer than 200ms. Snappy beats smooth.
 - No new fonts.
 - No "TODO" comments in shipped CSS — file an issue or fix it.
+
+### Password access and auth routing
+
+When the auth service is configured, email/password is the default on every load.
+All three methods retain hover/focus explanations and keyboard selection. Native
+POST password forms keep their autocomplete, username, and generation hints.
+Successful password submission explicitly reloads the dashboard at `#overview`,
+so hash routing does not bypass password-manager completion detection.
+
+Verification fragments are consumed before normal login routing changes the URL.
+Sign-in/create-account links keep their native hrefs; ordinary clicks update
+history synchronously, while Back/Forward update the visible form and title.
+Routing and responsive checks run in `e2e/password/routes.spec.ts` alongside the
+real Worker/D1 password suite; there is no separate npm browser test package.
