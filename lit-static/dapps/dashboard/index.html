@@ -46,10 +46,10 @@
 
           <section id="password-verify-panel" class="password-panel" hidden>
             <p id="password-verify-copy"></p>
-            <form id="password-verify-form">
+            <form id="password-verify-form" method="post" autocomplete="on">
               <div id="password-email-confirm-fields" hidden>
-                <label for="password-verify-email">Current email</label><input id="password-verify-email" class="input" type="email" autocomplete="username">
-                <label for="password-verify-password">Current password</label><input id="password-verify-password" class="input" type="password" autocomplete="current-password">
+                <label for="password-verify-email">Current email</label><input id="password-verify-email" name="username" class="input" type="email" autocomplete="username">
+                <label for="password-verify-password">Current password</label><input id="password-verify-password" name="password" class="input" type="password" autocomplete="current-password">
               </div>
               <button class="btn btn-primary" type="submit">Confirm email</button>
             </form>
@@ -85,9 +85,9 @@
           <div id="login-panel-existing" class="login-tab-panel is-active" role="tabpanel" aria-labelledby="login-tab-existing">
             <div class="login-cards">
               <div class="login-card login-card-password">
-                <form id="password-login-form">
-                  <label class="field-label" for="password-login-email">Email</label><input id="password-login-email" class="input" type="email" autocomplete="username" required>
-                  <label class="field-label" for="password-login-password">Password</label><input id="password-login-password" class="input" type="password" autocomplete="current-password" required>
+                <form id="password-login-form" method="post" autocomplete="on">
+                  <label class="field-label" for="password-login-email">Email</label><input id="password-login-email" name="username" class="input" type="email" autocomplete="username" required>
+                  <label class="field-label" for="password-login-password">Password</label><input id="password-login-password" name="password" class="input" type="password" autocomplete="current-password" required>
                   <button type="button" class="btn btn-sm" data-show-password="password-login-password">Show password</button>
                   <button type="submit" class="btn btn-primary btn-block">Sign in</button>
                 </form>
@@ -114,15 +114,15 @@
           <div id="login-panel-new" class="login-tab-panel" role="tabpanel" aria-labelledby="login-tab-new" hidden>
             <div class="login-cards">
               <div class="login-card login-card-password">
-                <form id="password-signup-form">
-                  <label class="field-label" for="password-signup-email">Email</label><input id="password-signup-email" class="input" type="email" autocomplete="email" required>
+                <form id="password-signup-form" method="post" autocomplete="on">
+                  <label class="field-label" for="password-signup-email">Email</label><input id="password-signup-email" name="username" class="input" type="email" autocomplete="username" required>
                   <button type="submit" class="btn btn-primary btn-block">Verify email</button>
                   <p class="form-hint">We’ll email you a link to create a new account. This won’t change an existing API-key account.</p>
                 </form>
-                <form id="password-create-form" hidden>
-                  <label class="field-label" for="password-create-email">Verified email</label><input id="password-create-email" class="input" type="email" autocomplete="username" readonly>
-                  <label class="field-label" for="password-account-name">Account name (optional)</label><input id="password-account-name" class="input" autocomplete="organization" maxlength="100">
-                  <label class="field-label" for="password-create-password">Password</label><input id="password-create-password" class="input" type="password" autocomplete="new-password" minlength="15" required aria-describedby="password-save-notice">
+                <form id="password-create-form" method="post" autocomplete="on" hidden>
+                  <label class="field-label" for="password-create-email">Verified email</label><input id="password-create-email" name="username" class="input" type="email" autocomplete="username" readonly>
+                  <label class="field-label" for="password-account-name">Account name (optional)</label><input id="password-account-name" name="organization" class="input" autocomplete="organization" maxlength="100">
+                  <label class="field-label" for="password-create-password">Password</label><input id="password-create-password" name="new-password" class="input" type="password" autocomplete="new-password" passwordrules="minlength: 15; maxlength: 128;" minlength="15" required aria-describedby="password-save-notice">
                   <button type="button" class="btn btn-sm" data-show-password="password-create-password">Show password</button>
                   <p id="password-save-notice" class="form-hint">Save this password in your password manager. There’s no “Forgot password” option, and we can’t reset it for you. Use at least 15 characters.</p>
                   <button id="password-create-submit" type="submit" class="btn btn-primary btn-block">Create account</button>
@@ -812,16 +812,18 @@
     <p>Save your password in a password manager. We can’t reset forgotten passwords.</p>
     <label for="password-settings-email">Email</label><input id="password-settings-email" class="input" type="email" readonly>
     <div id="password-settings-status" class="status" role="status" style="display:none;"></div>
-    <form id="password-change-form">
+    <form id="password-change-form" method="post" autocomplete="on">
       <h3>Change password</h3>
-      <label for="password-current">Current password</label><input id="password-current" class="input" type="password" autocomplete="current-password" required>
-      <label for="password-new">New password</label><input id="password-new" class="input" type="password" autocomplete="new-password" minlength="15" required>
+      <input id="password-change-username" name="username" type="email" autocomplete="username" hidden readonly>
+      <label for="password-current">Current password</label><input id="password-current" name="current-password" class="input" type="password" autocomplete="current-password" required>
+      <label for="password-new">New password</label><input id="password-new" name="new-password" class="input" type="password" autocomplete="new-password" passwordrules="minlength: 15; maxlength: 128;" minlength="15" required>
       <button type="submit" class="btn btn-primary">Change password</button>
     </form>
-    <form id="password-email-form">
+    <form id="password-email-form" method="post" autocomplete="on">
       <h3>Change email</h3>
-      <label for="password-email-new">New email</label><input id="password-email-new" class="input" type="email" autocomplete="email" required>
-      <label for="password-email-current">Current password</label><input id="password-email-current" class="input" type="password" autocomplete="current-password" required>
+      <input id="password-email-username" name="username" type="email" autocomplete="username" hidden readonly>
+      <label for="password-email-new">New email</label><input id="password-email-new" name="email" class="input" type="email" autocomplete="email" required>
+      <label for="password-email-current">Current password</label><input id="password-email-current" name="current-password" class="input" type="password" autocomplete="current-password" required>
       <button type="submit" class="btn btn-outline">Verify new email</button>
     </form>
   </dialog>

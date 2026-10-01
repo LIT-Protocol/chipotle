@@ -155,3 +155,27 @@ idempotency limitation, not password recovery.
 
 The initial release keeps the dashboard framework-free. React modernization is a
 separate follow-up, not a prerequisite for this feature.
+
+## Password-manager compatibility
+
+Signup, login, verification, and settings use native POST forms, stable field
+names/labels, and `username`, `current-password`, and `new-password` autocomplete
+hints. The verified signup email stays in the password form; password changes
+include the account username. Generation hints request at least 15 characters.
+The browser reads field values on submission, including autofill without input
+events, and never disables paste. Successful signup, login, and password changes
+navigate on the same dashboard origin after storage acknowledges success, leaving
+submitted fields intact until unload so managers can detect completion. Failed
+submissions stay on the form and clear passwords. Passwords never enter URLs or
+application storage, and native form POSTs are intercepted by JavaScript.
+
+CI checks those semantics, silent DOM autofill, Enter/button submission, and
+success navigation. It does **not** automate proprietary save/generate prompts.
+Before rollout, manually exercise generation/save, logout/autofill/login, and
+update-password prompts on the final HTTPS dashboard domain with Chrome Password
+Manager, Safari/Apple Passwords, 1Password, and Bitwarden. Use a disposable account
+per manager, keep the generated password available, and verify the saved username
+and origin. Browser settings and extensions control whether prompts appear.
+
+References: [Chromium password forms](https://www.chromium.org/developers/design-documents/create-amazing-password-forms/)
+and [1Password compatible forms](https://www.1password.dev/web/compatible-website-design).

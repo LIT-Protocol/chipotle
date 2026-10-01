@@ -46,8 +46,15 @@ function enter(record, apiKey) {
 async function busy(form, fn, status = "login-status") {
   const buttons = [...form.querySelectorAll("button")];
   buttons.forEach((b) => (b.disabled = true));
+  let navigate = false;
   try {
-    await fn();
+    navigate = (await fn()) === true;
+    if (navigate) {
+      // A real same-origin navigation signals successful submission to password
+      // managers. Leave submitted fields intact until this document unloads;
+      // never put passwords in the URL, storage, or a network form submission.
+      window.location.replace(window.location.pathname + window.location.search);
+    }
   } catch (e) {
     showStatus(
       status,
@@ -56,7 +63,7 @@ async function busy(form, fn, status = "login-status") {
     );
   } finally {
     buttons.forEach((b) => (b.disabled = false));
-    form
+    if (!navigate) form
       .querySelectorAll('input[type="password"], input[data-password]')
       .forEach((i) => (i.value = ""));
   }
@@ -112,7 +119,7 @@ async function createAccount(password) {
       envelope: record.envelope,
     });
     enter(record, apiKey);
-    return;
+    return true;
   }
   if (record.state === "reserved") {
     if (pending)
@@ -170,9 +177,15 @@ async function createAccount(password) {
   $("password-backup").hidden = true;
   enter(record, pending.apiKey);
   showStatus("dashboard-status", help, "info");
+  return true;
 }
 export function initPasswordLogin() {
   if (!enabled()) return;
+  const notice = sessionStorage.getItem("chipotle_password_notice");
+  if (notice) {
+    sessionStorage.removeItem("chipotle_password_notice");
+    showStatus("login-status", notice, "success");
+  }
   const marker = () => {
     try {
       return JSON.parse(sessionStorage.getItem(MARKER) || "null");
@@ -188,7 +201,7 @@ export function initPasswordLogin() {
       const record = await unlock($("password-login-email").value, password);
       if (record.apiKey) {
         enter(record, record.apiKey);
-        return;
+        return true;
       }
       showCreate(record);
       $("login-tab-new").click();
@@ -227,7 +240,10 @@ export function initPasswordLogin() {
     if ($("account-dropdown-trigger").getAttribute("aria-expanded") === "true")
       $("account-dropdown-trigger").click();
     $("password-settings").showModal();
-    $("password-settings-email").value = marker()?.email || "";
+    const email = marker()?.email || "";
+    $("password-settings-email").value = email;
+    $("password-change-username").value = email;
+    $("password-email-username").value = email;
   });
   $("password-settings-close").addEventListener("click", () =>
     $("password-settings").close(),
@@ -266,14 +282,11 @@ export function initPasswordLogin() {
           authSecret: encrypted.authSecret,
           envelope: encrypted.envelope,
         });
-        $("password-settings").close();
         clearAuthSession();
         logOut();
-        showStatus(
-          "login-status",
-          "Password changed. Save it in your password manager, then sign in again.",
-          "success",
-        );
+        sessionStorage.setItem("chipotle_password_notice",
+          "Password changed. Save it in your password manager, then sign in again.");
+        return true;
       },
       "password-settings-status",
     );

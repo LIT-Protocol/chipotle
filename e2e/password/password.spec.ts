@@ -1,8 +1,19 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 const password = "a long password from my manager",
   key = Buffer.alloc(32, 8).toString("base64");
 let creates = 0;
+async function submitAndNavigate(page: Page, selector: string) {
+  await Promise.all([page.waitForNavigation(), page.locator(selector).click()]);
+}
+// Model managers which set DOM values without keyboard/input events. This tests
+// the site's autofill contract, not any vendor's browser-chrome save prompt.
+async function autofill(page: Page, values: Record<string, string>) {
+  await page.evaluate(values => {
+    for (const [id, value] of Object.entries(values))
+      (document.getElementById(id) as HTMLInputElement).value = value;
+  }, values);
+}
 test.beforeEach(async ({ page }) => {
   await page.route("http://localhost:8000/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -67,15 +78,23 @@ test("new password account verifies email, encrypts locally, reloads, signs in a
       });
     } else await route.continue();
   });
-  await page.locator("#password-create-password").fill(password);
+  await expect(page.locator("#password-create-form")).toHaveAttribute("method", "post");
+  await expect(page.locator("#password-create-email")).toHaveAttribute("autocomplete", "username");
+  await expect(page.locator("#password-create-password")).toHaveAttribute("autocomplete", "new-password");
+  await expect(page.locator("#password-create-password")).toHaveAttribute("passwordrules", /minlength: 15/);
+  await autofill(page, { "password-create-password": password });
   await page.locator("#password-create-submit").click();
   await expect(page.locator("#login-status")).toContainText(
     "temporarily unavailable",
   );
   await expect(page.locator("body")).not.toHaveClass(/has-api-key/);
   expect(creates).toBe(1);
-  await page.locator("#password-create-password").fill(password);
-  await page.locator("#password-create-submit").click();
+  await autofill(page, { "password-create-password": password });
+  expect(await page.locator("#password-create-form").evaluate(form =>
+    Object.fromEntries(new FormData(form as HTMLFormElement)))).toMatchObject({
+      username: "browser@example.com", "new-password": password,
+    });
+  await submitAndNavigate(page, "#password-create-submit");
   await expect(page.locator("body")).toHaveClass(/has-api-key/);
   expect(creates).toBe(1);
   expect(
@@ -101,8 +120,10 @@ test("new password account verifies email, encrypts locally, reloads, signs in a
     .fill("a wrong password that is long");
   await page.locator("#password-login-form button[type=submit]").click();
   await expect(page.locator("#login-status")).toContainText("incorrect");
-  await page.locator("#password-login-password").fill(password);
-  await page.locator("#password-login-form button[type=submit]").click();
+  await autofill(page, { "password-login-email": "browser@example.com", "password-login-password": password });
+  await expect(page.locator("#password-login-password")).toHaveAttribute("autocomplete", "current-password");
+  // Enter submits the same real form that a password manager's submit button uses.
+  await Promise.all([page.waitForNavigation(), page.locator("#password-login-password").press("Enter")]);
   await expect(page.locator("body")).toHaveClass(/has-api-key/);
   await page.locator("#account-dropdown-trigger").click();
   await page.locator("#password-settings-open").click();
@@ -113,13 +134,15 @@ test("new password account verifies email, encrypts locally, reloads, signs in a
   await page
     .locator("#password-new")
     .fill("my newly generated password phrase");
-  await page.locator("#password-change-form button").click();
+  await expect(page.locator("#password-change-username")).toHaveValue("browser@example.com");
+  await submitAndNavigate(page, "#password-change-form button");
   await expect(page.locator("body")).not.toHaveClass(/has-api-key/);
   await expect(page.locator("#login-status")).toContainText("Password changed");
+  await page.locator("#password-login-email").fill("browser@example.com");
   await page
     .locator("#password-login-password")
     .fill("my newly generated password phrase");
-  await page.locator("#password-login-form button[type=submit]").click();
+  await submitAndNavigate(page, "#password-login-form button[type=submit]");
   await expect(page.locator("body")).toHaveClass(/has-api-key/);
   await page.locator("#account-dropdown-trigger").click();
   await page.locator("#password-settings-open").click();
@@ -158,7 +181,7 @@ test("new password account verifies email, encrypts locally, reloads, signs in a
   await page
     .locator("#password-login-password")
     .fill("my newly generated password phrase");
-  await page.locator("#password-login-form button[type=submit]").click();
+  await submitAndNavigate(page, "#password-login-form button[type=submit]");
   await expect(page.locator("body")).toHaveClass(/has-api-key/);
   expect(errors).toEqual([]);
 });
