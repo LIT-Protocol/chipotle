@@ -18,11 +18,8 @@ impl Client {
         // NOTE: Do not log `op` here — response variants (GetPrivateKeyResponse,
         // GetLitActionPrivateKeyResponse, AesDecryptResponse) carry secret material.
         self.state.ops_count += 1;
-        // Identity for CID-derived key material and PKP-wallet authorization.
-        // On the gVisor binary lane this reflects the code that actually runs
-        // (bundle checksum bound to any request-supplied startup script), so an
-        // override script cannot obtain the audited bundle's key or reuse its
-        // wallet authorizations. See #75 (F1b) / #600.
+        // Identity for CID-derived key material and PKP-wallet authorization:
+        // the bundle checksum (`ipfs_id`).
         let key_id = self.action_key_id().to_string();
         let op_type = match &op {
             UnionResponse::SetResponse(_) => "SetResponse",
