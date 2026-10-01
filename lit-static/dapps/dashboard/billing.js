@@ -281,12 +281,14 @@ export function refreshBillingUI() {
   const capturedKey = billingAuthKey();
   const balanceEl = document.getElementById('billing-balance-display');
   const addFundsBtn = document.getElementById('btn-add-funds');
+  const refreshBalanceBtn = document.getElementById('btn-refresh-balance');
   const notRequiredEl = document.getElementById('billing-not-required');
   const billingBanner = document.getElementById('billing-disabled-banner');
   const noFundsWarning = document.getElementById('no-funds-warning');
   if (!capturedKey || hasUsageKeyOverride()) {
     if (balanceEl) balanceEl.style.display = 'none';
     if (addFundsBtn) addFundsBtn.style.display = 'none';
+    if (refreshBalanceBtn) refreshBalanceBtn.style.display = 'none';
     if (notRequiredEl) notRequiredEl.style.display = 'none';
     if (billingBanner) billingBanner.style.display = 'none';
     if (noFundsWarning) noFundsWarning.style.display = 'none';
@@ -297,6 +299,12 @@ export function refreshBillingUI() {
     if (available) {
       if (balanceEl) balanceEl.style.display = '';
       if (addFundsBtn) addFundsBtn.style.display = '';
+      // Sovereign balances load silently only while a wallet-auth cache is
+      // live; after it expires the balance falls back to "—" and would only
+      // reappear via Add Funds. Offer an explicit refresh so the user can
+      // re-pull it with a single wallet signature. Managed (API-key) accounts
+      // refresh automatically and don't need it.
+      if (refreshBalanceBtn) refreshBalanceBtn.style.display = getMode() === 'sovereign' ? '' : 'none';
       if (notRequiredEl) notRequiredEl.style.display = 'none';
       if (billingBanner) billingBanner.style.display = 'none';
       // In sovereign mode never auto-trigger a wallet popup just to render
@@ -317,6 +325,7 @@ export function refreshBillingUI() {
     } else {
       if (balanceEl) balanceEl.style.display = 'none';
       if (addFundsBtn) addFundsBtn.style.display = 'none';
+      if (refreshBalanceBtn) refreshBalanceBtn.style.display = 'none';
       if (notRequiredEl) notRequiredEl.style.display = '';
       if (billingBanner) billingBanner.style.display = '';
       if (noFundsWarning) noFundsWarning.style.display = 'none';
@@ -398,6 +407,44 @@ async function loadBillingBalance() {
       el.textContent = 'Balance unavailable';
       if (noFundsWarning) noFundsWarning.style.display = 'none';
     }
+  }
+}
+
+/**
+ * Manual, user-initiated balance refresh for ChainSecured/sovereign mode.
+ *
+ * The topbar balance is only ever loaded silently while a valid wallet-auth
+ * cache exists — we never auto-prompt a wallet popup just to render it
+ * (CPL-285). Once that ~4-min cache expires the balance falls back to "—" and,
+ * without this, would only reappear as a side effect of opening Add Funds.
+ * This handler lets the user explicitly opt into the single EIP-712 BillingAuth
+ * signature needed to re-fetch the balance on demand: `getWalletAuthHeader()`
+ * pops the wallet on a cache miss, then we pull the balance.
+ */
+export async function refreshBalanceManually() {
+  if (getMode() !== 'sovereign') return;
+  const btn = document.getElementById('btn-refresh-balance');
+  const el = document.getElementById('billing-balance-display');
+  const prev = el ? el.textContent : '';
+  if (btn) btn.disabled = true;
+  if (el) el.textContent = '…';
+  try {
+    // Prompts the wallet for a BillingAuth signature when the cache is empty
+    // or expired; returns the cached header otherwise (no popup).
+    await getWalletAuthHeader();
+    // loadBillingBalance handles its own errors and updates the display.
+    await loadBillingBalance();
+  } catch (e) {
+    // The only thrower here is getWalletAuthHeader (e.g. the user rejected the
+    // signature, or no wallet is connected). Restore the prior display and
+    // surface why nothing refreshed.
+    if (!(e && e.name === 'AbortError')) {
+      logError('refreshBalanceManually', e);
+      showTopLevelStatus('Could not refresh balance: ' + formatError(e), 'error');
+    }
+    if (el) el.textContent = prev || '—';
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -681,6 +728,7 @@ function showTopLevelStatus(message, kind) {
 
 export function initBilling() {
   const addFundsBtn = document.getElementById('btn-add-funds');
+  const refreshBalanceBtn = document.getElementById('btn-refresh-balance');
   const closeBtn = document.getElementById('billing-modal-close-btn');
   const cancelBtn = document.getElementById('billing-cancel-btn');
   const continueBtn = document.getElementById('billing-continue-btn');
@@ -689,6 +737,7 @@ export function initBilling() {
   const litkeyBtn = document.getElementById('billing-litkey-btn');
 
   if (addFundsBtn) addFundsBtn.addEventListener('click', openAddFundsModal);
+  if (refreshBalanceBtn) refreshBalanceBtn.addEventListener('click', refreshBalanceManually);
   if (litkeyBtn) litkeyBtn.addEventListener('click', openLitkeyPaymentPage);
   const noFundsLink = document.getElementById('no-funds-add-funds');
   if (noFundsLink) noFundsLink.addEventListener('click', (e) => { e.preventDefault(); openAddFundsModal(); });
