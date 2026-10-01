@@ -8,6 +8,9 @@ import { resolve, extname } from "node:path";
 process.chdir(resolve(import.meta.dirname, ".."));
 const root = resolve(import.meta.dirname, "../../lit-static");
 const mail = [];
+// The real-backend CI stack uses 8088; isolated browser tests use 8080.
+const staticPort = Number(process.env.DASHBOARD_TEST_PORT || 8080);
+if (![8080, 8088].includes(staticPort)) throw new Error("Invalid test port");
 const mf = new Miniflare(
   convertV4MiniflareOptions({
     workers: [
@@ -18,7 +21,7 @@ const mf = new Miniflare(
         d1Databases: ["DB"],
         bindings: {
           ENVIRONMENT: "local",
-          DASHBOARD_URL: "http://localhost:8080/dapps/dashboard/",
+          DASHBOARD_URL: `http://localhost:${staticPort}/dapps/dashboard/`,
           AUTH_SECRET: "test-only-browser-secret-123456789012345",
           RESEND_API_KEY: "test",
           MAIL_FROM: "accounts@example.com",
@@ -94,7 +97,7 @@ const staticServer = createServer(async (req, res) => {
   }
 });
 auth.listen(8787, "localhost");
-staticServer.listen(8080, "localhost");
+staticServer.listen(staticPort, "localhost");
 for (const signal of ["SIGINT", "SIGTERM"])
   process.on(signal, async () => {
     auth.close();

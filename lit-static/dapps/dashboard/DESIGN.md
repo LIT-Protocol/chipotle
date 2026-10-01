@@ -106,6 +106,8 @@ and the authenticated workspace share the same frame.
   On the workspace the right side keeps the working controls (mode badge host
   `.topbar-title`, billing balance, Add Funds, Auto recharge, Developer docs,
   theme toggle, Account menu).
+  On small screens, the controls wrap below the brand so the Account menu stays
+  within the viewport and can be used to sign out.
 - **Body** (`.dashboard-body`): sidebar + main content in a row. The sidebar is
   in-flow (not fixed) so the footer can sit below both columns.
 - **Footer** (`.marketing-footer` / `.app-footer`): "Lit Protocol" left,
