@@ -73,6 +73,10 @@ async function send(path, body, method = "POST") {
   }
   if (!result || typeof result !== "object" || Array.isArray(result))
     throw new Error("Account service returned an invalid response. Please try again.");
+  const needsAcknowledgement = method !== "GET" &&
+    ["signup/credentials", "envelope", "password/change", "email/complete", "logout", "logout-all"].includes(path);
+  if (needsAcknowledgement && result.ok !== true)
+    throw new Error("Account service returned an invalid response. Please try again.");
   if (result.parameters && result.csrf) {
     validateParameters(result.parameters);
     current = result;

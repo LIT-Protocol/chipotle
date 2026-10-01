@@ -159,6 +159,14 @@ test("new password account verifies email, encrypts locally, reloads, signs in a
     .locator("#password-new")
     .fill("my newly generated password phrase");
   await expect(page.locator("#password-change-username")).toHaveValue("browser@example.com");
+  await page.route("http://localhost:8787/auth/v1/password/change", route => route.fulfill({ status: 200, json: {} }));
+  await page.locator("#password-change-form button").click();
+  await expect(page.locator("#password-settings-status")).toContainText("invalid response");
+  await expect(page.locator("#password-settings")).toBeVisible();
+  await expect(page.locator("body")).toHaveClass(/has-api-key/);
+  await page.unroute("http://localhost:8787/auth/v1/password/change");
+  await page.locator("#password-current").fill(password);
+  await page.locator("#password-new").fill("my newly generated password phrase");
   await submitAndNavigate(page, "#password-change-form button");
   await expect(page.locator("body")).not.toHaveClass(/has-api-key/);
   await expect(page.locator("#login-status")).toContainText("Password changed");
