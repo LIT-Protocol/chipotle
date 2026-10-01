@@ -1,0 +1,113 @@
+name: Dashboard account access
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-auth-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  auth:
+    # Stable name, no path filters: safe to configure as a required status check.
+    name: Dashboard account access
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      AGENT_SCREENSHOTS: '1'
+      SIMULATOR_DIR: ${{ github.workspace }}/.context/dstack/sdk/simulator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: e2e/package.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.5.1
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y protobuf-compiler libssl-dev pkg-config jq
+      - uses: dtolnay/rust-toolchain@1.91
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            lit-api-server -> target
+            lit-api-server/blockchain/rust_generator_and_deployer -> target
+          shared-key: dashboard-auth
+          cache-on-failure: true
+      - name: Install browser tests
+        working-directory: e2e
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+      - name: Build password auth Worker and check browser types
+        run: |
+          corepack pnpm@10.11.0 --dir lit-dashboard-auth install --frozen-lockfile
+          corepack pnpm@10.11.0 --dir lit-dashboard-auth build
+          corepack pnpm@10.11.0 --dir e2e typecheck
+      - name: Compile local contracts
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: |
+          npm ci
+          npx hardhat compile
+      - name: Build API and contract deployer
+        run: |
+          cargo build --locked --manifest-path lit-api-server/Cargo.toml --features dstack --bin lit-api-server
+          cargo build --locked --manifest-path lit-api-server/blockchain/rust_generator_and_deployer/Cargo.toml --bin contract_deployer
+      - name: Check out pinned TEE simulator
+        uses: actions/checkout@v4
+        with:
+          repository: Dstack-TEE/dstack
+          ref: 5c37b2574069267eaff5c490694dc2f4d24eaa62
+          path: .context/dstack
+          persist-credentials: false
+      - name: Cache simulator binary
+        id: simulator-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .context/dstack/sdk/simulator/dstack-simulator
+          key: auth-simulator-${{ runner.os }}-${{ runner.arch }}-5c37b2574069267eaff5c490694dc2f4d24eaa62-rust1.92
+      - uses: dtolnay/rust-toolchain@1.92
+        if: steps.simulator-cache.outputs.cache-hit != 'true'
+      - name: Build simulator
+        if: steps.simulator-cache.outputs.cache-hit != 'true'
+        working-directory: .context/dstack
+        run: |
+          cargo +1.92 build --release --locked -p dstack-guest-agent-simulator
+          cp target/release/dstack-simulator sdk/simulator/
+      - name: Save simulator binary before browser checks
+        if: steps.simulator-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .context/dstack/sdk/simulator/dstack-simulator
+          key: ${{ steps.simulator-cache.outputs.cache-primary-key }}
+      - name: Test signup and login in Chromium
+        working-directory: e2e
+        run: pnpm test:auth
+      - name: Upload browser report and service logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-account-access
+          path: |
+            e2e/playwright-report/auth
+            e2e/test-results/auth
+            e2e/artifacts/auth-stack
+          retention-days: 7

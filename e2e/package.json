@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@10.11.0",
   "scripts": {
     "build:wallet-cache": "synpress wallet-setup",
     "test": "playwright test",
@@ -11,6 +12,7 @@
     "test:eoa": "playwright test --project=eoa",
     "test:wc": "playwright test --project=walletconnect",
     "test:flows": "playwright test --project=flows-api --project=flows-wc",
+    "test:auth": "playwright test --config playwright.auth.config.ts",
     "typecheck": "tsc --noEmit",
     "report": "playwright show-report"
   },
