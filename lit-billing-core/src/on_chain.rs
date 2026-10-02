@@ -157,7 +157,23 @@ impl OnChainBillingResolver {
                     "latest"
                 ]),
             )
-            .await?;
+            .await
+            .map_err(|failure| match failure {
+                RpcFailure::Transport(msg) => ResolveError::Transient(msg),
+                // The contract reverts `AccountDoesNotExist(apiKeyHash)` for
+                // a hash it has never seen. Only accept that classification
+                // when the revert payload is ABI-exact AND echoes the hash
+                // we asked about — anything else (other reverts, rate
+                // limits, gateway diagnostics that merely mention the error
+                // name) stays transient so the caller retries.
+                RpcFailure::Rpc(err) if err.reverted_account_does_not_exist(&key_hash) => {
+                    ResolveError::NotFound
+                }
+                RpcFailure::Rpc(err) => ResolveError::Transient(format!(
+                    "eth_call RPC error {}: {}",
+                    err.code, err.message
+                )),
+            })?;
 
         // Response shape: 0x-prefixed 64-char hex = 32 bytes, last 20 of which
         // are the address (left-padded). Empty `0x` is what a node returns
@@ -195,7 +211,7 @@ impl OnChainBillingResolver {
         &self,
         method: &str,
         params: serde_json::Value,
-    ) -> Result<T, ResolveError> {
+    ) -> Result<T, RpcFailure> {
         let req = JsonRpcRequest {
             jsonrpc: "2.0",
             id: 1,
@@ -208,9 +224,9 @@ impl OnChainBillingResolver {
             .json(&req)
             .send()
             .await
-            .map_err(|e| ResolveError::Transient(format!("POST {method}: {e}")))?;
+            .map_err(|e| RpcFailure::Transport(format!("POST {method}: {}", e.without_url())))?;
         if !resp.status().is_success() {
-            return Err(ResolveError::Transient(format!(
+            return Err(RpcFailure::Transport(format!(
                 "{method} HTTP {}",
                 resp.status()
             )));
@@ -218,15 +234,12 @@ impl OnChainBillingResolver {
         let body: JsonRpcResponse<T> = resp
             .json()
             .await
-            .map_err(|e| ResolveError::Transient(format!("decode {method}: {e}")))?;
+            .map_err(|e| RpcFailure::Transport(format!("decode {method}: {}", e.without_url())))?;
         if let Some(err) = body.error {
-            return Err(ResolveError::Transient(format!(
-                "{method} RPC error {}: {}",
-                err.code, err.message
-            )));
+            return Err(RpcFailure::Rpc(err));
         }
         body.result
-            .ok_or_else(|| ResolveError::Transient(format!("{method}: missing result")))
+            .ok_or_else(|| RpcFailure::Transport(format!("{method}: missing result")))
     }
 
     /// Raw `eth_call` for the EIP-1271 path. Distinct from [`Self::json_rpc`]
@@ -259,17 +272,16 @@ impl OnChainBillingResolver {
             .json(&req)
             .send()
             .await
-            .map_err(|e| ResolveError::Transient(format!("POST eth_call: {e}")))?;
+            .map_err(|e| ResolveError::Transient(format!("POST eth_call: {}", e.without_url())))?;
         if !resp.status().is_success() {
             return Err(ResolveError::Transient(format!(
                 "eth_call HTTP {}",
                 resp.status()
             )));
         }
-        let body: JsonRpcResponse<String> = resp
-            .json()
-            .await
-            .map_err(|e| ResolveError::Transient(format!("decode eth_call: {e}")))?;
+        let body: JsonRpcResponse<String> = resp.json().await.map_err(|e| {
+            ResolveError::Transient(format!("decode eth_call: {}", e.without_url()))
+        })?;
         if body.error.is_some() {
             // Execution revert / non-EIP-1271 contract — a definitive
             // non-acceptance, not an infra failure.
@@ -380,8 +392,9 @@ impl crate::eip712::Erc1271Verifier for OnChainBillingResolver {
 /// status codes downstream.
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveError {
-    /// Account exists but has no billing wallet — i.e. the key isn't
-    /// registered on chain. 401 to the dashboard.
+    /// The key isn't registered on chain: either the contract reverted
+    /// `AccountDoesNotExist`, or (legacy contract) the account exists but
+    /// has no billing wallet. 401 to the dashboard.
     #[error("account has no wallet address")]
     NotFound,
     /// RPC / decode / contract failure. 503 — caller should retry.
@@ -407,6 +420,111 @@ struct JsonRpcResponse<T> {
 struct JsonRpcError {
     code: i64,
     message: String,
+    /// Revert payload. Alchemy/geth return the ABI-encoded revert data as a
+    /// 0x-hex string; other gateways nest it (`{"data": ...}`,
+    /// `{"originalError": {"data": ...}}`) or serialise it into `message`.
+    /// Optional because non-revert errors (rate limits, bad params) carry
+    /// no data.
+    #[serde(default)]
+    data: Option<serde_json::Value>,
+}
+
+/// Internal split of a JSON-RPC call's failure modes so the caller can
+/// classify execution errors with context (which account hash was asked
+/// about) that the generic transport layer doesn't have. Transport
+/// messages never include the RPC URL — provider tokens live in it.
+enum RpcFailure {
+    Transport(String),
+    Rpc(JsonRpcError),
+}
+
+/// How deep into nested `error.data` wrappers we look for a revert payload.
+/// Bounded so a hostile or buggy gateway can't make us walk a huge tree.
+const REVERT_DATA_MAX_DEPTH: usize = 4;
+
+impl JsonRpcError {
+    /// True when this execution error is the AccountConfig contract's
+    /// `AccountDoesNotExist(uint256)` custom revert *for the hash we
+    /// queried* — i.e. the account is simply not registered on this
+    /// diamond. That is a permanent credential failure (401), not a
+    /// transient RPC fault (503): the old mapping made every unknown key,
+    /// and every lit-payments deployment pointed at the wrong diamond,
+    /// surface as a retry-forever 503 to the dashboard.
+    ///
+    /// Evidence required: a hex string equal to
+    /// `0x d4a84737 <32-byte hash>` (exactly 72 hex chars) somewhere in the
+    /// revert data (nested up to [`REVERT_DATA_MAX_DEPTH`]) or embedded in
+    /// `message`. Truncated payloads, a different hash, other selectors, and
+    /// prose that merely mentions the error name do NOT qualify.
+    fn reverted_account_does_not_exist(&self, key_hash: &B256) -> bool {
+        let expected = format!(
+            "0x{}{}",
+            hex::encode(account_does_not_exist_selector()),
+            hex::encode(key_hash.as_slice())
+        );
+        let mut candidates: Vec<String> = Vec::new();
+        if let Some(data) = &self.data {
+            collect_hex_strings(data, 0, &mut candidates);
+        }
+        collect_hex_runs(&self.message, &mut candidates);
+        candidates
+            .iter()
+            .any(|c| c.to_ascii_lowercase() == expected)
+    }
+}
+
+/// Walk a JSON value (bounded depth) collecting every string that looks
+/// like 0x-hex, and every 0x-hex run inside string values (gateways that
+/// serialise the inner error object into a string are covered by the
+/// run scan).
+fn collect_hex_strings(v: &serde_json::Value, depth: usize, out: &mut Vec<String>) {
+    if depth > REVERT_DATA_MAX_DEPTH {
+        return;
+    }
+    match v {
+        serde_json::Value::String(s) => collect_hex_runs(s, out),
+        serde_json::Value::Object(map) => {
+            for child in map.values() {
+                collect_hex_strings(child, depth + 1, out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for child in items {
+                collect_hex_strings(child, depth + 1, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Push every maximal `0x[0-9a-fA-F]+` run found in `s`.
+fn collect_hex_runs(s: &str, out: &mut Vec<String>) {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'0' && (bytes[i + 1] == b'x' || bytes[i + 1] == b'X') {
+            let start = i;
+            let mut j = i + 2;
+            while j < bytes.len() && bytes[j].is_ascii_hexdigit() {
+                j += 1;
+            }
+            if j > i + 2 {
+                out.push(s[start..j].to_string());
+            }
+            i = j.max(i + 1);
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// `bytes4(keccak256("AccountDoesNotExist(uint256)"))` = `0xd4a84737`.
+/// Mirrors `AccountConfig::AccountDoesNotExist::SELECTOR` in
+/// lit-api-server's generated bindings, without pulling those in.
+pub fn account_does_not_exist_selector() -> [u8; 4] {
+    let mut buf = [0u8; 4];
+    buf.copy_from_slice(&keccak256(b"AccountDoesNotExist(uint256)")[..4]);
+    buf
 }
 
 /// Helper to compute the eth_call selector — exposed for tests in
@@ -468,6 +586,135 @@ mod tests {
         let h = account_key_hash("my-api-key").unwrap();
         let expected = keccak256(b"my-api-key");
         assert_eq!(h, expected);
+    }
+
+    /// Pin `AccountDoesNotExist(uint256)` to the selector lit-api-server's
+    /// `decode_revert` and the live Base diamonds emit (`0xd4a84737`).
+    #[test]
+    fn pinned_account_does_not_exist_selector() {
+        assert_eq!(hex::encode(account_does_not_exist_selector()), "d4a84737");
+    }
+
+    fn rpc_err(data: Option<serde_json::Value>) -> JsonRpcError {
+        JsonRpcError {
+            code: 3,
+            message: "execution reverted".to_string(),
+            data,
+        }
+    }
+
+    fn hash() -> B256 {
+        B256::from([0x11u8; 32])
+    }
+
+    fn payload_for(h: &B256) -> String {
+        format!("0xd4a84737{}", hex::encode(h.as_slice()))
+    }
+
+    /// Alchemy/geth shape: `data` is the 0x-hex revert payload.
+    #[test]
+    fn account_does_not_exist_detected_from_string_data() {
+        let h = hash();
+        let e = rpc_err(Some(serde_json::Value::String(payload_for(&h))));
+        assert!(e.reverted_account_does_not_exist(&h));
+        // Case-insensitive on the hex.
+        let upper = payload_for(&h).to_ascii_uppercase().replace("0X", "0x");
+        let e = rpc_err(Some(serde_json::Value::String(upper)));
+        assert!(e.reverted_account_does_not_exist(&h));
+    }
+
+    /// Nested wrappers: `{"data": ...}` and `{"originalError": {"data": ...}}`.
+    #[test]
+    fn account_does_not_exist_detected_from_nested_data() {
+        let h = hash();
+        let e = rpc_err(Some(serde_json::json!({ "data": payload_for(&h) })));
+        assert!(e.reverted_account_does_not_exist(&h));
+        let e = rpc_err(Some(serde_json::json!({
+            "originalError": { "code": 3, "data": payload_for(&h) }
+        })));
+        assert!(e.reverted_account_does_not_exist(&h));
+    }
+
+    /// Gateways that only put the payload in `message`, or serialise the
+    /// inner error object into a string.
+    #[test]
+    fn account_does_not_exist_detected_from_message_or_serialised_data() {
+        let h = hash();
+        let mut e = rpc_err(None);
+        e.message = format!("execution reverted: {}", payload_for(&h));
+        assert!(e.reverted_account_does_not_exist(&h));
+        let serialised = serde_json::json!({ "data": payload_for(&h) }).to_string();
+        let e = rpc_err(Some(serde_json::Value::String(serialised)));
+        assert!(e.reverted_account_does_not_exist(&h));
+    }
+
+    /// Nesting past the depth bound is ignored (bounded walk).
+    #[test]
+    fn account_does_not_exist_ignores_overly_deep_nesting() {
+        let h = hash();
+        let mut v = serde_json::Value::String(payload_for(&h));
+        for _ in 0..(REVERT_DATA_MAX_DEPTH + 2) {
+            v = serde_json::json!({ "inner": v });
+        }
+        assert!(!rpc_err(Some(v)).reverted_account_does_not_exist(&h));
+    }
+
+    /// A revert for a *different* hash is not evidence about ours.
+    #[test]
+    fn account_does_not_exist_requires_matching_hash() {
+        let other = B256::from([0x22u8; 32]);
+        let e = rpc_err(Some(serde_json::Value::String(payload_for(&other))));
+        assert!(!e.reverted_account_does_not_exist(&hash()));
+    }
+
+    /// Truncated / over-long payloads and selector-only data are rejected.
+    #[test]
+    fn account_does_not_exist_requires_abi_exact_payload() {
+        let h = hash();
+        let full = payload_for(&h);
+        let truncated = full[..full.len() - 2].to_string();
+        assert!(
+            !rpc_err(Some(serde_json::Value::String(truncated)))
+                .reverted_account_does_not_exist(&h)
+        );
+        let padded = format!("{full}ff");
+        assert!(
+            !rpc_err(Some(serde_json::Value::String(padded))).reverted_account_does_not_exist(&h)
+        );
+        let selector_only = "0xd4a84737".to_string();
+        assert!(
+            !rpc_err(Some(serde_json::Value::String(selector_only)))
+                .reverted_account_does_not_exist(&h)
+        );
+    }
+
+    /// Prose that mentions the error name, other reverts, rate limits, and
+    /// dataless errors all stay transient.
+    #[test]
+    fn other_rpc_errors_are_not_account_does_not_exist() {
+        let h = hash();
+        assert!(!rpc_err(None).reverted_account_does_not_exist(&h));
+        let mut prose = rpc_err(None);
+        prose.message = "gateway: upstream reported AccountDoesNotExist, retry later".to_string();
+        assert!(!prose.reverted_account_does_not_exist(&h));
+        let other_revert = format!("0xdeadbeef{}", hex::encode(h.as_slice()));
+        assert!(
+            !rpc_err(Some(serde_json::Value::String(other_revert)))
+                .reverted_account_does_not_exist(&h)
+        );
+        let rate_limited = JsonRpcError {
+            code: -32016,
+            message: "over rate limit".to_string(),
+            data: None,
+        };
+        assert!(!rate_limited.reverted_account_does_not_exist(&h));
+    }
+
+    #[test]
+    fn collect_hex_runs_finds_all_maximal_runs() {
+        let mut out = Vec::new();
+        collect_hex_runs("a 0xabc then 0X12 and 0x (empty) end", &mut out);
+        assert_eq!(out, vec!["0xabc".to_string(), "0X12".to_string()]);
     }
 
     /// Pin the selector — if alloy-primitives' keccak256 ever drifts we

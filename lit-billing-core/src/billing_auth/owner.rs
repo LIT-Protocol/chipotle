@@ -44,10 +44,14 @@ impl<'r> FromRequest<'r> for BillingOwnerAuth {
             match resolver.resolve_api_key(key).await {
                 Ok(identity) if key_controls_wallet(key, &identity.wallet_address_hex) => {}
                 Ok(_) => return Outcome::Error((Status::Forbidden, ())),
-                Err(AuthError::Transient(_)) => {
+                Err(AuthError::Transient(msg)) => {
+                    tracing::warn!("BillingOwnerAuth: API-key resolver transient failure: {msg}");
                     return Outcome::Error((Status::ServiceUnavailable, ()));
                 }
-                Err(_) => return Outcome::Error((Status::Unauthorized, ())),
+                Err(e) => {
+                    tracing::warn!("BillingOwnerAuth: API-key rejected: {e}");
+                    return Outcome::Error((Status::Unauthorized, ()));
+                }
             }
         }
         Outcome::Success(Self(auth))

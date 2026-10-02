@@ -125,7 +125,10 @@ impl<'r> FromRequest<'r> for BillingAuth {
                             api_key_hash_hex: identity.api_key_hash_hex,
                         });
                     }
-                    Err(e) => return Outcome::Error((map_auth_error(e), ())),
+                    Err(e) => {
+                        tracing::warn!("BillingAuth: wallet-sig rejected: {e}");
+                        return Outcome::Error((map_auth_error(e), ()));
+                    }
                 }
             }
             tracing::warn!(
@@ -162,7 +165,14 @@ impl<'r> FromRequest<'r> for BillingAuth {
                     // the public surface of `BillingAuth::ApiKey`.
                     return Outcome::Success(BillingAuth::ApiKey(key));
                 }
-                Err(e) => return Outcome::Error((map_auth_error(e), ())),
+                Err(e) => {
+                    // Logged here, at the first resolution boundary: the
+                    // owner guard only runs after this succeeds, so a
+                    // service pointed at the wrong AccountConfig diamond
+                    // (every key unknown) must be diagnosable from this line.
+                    tracing::warn!("BillingAuth: API-key rejected: {e}");
+                    return Outcome::Error((map_auth_error(e), ()));
+                }
             }
         }
         Outcome::Error((Status::Unauthorized, ()))
