@@ -51,14 +51,19 @@ const staticServer = createServer(async (req, res) => {
 });
 staticServer.listen(staticPort, "localhost");
 
+let stopping = false;
 async function shutdown() {
+  if (stopping) return;
+  stopping = true;
   staticServer.close();
-  await service.stop();
+  await service.stop(); // terminates the child and drops the throwaway database
   process.exit(0);
 }
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, shutdown);
-service.child.once("exit", (code) => {
-  console.error(`lit-payments exited (${code})`);
+service.child.once("exit", async (code) => {
+  if (stopping) return; // expected: shutdown() is waiting on this exit
+  console.error(`lit-payments exited unexpectedly (${code})`);
   staticServer.close();
+  await service.stop().catch(() => {});
   process.exit(1);
 });

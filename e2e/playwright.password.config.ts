@@ -17,6 +17,8 @@ export default defineConfig({
     command: "node ../lit-dashboard-auth/test/browser-server.mjs",
     url: "http://localhost:8080/dapps/dashboard/",
     reuseExistingServer: false,
-    timeout: 30000,
+    timeout: 60000,
+    // SIGTERM lets the harness stop lit-payments and drop its throwaway database.
+    gracefulShutdown: { signal: "SIGTERM", timeout: 10000 },
   },
 });

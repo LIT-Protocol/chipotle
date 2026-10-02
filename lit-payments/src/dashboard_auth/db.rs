@@ -430,18 +430,33 @@ pub async fn complete_email_change(
     notice: &super::outbox::Queued,
 ) -> Result<bool> {
     let mut tx = pool.begin().await?;
+    // Lock the user row with the credential the caller authenticated against.
+    // Under READ COMMITTED a concurrent password change could otherwise commit
+    // between the proof check and the email write; the lock serialises the
+    // two and the re-check rejects a rotated credential. (The D1 batch was
+    // serialised implicitly.)
+    let current = sqlx::query_scalar::<_, i32>(
+        "SELECT 1 FROM dashboard_auth_users WHERE id = $1 AND version = $2 AND verifier = $3 FOR UPDATE",
+    )
+    .bind(&u.id)
+    .bind(u.version)
+    .bind(&u.verifier)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if current.is_none() {
+        tx.rollback().await?;
+        return Ok(false);
+    }
     let consumed = sqlx::query(
         "UPDATE dashboard_auth_tokens SET claim = $1 \
          WHERE hash = $2 AND user_id = $3 AND version = $4 AND purpose = 'email' AND claim IS NULL \
-           AND expires_at > $5 \
-           AND EXISTS (SELECT 1 FROM dashboard_auth_users WHERE id = $3 AND version = $4 AND verifier = $6)",
+           AND expires_at > $5",
     )
     .bind(claim)
     .bind(token_hash)
     .bind(&u.id)
     .bind(u.version)
     .bind(now)
-    .bind(&u.verifier)
     .execute(&mut *tx)
     .await?;
     if consumed.rows_affected() != 1 {
