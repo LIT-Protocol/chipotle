@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Disposable local account-access stack. Build prerequisites first (README.md).
 # No lit-actions worker is needed: these tests don't execute Actions.
+# Password login uses the real lit-payments auth service against a fresh local
+# Postgres database (TEST_DATABASE_URL, default postgres://localhost:5432/postgres)
+# with outbound email captured by a local fake Resend endpoint.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SIMULATOR_DIR="${SIMULATOR_DIR:-$HOME/GitHub/dstack/sdk/simulator}"
 CONTRACTS_DIR="$REPO_DIR/lit-api-server/blockchain/lit_node_express"
 API_BIN="$REPO_DIR/lit-api-server/target/debug/lit-api-server"
+PAYMENTS_BIN="${LIT_PAYMENTS_BIN:-$REPO_DIR/lit-payments/target/debug/lit-payments}"
 DEPLOYER_BIN="$REPO_DIR/lit-api-server/blockchain/rust_generator_and_deployer/target/debug/contract_deployer"
 LOG_DIR="$REPO_DIR/e2e/artifacts/auth-stack"
 RUN_DIR=$(mktemp -d /tmp/lit-auth-XXXXXX)
@@ -35,14 +39,14 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-for binary in "$API_BIN" "$DEPLOYER_BIN" "$SIMULATOR_DIR/dstack-simulator"; do
+for binary in "$API_BIN" "$DEPLOYER_BIN" "$PAYMENTS_BIN" "$SIMULATOR_DIR/dstack-simulator"; do
   [ -x "$binary" ] || { echo "Missing $binary — see e2e/README.md" >&2; exit 1; }
 done
 
 # Refuse to reuse a developer's running chain/API or overwrite their config.
 python3 - <<'PY'
 import socket
-for port in (8545, 8000, 8088, 8787):
+for port in (8545, 8000, 8088, 8787, 8790):
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', port))
 PY
@@ -124,8 +128,8 @@ wait_for "${PIDS[2]}" curl --fail --silent --max-time 3 http://localhost:8000/co
 
 # Start static hosting last: Playwright's readiness probe now implies the API
 # and chain are ready too. Keep all runtime files outside the working tree.
-# Real auth Worker + D1; only outbound email is captured by this test harness.
-DASHBOARD_TEST_PORT=8088 node "$REPO_DIR/lit-dashboard-auth/test/browser-server.mjs" > "$RUN_DIR/auth-storage.log" 2>&1 &
+# Real lit-payments auth service + Postgres; only outbound email is captured.
+DASHBOARD_TEST_PORT=8088 LIT_PAYMENTS_BIN="$PAYMENTS_BIN" node "$REPO_DIR/lit-dashboard-auth/test/browser-server.mjs" > "$RUN_DIR/auth-storage.log" 2>&1 &
 PIDS+=("$!")
 wait_for "${PIDS[3]}" curl --fail --silent --max-time 3 http://localhost:8787/health
 while true; do

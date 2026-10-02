@@ -78,6 +78,8 @@ fn test_config(stripe_secret_key: String, db_url: String) -> Config {
         stripe_dashboard_base: "https://dashboard.stripe.com".to_string(),
         cors_allowed_origins: vec!["http://localhost".to_string()],
         gas_funder: None,
+        dashboard_auth: None,
+        resend_api_base_url: crate::mail::DEFAULT_RESEND_API_BASE_URL.into(),
     }
 }
 

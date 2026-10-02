@@ -1,6 +1,6 @@
 # Email/password login and dashboard modernization
 
-Status: authentication implemented in this PR; infrastructure provisioning and live rollout remain operator steps. React modernization remains a separate follow-up. See [implementation and rollout instructions](../lit-dashboard-auth/README.md).
+Status: authentication implemented; the storage service moved from Cloudflare Workers/D1 to lit-payments (see [dashboard-auth-on-lit-payments.md](dashboard-auth-on-lit-payments.md)), which replaces the Cloudflare provisioning described below. React modernization remains a separate follow-up. See [implementation and rollout instructions](../lit-dashboard-auth/README.md).
 Date: 2026-09-30.
 
 ## Outcome and recommended decisions

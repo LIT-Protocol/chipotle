@@ -40,6 +40,9 @@ jobs:
       - name: Inject lit-payments URL
         run: sed -i "s|__LIT_PAYMENTS_BASE_URL__|${{ vars.LIT_PAYMENTS_STAGING_URL }}|g" lit-static/dapps/dashboard/auth.js
 
+      # Empty LIT_AUTH_STAGING_URL keeps password login off on
+      # dashboard.dev.litprotocol.com. Set it to the staging lit-payments URL
+      # (and add that dashboard to DASHBOARD_AUTH_URLS on Railway) to enable it.
       - name: Configure password auth service
         env:
           AUTH_URL: ${{ vars.LIT_AUTH_STAGING_URL }}
@@ -73,14 +76,13 @@ jobs:
       - name: Inject lit-payments URL
         run: sed -i "s|__LIT_PAYMENTS_BASE_URL__|${{ vars.LIT_PAYMENTS_STAGING_URL }}|g" lit-static/dapps/dashboard/auth.js
 
-      # The next project serves from lit-static-next.pages.dev. pages.dev is a public
-      # suffix, so the auth Worker's SameSite cookie would never be sent, and the
-      # Worker only allows the single dashboard origin configured for staging
-      # (dashboard.dev.litprotocol.com). Leave password login disabled here until
-      # next has a same-site custom domain and its own auth deployment.
-      - name: Configure password auth service (disabled on next)
+      # Password login is served by the staging lit-payments service
+      # (staging.payments.litprotocol.com), which must list
+      # https://next.dashboard.chipotle.litprotocol.com/dapps/dashboard/ in
+      # DASHBOARD_AUTH_URLS. See plans/dashboard-auth-on-lit-payments.md.
+      - name: Configure password auth service (staging lit-payments)
         env:
-          AUTH_URL: ''
+          AUTH_URL: ${{ vars.LIT_PAYMENTS_STAGING_URL }}
         run: python3 lit-dashboard-auth/scripts/configure-static.py
 
       - name: Inject dashboard git commit

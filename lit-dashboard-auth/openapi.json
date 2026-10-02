@@ -3,7 +3,7 @@
   "info": {
     "title": "Chipotle dashboard password storage",
     "version": "1.0.0",
-    "description": "New accounts only. No password recovery, key import, or legacy enrollment. Browser encrypts the API key; this service never receives the encryption key or password."
+    "description": "New accounts only. No password recovery, key import, or legacy enrollment. Browser encrypts the API key; this service never receives the encryption key or password. Served by lit-payments (lit-payments/src/dashboard_auth/)."
   },
   "paths": {
     "/auth/v1/signup/start": {
@@ -265,12 +265,19 @@
             "application/json": {
               "schema": {
                 "allOf": [
-                  { "$ref": "#/components/schemas/CredentialRequest" },
+                  {
+                    "$ref": "#/components/schemas/CredentialRequest"
+                  },
                   {
                     "type": "object",
                     "properties": {
-                      "retry": { "type": "boolean" },
-                      "operation": { "type": "string", "pattern": "^[0-9a-f]{32}$" }
+                      "retry": {
+                        "type": "boolean"
+                      },
+                      "operation": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{32}$"
+                      }
                     }
                   }
                 ]
@@ -1281,5 +1288,15 @@
         }
       }
     }
-  }
+  },
+  "servers": [
+    {
+      "url": "https://payments.litprotocol.com",
+      "description": "production lit-payments"
+    },
+    {
+      "url": "https://staging.payments.litprotocol.com",
+      "description": "staging lit-payments"
+    }
+  ]
 }

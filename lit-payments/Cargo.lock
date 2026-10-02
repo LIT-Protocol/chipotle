@@ -2965,6 +2965,7 @@ dependencies = [
 name = "lit-payments"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "alloy",
  "alloy-dyn-abi",
  "alloy-primitives",
@@ -2994,6 +2995,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
 ]
 

@@ -1,83 +1,36 @@
-// Test-only local server: real Worker + D1 + static dashboard, simulated Lit API
-// and email delivery. No production fixture routes exist in the Worker.
-import { Miniflare, convertV4MiniflareOptions } from "miniflare";
-import { applyMigrations } from "./migrations.mjs";
+// Test-only local server: real lit-payments auth service + Postgres + static
+// dashboard, with simulated Lit API (mocked by the browser tests) and captured
+// email delivery. No production fixture routes exist in the service.
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve, extname } from "node:path";
-process.chdir(resolve(import.meta.dirname, ".."));
+import { startAuthService } from "./server.mjs";
+
 const root = resolve(import.meta.dirname, "../../lit-static");
-const mail = [];
 // The real-backend CI stack uses 8088; isolated browser tests use 8080.
 const staticPort = Number(process.env.DASHBOARD_TEST_PORT || 8080);
 if (![8080, 8088].includes(staticPort)) throw new Error("Invalid test port");
-const mf = new Miniflare(
-  convertV4MiniflareOptions({
-    workers: [
-      {
-        modules: true,
-        scriptPath: resolve(import.meta.dirname, "../dist/worker.js"),
-        compatibilityDate: "2025-10-11",
-        d1Databases: ["DB"],
-        bindings: {
-          ENVIRONMENT: "local",
-          DASHBOARD_URL: `http://localhost:${staticPort}/dapps/dashboard/`,
-          AUTH_SECRET: "test-only-browser-secret-123456789012345",
-          RESEND_API_KEY: "test",
-          MAIL_FROM: "accounts@example.com",
-        },
-        outboundService: async (request) => {
-          mail.push(await request.json());
-          return Response.json({ id: "test" });
-        },
-      },
-    ],
-  }),
-);
-const db = await mf.getD1Database("DB");
-await applyMigrations(db);
-const auth = createServer(async (req, res) => {
-  try {
-    const chunks = [];
-    for await (const chunk of req) chunks.push(chunk);
-    const body = Buffer.concat(chunks);
-    const headers = new Headers();
-    for (const [k, v] of Object.entries(req.headers))
-      if (v) headers.set(k, Array.isArray(v) ? v.join(",") : v);
-    const response = await mf.dispatchFetch("http://localhost:8787" + req.url, {
-      method: req.method,
-      headers,
-      ...(body.length ? { body } : {}),
-    });
-    res.writeHead(response.status, Object.fromEntries(response.headers));
-    res.end(Buffer.from(await response.arrayBuffer()));
-  } catch {
-    res.writeHead(500);
-    res.end("Test server failure");
-  }
+
+const service = await startAuthService({
+  dashboardUrls: [`http://localhost:${staticPort}/dapps/dashboard/`],
 });
+
 const staticServer = createServer(async (req, res) => {
   const pathname = new URL(req.url, "http://localhost").pathname;
   if (pathname === "/__test/mail") {
     res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify(mail));
+    res.end(JSON.stringify(service.mail));
     return;
   }
   if (pathname === "/__test/records") {
     res.setHeader("Content-Type", "application/json");
-    res.end(
-      JSON.stringify(
-        (await db.prepare("SELECT * FROM auth_users").all()).results,
-      ),
-    );
+    res.end(JSON.stringify(await service.records()));
     return;
   }
   try {
     const path = resolve(
       root,
-      "." +
-        decodeURIComponent(pathname) +
-        (pathname.endsWith("/") ? "index.html" : ""),
+      "." + decodeURIComponent(pathname) + (pathname.endsWith("/") ? "index.html" : ""),
     );
     if (!path.startsWith(root + "/")) throw Error();
     const data = await readFile(path);
@@ -96,12 +49,21 @@ const staticServer = createServer(async (req, res) => {
     res.end("Not found");
   }
 });
-auth.listen(8787, "localhost");
 staticServer.listen(staticPort, "localhost");
-for (const signal of ["SIGINT", "SIGTERM"])
-  process.on(signal, async () => {
-    auth.close();
-    staticServer.close();
-    await mf.dispose();
-    process.exit(0);
-  });
+
+let stopping = false;
+async function shutdown() {
+  if (stopping) return;
+  stopping = true;
+  staticServer.close();
+  await service.stop(); // terminates the child and drops the throwaway database
+  process.exit(0);
+}
+for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, shutdown);
+service.child.once("exit", async (code) => {
+  if (stopping) return; // expected: shutdown() is waiting on this exit
+  console.error(`lit-payments exited unexpectedly (${code})`);
+  staticServer.close();
+  await service.stop().catch(() => {});
+  process.exit(1);
+});

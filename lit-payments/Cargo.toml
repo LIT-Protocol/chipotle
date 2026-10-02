@@ -6,6 +6,7 @@ description = "Lit Protocol ops-facing billing service: admin credit portal + LI
 license = "Apache-2.0"
 
 [dependencies]
+aes-gcm = "0.10"
 anyhow = "1.0"
 async-trait = "0.1"
 base64 = "0.22"
@@ -47,6 +48,7 @@ time = { version = "0.3", features = ["serde", "formatting", "macros"] }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 
 [dev-dependencies]

@@ -8,6 +8,7 @@ pub mod auto_topup;
 pub mod billing;
 pub mod chain;
 pub mod config;
+pub mod dashboard_auth;
 pub mod db;
 pub mod enterprise;
 pub mod gas_funder;

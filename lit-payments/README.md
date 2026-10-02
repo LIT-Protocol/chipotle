@@ -118,6 +118,7 @@ Public:
 - `GET /api/customer/preview?wallet=0x…` — wallet-scoped customer identity preview for the LITKEY payment page. Returns only `found`, `email`, and `wallet_address`; it does not expose Stripe customer ids or balances. The `email` is **masked** (e.g. `b***n@l***l.com`) so the unauthenticated endpoint can't be scraped into a wallet↔email dataset (CPL-376), and it is throttled per client IP (token bucket, `PREVIEW_RATE_LIMIT_*` env vars).
 - `GET /api/litkey/quote` — public LITKEY quote for the end-user payment page; includes `crediting_paused` and omits an effective credit rate while paused.
 - `GET /api/litkey/payment-config` — public Base mainnet payment config: chain id, LITKEY token address, and payment gateway address. Fails closed with `503` if chain verification is not configured.
+- `/auth/v1/*` — dashboard email/password storage service (signup verification, login, encrypted API-key envelopes, password/email changes). Gated on the dashboard `Origin` + `X-Chipotle-Auth` header, not operator sessions; off (503) unless `DASHBOARD_AUTH_SECRET` is set. See [Dashboard password login](#dashboard-password-login).
 - `POST /api/litkey/payment-claim` — wallet-scoped transaction claim for the browser payment page. Accepts `{ "tx_hash": "0x…", "wallet": "0x…" }`, fetches the transaction receipt, verifies the configured gateway emitted the expected `Payment` event for that wallet, and applies credit idempotently from that receipt.
 
 Authenticated (operator session cookie required):
@@ -407,6 +408,15 @@ LITKEY_GATEWAY_ADDRESS=0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b
 LITKEY_CHAIN_ID=8453
 ```
 
+Dashboard password login (optional; see [Dashboard password login](#dashboard-password-login)):
+
+```sh
+DASHBOARD_AUTH_SECRET=<openssl rand -hex 32>
+DASHBOARD_AUTH_URLS=https://dashboard.chipotle.litprotocol.com/dapps/dashboard/
+DASHBOARD_AUTH_ENVIRONMENT=production
+DASHBOARD_AUTH_COOKIE_SAMESITE=lax
+```
+
 Optional operator caps if you want non-default values:
 
 ```sh
@@ -471,6 +481,31 @@ SPF/DKIM records that Google Workspace uses:
    records to the **subdomain** zone in your DNS provider.
 3. Verify in Resend.
 4. Set `MAIL_FROM=noreply@mail.litprotocol.com`.
+
+## Dashboard password login
+
+`src/dashboard_auth/` serves `/auth/v1/*` for the dashboard's email/password
+accounts: the browser encrypts the API key (Argon2id + AES-256-GCM) and this
+service stores only ciphertext, a password *verifier*, sessions, email
+verification proofs and an encrypted mail outbox (`dashboard_auth_*` tables).
+Contract, tests and the browser side live in `../lit-dashboard-auth/`; design
+and rollout in `../plans/dashboard-auth-on-lit-payments.md`.
+
+Variables (the feature is off and answers 503 until the first is set):
+
+```sh
+DASHBOARD_AUTH_SECRET=<openssl rand -hex 32>        # >=32 chars, distinct per environment
+DASHBOARD_AUTH_URLS=https://next.dashboard.chipotle.litprotocol.com/dapps/dashboard/   # comma-separated, exact origins
+DASHBOARD_AUTH_ENVIRONMENT=staging                   # [a-z0-9-]{1,40}; part of the envelope AAD
+DASHBOARD_AUTH_COOKIE_SAMESITE=lax                   # default; none only if a dashboard is not same-site with this service
+# optional
+DASHBOARD_AUTH_CLIENT_IP_HEADER=X-Forwarded-For      # last value is the client (Railway appends one hop)
+DASHBOARD_AUTH_OUTBOX_INTERVAL_SECS=300
+RESEND_API_BASE_URL=https://api.resend.com           # test harness override only
+```
+
+The dashboard origins are appended to the CORS allowlist automatically. Mail
+goes through the existing `RESEND_API_KEY`/`MAIL_FROM`.
 
 ## Operator allowlist
 

@@ -21,11 +21,25 @@ jobs:
     name: Dashboard account access
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    services:
+      # Password login stores encrypted records through lit-payments (Postgres).
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       CARGO_BUILD_JOBS: '2'
       CARGO_PROFILE_DEV_DEBUG: '0'
       AGENT_SCREENSHOTS: '1'
       SIMULATOR_DIR: ${{ github.workspace }}/.context/dstack/sdk/simulator
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -50,6 +64,7 @@ jobs:
           workspaces: |
             lit-api-server -> target
             lit-api-server/blockchain/rust_generator_and_deployer -> target
+            lit-payments -> target
           shared-key: dashboard-auth
           cache-on-failure: true
       - name: Install browser tests
@@ -57,7 +72,7 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm exec playwright install --with-deps chromium
-      - name: Build password auth Worker and check browser types
+      - name: Install password auth test harness and check browser types
         run: |
           corepack pnpm@10.11.0 --dir lit-dashboard-auth install --frozen-lockfile
           corepack pnpm@10.11.0 --dir lit-dashboard-auth build
@@ -67,10 +82,11 @@ jobs:
         run: |
           npm ci
           npx hardhat compile
-      - name: Build API and contract deployer
+      - name: Build API, contract deployer and payments/auth service
         run: |
           cargo build --locked --manifest-path lit-api-server/Cargo.toml --features dstack --bin lit-api-server
           cargo build --locked --manifest-path lit-api-server/blockchain/rust_generator_and_deployer/Cargo.toml --bin contract_deployer
+          cargo build --locked --manifest-path lit-payments/Cargo.toml --bin lit-payments
       - name: Check out pinned TEE simulator
         uses: actions/checkout@v4
         with:
