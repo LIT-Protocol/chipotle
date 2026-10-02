@@ -59,22 +59,20 @@ tracks the theme automatically:
 - Mono: `"JetBrains Mono", ui-monospace, ...` for keys, hashes, addresses.
 - Form controls inherit (`font-family: inherit`) — never let browsers pick.
 
-Display headings (the login hero and workspace title) use weight **500** with
+Display headings (the workspace title) use weight **500** with
 heavy negative tracking (`-0.04em` to `-0.045em`) for the large, quiet
 litprotocol.com feel. Smaller headings use **500-600** with `-0.01em` to
 `-0.03em`. Metric numbers are large and light (36px / 400).
 
 Eyebrows (`.eyebrow`) are the recurring section kicker: 10px, uppercase,
-`0.1em` tracking, muted. They sit above the hero, the sign-in panel, and the
-workspace title.
+`0.1em` tracking, muted. They sit above the workspace title.
 
 Scale (semantic, not pixel-perfect):
 
 | Use | Size | Weight | Tracking |
 |---|---|---|---|
-| Login hero (`.login-hero-title`) | clamp 38–62px | 500 | -0.045em |
 | Workspace title (`.workspace-title`) | clamp 30–38px | 500 | -0.04em |
-| Sign-in title (`.login-title`) | 32px | 500 | -0.03em |
+| Sign-in title (`.login-title`) | 28px | 600 | -0.04em |
 | Next-step h2 | 21px | 500 | -0.025em |
 | Metric value (`.metric-grid .stat-value`) | 36px | 400 | -0.02em |
 | Section h2 | 18px | 600 | -0.01em |
@@ -95,28 +93,28 @@ Radii:
 ## Layout (issue #673)
 
 The dashboard follows the reviewed litprotocol.com preview: a full-bleed brand
-bar, a quiet text sidebar, a flat metric grid, and a page footer. Both the login
-and the authenticated workspace share the same frame.
+bar, a quiet text sidebar, a flat metric grid, and a page footer. Account access
+pages use a standalone centered form.
 
 ### App frame
 
-- **Brand bar** (`.marketing-topbar` on login, `.app-topbar` on workspace): the
+- **Brand bar** (`.app-topbar` on workspace): the
   `Lit` wordmark (`.brand-mark`, orange/indigo accent) + a hairline divider +
-  `Dashboard`, on the left. On login the right side is just "Developer docs ↗".
-  On the workspace the right side keeps the working controls (mode badge host
+  `Dashboard`, on the left. The right side keeps the working controls (mode badge host
   `.topbar-title`, billing balance, Add Funds, Auto recharge, Developer docs,
   theme toggle, Account menu).
+  On small screens, the controls wrap below the brand so the Account menu stays
+  within the viewport and can be used to sign out.
 - **Body** (`.dashboard-body`): sidebar + main content in a row. The sidebar is
   in-flow (not fixed) so the footer can sit below both columns.
-- **Footer** (`.marketing-footer` / `.app-footer`): "Lit Protocol" left,
+- **Footer** (`.app-footer`): "Lit Protocol" left,
   "Confidential, verifiable execution." right. Hairline top border.
 
-### Login layout (`.login-layout`)
+### Login layout (`.login-container`)
 
-Two-column split: a marketing intro (`.login-intro`) on the left and the
-sign-in surface (`.login-signin`, hairline left border) on the right. Collapses
-to one column under 900px, where the intro principles and the panel eyebrow are
-hidden and the sign-in surface gets a top border instead.
+A centered form with a local Lit logo, a page-specific heading, an account-access
+selector, and a link to switch between sign-in and account creation. The form
+is at most 440px wide and uses reduced padding on mobile.
 
 ### Workspace heading (`.workspace-heading`)
 
@@ -181,28 +179,22 @@ action ("Run an Action") on the right. One primary action per view.
 - Different copy per mode. ChainSecured popover lists which features are hidden.
 - Closes on outside click and Escape.
 
-### Sign-in surface (`.login-signin`)
+### Account access pages
 
-- **One clear sign-in surface** (issue #673), living in the right column of the
-  split login. Order: eyebrow → "Sign in to Lit." → subtitle → **Account access**
-  radio cards → the active form panel → a secondary "existing vs new" switch.
-- **Account access** (`.access-options`): two radio cards (`.access-card`,
-  `role="radio"`) — "API key" vs "Wallet (ChainSecured permissions)". This is
-  the primary choice. Selected card gets an ink border and a filled orange radio
-  dot. IDs `login-auth-mode-api` / `login-auth-mode-chainsecured` are unchanged,
-  so auth.js's roving-tabindex radiogroup keeps working; the choice still
-  persists via `setMode()`/sessionStorage.
-- **Panels**: `.login-card-api` / `.login-card-chainsecured` are flat (no border,
-  ring, or shadow). CSS gates them on `body.login-mode-chainsecured` (both stay
-  in the DOM). API existing → account-key field; API new → email/name/desc;
-  Wallet → a `.chain-explainer` + Connect wallet.
-- **Secondary switch** (`.login-switch`): existing vs new. Only the option you can
-  switch *to* is shown — `.login-switch-tab.is-active { display:none }` — so
-  auth.js's existing `is-active` toggle drives the "New to Lit? Create an account
-  →" / "Have an account? Sign in" flip with no extra JS.
-- **One primary action per surface.** The primary CTA (Continue / Create account)
-  is a solid ink `.btn-primary`; the wallet actions are `.btn-outline`.
-- Help glyph in the wallet explainer → tooltip defining ChainSecured.
+- Sign in: `/dapps/dashboard/#sign-in`. Create account:
+  `/dapps/dashboard/#create-account`. Native links expose both routes to agents
+  and support direct entry, refresh, and browser Back/Forward on static hosting.
+- An unauthenticated dashboard visit defaults to sign-in. Successful auth replaces
+  the auth route with `#overview`; sign-out replaces it with `#sign-in`.
+- Use the official Lit mark from `docs/logo/light.svg`, shipped locally as
+  `lit-static/assets/lit-logo.svg`. The logo is not a generic key or shield icon.
+- One flat form surface, a page-specific heading, and a persistent primary CTA.
+  No nested cards, decorative icons, gradients, or hover-dependent CTA colors.
+- Account access selector above the form: Email & password / API key / Wallet.
+  The radio group supports arrow keys. Password access is the default on reload
+  when configured; API-key and wallet choices remain available.
+- Native forms support Enter submission, required fields, and email validation.
+  Inactive pages use `hidden`; inactive modes use `display: none`.
 
 ### Help disclosure (`details.help-details`)
 
@@ -270,3 +262,17 @@ and survive page reloads.
 - No animations longer than 200ms. Snappy beats smooth.
 - No new fonts.
 - No "TODO" comments in shipped CSS — file an issue or fix it.
+
+### Password access and auth routing
+
+When the auth service is configured, email/password is the default on every load.
+All three methods retain hover/focus explanations and keyboard selection. Native
+POST password forms keep their autocomplete, username, and generation hints.
+Successful password submission explicitly reloads the dashboard at `#overview`,
+so hash routing does not bypass password-manager completion detection.
+
+Verification fragments are consumed before normal login routing changes the URL.
+Sign-in/create-account links keep their native hrefs; ordinary clicks update
+history synchronously, while Back/Forward update the visible form and title.
+Routing and responsive checks run in `e2e/password/routes.spec.ts` alongside the
+real Worker/D1 password suite; there is no separate npm browser test package.

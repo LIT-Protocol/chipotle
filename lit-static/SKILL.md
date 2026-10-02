@@ -9,6 +9,8 @@ Lit Chipotle is a programmable key management system. Accounts hold wallets (PKP
 
 **Production API**: `https://api.chipotle.litprotocol.com`
 **Dashboard**: `https://dashboard.chipotle.litprotocol.com/dapps/dashboard/`
+**Sign in**: `https://dashboard.chipotle.litprotocol.com/dapps/dashboard/#sign-in`
+**Create account**: `https://dashboard.chipotle.litprotocol.com/dapps/dashboard/#create-account`
 **Local dev**: `http://localhost:8000`
 
 Routes are mounted at `/core/v1/`, `/transfer/v1/`, and `/swaps/v1/`.
