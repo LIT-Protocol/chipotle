@@ -220,6 +220,9 @@ impl OnChainBillingResolver {
             .await
             .map_err(|e| ResolveError::Transient(format!("decode {method}: {e}")))?;
         if let Some(err) = body.error {
+            if err.is_account_does_not_exist() {
+                return Err(ResolveError::NotFound);
+            }
             return Err(ResolveError::Transient(format!(
                 "{method} RPC error {}: {}",
                 err.code, err.message
@@ -380,8 +383,9 @@ impl crate::eip712::Erc1271Verifier for OnChainBillingResolver {
 /// status codes downstream.
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveError {
-    /// Account exists but has no billing wallet — i.e. the key isn't
-    /// registered on chain. 401 to the dashboard.
+    /// The key isn't registered on chain: either the contract reverted
+    /// `AccountDoesNotExist`, or (legacy contract) the account exists but
+    /// has no billing wallet. 401 to the dashboard.
     #[error("account has no wallet address")]
     NotFound,
     /// RPC / decode / contract failure. 503 — caller should retry.
@@ -407,6 +411,42 @@ struct JsonRpcResponse<T> {
 struct JsonRpcError {
     code: i64,
     message: String,
+    /// Revert payload. Alchemy/geth return the ABI-encoded revert data as a
+    /// 0x-hex string; some providers nest it as an object. Optional because
+    /// non-revert errors (rate limits, bad params) carry no data.
+    #[serde(default)]
+    data: Option<serde_json::Value>,
+}
+
+impl JsonRpcError {
+    /// True when this execution error is the AccountConfig contract's
+    /// `AccountDoesNotExist(uint256)` custom revert — i.e. the account hash
+    /// is simply not registered on this diamond. That is a permanent
+    /// credential failure (401), not a transient RPC fault (503): the old
+    /// mapping made every unknown key, and every lit-payments deployment
+    /// pointed at the wrong diamond, surface as a retry-forever 503 to the
+    /// dashboard.
+    fn is_account_does_not_exist(&self) -> bool {
+        let selector = format!("0x{}", hex::encode(account_does_not_exist_selector()));
+        let data_has_selector = match &self.data {
+            Some(serde_json::Value::String(s)) => s.to_ascii_lowercase().starts_with(&selector),
+            Some(serde_json::Value::Object(map)) => map
+                .get("data")
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| s.to_ascii_lowercase().starts_with(&selector)),
+            _ => false,
+        };
+        data_has_selector || self.message.contains("AccountDoesNotExist")
+    }
+}
+
+/// `bytes4(keccak256("AccountDoesNotExist(uint256)"))` = `0xd4a84737`.
+/// Mirrors `AccountConfig::AccountDoesNotExist::SELECTOR` in
+/// lit-api-server's generated bindings, without pulling those in.
+pub fn account_does_not_exist_selector() -> [u8; 4] {
+    let mut buf = [0u8; 4];
+    buf.copy_from_slice(&keccak256(b"AccountDoesNotExist(uint256)")[..4]);
+    buf
 }
 
 /// Helper to compute the eth_call selector — exposed for tests in
@@ -468,6 +508,54 @@ mod tests {
         let h = account_key_hash("my-api-key").unwrap();
         let expected = keccak256(b"my-api-key");
         assert_eq!(h, expected);
+    }
+
+    /// Pin `AccountDoesNotExist(uint256)` to the selector lit-api-server's
+    /// `decode_revert` and the live Base diamonds emit (`0xd4a84737`).
+    #[test]
+    fn pinned_account_does_not_exist_selector() {
+        assert_eq!(hex::encode(account_does_not_exist_selector()), "d4a84737");
+    }
+
+    fn rpc_err(data: Option<serde_json::Value>) -> JsonRpcError {
+        JsonRpcError {
+            code: 3,
+            message: "execution reverted".to_string(),
+            data,
+        }
+    }
+
+    /// Alchemy/geth shape: `data` is the 0x-hex revert payload.
+    #[test]
+    fn account_does_not_exist_detected_from_string_data() {
+        let data = format!("0xd4a84737{}", "11".repeat(32));
+        assert!(rpc_err(Some(serde_json::Value::String(data))).is_account_does_not_exist());
+        // Case-insensitive on the hex.
+        let upper = format!("0xD4A84737{}", "11".repeat(32));
+        assert!(rpc_err(Some(serde_json::Value::String(upper))).is_account_does_not_exist());
+    }
+
+    /// Some providers nest the payload under `{"data": "0x..."}`.
+    #[test]
+    fn account_does_not_exist_detected_from_object_data() {
+        let data = serde_json::json!({ "data": format!("0xd4a84737{}", "22".repeat(32)) });
+        assert!(rpc_err(Some(data)).is_account_does_not_exist());
+    }
+
+    /// Other reverts, rate limits, and dataless errors stay transient.
+    #[test]
+    fn other_rpc_errors_are_not_account_does_not_exist() {
+        assert!(!rpc_err(None).is_account_does_not_exist());
+        let other_revert = format!("0xdeadbeef{}", "00".repeat(32));
+        assert!(
+            !rpc_err(Some(serde_json::Value::String(other_revert))).is_account_does_not_exist()
+        );
+        let rate_limited = JsonRpcError {
+            code: -32016,
+            message: "over rate limit".to_string(),
+            data: None,
+        };
+        assert!(!rate_limited.is_account_does_not_exist());
     }
 
     /// Pin the selector — if alloy-primitives' keccak256 ever drifts we
