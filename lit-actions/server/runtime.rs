@@ -629,11 +629,22 @@ pub(crate) fn inject_lit_namespace(
 fn execute_patch_deno(worker: &mut MainWorker) -> Result<()> {
     let _span = info_span!("PatchDeno.js").entered();
 
+    // `Deno.createHttpClient` / `Deno.HttpClient` are deleted for egress safety:
+    // a custom client built through `op_fetch_custom_client` is created with
+    // `dns_resolver: dns::Resolver::default()` (plain getaddrinfo) in
+    // deno_fetch 0.272, so it bypasses the `fetch_dns_resolver` egress filter
+    // wired up in `WorkerServiceOptions` (see egress.rs / CPL-295). With no way
+    // to construct an `HttpClient`, the `{ client }` option of `fetch()` /
+    // `WebSocket` cannot reach the unfiltered DNS path (the fetch wrapper in
+    // 99_patches.js also strips `client` as defense in depth). These live in the
+    // stable `Deno` namespace, so there is no feature flag to disable them.
     let code = formatdoc! {r#"
         "use strict";
         delete Deno.build;
         delete Deno.permissions;
         delete Deno.version;
+        delete Deno.createHttpClient;
+        delete Deno.HttpClient;
         delete globalThis.Worker;
     "#};
 

@@ -14,7 +14,7 @@ import * as _actions from 'ext:lit_actions/02_litActionsSDK.js';
 // this block scopes oldFetch so that nobody can ever use it after
 {
   const oldFetch = globalThis.fetch;
-  const fetch = async function () {
+  const fetch = async function (input, init) {
     const fetchCount = await op_increment_fetch_count();
     // console.log(
     //   "fetchCount: " +
@@ -22,7 +22,18 @@ import * as _actions from 'ext:lit_actions/02_litActionsSDK.js';
     //     " and arguments: " +
     //     JSON.stringify(arguments, null, 2)
     // );
-    return oldFetch.apply(null, arguments);
+    // Defense in depth: strip the Deno-specific `client` option. A custom
+    // `Deno.HttpClient` is built with an unfiltered DNS resolver, so routing a
+    // fetch through it bypasses the egress filter (see PatchDeno.js / CPL-295).
+    // PatchDeno.js already removes `Deno.createHttpClient`/`Deno.HttpClient`, so
+    // user code can't obtain a client; this keeps the hole closed even if a
+    // client instance were ever reachable another way. Clone so the caller's
+    // object is left untouched.
+    if (init != null && typeof init === 'object' && 'client' in init) {
+      const { client: _dropped, ...rest } = init;
+      init = rest;
+    }
+    return oldFetch.call(null, input, init);
   };
   Object.freeze(fetch);
 
