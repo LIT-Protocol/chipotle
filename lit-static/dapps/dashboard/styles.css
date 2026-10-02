@@ -106,287 +106,186 @@ select:focus-visible {
   outline-offset: 0;
 }
 
-/* ----- Login page (standalone) ----- */
+/* ----- Account access pages ----- */
 .login-page {
   min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2rem;
-  background: linear-gradient(180deg, #fafaf7 0%, #f0f0eb 100%);
-}
-
-[data-theme="dark"] .login-page {
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  display: grid;
+  place-items: center;
+  padding: 48px 24px;
+  background: var(--body-bg);
 }
 
 .login-container {
   width: 100%;
-  max-width: 540px;
+  max-width: 440px;
 }
 
-.login-cards {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1.5rem;
-  max-width: 460px;
-  margin: 0 auto;
-}
-
-/* One clear sign-in surface (issue #673): the card panel sits directly inside
-   the shell with no nested border or shadow — the shell is the only container. */
-.login-cards > .login-card {
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  padding: 0;
-  margin-bottom: 0;
-  box-shadow: none;
+.login-brand {
   display: flex;
-  flex-direction: column;
-}
-
-/* CPL-288 — Single-card login: the auth-mode toggle (API mode / ChainSecured)
-   shows exactly one card at a time. body class set in initLogin() via
-   getMode(); 'api' is the default. */
-body:not(.login-mode-chainsecured) .login-card-chainsecured,
-body.login-mode-chainsecured .login-card-api {
-  display: none;
-}
-
-.login-title {
-  font-size: 2rem;
-  font-weight: 600;
-  letter-spacing: -0.03em;
-  margin: 0 0 0.5rem;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 32px;
   color: var(--text);
-  text-align: center;
+  font-size: 18px;
+  font-weight: 600;
+}
+.login-brand:hover {
+  color: var(--text);
+  text-decoration: none;
 }
 
-.login-subtitle {
+.login-brand img {
+  display: block;
+}
+
+.login-brand-detail {
   color: var(--text-muted);
-  text-align: center;
-  margin: 0 0 1.5rem;
-  font-size: 0.9375rem;
+  font-weight: 400;
 }
 
-.login-mode-label {
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--text-muted);
-}
-
-/* CPL-318 — Single-card login: tabs at the top, form panel in the middle,
-   API/ChainSecured selector at the bottom of the same card. */
 .login-card-shell {
   background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
-  overflow: hidden;
+  padding: 32px;
+}
+.login-heading {
+  margin-bottom: 24px;
 }
 
-.login-card-tabs-row {
-  display: flex;
-  justify-content: center;
-  padding: 1.25rem 1.5rem 0;
+.login-title {
+  margin: 0 0 8px;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
 }
 
-.login-card-footer {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  padding: 1rem 1.5rem 1.25rem;
-  border-top: 1px solid var(--border);
+.login-subtitle {
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.login-mode-selector {
+  margin-bottom: 24px;
+}
+
+.login-mode-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
 }
 
 .login-tabs {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.25rem;
-  background: var(--card-bg);
+  display: flex;
+  padding: 4px;
+  gap: 4px;
+  border-radius: var(--radius);
+  background: var(--bg-muted);
   border: 1px solid var(--border);
-  border-radius: 999px;
 }
-
 .login-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.5rem 1.1rem;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--text-muted);
+  flex: 1;
+  border: 1px solid transparent;
+  border-radius: 4px;
   background: transparent;
-  border: none;
-  border-radius: 999px;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  min-height: 40px;
+  padding: 8px;
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
-  font-family: inherit;
-  line-height: 1.2;
 }
-
 .login-tab:hover {
   color: var(--text);
 }
 
 .login-tab.is-active {
-  color: #fff;
-  background: var(--primary);
-  font-weight: 600;
+  background: var(--card-bg);
+  border-color: var(--border);
+  color: var(--text);
 }
 
-.login-tab-check {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
+.login-tab-panel[hidden] {
   display: none;
-}
-
-.login-tab.is-active .login-tab-check {
-  display: inline-block;
-}
-
-.login-tab-panel {
-  display: none;
-  padding: 1.5rem;
-}
-
-.login-tab-panel.is-active {
-  display: block;
 }
 
 .login-card {
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  padding: 0;
-  margin-bottom: 0;
-  box-shadow: none;
-  position: relative;
+  margin: 0;
 }
 
-.login-cards > .login-card {
-  padding: 0;
-}
-
-/* Push the CTA to the bottom so the button lines up at the base of the
-   surface regardless of how much body copy the card carries. The primary
-   CTA keeps its solid-ink fill (.btn-primary); Connect wallet stays outline
-   (.btn-outline) — one clear primary action per surface. */
-.login-cards > .login-card .btn-block {
-  margin-top: auto;
-}
-
-.login-card-required-badge {
-  position: absolute;
-  top: -0.6rem;
-  left: 1.25rem;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 0.2rem 0.55rem;
-  border-radius: 9999px;
-  line-height: 1;
-  background: var(--bg-muted);
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-}
-
-.login-card-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-  background: rgba(var(--primary-rgb), 0.1);
-  color: var(--primary);
-  margin-bottom: 0.75rem;
-}
-
-[data-theme="dark"] .login-card-icon {
-  background: rgba(99, 102, 241, 0.18);
-}
-
-.login-card-title {
-  font-size: 1.0625rem;
-  font-weight: 600;
-  margin: 0 0 0.25rem;
-  color: var(--text);
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
+body:not(.login-mode-chainsecured) .login-card-chainsecured,
+body.login-mode-chainsecured .login-card-api {
+  display: none;
 }
 
 .login-card-tagline {
-  font-size: 0.875rem;
-  color: var(--text);
-  margin: 0 0 0.75rem;
+  margin: 0 0 24px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.login-card .input {
+  min-height: 44px;
+}
+
+.login-card .btn-block {
+  min-height: 44px;
+  margin-top: 8px;
+}
+
+.login-optional {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.login-card-footer {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.login-card-footer p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.login-card-footer a {
   font-weight: 500;
 }
 
-.login-card-help {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: var(--bg-muted);
+.login-docs {
+  margin: 24px 0 0;
+  text-align: center;
+  font-size: 12px;
+}
+
+.login-docs a {
   color: var(--text-muted);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: help;
-  position: relative;
-  padding: 0;
-  border: none;
-  line-height: 1;
 }
 
-.login-card-help:hover,
-.login-card-help:focus {
-  background: var(--primary);
-  color: #fff;
-  outline: none;
+.login-related {
+  margin: 12px 0 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
-.login-card-help:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-}
+@media (max-width: 480px) {
+  .login-page {
+    padding: 32px 16px;
+  }
 
-.login-card-help::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--text);
-  color: var(--card-bg);
-  font-size: 0.75rem;
-  font-weight: 400;
-  padding: 0.4rem 0.6rem;
-  border-radius: 6px;
-  white-space: normal;
-  width: max-content;
-  max-width: 220px;
-  line-height: 1.4;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.15s;
-  z-index: 10;
-}
+  .login-card-shell {
+    padding: 24px;
+  }
 
-.login-card-help:hover::after,
-.login-card-help:focus::after {
-  opacity: 1;
 }
 
 .form-hint {
@@ -2386,10 +2285,10 @@ textarea.input.textarea-sm {
 
 /* ============================================================================
    Issue #673 — litprotocol.com layout system
-   Full-bleed brand topbar, split sign-in, text sidebar with counts, flat metric
+   Full-bleed brand topbar, text sidebar with counts, flat metric
    grid, and a page footer. Modeled on the reviewed design preview. Later source
    order lets these override the earlier TailAdmin-era rules for the reused
-   selectors (.login-page, .sidebar, .dashboard-main, .stat-value, …).
+   selectors (.sidebar, .dashboard-main, .stat-value, …).
    ============================================================================ */
 
 /* ----- Shared brand + type primitives ----- */
@@ -2438,158 +2337,6 @@ textarea.input.textarea-sm {
   color: var(--primary-hover);
   text-decoration: underline;
   text-underline-offset: 4px;
-}
-
-/* ----- Login: full page column (topbar / split / footer) ----- */
-.login-page {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-  padding: 0;
-  background: var(--body-bg);
-}
-[data-theme="dark"] .login-page { background: var(--body-bg); }
-
-.marketing-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  height: 90px;
-  padding: 0 clamp(22px, 4vw, 48px);
-  border-bottom: 1px solid var(--border);
-}
-
-.login-layout {
-  flex: 1;
-  width: min(1120px, 100% - 96px);
-  margin: 0 auto;
-  display: grid;
-  grid-template-columns: 1.2fr 1fr;
-  gap: clamp(40px, 7vw, 100px);
-  align-items: center;
-  padding: clamp(48px, 7vw, 80px) 0;
-}
-
-.login-hero-title {
-  font-size: clamp(38px, 4.8vw, 62px);
-  font-weight: 500;
-  letter-spacing: -0.045em;
-  line-height: 1.06;
-  margin: 0;
-  color: var(--text);
-}
-.login-lede {
-  font-size: 18px;
-  line-height: 1.6;
-  color: var(--text-muted);
-  max-width: 390px;
-  margin: 25px 0 0;
-}
-.login-principles { margin: 42px 0 28px; font-size: 13px; }
-.login-principles p { display: flex; gap: 18px; margin: 15px 0; color: var(--text); }
-.login-principles span { color: var(--text-muted); font-size: 11px; }
-
-.login-signin {
-  border-left: 1px solid var(--border);
-  padding-left: clamp(32px, 4vw, 64px);
-}
-.login-signin .eyebrow { margin-bottom: 15px; }
-.login-title {
-  font-size: 32px;
-  font-weight: 500;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-  margin: 0;
-  text-align: left;
-  color: var(--text);
-}
-.login-subtitle {
-  color: var(--text-muted);
-  margin: 14px 0 0;
-  text-align: left;
-  font-size: 14px;
-}
-.login-signin .status { margin: 16px 0 0; }
-
-.access-fieldset { border: 0; padding: 0; margin: 26px 0 22px; }
-.access-fieldset legend { font-size: 12px; margin-bottom: 10px; padding: 0; color: var(--text); }
-.access-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.access-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 13px 12px;
-  background: var(--card-bg);
-  text-align: left;
-  cursor: pointer;
-  font-family: inherit;
-}
-.access-card:hover { border-color: var(--text-muted); }
-.access-card.is-active { border-color: var(--text); }
-.access-radio {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  flex-shrink: 0;
-  margin-top: 2px;
-  position: relative;
-}
-.access-card.is-active .access-radio { border-color: var(--primary); }
-.access-card.is-active .access-radio::after {
-  content: "";
-  position: absolute;
-  inset: 3px;
-  border-radius: 50%;
-  background: var(--primary);
-}
-.access-copy { display: flex; flex-direction: column; }
-.access-title { font-size: 13px; font-weight: 500; color: var(--text); }
-.access-sub { font-size: 10px; color: var(--text-muted); line-height: 1.5; margin-top: 3px; }
-
-/* One flat sign-in surface — no nested card chrome in the signin column. */
-.login-signin .login-cards { display: block; max-width: none; margin: 0; }
-.login-signin .login-card { background: transparent; border: 0; padding: 0; box-shadow: none; }
-.field-label { display: block; font-size: 12px; font-weight: 500; margin-bottom: 8px; color: var(--text); }
-.access-note { font-size: 11px; color: var(--text-muted); line-height: 1.6; margin: 14px 0 0; }
-.chain-explainer { margin-bottom: 16px; }
-.chain-explainer p { margin: 0 0 8px; font-size: 13px; color: var(--text); }
-.chain-explainer .form-hint { margin-top: 0; }
-
-.login-switch {
-  border-top: 1px solid var(--border);
-  margin-top: 24px;
-  padding-top: 22px;
-  font-size: 12px;
-}
-.login-switch-tab {
-  background: none;
-  border: 0;
-  padding: 0;
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  color: var(--primary);
-}
-.login-switch-tab .login-switch-lead { color: var(--text-muted); font-weight: 400; margin-right: 5px; }
-.login-switch-tab:hover { text-decoration: underline; text-underline-offset: 4px; }
-/* Show only the option you can switch TO; the active one hides itself. */
-.login-switch-tab.is-active { display: none; }
-
-.marketing-footer {
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  border-top: 1px solid var(--border);
-  padding: 24px clamp(22px, 4vw, 48px);
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 /* ----- Workspace: topbar / body(sidebar + main) / footer ----- */
@@ -2774,24 +2521,6 @@ textarea.input.textarea-sm {
 
 /* ----- Responsive ----- */
 @media (max-width: 900px) {
-  .login-layout {
-    grid-template-columns: 1fr;
-    gap: 0;
-    width: calc(100% - 44px);
-    padding: 40px 0 50px;
-    align-items: start;
-  }
-  .login-signin {
-    border-left: 0;
-    border-top: 1px solid var(--border);
-    padding-left: 0;
-    padding-top: 34px;
-    margin-top: 34px;
-  }
-  .login-intro .login-principles,
-  .login-intro > .text-link { display: none; }
-  .login-signin > .eyebrow { display: none; }
-
   .dashboard-body { flex-direction: column; }
   .sidebar {
     width: auto;
@@ -2813,7 +2542,6 @@ textarea.input.textarea-sm {
 }
 
 @media (max-width: 560px) {
-  .marketing-topbar { height: auto; padding: 16px 22px; }
   .app-topbar { height: auto; flex-wrap: wrap; padding: 14px 20px; }
   .app-topbar-right { width: 100%; margin-left: 0; }
   .access-options { grid-template-columns: 1fr; }
@@ -2825,7 +2553,6 @@ textarea.input.textarea-sm {
   }
   .metric-cell:first-child { border-top: 0; }
   .workspace-heading { flex-direction: column; align-items: flex-start; gap: 16px; }
-  .marketing-footer,
   .app-footer { flex-direction: column; gap: 6px; }
 }
 
@@ -2837,20 +2564,21 @@ textarea.input.textarea-sm {
 body:not(.login-mode-password) .login-card-password,
 body.login-mode-password .login-card-api,
 body.login-mode-password .login-card-chainsecured { display: none; }
-.password-login-enabled .access-options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.password-login-enabled .access-card { padding: 12px 8px; }
+
+
 .login-card-password label, .password-settings label { display: block; margin-top: 12px; }
 .login-card-password button, .password-settings form button { margin-top: 12px; }
 .password-panel { margin: 16px 0; padding: 16px; border: 1px solid var(--border, #ddd); border-radius: 12px; }
 .password-settings { width: min(480px, calc(100vw - 32px)); padding: 24px; border: 1px solid var(--border, #ddd); border-radius: 16px; background: var(--bg, white); color: var(--text, #222); }
 .password-settings::backdrop { background: rgb(0 0 0 / .45); }
 .password-settings form + form { border-top: 1px solid var(--border, #ddd); margin-top: 24px; padding-top: 12px; }
-@media(max-width: 600px) { .password-login-enabled .access-options { grid-template-columns: 1fr; } }
+
 .access-card[hidden] { display: none; }
 
 /* Shared width keeps access explanations readable on desktop and touch screens. */
 .access-options { position: relative; }
 .access-tooltip {
+  text-align: left;
   display: none;
   position: absolute;
   bottom: 100%;

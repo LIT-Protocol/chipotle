@@ -5,7 +5,12 @@ const password = "a long password from my manager",
 let creates = 0;
 let rejectNextCreate = false;
 async function submitAndNavigate(page: Page, selector: string) {
+  // A hash-only navigation would pass waitForNavigation but would not finish
+  // the native form lifecycle used by password managers.
+  await page.evaluate(() => { document.documentElement.dataset.beforeSubmit = "true"; });
   await Promise.all([page.waitForNavigation(), page.locator(selector).click()]);
+  await expect(page.locator("html")).not.toHaveAttribute("data-before-submit", "true");
+  await expect(page).toHaveURL(/#overview$/);
 }
 // Model managers which set DOM values without keyboard/input events. This tests
 // the site's autofill contract, not any vendor's browser-chrome save prompt.

@@ -9,6 +9,7 @@ import {
   hasAuthSession,
 } from "./password-client.js";
 import {
+  navigateLogin,
   setMode,
   setApiKey,
   getApiKey,
@@ -58,9 +59,10 @@ async function busy(form, fn, status = "login-status") {
       // A real same-origin navigation signals successful submission to password
       // managers. Leave submitted fields intact until this document unloads;
       // never put passwords in the URL, storage, or a network form submission.
-      window.location.replace(
-        window.location.pathname + window.location.search,
-      );
+      // Routing uses fragments, so changing the URL alone could be a same-
+      // document navigation. Explicitly reload to complete the form lifecycle.
+      history.replaceState(null, "", window.location.pathname + window.location.search + "#overview");
+      window.location.reload();
     }
   } catch (e) {
     showStatus(
@@ -247,7 +249,7 @@ export function initPasswordLogin() {
         return true;
       }
       showCreate(record);
-      $("login-tab-new").click();
+      navigateLogin("#create-account");
       showStatus(
         "login-status",
         "Finish creating and saving your account with the password you chose.",
@@ -398,7 +400,7 @@ export function initPasswordLogin() {
           } else {
             const record = await request("signup/verify", { token: proof });
             showCreate(record);
-            $("login-tab-new").click();
+            navigateLogin("#create-account");
             showStatus(
               "login-status",
               "Email verified. Choose a password to create your account.",
