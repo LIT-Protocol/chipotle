@@ -1,0 +1,14 @@
+{
+  "name": "lit-bridge-scripts",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Setup + end-to-end scripts for lit-bridge (deploy, configure registry, run a transfer).",
+  "scripts": {
+    "setup": "node setup.js",
+    "bridge": "node bridge.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "ethers": "^5.7.2"
+  }
+}
