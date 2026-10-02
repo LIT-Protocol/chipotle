@@ -77,8 +77,8 @@ jobs:
         run: sed -i "s|__LIT_PAYMENTS_BASE_URL__|${{ vars.LIT_PAYMENTS_STAGING_URL }}|g" lit-static/dapps/dashboard/auth.js
 
       # Password login is served by the staging lit-payments service (Railway),
-      # which must list https://lit-static-next.pages.dev/dapps/dashboard/ in
-      # DASHBOARD_AUTH_URLS with DASHBOARD_AUTH_COOKIE_SAMESITE=none (pages.dev
+      # which must list https://next.dashboard.chipotle.litprotocol.com/dapps/dashboard/ in
+      # DASHBOARD_AUTH_URLS with DASHBOARD_AUTH_COOKIE_SAMESITE=none (litprotocol.com
       # and up.railway.app are cross-site). See plans/dashboard-auth-on-lit-payments.md.
       - name: Configure password auth service (staging lit-payments)
         env:

@@ -495,7 +495,7 @@ Variables (the feature is off and answers 503 until the first is set):
 
 ```sh
 DASHBOARD_AUTH_SECRET=<openssl rand -hex 32>        # >=32 chars, distinct per environment
-DASHBOARD_AUTH_URLS=https://lit-static-next.pages.dev/dapps/dashboard/   # comma-separated, exact origins
+DASHBOARD_AUTH_URLS=https://next.dashboard.chipotle.litprotocol.com/dapps/dashboard/   # comma-separated, exact origins
 DASHBOARD_AUTH_ENVIRONMENT=staging                   # [a-z0-9-]{1,40}; part of the envelope AAD
 DASHBOARD_AUTH_COOKIE_SAMESITE=none                  # none when dashboard and this service are cross-site; lax (default) when same-site
 # optional
