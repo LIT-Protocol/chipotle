@@ -28,11 +28,13 @@
             <p id="login-subtitle" class="login-subtitle">Manage your wallets, keys, and Lit Actions.</p>
           </header>
           <section id="password-verify-panel" class="password-panel" hidden>
-            <p id="password-verify-copy">Sign in with your current email and password to confirm your new email address.</p>
+            <p id="password-verify-copy"></p>
             <form id="password-verify-form" method="post" autocomplete="on">
-              <label for="password-verify-email">Current email</label><input id="password-verify-email" name="username" class="input" type="email" autocomplete="username" required>
-              <label for="password-verify-password">Current password</label><input id="password-verify-password" name="password" class="input" type="password" autocomplete="current-password" required>
-              <button class="btn btn-primary" type="submit">Confirm new email</button>
+              <div id="password-email-confirm-fields" hidden>
+                <label for="password-verify-email">Current email</label><input id="password-verify-email" name="username" class="input" type="email" autocomplete="username">
+                <label for="password-verify-password">Current password</label><input id="password-verify-password" name="password" class="input" type="password" autocomplete="current-password">
+              </div>
+              <button id="password-verify-submit" class="btn btn-primary" type="submit">Confirm new email</button>
             </form>
           </section>
           <div class="login-mode-selector">

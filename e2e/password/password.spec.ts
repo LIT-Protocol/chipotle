@@ -79,27 +79,44 @@ test("new password account verifies email, encrypts locally, reloads, signs in a
       return !!link;
     })
     .toBe(true);
+  // A link opened while the auth service is unreachable must not lose the
+  // proof: the URL is already scrubbed, so the page offers an in-memory retry.
+  let dropVerify = true;
+  await page.route("http://localhost:8787/auth/v1/signup/verify", async (route) => {
+    if (dropVerify) {
+      dropVerify = false;
+      await route.abort("failed");
+    } else await route.continue();
+  });
   await page.goto(link);
   await expect(page).not.toHaveURL(/verify=/);
-  // Opening the link confirms the email; no extra click stands between the
-  // user and the password step.
   await expect(page).toHaveURL(/#create-account$/);
+  await expect(page.locator("#login-status")).toContainText("Unable to reach");
+  await expect(page.locator("#password-verify-panel")).toBeVisible();
+  await expect(page.locator("#password-email-confirm-fields")).toBeHidden();
+  await expect(page.locator("#password-verify-submit")).toHaveText("Try again");
+  await page.locator("#password-verify-submit").click();
+  // Opening the link confirms the email; no extra click stands between the
+  // user and the password step once the service answers.
   await expect(page.locator("#password-verify-panel")).toBeHidden();
   await expect(page.locator("#password-create-form")).toBeVisible();
   await expect(page.locator("#login-status")).toContainText("Email confirmed");
+  await page.unroute("http://localhost:8787/auth/v1/signup/verify");
   await expect(page.locator("#password-save-notice")).toContainText(
     "password manager",
   );
   // Passwords cannot be reset, so a mismatched confirmation must stop before
-  // any account is created and must clear both fields for another attempt.
+  // any account is created. The first entry may be an unsaved generated
+  // password, so it stays; only the confirmation is cleared and refocused.
   await autofill(page, {
     "password-create-password": password,
     "password-create-confirm": password + " typo",
   });
   await page.locator("#password-create-submit").click();
   await expect(page.locator("#login-status")).toContainText("don’t match");
-  await expect(page.locator("#password-create-password")).toHaveValue("");
+  await expect(page.locator("#password-create-password")).toHaveValue(password);
   await expect(page.locator("#password-create-confirm")).toHaveValue("");
+  await expect(page.locator("#password-create-confirm")).toBeFocused();
   expect(creates).toBe(0);
   let failUpload = true;
   await page.route("http://localhost:8787/auth/v1/envelope", async (route) => {
@@ -174,6 +191,20 @@ test("new password account verifies email, encrypts locally, reloads, signs in a
   await expect(page.locator("#password-settings")).toBeVisible();
   await mkdir("../.context", { recursive: true });
   await page.screenshot({ path: "../.context/password-settings.png" });
+  // Revealed passwords must not survive closing the dialog: both inputs are
+  // emptied and re-masked, and the toggle label resets.
+  await page.locator("#password-new").fill("revealed then abandoned value");
+  await page.locator("#password-new-confirm").fill("revealed then abandoned value");
+  await page.locator('[data-show-password="password-new password-new-confirm"]').click();
+  await expect(page.locator("#password-new")).toHaveAttribute("type", "text");
+  await page.locator("#password-settings-close").click();
+  await page.locator("#account-dropdown-trigger").click();
+  await page.locator("#password-settings-open").click();
+  await expect(page.locator("#password-new")).toHaveAttribute("type", "password");
+  await expect(page.locator("#password-new")).toHaveValue("");
+  await expect(page.locator("#password-new-confirm")).toHaveAttribute("type", "password");
+  await expect(page.locator("#password-new-confirm")).toHaveValue("");
+  await expect(page.locator('[data-show-password="password-new password-new-confirm"]')).toHaveText("Show passwords");
   await page.locator("#password-current").fill(password);
   await page
     .locator("#password-new")

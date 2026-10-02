@@ -28,12 +28,36 @@ let verified = null;
 const help =
   "Save this password in your password manager. There’s no “Forgot password” option, and we can’t reset it for you.";
 // Passwords can’t be reset, so a typo in a new password would lock the user
-// out. Require the same value twice before deriving anything from it.
-function confirmed(password, confirmation) {
-  if (password !== confirmation)
-    throw new Error("Passwords don’t match. Enter the same password in both fields.");
-  return password;
+// out. Require the same value twice before deriving anything from it. On a
+// mismatch keep the first entry (it may be an unsaved generated password) and
+// send the user back to the confirmation field.
+function matching(passwordId, confirmId, status) {
+  const confirm = $(confirmId);
+  if ($(passwordId).value === confirm.value) return true;
+  showStatus(
+    status,
+    "Passwords don’t match. Re-enter the confirmation so it matches the password above.",
+    "error",
+  );
+  confirm.value = "";
+  confirm.focus();
+  return false;
 }
+// Re-mask inputs revealed with "Show passwords" and reset their toggles.
+function conceal(container) {
+  container.querySelectorAll("input[data-password]").forEach((input) => {
+    input.type = "password";
+    delete input.dataset.password;
+  });
+  container.querySelectorAll("[data-show-password]").forEach((button) => {
+    button.textContent = button.dataset.showPassword.includes(" ")
+      ? "Show passwords"
+      : "Show password";
+  });
+}
+// Forms currently awaiting a response. A verification link opened mid-submit
+// would swap the auth session under the in-flight request, so it waits.
+let inFlight = 0;
 export function resetPasswordIdentity() {
   // API-key and wallet sign-outs call this too; only contact the auth service
   // when this tab actually held a password identity or storage session.
@@ -59,6 +83,7 @@ function enter(record, apiKey) {
 async function busy(form, fn, status = "login-status") {
   const buttons = [...form.querySelectorAll("button")];
   buttons.forEach((b) => (b.disabled = true));
+  inFlight++;
   let navigate = false;
   try {
     navigate = (await fn()) === true;
@@ -78,6 +103,7 @@ async function busy(form, fn, status = "login-status") {
       "error",
     );
   } finally {
+    inFlight--;
     buttons.forEach((b) => (b.disabled = false));
     if (!navigate)
       form
@@ -275,13 +301,10 @@ export function initPasswordLogin() {
   });
   $("password-create-form").addEventListener("submit", (event) => {
     event.preventDefault();
+    if (!matching("password-create-password", "password-create-confirm", "login-status"))
+      return;
     void busy(event.currentTarget, () =>
-      createAccount(
-        confirmed(
-          $("password-create-password").value,
-          $("password-create-confirm").value,
-        ),
-      ),
+      createAccount($("password-create-password").value),
     );
   });
   document.querySelectorAll("[data-show-password]").forEach((button) =>
@@ -310,12 +333,16 @@ export function initPasswordLogin() {
     $("password-settings").close(),
   );
   $("password-settings").addEventListener("close", () => {
-    $("password-settings")
-      .querySelectorAll('input[type="password"]')
+    const dialog = $("password-settings");
+    dialog
+      .querySelectorAll('input[type="password"], input[data-password]')
       .forEach((input) => (input.value = ""));
+    conceal(dialog);
   });
   $("password-change-form").addEventListener("submit", (event) => {
     event.preventDefault();
+    if (!matching("password-new", "password-new-confirm", "password-settings-status"))
+      return;
     void busy(
       event.currentTarget,
       async () => {
@@ -323,10 +350,7 @@ export function initPasswordLogin() {
         if (!identity)
           throw new Error("Sign in with email and password first.");
         const oldPassword = $("password-current").value,
-          newPassword = confirmed(
-            $("password-new").value,
-            $("password-new-confirm").value,
-          );
+          newPassword = $("password-new").value;
         await validateNewPassword(newPassword);
         const record = await unlock(identity.email, oldPassword);
         if (
@@ -388,14 +412,34 @@ export function initPasswordLogin() {
     const proof = fragment.get("verify"),
       purpose = fragment.get("purpose");
     if (!proof) return;
-    if (isAuthenticated()) logOut();
+    // Drop the proof from the URL before anything else so it never reaches
+    // history or referrers. A link opened while another form is mid-request
+    // is left unconsumed; reopening it after that request settles works.
     history.replaceState(null, "", location.pathname + location.search);
+    if (inFlight > 0) {
+      showStatus(
+        "login-status",
+        "Finish the step in progress, then open the link from your email again.",
+        "error",
+      );
+      return;
+    }
+    if (isAuthenticated()) logOut();
     $("login-auth-mode-password").click();
+    // Any earlier link's panel (and its token) must not outlive this one.
+    const panel = $("password-verify-panel"),
+      verifyForm = $("password-verify-form");
+    panel.hidden = true;
+    verifyForm.onsubmit = null;
     if (purpose === "email") {
       // Changing the email on an existing account still needs the current
       // password, so this one keeps an explicit confirmation form.
-      $("password-verify-panel").hidden = false;
-      $("password-verify-form").onsubmit = (event) => {
+      $("password-verify-copy").textContent =
+        "Sign in with your current email and password to confirm your new email address.";
+      $("password-email-confirm-fields").hidden = false;
+      $("password-verify-submit").textContent = "Confirm new email";
+      panel.hidden = false;
+      verifyForm.onsubmit = (event) => {
         event.preventDefault();
         void busy(event.currentTarget, async () => {
           const record = await unlock(
@@ -407,7 +451,7 @@ export function initPasswordLogin() {
             authSecret: record.authSecret,
           });
           logOut();
-          $("password-verify-panel").hidden = true;
+          panel.hidden = true;
           showStatus(
             "login-status",
             "Email updated. Sign in with your new email and existing password.",
@@ -417,12 +461,15 @@ export function initPasswordLogin() {
       };
       return;
     }
-    // Signup links confirm the email as soon as they open. The proof lives in
-    // the URL fragment, so only this page ever saw it; there is nothing for
-    // the user to decide until the password step.
+    // Signup links confirm the email as soon as they open: the fragment is a
+    // single-use proof and there is nothing for the user to decide until the
+    // password step. Anything that runs this page's JavaScript with the link
+    // (not plain prefetchers, which never see fragments) consumes it; the
+    // recipient then simply requests a new link.
     navigateLogin("#create-account");
-    showStatus("login-status", "Confirming your email…", "info");
-    void (async () => {
+    const confirmSignup = async () => {
+      panel.hidden = true;
+      showStatus("login-status", "Confirming your email…", "info");
       try {
         const record = await request("signup/verify", { token: proof });
         showCreate(record);
@@ -438,8 +485,23 @@ export function initPasswordLogin() {
           e.message || "Unable to confirm this email. Request a new link.",
           "error",
         );
+        // The URL no longer carries the proof, so a connectivity or service
+        // failure keeps it in memory behind a retry. A definitive rejection
+        // (expired or already used) has nothing to retry.
+        if (!e.status || e.status >= 500) {
+          $("password-verify-copy").textContent =
+            "Your email isn’t confirmed yet. Try again once you’re back online.";
+          $("password-email-confirm-fields").hidden = true;
+          $("password-verify-submit").textContent = "Try again";
+          panel.hidden = false;
+          verifyForm.onsubmit = (event) => {
+            event.preventDefault();
+            void confirmSignup();
+          };
+        }
       }
-    })();
+    };
+    void confirmSignup();
   }
   readVerificationLink();
   window.addEventListener("hashchange", readVerificationLink);
