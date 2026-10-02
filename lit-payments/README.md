@@ -497,7 +497,7 @@ Variables (the feature is off and answers 503 until the first is set):
 DASHBOARD_AUTH_SECRET=<openssl rand -hex 32>        # >=32 chars, distinct per environment
 DASHBOARD_AUTH_URLS=https://next.dashboard.chipotle.litprotocol.com/dapps/dashboard/   # comma-separated, exact origins
 DASHBOARD_AUTH_ENVIRONMENT=staging                   # [a-z0-9-]{1,40}; part of the envelope AAD
-DASHBOARD_AUTH_COOKIE_SAMESITE=none                  # none when dashboard and this service are cross-site; lax (default) when same-site
+DASHBOARD_AUTH_COOKIE_SAMESITE=lax                   # default; none only if a dashboard is not same-site with this service
 # optional
 DASHBOARD_AUTH_CLIENT_IP_HEADER=X-Forwarded-For      # last value is the client (Railway appends one hop)
 DASHBOARD_AUTH_OUTBOX_INTERVAL_SECS=300

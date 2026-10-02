@@ -1295,7 +1295,7 @@
       "description": "production lit-payments"
     },
     {
-      "url": "https://lit-payments-staging.up.railway.app",
+      "url": "https://staging.payments.litprotocol.com",
       "description": "staging lit-payments"
     }
   ]

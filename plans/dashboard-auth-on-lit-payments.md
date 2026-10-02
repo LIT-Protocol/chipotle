@@ -12,7 +12,7 @@ The Worker design required `litprotocol.com` to be a Cloudflare zone so Wrangler
 
 | Need | lit-payments already has |
 | --- | --- |
-| HTTPS origin reachable from the dashboard | `https://lit-payments-staging.up.railway.app` (staging) and `https://payments.litprotocol.com` (production) |
+| HTTPS origin reachable from the dashboard | `https://staging.payments.litprotocol.com` (staging) and `https://payments.litprotocol.com` (production) |
 | Database | Postgres via `sqlx`, runtime migrations in `lit-payments/migrations/` |
 | Transactional email | `mail::Mailer` (Resend), `RESEND_API_KEY` and `MAIL_FROM` already configured in both Railway environments |
 | CORS allowlist with credentials | `CORS_ALLOWED_ORIGINS` exact-match list, `allow_credentials: true` |
@@ -27,7 +27,7 @@ The browser side of the feature (Argon2id in a Web Worker, AES-GCM envelopes, `p
 2. **Module, not a new service.** Code lives in `lit-payments/src/dashboard_auth/`. Routes mount alongside the existing `/auth/request` magic-link routes (no path overlap: all new routes are under `/auth/v1/`).
 3. **Feature is off until configured.** `DASHBOARD_AUTH_SECRET` unset means every `/auth/v1/*` request returns `503 {"error":"Account service is not configured."}`. This keeps the Railway deploy green before the variables are set and matches the Worker's fail-closed behaviour.
 4. **Several dashboard origins per deployment.** `DASHBOARD_AUTH_URLS` is a comma-separated list of full dashboard URLs ending in `/dapps/dashboard/`. Requests must carry an `Origin` header whose value is one of those origins; the verification email link points back at the dashboard URL matching the requesting origin. The origins are appended to the CORS allowlist automatically. Staging can therefore serve both `next.dashboard.chipotle.litprotocol.com` and `dashboard.dev.litprotocol.com`.
-5. **Cookie `SameSite` is configurable.** The Worker relied on the auth host being same-site with the dashboard. On Railway, staging (`*.up.railway.app`) is cross-site with every dashboard, so `DASHBOARD_AUTH_COOKIE_SAMESITE=none` is required there (emits `SameSite=None; Secure; Partitioned`). Production (`payments.litprotocol.com` and `dashboard.chipotle.litprotocol.com`) is same-site and keeps the default `lax`. CSRF protection never depended on `SameSite`: the exact `Origin` check, the custom header (forces a CORS preflight) and the per-session CSRF token remain.
+5. **Cookie `SameSite` is configurable.** The Worker relied on the auth host being same-site with the dashboard. A Railway-generated `*.up.railway.app` hostname would be cross-site with every dashboard, so `DASHBOARD_AUTH_COOKIE_SAMESITE=none` exists for that case (emits `SameSite=None; Secure; Partitioned`). Both staging (`staging.payments.litprotocol.com` ↔ `next.dashboard.chipotle.litprotocol.com`) and production (`payments.litprotocol.com` ↔ `dashboard.chipotle.litprotocol.com`) are same-site under `litprotocol.com` and keep the default `lax`. CSRF protection never depended on `SameSite`: the exact `Origin` check, the custom header (forces a CORS preflight) and the per-session CSRF token remain.
 6. **Postgres schema mirrors D1.** Five tables prefixed `dashboard_auth_` (`users`, `sessions`, `tokens`, `outbox`, `limits`) with the same columns, constraints and conditional-update semantics (`UPDATE ... WHERE state = ... AND version = ... AND verifier = ...`). Wallet addresses stay non-unique (the D1 `0002` migration is folded into the initial Postgres schema). Timestamps stay epoch seconds (`BIGINT`) so the conditional SQL ports one-to-one.
 7. **Rate limits stay in the database.** Same counters (`INSERT ... ON CONFLICT DO UPDATE ... RETURNING count`) keyed by an HMAC of the window and label. Client IP comes from the last value of `X-Forwarded-For` (Railway's edge proxy appends exactly one hop), configurable via `DASHBOARD_AUTH_CLIENT_IP_HEADER`, falling back to the socket peer.
 8. **Outbox + encryption unchanged.** Pending mail is encrypted at rest with AES-256-GCM under a key derived from `DASHBOARD_AUTH_SECRET`; a tokio job retries every five minutes with Resend idempotency keys and purges expired tokens, sessions, outbox rows and limit counters. Enqueueing also kicks an immediate delivery attempt.
@@ -79,10 +79,10 @@ Configuration (all read once at boot, in `config.rs`):
    - `DASHBOARD_AUTH_SECRET` = `openssl rand -hex 32`
    - `DASHBOARD_AUTH_URLS` = `https://next.dashboard.chipotle.litprotocol.com/dapps/dashboard/` (append `,https://dashboard.dev.litprotocol.com/dapps/dashboard/` when enabling dev)
    - `DASHBOARD_AUTH_ENVIRONMENT` = `staging`
-   - `DASHBOARD_AUTH_COOKIE_SAMESITE` = `none`
+   - `DASHBOARD_AUTH_COOKIE_SAMESITE` = `lax` (staging mirrors production: both hosts are under `litprotocol.com`)
    Railway redeploys on variable changes.
 3. Deploy the `next` static site (`deploy-static.yml`, target `deploy-next`) so the dashboard picks up the auth URL.
-4. Test on `https://next.dashboard.chipotle.litprotocol.com/dapps/dashboard/#create-account` in Chrome or Firefox. Safari blocks cross-site cookies, so staging (payments on `up.railway.app`) cannot be tested there; production on `litprotocol.com` is same-site and works everywhere.
+4. Test on `https://next.dashboard.chipotle.litprotocol.com/dapps/dashboard/#create-account` in any browser; staging and production are both same-site under `litprotocol.com`.
 5. Delete the Cloudflare D1 databases `chipotle-auth-staging` and `chipotle-auth-production`.
 6. For production later: set the same four variables on the production environment (`DASHBOARD_AUTH_URLS=https://dashboard.chipotle.litprotocol.com/dapps/dashboard/`, `DASHBOARD_AUTH_ENVIRONMENT=production`, `DASHBOARD_AUTH_COOKIE_SAMESITE=lax`), push a `v*` tag, then set `LIT_AUTH_PROD_URL=https://payments.litprotocol.com` and run the production static deploy.
 

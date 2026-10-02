@@ -69,7 +69,7 @@ variables below are set on the Railway `lit-payments` service:
 | `DASHBOARD_AUTH_SECRET` | `openssl rand -hex 32`; distinct per environment. Authenticates synthetic login parameters, rate-limit keys and transient outbox payloads, **not account keys**. |
 | `DASHBOARD_AUTH_URLS` | Comma-separated dashboard URLs ending in `/dapps/dashboard/`. Only these exact origins are accepted; verification links point back at the one the request came from. |
 | `DASHBOARD_AUTH_ENVIRONMENT` | `staging` or `production`. Part of every envelope's AAD; never change it once accounts exist. |
-| `DASHBOARD_AUTH_COOKIE_SAMESITE` | `none` when the dashboard and lit-payments are not same-site (staging: `next.dashboard.chipotle.litprotocol.com` ↔ `lit-payments-staging.up.railway.app`); `lax` (default) when they are (production: `dashboard.chipotle.litprotocol.com` ↔ `payments.litprotocol.com`). |
+| `DASHBOARD_AUTH_COOKIE_SAMESITE` | `lax` (default). Staging (`next.dashboard.chipotle.litprotocol.com` ↔ `staging.payments.litprotocol.com`) and production (`dashboard.chipotle.litprotocol.com` ↔ `payments.litprotocol.com`) are same-site. `none` only if a dashboard is ever served from a host that is not same-site with lit-payments (emits `Partitioned`; Safari blocks it). |
 
 `RESEND_API_KEY` and `MAIL_FROM` are shared with the rest of lit-payments.
 Optional: `DASHBOARD_AUTH_CLIENT_IP_HEADER` (default `X-Forwarded-For`, last
@@ -84,9 +84,7 @@ time (`scripts/configure-static.py`, an empty value keeps the API-key/wallet UI)
 
 Each dashboard you enable must also be listed in that environment's
 `DASHBOARD_AUTH_URLS`. Do not point arbitrary Pages preview domains at
-production auth. With `SameSite=None` the cookie is also `Partitioned`;
-Safari still blocks cross-site cookies, so staging (payments on `up.railway.app`)
-is testable in Chrome and Firefox only. Production is same-site and works everywhere.
+production auth.
 `GET /health` is lit-payments' process health endpoint, not a promise that email
 configuration, Postgres, and the delivery provider are healthy.
 
