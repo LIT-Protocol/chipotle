@@ -1,0 +1,166 @@
+---
+title: "Signing"
+description: "From a fresh account to a signature you can verify: mint a network-held wallet (PKP), sign a message from a Lit Action, and check the signature locally."
+---
+
+This guide takes you from nothing to a **verified signature**: a wallet whose private key lives inside Lit's TEE, a few lines of JavaScript that sign with it, and a local check that proves the signature is real. At each step, the administrative page that covers it in depth is linked — skim them now, come back when you productionize.
+
+If the nouns below (PKP, usage key, group) are new, keep [Core Concepts](/concepts) open in a second tab.
+
+## What you'll build
+
+1. A **PKP** — a real EVM wallet the network holds for you.
+2. A **Lit Action** that signs a message with that PKP.
+3. A local verification that the signature recovers to the PKP's address.
+
+Total cost is a few cents of credits; total time is about five minutes.
+
+<Steps>
+  <Step title="Create an account">
+    Create an account in the [Dashboard](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/) (**New User** tab) or via the API:
+
+    ```bash
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/new_account" \
+      -H "Content-Type: application/json" \
+      -d '{"account_name":"My Signing App","account_description":""}'
+    ```
+
+    The response contains your **account API key** — it is shown exactly once, so store it now, and never ship it in client code. Account creation takes ~15 seconds because it registers your account on-chain (Base).
+
+    <Info>Admin reference: [API Keys](/management/api_keys) · [Account Modes](/management/account_modes) (this guide uses the default API mode).</Info>
+  </Step>
+
+  <Step title="Add funds">
+    Running actions and write management calls consume credits; reads are free. Click **Add Funds** in the Dashboard (minimum $5.00, card, [crypto](/management/crypto), or [LITKEY](/management/litkey)). Unfunded metered calls return `402 Payment Required`.
+
+    <Info>Admin reference: [Pricing](/management/pricing) · [Errors](/management/errors).</Info>
+  </Step>
+
+  <Step title="Mint a PKP (your signing wallet)">
+    ```bash
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/create_wallet" \
+      -H "X-Api-Key: YOUR_ACCOUNT_KEY"
+    ```
+
+    Note the returned `wallet_address` — that address **is** your `pkpId` in the code below, and it's what signatures will recover to. The private key was generated inside the TEE and will never leave it.
+
+    <Info>Admin reference: [Dashboard → Wallets](/management/dashboard#4-request-new-pkps-wallets).</Info>
+  </Step>
+
+  <Step title="Sign a message">
+    Run this action with your account key (we'll scope a production key in step 6):
+
+    <Tabs>
+      <Tab title="JavaScript (Core SDK)">
+        ```javascript
+        const result = await client.litAction({
+          apiKey: accountApiKey,
+          code: `
+            async function main({ pkpId, message }) {
+              const wallet = new ethers.Wallet(
+                await Lit.Actions.getPrivateKey({ pkpId })
+              );
+              const signature = await wallet.signMessage(message);
+              return { message, signature };
+            }
+          `,
+          jsParams: { pkpId: '0xYOUR_PKP_ADDRESS', message: 'Hello from Lit' }
+        });
+        console.log(result.response);
+        ```
+      </Tab>
+      <Tab title="cURL">
+        ```bash
+        curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/lit_action" \
+          -H "Content-Type: application/json" \
+          -H "X-Api-Key: YOUR_ACCOUNT_KEY" \
+          -d '{
+            "code": "async function main({ pkpId, message }) { const wallet = new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId })); const signature = await wallet.signMessage(message); return { message, signature }; }",
+            "js_params": { "pkpId": "0xYOUR_PKP_ADDRESS", "message": "Hello from Lit" }
+          }'
+        ```
+      </Tab>
+    </Tabs>
+
+    You can also paste the same code into the Dashboard's [Action Runner](/management/dashboard#7-run-lit-actions).
+  </Step>
+
+  <Step title="Verify the signature locally">
+    The point of Lit signing is that anyone can check the result without trusting you or Lit's API. In any Node script or browser console:
+
+    ```javascript
+    import { ethers } from 'ethers'; // v5: ethers.utils.verifyMessage
+
+    const recovered = ethers.utils.verifyMessage('Hello from Lit', signature);
+    console.log(recovered === '0xYOUR_PKP_ADDRESS'); // true
+    ```
+
+    If it recovers to your PKP's address, the message was signed by a key that only exists inside the TEE — and only code permitted on-chain could use it. The same check works on-chain via `ecrecover`, which is how smart contracts consume Lit signatures.
+  </Step>
+
+  <Step title="Production posture: pin the code, scope the key">
+    For a real app you don't want "any code, master key." Two changes:
+
+    1. **Pin your action.** Publish the action code to IPFS and [register its CID in a group](/management/dashboard#5-register-ipfs-cids-actions), and add your PKP to the same group. Now only that exact code can sign with that wallet.
+    2. **Mint a usage key** with `execute_in_groups` limited to that group, and put *that* key in your app:
+
+    ```bash
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/add_usage_api_key" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: YOUR_ACCOUNT_KEY" \
+      -d '{
+        "name": "signing-app",
+        "description": "Signs with the app PKP only",
+        "can_create_groups": false,
+        "can_delete_groups": false,
+        "can_create_pkps": false,
+        "manage_ipfs_ids_in_groups": [],
+        "add_pkp_to_groups": [],
+        "remove_pkp_from_groups": [],
+        "execute_in_groups": [YOUR_GROUP_ID]
+      }'
+    ```
+
+    <Warning>
+      Freshly-granted permissions are **eventually consistent** — the first `/lit_action` call right after minting a key or adding a grant can fail for a beat. Poll the real call until it succeeds rather than sleeping a fixed amount. Details: [run lit-action](/management/api_direct#7-run-lit-action).
+    </Warning>
+
+    <Info>Admin reference: [API Keys](/management/api_keys) · [Groups](/architecture/groups) · full API walkthrough in [Using the API directly](/management/api_direct).</Info>
+  </Step>
+</Steps>
+
+## Where signing goes from here
+
+The message signature above is the atom; everything else is that atom plus conditions, transactions, or different curves.
+
+<CardGroup cols={2}>
+  <Card title="Sign & send transactions" icon="paper-plane" href="/lit-actions/examples#7-send-eth-to-an-address">
+    Construct, sign, and broadcast an ETH transfer from your PKP — it's a normal wallet, so fund its address first.
+  </Card>
+  <Card title="Conditional signing" icon="shield-check" href="/lit-actions/examples#5-gate-a-signature-on-live-weather-data">
+    Only sign when a condition holds — an API result, a contract read, a sanctions screen.
+  </Card>
+  <Card title="Keyless signing (action identity)" icon="fingerprint" href="/lit-actions/patterns#action-identity-signing--immutable-proofs">
+    Every action has a key derived from its own IPFS CID — sign with code identity, no PKP needed.
+  </Card>
+  <Card title="Oracles & proofs" icon="globe" href="/lit-actions/examples#9-median-price-oracle-across-three-exchanges">
+    Fetch data, aggregate it, and deliver a signature any contract can verify with ecrecover.
+  </Card>
+  <Card title="Solana & non-EVM" icon="sun" href="/lit-actions/examples#17-sign-a-solana-transaction-keyless-ed25519-wallet">
+    Derive an ed25519 wallet from an action's identity key and sign Solana transactions.
+  </Card>
+  <Card title="Non-custodial co-signing (MPC)" icon="users" href="/lit-actions/examples#16-non-custodial-co-signer-threshold-ecdsa-split-between-lit-and-you">
+    Threshold ECDSA/FROST where Lit holds one share and literally cannot sign without you.
+  </Card>
+</CardGroup>
+
+Want a signature produced on a schedule or in response to an event, with no server of your own? See [Lit Triggers](/lit-triggers/index).
+
+## Administrative checklist for a signing app
+
+- [ ] Account key lives in a secrets manager; only usage keys ship — [API Keys](/management/api_keys)
+- [ ] Usage key scoped with `execute_in_groups` to exactly one group — [API Keys](/management/api_keys)
+- [ ] Action published to IPFS and its CID pinned in the group — [Dashboard](/management/dashboard#5-register-ipfs-cids-actions)
+- [ ] Credit balance monitored (metered calls fail with `402` when empty) — [Pricing](/management/pricing) · [Errors](/management/errors)
+- [ ] If the PKP sends transactions, its address holds gas on the target chain
+- [ ] Decided on an ownership model (API vs. ChainSecured) — [Account Modes](/management/account_modes)

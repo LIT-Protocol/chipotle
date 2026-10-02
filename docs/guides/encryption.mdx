@@ -1,0 +1,151 @@
+---
+title: "Encryption & Decryption"
+description: "From a fresh account to an encrypt/decrypt round trip: seal a secret under a vault PKP, store the ciphertext anywhere, and decrypt it only from code you've authorized on-chain."
+---
+
+This guide takes you from nothing to a working **encrypt/decrypt round trip**, then shows the pattern nearly every real integration uses it for: keeping API keys and credentials out of your code while still using them inside a Lit Action. Administrative pages are linked where you meet them.
+
+The model in two sentences: `Lit.Actions.Encrypt` seals data with an AES key derived — inside the TEE — from a PKP you own, and that key never exists outside the enclave. So "who can decrypt this?" reduces to "which action code is permitted to use that PKP?", which is on-chain configuration you control.
+
+If PKPs, groups, or usage keys are new to you, keep [Core Concepts](/concepts) open in a second tab. Coming from Lit V1 / Naga access-control conditions? Read [the model comparison](/lit-actions/migration/encryption) first — this is a different (and simpler) approach.
+
+## What you'll build
+
+1. A **vault PKP** — the key your ciphertexts are sealed under.
+2. An action that **encrypts** a secret and returns the ciphertext.
+3. An action that **decrypts** it — and only runs because you've authorized it.
+
+<Steps>
+  <Step title="Create an account and add funds">
+    If you haven't yet, follow the [Quick Start](/quickstart) through funding: create an account (store the account API key — it's shown once) and add at least $5.00 of credits. Metered calls without credits fail with `402 Payment Required`.
+
+    <Info>Admin reference: [API Keys](/management/api_keys) · [Pricing](/management/pricing) · [Errors](/management/errors).</Info>
+  </Step>
+
+  <Step title="Mint a vault PKP">
+    ```bash
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/create_wallet" \
+      -H "X-Api-Key: YOUR_ACCOUNT_KEY"
+    ```
+
+    The returned `wallet_address` is your `pkpId`. Treat one PKP as one **trust boundary**: everything encrypted under it is decryptable by any action allowed to use it. Separate app secrets from user data by minting separate PKPs — see [PKP wallets as data vaults](/lit-actions/patterns#encrypt--decrypt--pkp-wallets-as-data-vaults).
+  </Step>
+
+  <Step title="Encrypt a secret">
+    <Tabs>
+      <Tab title="JavaScript (Core SDK)">
+        ```javascript
+        const result = await client.litAction({
+          apiKey: accountApiKey,
+          code: `
+            async function main({ pkpId, secret }) {
+              const ciphertext = await Lit.Actions.Encrypt({ pkpId, message: secret });
+              return { ciphertext };
+            }
+          `,
+          jsParams: { pkpId: '0xYOUR_VAULT_PKP', secret: 'my-api-key-or-anything' }
+        });
+        console.log(result.response);
+        ```
+      </Tab>
+      <Tab title="cURL">
+        ```bash
+        curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/lit_action" \
+          -H "Content-Type: application/json" \
+          -H "X-Api-Key: YOUR_ACCOUNT_KEY" \
+          -d '{
+            "code": "async function main({ pkpId, secret }) { const ciphertext = await Lit.Actions.Encrypt({ pkpId, message: secret }); return { ciphertext }; }",
+            "js_params": { "pkpId": "0xYOUR_VAULT_PKP", "secret": "my-api-key-or-anything" }
+          }'
+        ```
+      </Tab>
+    </Tabs>
+
+    <Warning>
+      The plaintext transits this one request (over TLS, into the TEE). For most secrets that's fine — encrypt once from a trusted machine. Never log it, and never leave it in shell history you don't control.
+    </Warning>
+  </Step>
+
+  <Step title="Store the ciphertext — anywhere">
+    The ciphertext is safe to store in public: a database, IPFS, a smart contract, an environment variable, even hardcoded in client code. Its confidentiality comes from the PKP-derived key in the TEE, not from where it sits. Storage trade-offs are covered in [Secrets → where to put the ciphertext](/lit-actions/secrets).
+  </Step>
+
+  <Step title="Decrypt it back">
+    ```javascript
+    const result = await client.litAction({
+      apiKey: accountApiKey,
+      code: `
+        async function main({ pkpId, ciphertext }) {
+          const plaintext = await Lit.Actions.Decrypt({ pkpId, ciphertext });
+          return { plaintext };
+        }
+      `,
+      jsParams: { pkpId: '0xYOUR_VAULT_PKP', ciphertext: 'FROM_STEP_3' }
+    });
+    ```
+
+    Round trip complete. In production you'll rarely *return* the plaintext like this — you'll **use** it inside the action (call an API with it, sign with it) and return only the result. Returning or logging decrypted secrets is the #1 leak path; see [common mistakes](/lit-actions/secrets#common-mistakes).
+  </Step>
+
+  <Step title="Production posture: lock down who can decrypt">
+    Right now your account key can run any code against the vault PKP. Locking it down is on-chain configuration:
+
+    1. **Pin the decrypt action.** Publish your decrypting action to IPFS, [register the CID in a group](/management/dashboard#5-register-ipfs-cids-actions), and add the vault PKP to the same group. Now only that exact code can ever produce the plaintext.
+    2. **Scope a usage key** to `execute_in_groups: [thatGroup]` for whatever service calls it — it can trigger the decrypt flow but can't run arbitrary code against your vault.
+    3. **Gate inside the action** if you need caller-level rules: token balance, NFT ownership, a caller signature. The gate is plain JavaScript — see [gating logic](/lit-actions/patterns#gating-logic--aka-access-control-conditions).
+
+    The enforcement split — what the chain guarantees vs. what your action code guarantees — is summarized in [Secrets → what's enforced where](/lit-actions/secrets#whats-enforced-where).
+
+    <Info>Admin reference: [API Keys](/management/api_keys) · [Groups](/architecture/groups) · [Dashboard](/management/dashboard).</Info>
+  </Step>
+</Steps>
+
+## The pattern you'll actually use: encrypted secrets inside actions
+
+Most encryption use on Lit isn't "encrypt user files" — it's **giving your action a secret without giving it to anyone else**. Encrypt an API key once, pass the ciphertext as a `js_params` value (or hardcode it in the action), and decrypt at runtime inside the TEE:
+
+```javascript
+// js_params: { pkpId, city, encryptedWeatherApiKey }
+async function main({ pkpId, city, encryptedWeatherApiKey }) {
+  const apiKey = await Lit.Actions.Decrypt({ pkpId, ciphertext: encryptedWeatherApiKey });
+  const res = await fetch(
+    `https://api.openweathermap.org/data/2.5/weather?q=${city}&units=metric&appid=${apiKey}`
+  );
+  const { main: weather } = await res.json();
+  return { temp: weather.temp }; // the key itself never leaves the enclave
+}
+```
+
+The same shape secures paid RPC URLs, database connection strings, LLM API keys, and webhook signing secrets. Full treatment: [Secrets](/lit-actions/secrets) and [securing RPC URLs](/lit-actions/patterns#securing-rpc-urls--hiding-api-keys-with-encryption).
+
+## Where encryption goes from here
+
+<CardGroup cols={2}>
+  <Card title="Secrets lifecycle" icon="vault" href="/lit-actions/secrets">
+    The full vault model: minting, permitting, storing, bundling multiple secrets, and rotation.
+  </Card>
+  <Card title="Token-gated decryption" icon="ticket" href="/lit-actions/patterns#gating-logic--aka-access-control-conditions">
+    Decrypt only for callers who hold a token or NFT, or who sign a challenge — gates written as plain JS.
+  </Card>
+  <Card title="Coming from Lit V1?" icon="route" href="/lit-actions/migration/encryption">
+    How PKP-derived encryption differs from BLS access-control conditions, and when to use each.
+  </Card>
+  <Card title="SDK reference" icon="book" href="/lit-actions/chipotle">
+    Exact signatures for Lit.Actions.Encrypt and Lit.Actions.Decrypt.
+  </Card>
+  <Card title="Encrypted state at scale" icon="database" href="/lit-actions/examples#15-confidential-dark-pool-encrypted-orders-matched-in-the-enclave">
+    A dark pool that stores every order as ciphertext in Postgres and matches batches inside the enclave.
+  </Card>
+  <Card title="Combine with signing" icon="signature" href="/guides/signing">
+    Decrypt a credential, act on it, sign the result — the two primitives compose in one action.
+  </Card>
+</CardGroup>
+
+## Administrative checklist for an encryption app
+
+- [ ] Separate vault PKPs per trust boundary (app secrets vs. user data) — [Patterns](/lit-actions/patterns#multiple-pkps-in-a-single-action--separating-app-secrets-from-user-signing)
+- [ ] Decrypt action published to IPFS, CID pinned in a group with the vault PKP — [Dashboard](/management/dashboard#5-register-ipfs-cids-actions)
+- [ ] Usage keys scoped to that group only; account key never ships — [API Keys](/management/api_keys)
+- [ ] No action returns or logs plaintext secrets — [Common mistakes](/lit-actions/secrets#common-mistakes)
+- [ ] Rotation plan: re-encrypt, replace ciphertext, invalidate the old secret upstream — [Secrets](/lit-actions/secrets)
+- [ ] Credit balance monitored; decrypt calls are metered like any action — [Pricing](/management/pricing)
