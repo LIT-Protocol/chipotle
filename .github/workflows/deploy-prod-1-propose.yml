@@ -60,7 +60,7 @@ on:
   workflow_dispatch:
     inputs:
       phala_cvm_name:
-        description: "Target chipotle-prod CVM name or id (e.g. chipotle-prod-rep-xxxxx). Leave blank to use the current prod replica default. Set this to provision + propose against a freshly-added replica on a new Phala node during a zero-downtime upgrade."
+        description: "Target chipotle-prod CVM name or id (e.g. chipotle-prod-rep-xxxxx). Leave blank to auto-select the COLD replica (the prod replica NOT currently serving the public domain). Set this as a break-glass override, or to provision + propose against a freshly-added replica on a new Phala node during a zero-downtime upgrade."
         required: false
         type: string
         default: ""
@@ -278,13 +278,83 @@ jobs:
           set -euo pipefail
 
           # Resolve the target CVM. A manual workflow_dispatch run may override
-          # it via the phala_cvm_name input (e.g. to provision + propose against
-          # a freshly-added replica on a new Phala node for a zero-downtime
-          # upgrade). Empty on tag pushes, so tagged prod releases keep using
-          # the current replica default below.
+          # it via the phala_cvm_name input (break-glass / to provision + propose
+          # against a freshly-added replica on a new Phala node). Empty on tag
+          # pushes, so tagged prod releases auto-select the COLD replica below.
           CVM_NAME="${{ inputs.phala_cvm_name }}"
           if [ -z "$CVM_NAME" ]; then
-            CVM_NAME="chipotle-prod-rep-r68r6"
+            # Auto-select the COLD prod replica: of the two long-lived prod
+            # replicas, propose against whichever one is NOT currently serving
+            # the public domain, so the Safe-approved compose hash lands on the
+            # standby box for a zero-downtime ping-pong cutover (see
+            # plans/zero-downtime-pingpong-deploy.md).
+            #
+            # Both replicas share one app_id, so the _dstack-app-address TXT
+            # can't tell them apart. The join key is the Phala node token
+            # (dstack-base-prodN): it appears both in the public domain's CNAME
+            # target (_.dstack-base-prodN.phala.network — written by the live
+            # replica's dstack-ingress when it claims the domain) and in each
+            # replica's own default Phala app URL. Match them: the replica on
+            # the live node is serving; the other is the cold deploy target.
+            #
+            # To change the replica set, edit PROD_REPLICAS below.
+            PROD_REPLICAS=("chipotle-prod-rep-r68r6" "chipotle-prod-rep-08tv3")
+            PUBLIC_DOMAIN="${{ vars.DOMAIN_PROD }}"
+            [ -z "$PUBLIC_DOMAIN" ] && PUBLIC_DOMAIN="api.chipotle.litprotocol.com"
+
+            # node_of_dns <host> — print the dstack node token that <host> is a
+            # CNAME for, using whichever resolver is installed on the runner.
+            node_of_dns() {
+              local host="$1" out=""
+              if command -v dig >/dev/null 2>&1; then
+                out=$(dig +short "$host" 2>/dev/null)
+              elif command -v host >/dev/null 2>&1; then
+                out=$(host "$host" 2>/dev/null)
+              elif command -v nslookup >/dev/null 2>&1; then
+                out=$(nslookup "$host" 2>/dev/null)
+              fi
+              echo "$out" | grep -oE 'dstack-base-prod[0-9]+' | head -1
+            }
+
+            # node_of_cvm <cvm> — print the dstack node token the CVM's default
+            # Phala app URL lives on (same jq patterns as wait-for-api-restart).
+            node_of_cvm() {
+              local cvm="$1" json app
+              json=$(phala cvms get "$cvm" --json 2>/dev/null) || return 0
+              app=$(echo "$json" | jq -r '.endpoints[]? | select(.app != null and (.app | tostring | test("-8000\\."))) | .app' | head -1)
+              [ -z "$app" ] && app=$(echo "$json" | jq -r '.public_urls[0].app // empty')
+              [ -z "$app" ] && app=$(echo "$json" | jq -r '(.endpoints // [])[0].app // empty')
+              echo "$app" | grep -oE 'dstack-base-prod[0-9]+' | head -1
+            }
+
+            LIVE_NODE=$(node_of_dns "$PUBLIC_DOMAIN")
+            if [ -z "$LIVE_NODE" ]; then
+              echo "::error::Could not determine the live prod node from DNS for $PUBLIC_DOMAIN. Re-run with the phala_cvm_name input to target a replica explicitly."
+              exit 1
+            fi
+            echo "Live node currently serving $PUBLIC_DOMAIN: $LIVE_NODE"
+
+            COLD_CVM=""; LIVE_CVM=""
+            for rep in "${PROD_REPLICAS[@]}"; do
+              n=$(node_of_cvm "$rep")
+              if [ -z "$n" ]; then
+                echo "::error::Could not resolve the node for replica '$rep' via 'phala cvms get'. Cannot safely auto-select the cold box; re-run with phala_cvm_name."
+                exit 1
+              fi
+              echo "  replica $rep is on node $n"
+              if [ "$n" = "$LIVE_NODE" ]; then LIVE_CVM="$rep"; else COLD_CVM="$rep"; fi
+            done
+
+            if [ -z "$LIVE_CVM" ]; then
+              echo "::error::Neither prod replica (${PROD_REPLICAS[*]}) is on the live node $LIVE_NODE. Refusing to guess the cold box; re-run with phala_cvm_name."
+              exit 1
+            fi
+            if [ -z "$COLD_CVM" ]; then
+              echo "::error::Both prod replicas resolve to the live node $LIVE_NODE — cannot pick a distinct cold box. Re-run with phala_cvm_name."
+              exit 1
+            fi
+            echo "Live replica: $LIVE_CVM ($LIVE_NODE) → proposing against COLD replica: $COLD_CVM"
+            CVM_NAME="$COLD_CVM"
           fi
           echo "Target prod CVM: $CVM_NAME"
           echo "cvm_name=$CVM_NAME" >> "$GITHUB_OUTPUT"
