@@ -22,7 +22,7 @@ API key, an independent account-existence read, session restoration, logout,
 login with the issued key, rejected keys, missing fields, API-error recovery,
 and keyboard access-mode selection. It also runs password signup, email
 verification, ciphertext storage, wrong-password rejection, autofill-style login,
-and password changes against the real Worker/D1 and Rust API on both viewports
+and password changes against the real lit-payments auth service (Postgres) and Rust API on both viewports
 (14 checks total). Password fields are filled without keyboard/input events and
 submitted by Enter/button with successful navigation checks. Only error-injection
 tests replace API responses; successful requests use the real API. Outbound email
@@ -38,9 +38,11 @@ screenshots, failure traces/videos, and service logs are uploaded as
 `dashboard-account-access` for seven days. This PR is stacked on #727 and requires
 its email/password implementation. Merge #727 first, then retarget this PR to main.
 
-To run locally, use Node 22, Python 3, Foundry (`anvil`, `cast`), `jq`, and the
-dstack simulator. Ports 8545, 8000, 8088, and 8787 must be free; the launcher refuses
-to reuse running services. Build once from the repository root:
+To run locally, use Node 22, Python 3, Foundry (`anvil`, `cast`), `jq`, a local
+Postgres (`TEST_DATABASE_URL`, default `postgres://localhost:5432/postgres`; a
+throwaway database is created per run), and the dstack simulator. Ports 8545,
+8000, 8088, 8787, and 8790 must be free; the launcher refuses to reuse running
+services. Build once from the repository root:
 
 ```sh
 corepack enable
@@ -50,6 +52,7 @@ npm ci --prefix lit-api-server/blockchain/lit_node_express
 (cd lit-api-server/blockchain/lit_node_express && npx hardhat compile)
 cargo build --locked --manifest-path lit-api-server/Cargo.toml --features dstack --bin lit-api-server
 cargo build --locked --manifest-path lit-api-server/blockchain/rust_generator_and_deployer/Cargo.toml --bin contract_deployer
+cargo build --locked --manifest-path lit-payments/Cargo.toml --bin lit-payments
 ```
 
 Use dstack revision `5c37b2574069267eaff5c490694dc2f4d24eaa62` (Rust 1.92) and

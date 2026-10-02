@@ -1,8 +1,14 @@
 name: Dashboard password authentication
+# Tests the dashboard password login end to end: the lit-payments auth service
+# (Rust, Postgres) plus the real dashboard in Chromium. Deployment is not done
+# here: lit-payments deploys through deploy-lit-payments.yml and the dashboard
+# through deploy-static.yml (see plans/dashboard-auth-on-lit-payments.md).
 on:
   pull_request:
     paths:
       - 'lit-dashboard-auth/**'
+      - 'lit-payments/**'
+      - 'lit-billing-core/**'
       - 'lit-static/dapps/dashboard/**'
       - 'e2e/password/**'
       - 'e2e/playwright.password.config.ts'
@@ -11,22 +17,35 @@ on:
     branches: [main]
     paths:
       - 'lit-dashboard-auth/**'
+      - 'lit-payments/**'
+      - 'lit-billing-core/**'
       - 'lit-static/dapps/dashboard/**'
       - 'e2e/password/**'
       - 'e2e/playwright.password.config.ts'
       - '.github/workflows/dashboard-auth.yml'
   workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Deploy auth Worker (frontend enabled separately with LIT_AUTH_*_URL)'
-        type: choice
-        required: true
-        options: [staging, production]
 permissions:
   contents: read
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      CARGO_BUILD_JOBS: '2'
+      CARGO_PROFILE_DEV_DEBUG: '0'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -35,9 +54,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - uses: dtolnay/rust-toolchain@1.91
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lit-payments -> target
+          shared-key: lit-payments-auth
+          cache-on-failure: true
+      - name: Build lit-payments
+        run: cargo build --locked --manifest-path lit-payments/Cargo.toml --bin lit-payments
       - run: pnpm install --frozen-lockfile
         working-directory: lit-dashboard-auth
-      - run: pnpm check && pnpm test
+      - name: API tests against the real service
+        run: pnpm test
         working-directory: lit-dashboard-auth
       - name: Verify committed crypto bundle
         run: git diff --exit-code -- lit-static/dapps/dashboard/password-crypto-worker.js
@@ -54,33 +82,3 @@ jobs:
         with:
           name: password-auth-browser-results
           path: e2e/test-results/
-  deploy:
-    if: github.event_name == 'workflow_dispatch'
-    needs: test
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    concurrency:
-      group: dashboard-auth-${{ inputs.environment }}
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.11.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - run: pnpm install --frozen-lockfile
-        working-directory: lit-dashboard-auth
-      - run: pnpm run deploy
-        working-directory: lit-dashboard-auth
-        env:
-          AUTH_ENVIRONMENT: ${{ inputs.environment }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          AUTH_DATABASE_ID: ${{ vars.AUTH_DATABASE_ID }}
-          AUTH_DOMAIN: ${{ vars.AUTH_DOMAIN }}
-          AUTH_DASHBOARD_URL: ${{ vars.AUTH_DASHBOARD_URL }}
-          AUTH_MAIL_FROM: ${{ vars.AUTH_MAIL_FROM }}
-          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}

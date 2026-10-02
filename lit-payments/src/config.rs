@@ -11,7 +11,8 @@ use alloy_primitives::{Address, B256, U256};
 use anyhow::{Context, Result};
 use lit_billing_core::on_chain::OnChainBillingResolver;
 
-use crate::{chain, rate};
+use crate::dashboard_auth::DashboardAuthConfig;
+use crate::{chain, mail, rate};
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -26,6 +27,10 @@ pub struct Config {
     pub resend_api_key: String,
     /// From: address on magic-link emails (e.g., "noreply@mail.litprotocol.com").
     pub mail_from: String,
+    /// Resend API base URL. Default `https://api.resend.com`; the dashboard
+    /// auth test harness points it at a local capture server
+    /// (`RESEND_API_BASE_URL`).
+    pub resend_api_base_url: String,
     /// Public base URL, used to build magic-link verification URLs.
     /// e.g., "https://payments.litprotocol.com".
     pub public_base_url: String,
@@ -114,6 +119,11 @@ pub struct Config {
     /// otherwise the feature is off and the background loop never starts. See
     /// [`GasFunderConfig`] and `src/gas_funder/`.
     pub gas_funder: Option<GasFunderConfig>,
+    /// Dashboard password-login storage service (`/auth/v1/*`). `None` (feature
+    /// off, requests fail closed with 503) unless `DASHBOARD_AUTH_SECRET` is
+    /// set. See `src/dashboard_auth/` and
+    /// `plans/dashboard-auth-on-lit-payments.md`.
+    pub dashboard_auth: Option<DashboardAuthConfig>,
 }
 
 /// Configuration for the API-payer gas funder (see `src/gas_funder/`).
@@ -193,12 +203,24 @@ impl Config {
         let public_base_url = required("PUBLIC_BASE_URL")?
             .trim_end_matches('/')
             .to_string();
-        let cors_allowed_origins = parse_cors_allowed_origins(&public_base_url);
+        let mut cors_allowed_origins = parse_cors_allowed_origins(&public_base_url);
+        let dashboard_auth = DashboardAuthConfig::from_env()?;
+        // The dashboards that use password login call this service with
+        // credentials from their own origin; they must be CORS-allowed.
+        if let Some(auth) = &dashboard_auth {
+            for origin in auth.origins() {
+                if !cors_allowed_origins.iter().any(|o| o == origin) {
+                    cors_allowed_origins.push(origin.to_string());
+                }
+            }
+        }
         Ok(Self {
             database_url: required("DATABASE_URL")?,
             magic_link_signing_key: parse_signing_key()?,
             resend_api_key: required("RESEND_API_KEY")?,
             mail_from: required("MAIL_FROM")?,
+            resend_api_base_url: optional_trimmed("RESEND_API_BASE_URL")
+                .unwrap_or_else(|| mail::DEFAULT_RESEND_API_BASE_URL.to_string()),
             public_base_url,
             stripe_secret_key: required("STRIPE_SECRET_KEY")?,
             stripe_publishable_key: required("STRIPE_PUBLISHABLE_KEY")?,
@@ -223,6 +245,7 @@ impl Config {
                 .unwrap_or_else(|| "https://dashboard.stripe.com".to_string()),
             cors_allowed_origins,
             gas_funder: parse_gas_funder_config()?,
+            dashboard_auth,
         })
     }
 }

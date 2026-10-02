@@ -34,8 +34,12 @@ async fn rocket() -> _ {
         tracing::warn!("used magic-link purge on boot failed: {e}");
     }
 
-    let mailer =
-        mail::Mailer::new(cfg.resend_api_key.clone(), cfg.mail_from.clone()).expect("mailer");
+    let mailer = mail::Mailer::new(
+        cfg.resend_api_key.clone(),
+        cfg.mail_from.clone(),
+        cfg.resend_api_base_url.clone(),
+    )
+    .expect("mailer");
     let rate_limit = auth::rate_limit::RateLimiter::new();
     // Per-client-IP throttle for the public customer-preview endpoint (CPL-376).
     let preview_rate_limit = lit_payments::portal::rate_limit::PreviewRateLimiter::new();
@@ -62,6 +66,15 @@ async fn rocket() -> _ {
     // Keep the lit-api-server API payer pool topped up (no-op unless
     // GAS_FUNDER_PRIVATE_KEY is configured). Runs out of the TEE hot path.
     lit_payments::gas_funder::spawn(cfg.clone(), pool.clone(), mailer.clone());
+    // Dashboard password login: encrypted mail outbox + expiry cleanup. Only
+    // when configured; the routes themselves fail closed otherwise.
+    match &cfg.dashboard_auth {
+        Some(auth) => {
+            tracing::info!(config = ?auth, "dashboard auth enabled");
+            lit_payments::dashboard_auth::outbox::spawn(pool.clone(), auth.clone(), mailer.clone());
+        }
+        None => tracing::info!("dashboard auth disabled (DASHBOARD_AUTH_SECRET unset)"),
+    }
 
     // Codex P1 (Phase 8): exact-match CORS allowlist driven by
     // `cors_allowed_origins`. The prior config used
@@ -130,6 +143,7 @@ async fn rocket() -> _ {
                 webhook_handler::stripe_webhook,
             ],
         )
+        .mount("/", lit_payments::dashboard_auth::routes::routes())
         .mount("/static", FileServer::from("static"))
         .register(
             "/",
