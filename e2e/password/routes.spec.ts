@@ -138,12 +138,12 @@ test('a verification fragment opened while signed in survives auth routing', asy
   await page.locator('#login-api-key').press('Enter');
   await expect(page).toHaveURL(/#overview$/);
   await page.evaluate(hash => { location.hash = hash; }, new URL(link).hash);
-  await expect(page.locator('#password-verify-panel')).toBeVisible();
   await expect(page).not.toHaveURL(/verify=/);
   await expect(page.locator('#dashboard-wrap')).toBeHidden();
-  await page.locator('#password-verify-form button').click();
   await expect(page).toHaveURL(/#create-account$/);
+  await expect(page.locator('#password-verify-panel')).toBeHidden();
   await expect(page.locator('#password-create-email')).toHaveValue(email);
-  await expect(page.locator('#login-status')).toContainText('Email verified');
+  await expect(page.locator('#login-status')).toContainText('Email confirmed');
+  await expect(page.getByRole('heading', { name: 'Create an account' })).toBeVisible();
   expect(errors).toEqual([]);
 });

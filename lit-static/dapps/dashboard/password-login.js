@@ -27,6 +27,13 @@ const $ = (id) => document.getElementById(id);
 let verified = null;
 const help =
   "Save this password in your password manager. There’s no “Forgot password” option, and we can’t reset it for you.";
+// Passwords can’t be reset, so a typo in a new password would lock the user
+// out. Require the same value twice before deriving anything from it.
+function confirmed(password, confirmation) {
+  if (password !== confirmation)
+    throw new Error("Passwords don’t match. Enter the same password in both fields.");
+  return password;
+}
 export function resetPasswordIdentity() {
   // API-key and wallet sign-outs call this too; only contact the auth service
   // when this tab actually held a password identity or storage session.
@@ -269,16 +276,25 @@ export function initPasswordLogin() {
   $("password-create-form").addEventListener("submit", (event) => {
     event.preventDefault();
     void busy(event.currentTarget, () =>
-      createAccount($("password-create-password").value),
+      createAccount(
+        confirmed(
+          $("password-create-password").value,
+          $("password-create-confirm").value,
+        ),
+      ),
     );
   });
   document.querySelectorAll("[data-show-password]").forEach((button) =>
     button.addEventListener("click", () => {
-      const input = $(button.dataset.showPassword);
-      input.dataset.password = "true";
-      input.type = input.type === "password" ? "text" : "password";
-      button.textContent =
-        input.type === "password" ? "Show password" : "Hide password";
+      // One toggle may reveal a password and its confirmation together.
+      const inputs = button.dataset.showPassword.split(/\s+/).map($);
+      const reveal = inputs[0].type === "password";
+      inputs.forEach((input) => {
+        input.dataset.password = "true";
+        input.type = reveal ? "text" : "password";
+      });
+      const plural = inputs.length > 1 ? "passwords" : "password";
+      button.textContent = reveal ? `Hide ${plural}` : `Show ${plural}`;
     }),
   );
   $("password-settings-open").addEventListener("click", () => {
@@ -307,7 +323,10 @@ export function initPasswordLogin() {
         if (!identity)
           throw new Error("Sign in with email and password first.");
         const oldPassword = $("password-current").value,
-          newPassword = $("password-new").value;
+          newPassword = confirmed(
+            $("password-new").value,
+            $("password-new-confirm").value,
+          );
         await validateNewPassword(newPassword);
         const record = await unlock(identity.email, oldPassword);
         if (
@@ -368,49 +387,59 @@ export function initPasswordLogin() {
     const fragment = new URLSearchParams(location.hash.slice(1));
     const proof = fragment.get("verify"),
       purpose = fragment.get("purpose");
-    if (proof) {
-      if (isAuthenticated()) logOut();
-      history.replaceState(null, "", location.pathname + location.search);
+    if (!proof) return;
+    if (isAuthenticated()) logOut();
+    history.replaceState(null, "", location.pathname + location.search);
+    $("login-auth-mode-password").click();
+    if (purpose === "email") {
+      // Changing the email on an existing account still needs the current
+      // password, so this one keeps an explicit confirmation form.
       $("password-verify-panel").hidden = false;
-      $("password-verify-copy").textContent =
-        purpose === "email"
-          ? "Sign in with your current email and password to confirm your new email address."
-          : "Confirm your email to create a new account.";
-      $("password-email-confirm-fields").hidden = purpose !== "email";
-      $("login-auth-mode-password").click();
       $("password-verify-form").onsubmit = (event) => {
         event.preventDefault();
         void busy(event.currentTarget, async () => {
-          if (purpose === "email") {
-            const password = $("password-verify-password").value;
-            const record = await unlock(
-              $("password-verify-email").value,
-              password,
-            );
-            await request("email/complete", {
-              token: proof,
-              authSecret: record.authSecret,
-            });
-            logOut();
-            showStatus(
-              "login-status",
-              "Email updated. Sign in with your new email and existing password.",
-              "success",
-            );
-          } else {
-            const record = await request("signup/verify", { token: proof });
-            showCreate(record);
-            navigateLogin("#create-account");
-            showStatus(
-              "login-status",
-              "Email verified. Choose a password to create your account.",
-              "success",
-            );
-          }
+          const record = await unlock(
+            $("password-verify-email").value,
+            $("password-verify-password").value,
+          );
+          await request("email/complete", {
+            token: proof,
+            authSecret: record.authSecret,
+          });
+          logOut();
           $("password-verify-panel").hidden = true;
+          showStatus(
+            "login-status",
+            "Email updated. Sign in with your new email and existing password.",
+            "success",
+          );
         });
       };
+      return;
     }
+    // Signup links confirm the email as soon as they open. The proof lives in
+    // the URL fragment, so only this page ever saw it; there is nothing for
+    // the user to decide until the password step.
+    navigateLogin("#create-account");
+    showStatus("login-status", "Confirming your email…", "info");
+    void (async () => {
+      try {
+        const record = await request("signup/verify", { token: proof });
+        showCreate(record);
+        showStatus(
+          "login-status",
+          "Email confirmed. Choose a password to finish creating your account.",
+          "success",
+        );
+        $("password-create-password").focus();
+      } catch (e) {
+        showStatus(
+          "login-status",
+          e.message || "Unable to confirm this email. Request a new link.",
+          "error",
+        );
+      }
+    })();
   }
   readVerificationLink();
   window.addEventListener("hashchange", readVerificationLink);

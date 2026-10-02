@@ -189,7 +189,8 @@ test('password-manager style signup and autofill unlock a real account', async (
     return !!link;
   }).toBe(true);
   await page.goto(link);
-  await page.locator('#password-verify-form button').click();
+  // Opening the link confirms the email and lands on the password step.
+  await expect(page).toHaveURL(/#create-account$/);
   const signup = page.locator('#password-create-form');
   await expect(signup).toBeVisible();
   await expect(signup).toHaveAttribute('method', 'post');
@@ -200,6 +201,7 @@ test('password-manager style signup and autofill unlock a real account', async (
   // Direct assignment deliberately emits no input/change events, like some
   // managers. Generated passwords must work without manually typing a character.
   await page.locator('#password-create-password').evaluate((input, value) => { (input as HTMLInputElement).value = value; }, password);
+  await page.locator('#password-create-confirm').evaluate((input, value) => { (input as HTMLInputElement).value = value; }, password);
   expect(await signup.evaluate(form => Object.fromEntries(new FormData(form as HTMLFormElement)))).toMatchObject({ username: email, 'new-password': password });
   // Simulate a pre-handler rate-limit rejection, then retry against the real
   // API. The Worker must release only the rejected operation's creation claim.
@@ -209,6 +211,7 @@ test('password-manager style signup and autofill unlock a real account', async (
   await expect(page.locator('#dashboard-wrap')).toBeHidden();
   await page.unroute(`${api}/new_account`);
   await page.locator('#password-create-password').evaluate((input, value) => { (input as HTMLInputElement).value = value; }, password);
+  await page.locator('#password-create-confirm').evaluate((input, value) => { (input as HTMLInputElement).value = value; }, password);
   const created = page.waitForResponse(`${api}/new_account`);
   await Promise.all([page.waitForNavigation(), page.locator('#password-create-submit').click()]);
   expect((await created).ok()).toBe(true);
@@ -247,7 +250,8 @@ test('password-manager style signup and autofill unlock a real account', async (
   await expect(page.locator('#password-change-username')).toHaveValue(email);
   await page.locator('#password-current').fill(password);
   await page.locator('#password-new').evaluate((input, value) => { (input as HTMLInputElement).value = value; }, replacement);
-  await Promise.all([page.waitForNavigation(), page.locator('#password-change-form button').click()]);
+  await page.locator('#password-new-confirm').evaluate((input, value) => { (input as HTMLInputElement).value = value; }, replacement);
+  await Promise.all([page.waitForNavigation(), page.locator('#password-change-form button[type=submit]').click()]);
   await expect(page.locator('#login-status')).toContainText('Password changed');
   await fillLogin(password);
   await page.locator('#password-login-form button[type=submit]').click();
