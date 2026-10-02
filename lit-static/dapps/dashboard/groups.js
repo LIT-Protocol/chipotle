@@ -3,7 +3,7 @@
  */
 
 import { getEffectiveApiKey, isAuthenticated, getClient, getGroupsStore, setGroupsStore, getWalletsStore, getActionsStore, setStat, updateStatCards, LIST_PAGE_SIZE } from './auth.js';
-import { escapeHtml, showStatus, hideStatus, showActionProgress, closeActionProgress, openModal, closeModal, confirmDelete, formatError, logError, ICON_PENCIL, ICON_TRASH } from './ui-utils.js';
+import { escapeHtml, showStatus, hideStatus, showActionProgress, closeActionProgress, openModal, closeModal, confirmDelete, formatError, logError, ICON_PENCIL, ICON_TRASH, ICON_WARNING } from './ui-utils.js';
 
 // ----- Multi-select builders -----
 
@@ -141,8 +141,12 @@ export function renderGroupsTable(items) {
   if (empty) empty.style.display = 'none';
   items.forEach((item) => {
     const tr = document.createElement('tr');
+    // Slot stays empty until the lazy PKP-wildcard check (populateGroupPkpWildcardWarnings)
+    // resolves and, if warranted, injects the badge. data-group-id lets that async
+    // pass re-find the row even after an unrelated re-render.
     tr.innerHTML =
-      '<td><strong>' + escapeHtml(item.name || '') + '</strong></td>' +
+      '<td><strong>' + escapeHtml(item.name || '') + '</strong>' +
+        '<span class="warn-slot" data-group-id="' + escapeHtml(String(item.id)) + '"></span></td>' +
       '<td class="mono">' + escapeHtml(item.description || '') + '</td>' +
       '<td class="cell-actions"></td>';
     const actionsCell = tr.querySelector('.cell-actions');
@@ -162,6 +166,56 @@ export function renderGroupsTable(items) {
     actionsCell.appendChild(delBtn);
     tbody.appendChild(tr);
   });
+  // Fire-and-forget: the group list doesn't carry PKP membership, so flag the
+  // "All PKPs" wildcard lazily (per-group fetch, cached on the item) without
+  // blocking the table render.
+  void populateGroupPkpWildcardWarnings(items);
+}
+
+// A group whose permitted-PKP set includes the zero-address wildcard grants
+// access to *every* PKP in the account — including PKPs scoped more narrowly in
+// other groups. list_wallets_in_group returns that wildcard as the zero address.
+const GROUP_PKP_WILDCARD_WARNING =
+  'This group permits All PKPs (wildcard). It grants access to PKPs that may be scoped more narrowly in other groups.';
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+
+async function populateGroupPkpWildcardWarnings(items) {
+  if (!items || !items.length || !isAuthenticated()) return;
+  const apiKey = getEffectiveApiKey();
+  let client;
+  try {
+    client = await getClient();
+  } catch (e) {
+    logError('groupPkpWildcard:getClient', e);
+    return;
+  }
+  for (const item of items) {
+    // Cached from a prior render of the same store object; only a fresh Load
+    // (which rebuilds the store) re-fetches.
+    if (item._pkpWildcard === undefined) {
+      try {
+        const wallets = await client.listWalletsInGroup({
+          apiKey,
+          groupId: normalizeGroupId(item.id),
+          pageNumber: '0',
+          pageSize: LIST_PAGE_SIZE,
+        });
+        item._pkpWildcard = wallets.some((w) => (w.wallet_address || '').toLowerCase() === ZERO_ADDRESS);
+      } catch (e) {
+        logError('groupPkpWildcard:list', e);
+        continue;
+      }
+    }
+    if (!item._pkpWildcard) continue;
+    // Re-find the slot at inject time: the table may have been re-rendered while
+    // the fetch was in flight. Guard against double-injection.
+    const slot = document.querySelector('.warn-slot[data-group-id="' + CSS.escape(String(item.id)) + '"]');
+    if (slot && !slot.firstChild) {
+      slot.innerHTML =
+        '<span class="warn-badge" role="img" aria-label="Wildcard PKP warning" title="' +
+        escapeHtml(GROUP_PKP_WILDCARD_WARNING) + '">' + ICON_WARNING + '</span>';
+    }
+  }
 }
 
 // ----- Load -----
