@@ -56,6 +56,7 @@ const ACCOUNT_CONFIG_ERROR_SIGNATURES: &[(&str, &str)] = &[
         "PkpDoesNotExist",
         "PkpDoesNotExist(uint256,uint256,address)",
     ),
+    ("UsageApiKeyExpired", "UsageApiKeyExpired(uint256)"),
     (
         "UsageApiKeyDoesNotExist",
         "UsageApiKeyDoesNotExist(uint256,uint256)",
@@ -117,6 +118,24 @@ mod tests {
             account_config_error_name(&selector),
             Some("AccountDoesNotExist")
         );
+    }
+
+    #[test]
+    fn usage_api_key_expired_is_named_and_decodable() {
+        let error = AccountConfig::UsageApiKeyExpired {
+            usageApiKeyHash: alloy::primitives::U256::from(202),
+        };
+        let encoded = error.abi_encode();
+        assert_eq!(
+            account_config_error_name(&encoded),
+            Some("UsageApiKeyExpired")
+        );
+        match AccountConfigErrors::abi_decode(&encoded).expect("generated ABI must decode expiry") {
+            AccountConfigErrors::UsageApiKeyExpired(decoded) => {
+                assert_eq!(decoded.usageApiKeyHash, error.usageApiKeyHash);
+            }
+            _ => panic!("wrong contract error variant"),
+        }
     }
 
     #[test]

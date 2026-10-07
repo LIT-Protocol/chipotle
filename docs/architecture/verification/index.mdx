@@ -6,12 +6,18 @@ description: "How to verify that your connection to Lit Chipotle terminates insi
 The Lit Chipotle API server runs inside an Intel TDX [Trusted Execution Environment](https://www.intel.com/content/www/us/en/developer/tools/trust-domain-extensions/overview.html) on [Phala Cloud](https://phala.com/), with its keys gated by smart contracts on Base. This section explains how that works and how to verify it yourself.
 
 <Card
-  title="Just want to verify it? Start here."
+  title="Start with the report and quick diagnostics"
   icon="shield-check"
   href="/architecture/verification/quick-verify"
 >
-  One-click Phala Trust Center report plus three commands you can paste into a terminal to confirm the API is running unmodified code on real Intel TDX hardware.
+  Phala Trust Center report plus preliminary API metadata and on-chain policy checks, with the prerequisites for attestation and TLS verification.
 </Card>
+
+## Production verification
+
+Follow [Phala’s official application verification instructions](https://docs.phala.com/phala-cloud/attestation/verify-your-application) and [complete chain-of-trust checklist](https://docs.phala.com/phala-cloud/attestation/chain-of-trust) for full production verification. They are the authoritative references for Phala/dstack verification; the examples here are diagnostic aids.
+
+You are responsible for implementing and enforcing attestation verification in your integration. What you need to implement depends on your setup and where and how your client connects to Chipotle, including proxies, gateways, and TLS termination points. Verify against your approved workload and security policy, and bind the verified identity to the connection carrying application traffic before sending secrets. A Trust Center report or a separate diagnostic connection does not enforce these checks in your client.
 
 ## Zero-Trust TLS
 
@@ -24,7 +30,7 @@ The Lit Chipotle API server runs inside an Intel TDX [Trusted Execution Environm
 3. The certificate and ACME account are recorded as evidence files. Their SHA-256 checksums are hashed into a single digest that is embedded in a TDX attestation quote's `reportData` field.
 4. Because the quote is signed by Intel's TDX hardware root of trust and bound to this digest, anyone can cryptographically prove the certificate was generated inside this specific TEE.
 
-**What this means:** When you connect to `api.chipotle.litprotocol.com` over HTTPS, the TLS handshake completes **inside the TEE**. No proxy, load balancer, or CDN can intercept the traffic. If the TLS handshake succeeds and the certificate is valid, you are provably talking to the TEE — not to any intermediary.
+**What you must verify:** A valid public-CA certificate and successful TLS handshake do not by themselves prove TEE termination. Authenticate the evidence quote and approved workload, verify the certificate's checksum binding, and enforce that certificate on the connection used for application traffic.
 
 **Contrast with traditional TLS:** Traditional TLS proves identity (the server holds the private key for this domain) but says nothing about *where* the key lives or *what code* uses it. ZT-TLS closes that gap: the key can only exist inside attested TEE hardware.
 
@@ -34,9 +40,9 @@ Zero-Trust TLS means the encryption endpoint is the trust boundary. Once you ver
 
 For the full design, see [Phala: TEE-Controlled Domain Certificates](https://docs.phala.com/dstack/design-documents/tee-controlled-domain-certificates).
 
-## Quick TLS Verification
+## Inspect the TLS Certificate
 
-Given Zero-Trust TLS, simple certificate validation already gives strong guarantees. This is sufficient for most users.
+The command below only inspects the certificate. It does not verify an attestation quote or prove TEE termination.
 
 ```bash
 # Inspect the TLS certificate
@@ -46,7 +52,7 @@ openssl s_client -connect api.chipotle.litprotocol.com:443 \
 ```
 
 - The certificate is issued by **Let's Encrypt** (a public CA) to the exact domain.
-- Because ZT-TLS guarantees the private key lives only in the TEE, a valid TLS handshake = connection to the TEE.
+- Public-CA validity alone does not prove that the private key lives in a TEE. Follow the authentication prerequisites in the [Full Verification Guide](/architecture/verification/full-verification).
 - For programmatic clients: **pin the certificate fingerprint** after initial verification (see [Certificate Pinning](#certificate-pinning) below).
 
 ## Certificate Pinning
@@ -59,9 +65,9 @@ Once full verification passes, pin the TLS certificate fingerprint:
 
 ## What's Next
 
-- [Verify in 30 Seconds](/architecture/verification/quick-verify) — Phala Trust Center one-click report plus three terminal commands
+- [Verify in 30 Seconds](/architecture/verification/quick-verify) — Phala Trust Center report and preliminary metadata and policy checks
 - [On-Chain KMS](/architecture/verification/onchain-kms) — how Base smart contracts gate key release and how to confirm the KMS is active
-- [Full Verification Guide](/architecture/verification/full-verification) — step-by-step commands to verify every layer of the chain of trust
+- [Full Verification Guide](/architecture/verification/full-verification) — Chipotle-specific diagnostic examples and prerequisites; follow Phala’s instructions for production
 - [Chain of Trust Reference](/architecture/verification/chain-of-trust) — detailed explanation of what each verification step checks and why it matters
 
 ## Further Reading

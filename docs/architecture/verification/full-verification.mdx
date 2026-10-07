@@ -1,12 +1,16 @@
 ---
 title: "Full Verification Guide"
-description: "Step-by-step commands to verify every layer of the Lit Chipotle chain of trust: hardware attestation, application code, TLS certificates, and on-chain governance."
+description: "Chipotle-specific verification layers and diagnostic examples, with links to Phala’s authoritative production verification instructions."
 ---
 
-This is a complete, end-to-end how-to. It mirrors the CI workflow that runs on every Lit Chipotle deployment and covers all layers of the chain of trust.
+For full production verification, follow [Phala’s official application verification instructions](https://docs.phala.com/phala-cloud/attestation/verify-your-application) and [complete chain-of-trust checklist](https://docs.phala.com/phala-cloud/attestation/chain-of-trust). These are the authoritative references for Phala/dstack verification; this guide adds Chipotle-specific context and diagnostic examples, not a complete production verifier.
+
+You are responsible for implementing and enforcing attestation verification correctly for your integration. The implementation depends on your setup and where and how your client connects to the Chipotle server, including proxies, gateways, and TLS termination points. Define the workload and security policy you accept, and enforce the verified identity on the connection carrying application traffic before sending secrets. Following Phala’s instructions does not automatically choose your application policy or integrate those checks into your client.
+
+The commands below are diagnostic building blocks. In particular, observe the authentication prerequisites and limitations in Step 3; a passing checksum comparison is not authenticated attestation.
 
 <Tip>
-**New to TEE verification?** You don't need to understand every cryptographic detail. Each step below is a self-contained check you can copy-paste into your terminal. The commands will output PASS or FAIL. If all steps pass, you have cryptographic proof that your connection terminates in genuine, unmodified TEE hardware running authorized code.
+**New to TEE verification?** Work through the layers in order. Individual checksum matches are not proof of attestation; the TLS evidence checks require the signature, measurement and connection-binding prerequisites described in Step 3.
 </Tip>
 
 **Prerequisites:** `python3` (3.8+), `docker`, `openssl`, `dig`, and optionally [`cosign`](https://docs.sigstore.dev/cosign/system_config/installation/) and [`cast`](https://book.getfoundry.sh/getting-started/installation) (from Foundry).
@@ -166,7 +170,13 @@ The `dstack-ingress` image is a third-party dependency from the [dstack project]
 
 ## 3. Verify TLS terminates in the TEE (Network)
 
-**What this checks:** Was the TLS certificate generated inside the TEE? This confirms your encrypted connection goes directly into the secure hardware — no proxy or intermediary can see your traffic.
+<Warning>
+**The commands below are not a standalone TLS attestation verifier.** Before trusting this chain, independently verify the signature of the dstack-ingress evidence quote and validate its measurements and workload identity against approved policy. Use `reportData` extracted from that verified quote, not an unauthenticated JSON field. Verifying the separate `/attestation` quote in Step 1 does not authenticate this evidence quote.
+
+The checksum comparison below reads `report_data` from JSON; it does not perform those prerequisite checks. You must also verify that the certificate file is covered by the authenticated `sha256sum.txt` and enforce the verified certificate on the TLS connection used for application traffic. A matching PEM from the same origin, or a separate `openssl` connection, is not sufficient to authenticate a later connection.
+</Warning>
+
+**Verification goal:** Establish that the certificate belongs to the approved TEE workload and is enforced on your application connection. The comparisons below alone do not establish this.
 
 Lit Chipotle uses [dstack-ingress](https://github.com/Dstack-TEE/dstack-examples/tree/main/custom-domain/dstack-ingress) for custom-domain TLS. Unlike the default dstack gateway (which embeds cert hashes directly in the CVM's boot-time TDX quote via `reportData`), dstack-ingress runs as an application container and generates a **separate** TDX evidence quote after obtaining the Let's Encrypt certificate. This evidence quote binds the certificate to TDX hardware through a checksum chain:
 

@@ -29,3 +29,33 @@ and a JavaScript/TypeScript frontend / monorepo tooling layer.
   code there.
 - Language boundaries are strict. Do not introduce Rust dependencies into JS tools, or
   vice versa, without human approval.
+
+## Private-first development and public releases
+
+- **All development and security fixes must be proposed and merged only in
+  `LIT-Protocol/chipotle-private`.** The public `LIT-Protocol/chipotle` repository
+  is a release destination, not a destination for individual fix PRs.
+- Check the remote URL before every push or PR operation. A workspace's `origin`
+  may point to the public repository even when the task belongs in private. Use
+  an explicit private repository URL / `gh --repo LIT-Protocol/chipotle-private`.
+- When the repositories diverge, bring public `main` into private through a
+  dedicated private sync PR. Preserve private-only fixes, merge the sync PR
+  first, then retarget dependent private PRs to private `main` and merge them.
+- Do not push development/security branches, individual fix commits, detailed
+  PRs, test logs, or review reports to the public repository. Authorization to
+  work on a fix or sync into private does **not** authorize public publication.
+- At release time, only with explicit user authorization for that release,
+  prepare one bundled private-to-public release PR. Sanitize its title,
+  description, branch name, and public commit messages. Keep vulnerability
+  details, exploit prerequisites, reproduction steps, security regression-test
+  explanations, private issue links, and deployment gaps out of public prose.
+  Keep detailed review and validation records in the private repository.
+- Coordinate publication and deployment timing with the release owner. A vague
+  PR description does not hide its diff, commits, or CI output; do not publish
+  the release branch early. Never infer a public release from a private merge.
+- If sensitive material is accidentally published, notify the user promptly.
+  Closing a PR, editing its body, and deleting its branch do not permanently
+  remove GitHub's retained diff, edit history, or cached commits. Repository
+  administrators can archive a PR to hide it from public view; permanent
+  sensitive-data removal requires GitHub Support. Do not claim deletion until
+  it has been verified.

@@ -49,7 +49,7 @@ You can add existing PKPs to groups (see step 6) via **Add PKP to group** in the
 
 ### 5. Register IPFS CIDs (actions)
 
-To scope which usage API keys can run which code, you register **IPFS CIDs** as permitted actions. In the **IPFS Actions** section, pick a group from the dropdown, then **Add** an action: enter the IPFS CID of the lit-action and optional name/description. The server hashes the CID and stores it in the group. Only keys that are allowed to use that group can run that action.
+To scope which usage API keys can run which code, you register **IPFS CIDs** as permitted actions. In the **IPFS Actions** section, pick a group from the dropdown, then **Add** an action: enter the IPFS CID of the lit-action and optional name/description. The server hashes the CID and stores it in the group. Scoped usage keys need permission for a group containing the action. Wildcard execution keys can run code without registering its CID.
 
 ### 6. Create groups
 
@@ -60,11 +60,13 @@ In the **Groups** section, click **Add** to create a group (name, description, o
 - Use **IPFS Actions** to add CIDs to the group.
 - Use **Add PKP to group** / **Remove PKP from group** to allow which wallets can be used in that group.
 
-Usage API keys (and the account key) are validated against the account's groups and permitted actions/wallets when you run a lit-action.
+Scoped usage keys are validated against the account's groups when you run an action. PKP wallet operations require a matching action-and-wallet group even with a wildcard execution key.
 
 ### 7. Run lit-actions
 
-In the **Action Runner** section, paste some Lit Action JavaScript code and optional JSON parameters. For example
+In the **Action Runner** section, paste a usage key, Lit Action JavaScript code, and optional JSON parameters. To try `console.log("hello")` without creating groups or registering actions, use a usage key with `execute_in_groups: [0]` (wildcard execution). The account master key does not automatically grant execution permission.
+
+For code that uses a PKP wallet, create a group permitting both that wallet and the action CID (or explicitly permit all actions in that group). This wallet check applies to wildcard execution keys too. For example
 ```js
 async function main({ pkpId }) {
   const wallet = new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId }));
@@ -72,7 +74,7 @@ async function main({ pkpId }) {
   return { sig };
 }
 ```
- Choose the API key (account or usage key) to use for the request, then click **Execute**. The node runs the action and returns signatures, response, and logs. The key you use must be allowed to run that action (via the group and IPFS CID configuration).
+ Choose the usage key to use for the request, then click **Execute**. The node runs the action and returns signatures, response, and logs. Scoped keys require execution permission for a matching group; wildcard execution keys do not require a group just to run code.
 
 ## Daily Usage
 
