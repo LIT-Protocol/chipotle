@@ -11,7 +11,7 @@ A **group** is the core organizing unit in Lit Chipotle. It binds together three
 2. **IPFS Actions** — which lit-actions can be executed
 3. **Usage API Keys** — which keys have access (via their permission arrays)
 
-Think of a group as an access-control boundary: a usage API key can only run actions and use wallets that belong to groups it has been granted access to.
+Think of a group as an access-control boundary: scoped usage keys can run actions in their permitted groups, and PKP wallet access requires a group permitting both the action and wallet. Wildcard execution keys can run arbitrary code without a group, but still need that group match to use a PKP wallet.
 
 ```
                         ┌─────────────────────────┐
@@ -31,7 +31,7 @@ Think of a group as an access-control boundary: a usage API key can only run act
                         └─────────────────────────┘
 ```
 
-In this example, Key A can only use Group 1's wallets and actions. Key B can use both groups. The account key always has full access to all groups.
+In this example, Key A can only use Group 1's wallets and actions. Key B can use both groups. The account key administers all groups; use a usage key to execute actions.
 
 ## Why Groups Exist
 
@@ -48,7 +48,7 @@ Without groups, every usage key would have access to every wallet and every acti
 | **Wallet (PKP)** | Added via `add_pkp_to_group`. A wallet can belong to multiple groups. |
 | **IPFS Action** | Added via `add_action_to_group` (raw CID, server hashes it). An action can belong to multiple groups. |
 | **Usage API Key** | Granted access at creation via permission arrays (e.g., `execute_in_groups: [1, 2]`). Use `[0]` as a wildcard for all groups. |
-| **Account Key** | Always has full access to all groups — no group scoping needed. |
+| **Account Key** | Administers all groups; use a usage key for action execution. |
 
 ## Common Patterns
 
@@ -63,7 +63,13 @@ Give each dApp its own usage key scoped to its group. If the price-oracle key le
 
 ### All-access key for development
 
-Create a usage key with `execute_in_groups: [0]` (wildcard). This key can run any action in any group — useful for local development, but never deploy it.
+Create a usage key with `execute_in_groups: [0]` (wildcard). This key can run arbitrary action code, including code pasted into the Dashboard Action Runner, without registering a CID or creating a group.
+
+Execution permission and PKP wallet permission are separate. If the action requests a PKP private key or uses PKP encryption/decryption, a group in the key's own account must permit **both** the action CID and the requested wallet. They must match the same group. Wildcard execution skips the individual group grants on the key; it does not skip this resource check or grant access to another account's wallets. Group membership is not proof of wallet ownership: listing a foreign wallet address can satisfy the group check, but the node separately resolves the wallet in the caller's account and verifies the derived key's address before releasing or using it.
+
+For example, `console.log("hello")` needs no group with a wildcard key. An action using wallet A requires a group containing wallet A and that action's CID (or the group's all-actions wildcard). Changing the code changes its CID, so update the permitted CID or deliberately allow all actions for that group.
+
+Use a scoped key when you want to restrict which code can execute. Expired and revoked keys do not gain access through wildcard permissions.
 
 ### Shared wallets across groups
 
@@ -82,7 +88,7 @@ A single wallet can belong to multiple groups. This is useful when multiple dApp
 When creating a group, two convenience flags control default access:
 
 - **All wallets permitted** — any wallet in the account can be used via this group (no need to add individually).
-- **All actions permitted** — any registered action can be run via this group.
+- **All actions permitted** — any action CID matches this group, including code that has not been registered.
 
 These are set in the Dashboard's group creation form or via the `pkp_ids_permitted` and `cid_hashes_permitted` arrays in the API. On-chain, these flags are *not* separate booleans: they are encoded using wildcard values in the arrays:
 

@@ -29,9 +29,15 @@ The account key is shown only once at creation. There is no way to retrieve it a
 Usage keys are scoped, rotatable keys intended for day-to-day operations — for use in dApps, servers, cron jobs, or anywhere you need to run lit-actions without exposing your master credential.
 
 - **Created:** From the **Usage API Keys** section of the dashboard, or via the API. Like the account key, each usage key is shown **once** on creation.
-- **Purpose:** Running lit-actions and interacting with the node on behalf of your account. Access is enforced through groups — a usage key can only perform operations in the groups it has been explicitly granted access to.
+- **Purpose:** Running lit-actions and interacting with the node on behalf of your account. Scoped execution is enforced through groups. A wildcard execution key can run arbitrary code without a group, while PKP wallet use still requires a matching action-and-wallet group in its own account.
 - **Authentication:** Pass the usage key in the `X-Api-Key` (or `Authorization: Bearer`) header just as you would the account key.
 - **Security model:** Usage keys enforce least-privilege access. By scoping each key to specific groups (and therefore specific IPFS actions and PKPs), you can give a key to a client or service without granting it access to your full account. If a key is compromised or no longer needed, delete it — this has no impact on other keys or your account.
+
+#### Wildcard execution and wallet access
+
+Set `execute_in_groups: [0]` (`executeInGroups: [0]` in the SDK) to run arbitrary Lit Action code without registering an action or creating a group. Paste this usage key into the Dashboard Action Runner to try code such as `console.log("hello")`. An account master key is an administrative credential; it does not automatically grant action execution.
+
+Wildcard execution does **not** grant unrestricted PKP wallet access. PKP private-key, encryption, and decryption operations require a group in the key's account that permits both the action CID and wallet. A group can explicitly permit all action CIDs, but the key's execution wildcard alone never bypasses wallet scoping. See [Groups](/architecture/groups#all-access-key-for-development).
 
 #### Key lifecycle
 
@@ -40,7 +46,7 @@ Usage keys are scoped, rotatable keys intended for day-to-day operations — for
 | Create usage key | Account key only |
 | Update usage key permissions | Account key only |
 | Delete usage key | Account key only |
-| Run a lit-action | Account key or usage key (subject to group permissions) |
+| Run a lit-action | Usage key with execution permission (scoped or wildcard) |
 
 <Note>
 A freshly-created usage key's group permissions are eventually consistent — the first `/lit_action` call right after `add_usage_api_key` can fail for a beat while the grant propagates. Don't sleep a fixed amount; poll the real execution path until it succeeds. See [Verify the real path before you depend on it](/management/api_direct#7-run-lit-action).
@@ -121,7 +127,7 @@ Returns the new key once in the response (`usage_api_key`). Permissions are set 
 | `manage_ipfs_ids_in_groups` | `u64[]` | Group IDs where this key can add/remove IPFS actions. Use `[0]` as a wildcard for all groups. |
 | `add_pkp_to_groups` | `u64[]` | Group IDs where this key can add PKPs. Use `[0]` for all groups. |
 | `remove_pkp_from_groups` | `u64[]` | Group IDs where this key can remove PKPs. Use `[0]` for all groups. |
-| `execute_in_groups` | `u64[]` | Group IDs where this key can execute lit-actions. Use `[0]` for all groups. |
+| `execute_in_groups` | `u64[]` | Group IDs where this key can execute lit-actions. `[0]` allows arbitrary code without a group; PKP wallet access still requires a matching group. |
 
 ---
 

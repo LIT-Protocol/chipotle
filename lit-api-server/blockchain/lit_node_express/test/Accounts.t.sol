@@ -1041,10 +1041,10 @@ contract AccountsTest is BaseTest {
             walletA
         );
         assertFalse(canWallet, "wildcard key (combined) reached foreign wallet");
-        // The action isn't registered to B either, so execution is denied too.
-        assertFalse(canExec, "wildcard key executed unregistered action");
-        assertFalse(views_.canExecuteAction(usageB, cidHash));
-        assertFalse(views_.canExecuteActionFast(usageB, cidHash));
+        // Arbitrary code execution is allowed independently of PKP access.
+        assertTrue(canExec, "wildcard key should execute unregistered action");
+        assertTrue(views_.canExecuteAction(usageB, cidHash));
+        assertTrue(views_.canExecuteActionFast(usageB, cidHash));
 
         // Positive control: once B registers its own wallet in its own group,
         // the wildcard key authorizes B's wallet (but still not A's).

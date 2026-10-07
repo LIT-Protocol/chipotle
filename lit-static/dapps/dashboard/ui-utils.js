@@ -8,21 +8,32 @@
 /**
  * Classify an error into a user-friendly category.
  * @param {Error|string|*} e
- * @returns {{ type: 'auth'|'network'|'server'|'unknown', message: string }}
+ * @returns {{ type: 'auth'|'permission'|'network'|'server'|'unknown', message: string }}
  */
 export function classifyError(e) {
   const raw = (e && e.message) ? e.message : String(e);
   const lower = raw.toLowerCase();
 
+  // Permission failures do not mean the login session has expired. Preserve
+  // the API's explanation so users can fix their key/group permissions.
+  if (
+    e?.status === 403 ||
+    /\b403\b/.test(lower) ||
+    /\bforbidden\b/.test(lower) ||
+    lower.includes('not authorized') ||
+    lower.includes('api key cannot')
+  ) {
+    return { type: 'permission', message: raw };
+  }
+
   // Auth: only specific phrases, not bare "session"/"expired" which collide with
   // contract revert reasons and ethers messages that mention those words.
   if (
+    e?.status === 401 ||
     /\bunauthorized\b/.test(lower) ||
     /\b401\b/.test(lower) ||
-    /\b403\b/.test(lower) ||
     lower.includes('session expired') ||
-    lower.includes('token expired') ||
-    lower.includes('api key')
+    lower.includes('token expired')
   ) {
     return { type: 'auth', message: 'Session expired — please log in again.' };
   }

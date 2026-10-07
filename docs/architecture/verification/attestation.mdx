@@ -109,11 +109,15 @@ Put the pieces together and the trust model inverts:
 
 That is the whole point of attestation: *don't trust, verify.*
 
+## Production verification is your integration’s responsibility
+
+For full production verification, follow [Phala’s official application verification instructions](https://docs.phala.com/phala-cloud/attestation/verify-your-application) and [complete chain-of-trust checklist](https://docs.phala.com/phala-cloud/attestation/chain-of-trust), the authoritative references for Phala/dstack verification. You are responsible for implementing and enforcing these checks for your setup and the path your client uses to reach Chipotle, including any proxies and TLS termination points. A report or matching hashes alone cannot authenticate that connection; your client must enforce your approved workload and security policy against authenticated evidence.
+
 ## What's next
 
 <CardGroup cols={2}>
   <Card title="Verify in 30 Seconds" icon="shield-check" href="/architecture/verification/quick-verify">
-    The Phala Trust Center one-click report, plus three commands you can paste into a terminal.
+    The Phala Trust Center report, plus preliminary API metadata and on-chain policy checks.
   </Card>
   <Card title="On-Chain KMS" icon="key" href="/architecture/verification/onchain-kms">
     How Base smart contracts — not Lit or Phala — gate key release to the enclave.
@@ -122,7 +126,7 @@ That is the whole point of attestation: *don't trust, verify.*
     How a new release is reviewed and approved by the Safe multisig before it can run.
   </Card>
   <Card title="Full Verification Guide" icon="list-checks" href="/architecture/verification/full-verification">
-    Replay the RTMR3 event log and check every layer yourself, end to end.
+    Chipotle-specific diagnostic examples and prerequisites, with Phala’s production verification instructions.
   </Card>
 </CardGroup>
 
