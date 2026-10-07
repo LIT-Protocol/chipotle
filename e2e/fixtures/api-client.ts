@@ -1,3 +1,4 @@
+import { keccak256, toUtf8Bytes } from 'ethers';
 import { API_BASE_URL } from '../playwright.config';
 
 /**
@@ -116,7 +117,9 @@ export class LitApiClient {
     account_name: string;
     account_description?: string;
   }): Promise<NewAccountResponse> {
-    return this.request<NewAccountResponse>('POST', '/new_account', { body: input });
+    return this.request<NewAccountResponse>('POST', '/new_account', {
+      body: { account_description: '', ...input },
+    });
   }
 
   /**
@@ -144,6 +147,7 @@ export class LitApiClient {
     return this.request<AddUsageKeyResponse>('POST', '/add_usage_api_key', {
       headers: { 'x-api-key': apiKey },
       body: {
+        description: '',
         can_create_groups: false,
         can_delete_groups: false,
         can_create_pkps: false,
@@ -152,6 +156,25 @@ export class LitApiClient {
         remove_pkp_from_groups: [],
         execute_in_groups: [0],
         ...input,
+      },
+    });
+  }
+
+  /** Permit exact source bytes and wallet addresses in one group. */
+  async permitWalletActions(
+    apiKey: string,
+    name: string,
+    wallets: string[],
+    codes: string[],
+  ): Promise<{ group_id: string }> {
+    const cids = await Promise.all(codes.map(code => this.getLitActionIpfsId(code)));
+    return this.request<{ group_id: string }>('POST', '/add_group', {
+      headers: { 'x-api-key': apiKey },
+      body: {
+        group_name: name,
+        group_description: 'Exact action and wallet permissions for integration tests',
+        pkp_ids_permitted: wallets,
+        cid_hashes_permitted: cids.map(cid => keccak256(toUtf8Bytes(cid))),
       },
     });
   }

@@ -1,11 +1,11 @@
 ---
 title: "Verify in 30 Seconds"
-description: "One click to confirm the Lit Chipotle API server is running unmodified code inside a genuine Intel TDX enclave — plus three commands to verify it yourself."
+description: "View the Phala Trust Center report, inspect API metadata and on-chain policy, and learn what full attestation and TLS verification requires."
 ---
 
 When you call `api.chipotle.litprotocol.com`, your request terminates inside an Intel TDX [Trusted Execution Environment](https://www.intel.com/content/www/us/en/developer/tools/trust-domain-extensions/overview.html) (TEE) operated by [Phala Cloud](https://phala.com/). The TEE generates a hardware-signed attestation quote on every boot, and the code it's allowed to run is gated by smart contracts on Base — not by Lit Protocol or any Phala employee.
 
-The fastest way to verify this is to view the Phala Trust Center report for our production app. It runs every check on this page automatically and shows you the result in a browser.
+Start with the Phala Trust Center report for our production app. This page is a quick diagnostic guide, not a production attestation implementation. Viewing a report does not verify the connection your application uses to reach Chipotle.
 
 <Card
   title="View the Lit Chipotle Trust Center Report"
@@ -30,16 +30,20 @@ A passing Trust Center report confirms four independent properties:
 
 If any of these fail, the report will show it.
 
-## Verify it yourself in three commands
+## Inspect API metadata and on-chain policy
 
-The Trust Center is convenient, but the whole point of attestation is that you don't have to trust *anyone* — including Phala. Here's the minimum-viable manual check:
+These commands inspect what the API reports and whether its reported compose hash is whitelisted on Base. They are preliminary diagnostics, not a substitute for cryptographic verification.
+
+<Warning>
+**These commands do not verify attestation or TLS termination.** An untrusted server can return an approved compose hash from `/info`. A `true` contract response confirms only that the supplied hash is allowed, not that this server is running it. Do not use these results alone to decide whether to send secrets.
+</Warning>
 
 ```bash
-# 1. What is the live API attesting to right now?
+# 1. What metadata does the API report? (Not authenticated attestation.)
 curl -sf https://api.chipotle.litprotocol.com/info \
   | python3 -m json.tool | head -20
 
-# 2. Is the compose hash whitelisted on Base?
+# 2. Is the reported compose hash whitelisted on Base?
 #    (Requires `cast` from Foundry — https://book.getfoundry.sh)
 COMPOSE_HASH=0x$(curl -sf https://api.chipotle.litprotocol.com/info \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["compose_hash"])')
@@ -47,37 +51,21 @@ cast call 0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC \
   "allowedComposeHashes(bytes32)(bool)" "$COMPOSE_HASH" \
   --rpc-url https://mainnet.base.org
 # Expect: true
-
-# 3. Is the TLS cert bound to the TEE by the attestation quote?
-#    First anchor the evidence to the hardware: the evidence quote's reportData
-#    must equal SHA-256(sha256sum.txt). Without this step, comparing the live
-#    cert to /evidences/cert-*.pem is a tautology — both come from the same
-#    server, so it passes even for an un-attested relay.
-curl -sf https://api.chipotle.litprotocol.com/evidences/sha256sum.txt > sha256sum.txt
-REPORT_DATA=$(curl -sf https://api.chipotle.litprotocol.com/evidences/quote.json \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["report_data"][:64])')
-CHAIN=$(openssl dgst -sha256 -hex sha256sum.txt | awk '{print $NF}')
-[ "$REPORT_DATA" = "$CHAIN" ] \
-  && echo "Evidence bound to TEE quote" \
-  || { echo "MISMATCH: evidence not attested by the quote"; exit 1; }
-
-# Now the evidence cert is TEE-attested, so matching the live cert to it is
-# meaningful. (Confirm cert-*.pem is listed in sha256sum.txt — the file the
-# reportData commits to — so the attested checksum actually covers it.)
-CERT_FILE=$(curl -sf https://api.chipotle.litprotocol.com/evidences/ \
-  | grep -o 'href="cert-[^"]*\.pem"' | sed 's/href="//;s/"//')
-grep -q "$CERT_FILE" sha256sum.txt || { echo "cert not covered by attested checksum"; exit 1; }
-LIVE=$(openssl s_client -connect api.chipotle.litprotocol.com:443 \
-  -servername api.chipotle.litprotocol.com </dev/null 2>/dev/null \
-  | openssl x509 -outform DER 2>/dev/null \
-  | openssl dgst -sha256 -hex | awk '{print $NF}')
-ATTESTED=$(curl -sf "https://api.chipotle.litprotocol.com/evidences/$CERT_FILE" \
-  | openssl x509 -outform DER 2>/dev/null \
-  | openssl dgst -sha256 -hex | awk '{print $NF}')
-[ "$LIVE" = "$ATTESTED" ] && echo "TLS cert matches TEE-attested evidence" || echo "MISMATCH"
 ```
 
-For the full end-to-end verification — including replaying the RTMR3 event log, verifying image signatures with Sigstore, and walking the on-chain governance Safe — see the [Full Verification Guide](/architecture/verification/full-verification).
+### Production verification is integration-specific
+
+For full production verification, follow [Phala’s official application verification instructions](https://docs.phala.com/phala-cloud/attestation/verify-your-application) and [complete chain-of-trust checklist](https://docs.phala.com/phala-cloud/attestation/chain-of-trust), the authoritative references for Phala/dstack verification.
+
+You are responsible for implementing and enforcing attestation verification correctly in your integration. The implementation depends on your setup and where and how your client connects to the Chipotle server, including any proxies, gateways, and TLS termination points. Apply your approved workload and security policy, and bind verified evidence to the connection carrying your application traffic before sending secrets. Phala’s instructions do not select that application policy or enforce it in your client for you.
+
+### TLS verification requires authenticated evidence
+
+Comparing the live TLS certificate with a PEM fetched from the same server proves only that they match. A server with no attestation can serve a matching PEM.
+
+Before trusting a certificate binding, verify the **evidence quote signature**, validate its approved measurements and workload identity, and use `reportData` extracted from that verified quote. Then verify the checksum chain from `reportData` through `sha256sum.txt` to the certificate file and bind that certificate to the TLS connection you will actually use. Verifying the separate `/attestation` quote alone does not authenticate the TLS evidence quote.
+
+Unauthenticated `quote.json` fields and matching hashes are not proof of attestation. See the [Full Verification Guide](/architecture/verification/full-verification) for the verification layers and evidence format; its checksum comparisons are not a standalone substitute for quote signature and measurement validation.
 
 ## On-chain governance you can audit
 
@@ -117,6 +105,6 @@ Smart contracts on Base together define what Lit Chipotle is allowed to do. Lit'
 ## What's next
 
 - [On-Chain KMS](/architecture/verification/onchain-kms) — how the KMS contracts gate key release and what to look for on Basescan
-- [Full Verification Guide](/architecture/verification/full-verification) — step-by-step manual verification of every layer
+- [Full Verification Guide](/architecture/verification/full-verification) — Chipotle-specific diagnostic examples and prerequisites; follow Phala’s instructions for production
 - [Chain of Trust Reference](/architecture/verification/chain-of-trust) — what each layer checks and why
 - [Security & Verification Overview](/architecture/verification/index) — Zero-Trust TLS and the trust model

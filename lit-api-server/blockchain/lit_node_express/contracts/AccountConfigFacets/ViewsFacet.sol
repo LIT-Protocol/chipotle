@@ -467,12 +467,13 @@ contract ViewsFacet {
             block.timestamp >= usageApiKey.expiration;
     }
 
+    /// @notice Authorize code execution; wildcard usage keys need no registered action/group.
+    /// @dev PKP access is authorized separately by canUseWalletInAction.
     function canExecuteAction(
         uint256 apiKeyHash,
         uint256 cidHash
     ) public view returns (bool) {
-        uint256[] memory groupIds = groupIdsForAction(apiKeyHash, cidHash);
-        return apiKeyCanExecuteForAnyGroup(apiKeyHash, groupIds);
+        return canExecuteActionFast(apiKeyHash, cidHash);
     }
 
     function canUseWalletInAction(
@@ -502,15 +503,8 @@ contract ViewsFacet {
             return false;
         }
 
-        // Wildcard usage key (executeInGroups contains group 0): the key may
-        // execute in ANY of its account's groups, so the per-group
-        // executeInGroups permission below is skipped. But the request must
-        // still resolve to at least one group in THIS account — `groupIds` is
-        // the (cid[, wallet]) match set the caller built from the account's own
-        // groups. A bare `return true` here let a wildcard key authorize
-        // actions/PKPs never registered to its account, reaching another
-        // tenant's PKP in the shared node keystore (issue #62 — cross-account
-        // PKP crypto ops).
+        // Group 0 skips per-group grants, never the resource match. Wallet
+        // callers resolve (CID, wallet) against this account's groups first.
         if (usageApiKey.executeInGroups.contains(0)) {
             return groupIds.length > 0;
         }
@@ -589,10 +583,9 @@ contract ViewsFacet {
             return false; // expired key authorizes nothing
         }
 
-        // Wildcard (group 0) skips the per-group executeInGroups permission but
-        // the action must still resolve to a group in this account, so the key
-        // cannot authorize an action never registered to it (issue #62).
-        bool isWildcard = usageApiKey.executeInGroups.contains(0);
+        if (usageApiKey.executeInGroups.contains(0)) {
+            return true; // wildcard: arbitrary code, even without a group
+        }
 
         uint256 len = account.groupList.length();
         for (uint256 i = 0; i < len; i++) {
@@ -601,7 +594,7 @@ contract ViewsFacet {
             if (
                 (group.cidHash.contains(cidHash) ||
                     group.cidHash.contains(0)) &&
-                (isWildcard || usageApiKey.executeInGroups.contains(groupId))
+                usageApiKey.executeInGroups.contains(groupId)
             ) {
                 return true;
             }
@@ -624,10 +617,7 @@ contract ViewsFacet {
             return false; // expired key authorizes nothing
         }
 
-        // Wildcard (group 0) skips the per-group executeInGroups permission but
-        // the (cid, wallet) must still resolve to a group in this account, so a
-        // wildcard key cannot reach another account's PKP in the shared node
-        // keystore (issue #62).
+        // A wildcard execution grant does not bypass (CID, wallet) scoping.
         bool isWildcard = usageApiKey.executeInGroups.contains(0);
 
         uint256 len = account.groupList.length();
@@ -664,10 +654,10 @@ contract ViewsFacet {
             return (false, false); // expired key authorizes nothing
         }
 
-        // Wildcard (group 0) skips the per-group executeInGroups permission but
-        // the request must still resolve to a group in this account, so a
-        // wildcard key cannot reach another account's action/PKP (issue #62).
         bool isWildcard = usageApiKey.executeInGroups.contains(0);
+        // Execution may succeed without a group, but wallet use still needs a
+        // matching (CID, wallet) group in the key's own account.
+        canExecute = isWildcard;
 
         uint256 len = account.groupList.length();
         for (uint256 i = 0; i < len; i++) {

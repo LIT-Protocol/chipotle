@@ -646,6 +646,21 @@ fn execute_patch_deno(worker: &mut MainWorker) -> Result<()> {
         delete Deno.createHttpClient;
         delete Deno.HttpClient;
         delete globalThis.Worker;
+        // The pinned runtime exposes core.evalContext through this symbol.
+        // Remove the symbol-keyed property too: hiding only its public name
+        // still permits discovery through Reflect.ownKeys.
+        // Strict deletion failures must abort bootstrap before user code runs.
+        {{
+            const internal = Deno.internal;
+            if (typeof internal !== "symbol") {{
+                throw new Error("Unexpected Deno internal symbol");
+            }}
+            delete Deno[internal];
+            delete Deno.internal;
+            if (internal in Deno || "internal" in Deno) {{
+                throw new Error("Deno internals remain reachable");
+            }}
+        }}
     "#};
 
     worker
@@ -1341,17 +1356,11 @@ mod tests {
         assert!(!cache.entries.contains_key("QmOld"));
     }
 
-    /// Each `PreparedWorker` must have a fresh `LoadedModules` `Arc`.
-    /// If two workers ever shared the same accumulator, per-tenant module
-    /// state would leak between the requests dispatched to those workers.
-    /// This is the core safety invariant for the pool.
-    #[test]
-    fn prepared_workers_have_distinct_loaded_modules_arcs() {
-        use std::sync::Once;
+    fn worker_test_state() -> PoolSharedState {
         static INIT_V8_ONCE: Once = Once::new();
         INIT_V8_ONCE.call_once(super::init_v8);
 
-        let shared = PoolSharedState {
+        PoolSharedState {
             integrity_manifest: Arc::new(RwLock::new(HashMap::new())),
             strict_imports: false,
             module_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -1359,7 +1368,16 @@ mod tests {
             http_client: CdnModuleLoader::build_http_client(),
             memory_limit_mb: DEFAULT_MEMORY_LIMIT_MB,
             v8_code_cache: crate::v8_code_cache::new_v8_code_cache(),
-        };
+        }
+    }
+
+    /// Each `PreparedWorker` must have a fresh `LoadedModules` `Arc`.
+    /// If two workers ever shared the same accumulator, per-tenant module
+    /// state would leak between the requests dispatched to those workers.
+    /// This is the core safety invariant for the pool.
+    #[test]
+    fn prepared_workers_have_distinct_loaded_modules_arcs() {
+        let shared = worker_test_state();
 
         // `build_worker_base` bootstraps a `MainWorker`, whose Node TTY compat
         // layer registers process stdio via `AsyncFd::new` and therefore needs
@@ -1378,5 +1396,93 @@ mod tests {
             "two PreparedWorkers must not share a LoadedModules Arc; \
              this would leak per-request module state between tenants",
         );
+    }
+
+    #[test]
+    fn patch_deno_strips_deno_internal() {
+        let shared = worker_test_state();
+        let rt = deno_runtime::tokio_util::create_basic_runtime();
+        let _enter = rt.enter();
+        let mut prepared = build_worker_base(&shared).expect("worker built");
+        let worker = &mut prepared.worker;
+        inject_lit_namespace(worker, &None, &BTreeMap::new()).expect("Lit namespace injected");
+
+        // Check the real pinned runtime, not a synthetic Deno object. Retain
+        // only the symbol for the reflection check, never the core namespace.
+        worker
+            .execute_script(
+                "check_internal_before.js",
+                r#"
+                if (typeof Deno.internal !== "symbol" ||
+                    typeof Deno[Deno.internal]?.core?.evalContext !== "function") {
+                    throw new Error("expected pinned Deno internal evalContext");
+                }
+                globalThis.__testInternalSymbol = Deno.internal;
+                "#
+                .to_string()
+                .into(),
+            )
+            .expect("internal namespace exists before stripping");
+
+        execute_patch_deno(worker).expect("bootstrap stripping succeeds");
+
+        worker
+            .execute_script(
+                "check_internal_after.js",
+                r#"
+                if ("internal" in Deno || __testInternalSymbol in Deno ||
+                    Reflect.ownKeys(Deno).includes(__testInternalSymbol) ||
+                    Object.getOwnPropertySymbols(Deno).includes(__testInternalSymbol)) {
+                    throw new Error("Deno internal namespace remains reachable");
+                }
+                if ("core" in Deno || "build" in Deno || "permissions" in Deno ||
+                    "version" in Deno || "Worker" in globalThis) {
+                    throw new Error("privileged bootstrap surface remains");
+                }
+                delete globalThis.__testInternalSymbol;
+                if (Lit.Actions !== LitActions || typeof TextEncoder !== "function") {
+                    throw new Error("normal action globals were damaged");
+                }
+                // The trusted cached-eval entry point must still work after
+                // stripping and remove itself before executing action code.
+                __litEvalCached(
+                    'if ("__litEvalCached" in globalThis) throw new Error("eval helper leaked");' +
+                    'globalThis.__testActionRan = true;',
+                    "file:///bootstrap_strip_regression.js"
+                );
+                if (globalThis.__testActionRan !== true) {
+                    throw new Error("trusted action execution failed");
+                }
+                "#
+                .to_string()
+                .into(),
+            )
+            .expect("user-visible namespace is stripped and trusted eval still works");
+    }
+
+    #[test]
+    fn patch_deno_rejects_unsafe_internal_shapes() {
+        let shared = worker_test_state();
+        let rt = deno_runtime::tokio_util::create_basic_runtime();
+        let _enter = rt.enter();
+        for setup in [
+            // Non-configurable properties must abort bootstrap whether or not
+            // an assignment fallback could overwrite their values.
+            "Object.defineProperty(Deno, Deno.internal, { configurable: false, writable: false });",
+            "Object.defineProperty(Deno, Deno.internal, { configurable: false, writable: true });",
+            "Object.defineProperty(Deno, 'internal', { configurable: false, writable: false });",
+            // Reject unexpected runtime shapes instead of deleting the
+            // string-keyed property named 'undefined' or exposing a prototype.
+            "delete Deno.internal;",
+            "Object.setPrototypeOf(Deno, { [Deno.internal]: Deno[Deno.internal] });",
+        ] {
+            let mut prepared = build_worker_base(&shared).expect("worker built");
+            let worker = &mut prepared.worker;
+            inject_lit_namespace(worker, &None, &BTreeMap::new()).expect("Lit namespace injected");
+            worker
+                .execute_script("lock_internal.js", setup.to_owned().into())
+                .expect("unsafe internal shape installed");
+            execute_patch_deno(worker).expect_err("unsafe internals must abort bootstrap");
+        }
     }
 }
