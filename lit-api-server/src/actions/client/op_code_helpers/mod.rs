@@ -4,6 +4,9 @@ use tracing::instrument;
 pub mod encryption;
 pub mod private_keys;
 
+/// Check every wallet operation through the shared blockchain cache. Do not
+/// memoize permissions in ExecutionState: that would bypass the shared cache's
+/// TTL and selective invalidation by API mutations and the account-event listener.
 #[instrument(
     name = "op::can_use_wallet_in_action",
     level = "debug",
@@ -22,29 +25,4 @@ pub async fn can_use_wallet_in_action(
     let can_use =
         crate::accounts::can_use_wallet_in_action(api_key, cid_hash, wallet_address).await?;
     Ok(can_use)
-}
-
-#[instrument(
-    name = "op::can_use_wallet_in_action_cached",
-    level = "debug",
-    skip(state, api_key),
-    fields(cache_hit),
-    err
-)]
-pub async fn can_use_wallet_in_action_cached(
-    state: &mut crate::actions::client::models::ExecutionState,
-    api_key: &str,
-    ipfs_id: &str,
-    wallet_address: &str,
-) -> Result<bool> {
-    if let Some(&cached) = state.wallet_permission_cache.get(wallet_address) {
-        tracing::Span::current().record("cache_hit", true);
-        return Ok(cached);
-    }
-    tracing::Span::current().record("cache_hit", false);
-    let result = can_use_wallet_in_action(api_key, ipfs_id, wallet_address).await?;
-    state
-        .wallet_permission_cache
-        .insert(wallet_address.to_string(), result);
-    Ok(result)
 }

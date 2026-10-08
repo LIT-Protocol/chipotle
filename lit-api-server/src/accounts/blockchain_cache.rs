@@ -5,26 +5,20 @@
 //! so that repeated calls for the same API key and relevant parameters
 //! avoid redundant contract calls.
 //!
-//! TTL: permission results use per-entry expiration — positive (authorized)
-//! results live 5 minutes from insertion, while negative (denied) results
-//! expire after 30 seconds. ChainSecured accounts mutate permissions by
-//! sending wallet-signed transactions directly to the chain, which this
-//! server never observes, so no invalidation hook can cover those writes;
-//! the TTLs bound how long stale state is served in either direction: a
-//! stale denial (newly group-permitted action returning 403) lasts at most
-//! 30s, and a stale grant (revoked action/key still executing) lasts at most
-//! 5 minutes. Wallet derivation lookups use the positive TTL for the same
-//! reason — derivations can change on-chain without this server observing it.
-//! `try_get_with` coalesces concurrent misses per key, so the steady-state
-//! chain load is at most one read per (key, parameters) per TTL window.
+//! Permission grants expire after 5 minutes without a cache hit; each read
+//! renews that window. Denials expire 30 seconds after insertion/update and
+//! reads do not extend them. Wallet derivations retain a fixed 5-minute TTL.
+//! `try_get_with` coalesces concurrent misses per key.
 //!
-//! Invalidation uses a **per-account generation counter**: each API key hash
-//! has an associated generation number embedded in the cache key. Bumping the
-//! generation for an account causes all subsequent lookups to miss, while stale
-//! entries with old generations are evicted naturally by TTL. Note this is
-//! process-local: in a multi-replica deployment, a mutation handled by one
-//! replica does not invalidate the others — they converge within the TTL
-//! bounds above.
+//! API mutation hooks and the account-event listener invalidate both grants
+//! and denials using per-account generations embedded in cache keys. A bump
+//! makes subsequent lookups miss regardless of recent reads. Each replica
+//! must observe events independently; invalidation is process-local.
+//!
+//! Tradeoff: there is NO hard maximum age for continuously used grants. A
+//! missed event, stopped listener, or incomplete usage-key invalidation can
+//! leave a hot stale grant usable indefinitely. The 30-second denial TTL
+//! remains a fallback when a grant event is not successfully invalidated.
 
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
@@ -34,12 +28,9 @@ use alloy::primitives::{Address, U256};
 use moka::Expiry;
 use moka::future::Cache;
 
-/// TTL in seconds for positive (authorized) permission results and wallet
-/// derivations — 5 minutes. This bounds how long a revoked permission (or a
-/// changed derivation) keeps being honored when the revocation happens
-/// out-of-band: ChainSecured wallet-signed transactions submitted directly
-/// on-chain, or a mutation handled by a different replica (invalidation is
-/// process-local).
+/// Idle expiration for positive permissions and fixed TTL for wallet
+/// derivations — 5 minutes. Permission reads renew this window; derivations
+/// retain their hard time-to-live cap.
 const CACHE_TTL_SECS: u64 = 300;
 
 /// TTL in seconds for negative (denied) permission results. Kept short so
@@ -81,6 +72,21 @@ impl Expiry<String, bool> for PermissionExpiry {
     ) -> Option<Duration> {
         Some(permission_ttl(*value))
     }
+
+    fn expire_after_read(
+        &self,
+        _key: &String,
+        value: &bool,
+        _read_at: Instant,
+        duration_until_expiry: Option<Duration>,
+        _last_modified_at: Instant,
+    ) -> Option<Duration> {
+        if *value {
+            Some(permission_ttl(true))
+        } else {
+            duration_until_expiry
+        }
+    }
 }
 
 /// Per-entry expiry for the `(can_execute, can_use_wallet)` pair cache: the
@@ -107,6 +113,21 @@ impl Expiry<String, (bool, bool)> for PairPermissionExpiry {
     ) -> Option<Duration> {
         Some(permission_ttl(value.0 && value.1))
     }
+
+    fn expire_after_read(
+        &self,
+        _key: &String,
+        value: &(bool, bool),
+        _read_at: Instant,
+        duration_until_expiry: Option<Duration>,
+        _last_modified_at: Instant,
+    ) -> Option<Duration> {
+        if value.0 && value.1 {
+            Some(permission_ttl(true))
+        } else {
+            duration_until_expiry
+        }
+    }
 }
 
 /// Maximum entries per cache.
@@ -132,9 +153,8 @@ pub struct BlockchainCache {
 impl BlockchainCache {
     fn new() -> Self {
         let ttl = Duration::from_secs(CACHE_TTL_SECS);
-        // Permission caches use per-entry expiry (short TTL for denials).
-        // The previous time_to_idle was redundant: with tti == ttl, the hard
-        // time_to_live cap always fired first.
+        // Permission expiry renews grants on reads but leaves denials fixed.
+        // Do not add a hard TTL: it would cap the grant's sliding window.
         let execute_action = Cache::builder()
             .max_capacity(MAX_CAPACITY)
             .expire_after(PermissionExpiry)
@@ -254,7 +274,7 @@ static BLOCKCHAIN_CACHE_INSTANCE: OnceLock<BlockchainCache> = OnceLock::new();
 pub fn init() {
     BLOCKCHAIN_CACHE_INSTANCE.get_or_init(BlockchainCache::new);
     tracing::info!(
-        "blockchain_cache: initialized (TTL={CACHE_TTL_SECS}s, negative TTL={NEGATIVE_CACHE_TTL_SECS}s)"
+        "blockchain_cache: initialized (grant idle expiry={CACHE_TTL_SECS}s, negative TTL={NEGATIVE_CACHE_TTL_SECS}s)"
     );
 }
 
@@ -283,12 +303,12 @@ pub fn invalidate_for_hash(api_key_hash: U256) {
 /// account-event listener ([`crate::account_events`]). Account-level mutation
 /// events (group/action/PKP) carry only the master `apiKeyHash`, but cached
 /// permission entries are keyed per *calling* key (master or usage), so
-/// usage-key-authenticated traffic would otherwise serve stale results until
-/// TTL. Resolves the usage keys via a chain call to `list_api_keys_by_hash`.
+/// usage-key-authenticated traffic would otherwise serve stale results.
+/// Resolves the usage keys via a chain call to `list_api_keys_by_hash`.
 ///
-/// **Limitation:** Only the first 1000 usage keys are invalidated; any beyond
-/// that expire naturally via the cache TTL. This mirrors
-/// [`invalidate_for_account`] and is acceptable in practice.
+/// **Limitation:** Only the first 1000 usage keys are invalidated, matching
+/// [`invalidate_for_account`]. Entries beyond that rely on expiration; hot
+/// grants may remain stale indefinitely because reads extend their lifetime.
 pub async fn invalidate_for_account_hash(account_api_key_hash: U256) {
     let Some(cache) = get() else { return };
     cache.bump_generation(&account_api_key_hash.to_string());
@@ -308,7 +328,7 @@ pub async fn invalidate_for_account_hash(account_api_key_hash: U256) {
         Err(e) => {
             tracing::warn!(
                 "blockchain_cache: failed to list usage keys for account {account_api_key_hash}: {e}. \
-                 Usage-key cache entries may be stale until TTL."
+                 Usage-key cache entries may be stale; hot grants can persist indefinitely."
             );
         }
     }
@@ -333,10 +353,9 @@ pub fn invalidate_for_key(api_key: &str) {
 ///
 /// **Limitation:** If the caller authenticates with a usage key (not the master
 /// key), the master key's cached entries are NOT invalidated here because the
-/// contract does not expose a `resolveToMaster` view. In that case the master
-/// key's entries expire naturally via the 60-minute `time_to_live`. This is
-/// acceptable because usage-key-driven management mutations are uncommon in
-/// practice.
+/// contract does not expose a `resolveToMaster` view. The event listener can
+/// invalidate the master independently; without that, hot master grants can
+/// remain stale indefinitely.
 pub async fn invalidate_for_account(api_key: &str) {
     let Some(cache) = get() else { return };
 
@@ -362,7 +381,7 @@ pub async fn invalidate_for_account(api_key: &str) {
         Err(e) => {
             tracing::warn!(
                 "blockchain_cache: failed to list usage keys for invalidation: {e}. \
-                 Usage key cache entries may be stale until TTL."
+                 Usage key cache entries may be stale; hot grants can persist indefinitely."
             );
         }
     }
@@ -694,6 +713,38 @@ mod tests {
             "closure should run on cache miss after bump"
         );
         assert!(!result, "should return the newly fetched value");
+    }
+
+    #[test]
+    fn permission_reads_extend_only_grants() {
+        let now = Instant::now();
+        let key = "permission".to_string();
+        let remaining = Some(Duration::from_secs(7));
+        assert_eq!(
+            PermissionExpiry.expire_after_read(&key, &true, now, remaining, now),
+            Some(Duration::from_secs(CACHE_TTL_SECS))
+        );
+        assert_eq!(
+            PermissionExpiry.expire_after_read(&key, &false, now, remaining, now),
+            remaining
+        );
+    }
+
+    #[test]
+    fn pair_permission_reads_extend_only_complete_grants() {
+        let now = Instant::now();
+        let key = "permission-pair".to_string();
+        let remaining = Some(Duration::from_secs(7));
+        for value in [(true, true), (true, false), (false, true), (false, false)] {
+            assert_eq!(
+                PairPermissionExpiry.expire_after_read(&key, &value, now, remaining, now),
+                if value.0 && value.1 {
+                    Some(Duration::from_secs(CACHE_TTL_SECS))
+                } else {
+                    remaining
+                }
+            );
+        }
     }
 
     // ── Per-entry expiry policy ──────────────────────────────────────

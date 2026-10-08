@@ -31,7 +31,10 @@ Native browser/extension save and generate prompts require the manual matrix in
 `lit-dashboard-auth/README.md`; this suite does not claim to automate those UIs.
 
 This is an account-access check, not complete system coverage: real TEE hardware,
-Stripe, wallet connection/signing, and Lit Action execution are not exercised.
+CPU load shedding, Stripe, wallet connection/signing, and Lit Action execution are
+not exercised. The disposable API uses test-only CPU thresholds so host-wide
+pressure from Chromium/password hashing cannot randomly reject account creation;
+production thresholds and the new-account per-IP limiter are unchanged.
 The existing EOA/WalletConnect/Action suites below cover those other local flows.
 No production accounts, paid transactions, or secrets are used. The HTML report,
 screenshots, failure traces/videos, and service logs are uploaded as

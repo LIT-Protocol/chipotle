@@ -21,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       days:
-        description: "Window size in days"
+        description: "Completed UTC days (excludes today)"
         required: false
         default: "7"
 
@@ -63,6 +63,7 @@ jobs:
           node-version: "22"
 
       # Stream the report through memory only; do not persist customer data.
+      # Suppress all report/build/delivery output while preserving failure status.
       - name: Generate usage report and post digest to Slack
         env:
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
@@ -70,6 +71,8 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         shell: bash
         run: |
+          set +x
+          exec >/dev/null 2>&1
           set -euo pipefail
           bash scripts/stripe_report.sh --days "$DAYS" --csv-stdout |
             node scripts/stripe-report-slack.mjs - --days "$DAYS"

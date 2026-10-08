@@ -25,7 +25,7 @@ use tracing::instrument;
 // other modules in lit-api-server) reference via `lit_api_server::stripe::*`.
 pub use lit_billing_core::format::{cents_to_display, unix_to_utc_date};
 pub use lit_billing_core::reporting::{
-    ReportBalanceTx, ReportCustomer, ReportRow, aggregate_report_rows,
+    ReportBalanceTx, ReportCustomer, ReportRow, aggregate_report_rows, completed_days_window,
 };
 
 /// Cost constants in US cents.
@@ -1280,17 +1280,19 @@ pub async fn list_all_customers(state: &StripeState) -> Result<Vec<ReportCustome
     lit_billing_core::reporting::list_all_customers(&state.client).await
 }
 
-/// Fetch all customer balance transactions created at or after `since_unix`
+/// Fetch customer balance transactions in `[since_unix, until_unix)`
 /// (seconds since epoch), paginating 100 at a time.
-pub async fn list_balance_transactions_since(
+pub async fn list_balance_transactions_in_window(
     state: &StripeState,
     customer_id: &str,
     since_unix: i64,
+    until_unix: i64,
 ) -> Result<Vec<ReportBalanceTx>> {
-    lit_billing_core::reporting::list_balance_transactions_since(
+    lit_billing_core::reporting::list_balance_transactions_in_window(
         &state.client,
         customer_id,
         since_unix,
+        until_unix,
     )
     .await
 }

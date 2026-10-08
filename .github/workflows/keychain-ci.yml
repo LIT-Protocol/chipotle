@@ -14,6 +14,12 @@ concurrency:
 jobs:
   keychain:
     runs-on: ubuntu-latest
+    env:
+      # Both Rust workspaces remain on disk for the Deno fixture. Omit debug
+      # symbols, not debug assertions, to fit the hosted runner's disk budget.
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+      CARGO_INCREMENTAL: '0'
     services:
       postgres:
         image: postgres:17

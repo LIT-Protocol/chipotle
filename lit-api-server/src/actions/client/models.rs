@@ -79,6 +79,4 @@ pub struct ExecutionState {
     /// Flushed to Stripe every 5 seconds and at the end of execution.
     #[serde(skip)]
     pub unbilled_seconds: u64,
-    #[serde(skip)]
-    pub wallet_permission_cache: HashMap<String, bool>,
 }

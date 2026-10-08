@@ -451,6 +451,247 @@ where
 mod tests {
     use super::*;
 
+    // Lives here so the RPC fixture can install the private read-only client
+    // without exposing a production setter. No live RPC or TEE is involved.
+    #[tokio::test]
+    async fn wallet_removal_invalidates_master_and_usage_key_caches() {
+        // Run this fixture in its own test process: these OnceLocks cannot be
+        // reset, and other tests intentionally exercise uninitialized clients.
+        const CHILD_ENV: &str = "LIT_TEST_WALLET_REMOVAL_CHILD";
+        if std::env::var_os(CHILD_ENV).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "accounts::signable_contract::tests::wallet_removal_invalidates_master_and_usage_key_caches",
+                    "--nocapture",
+                ])
+                .env(CHILD_ENV, "1")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                output.status.success() && stdout.contains("1 passed; 0 failed"),
+                "isolated wallet-removal regression must run and pass: {stdout}\n{stderr}"
+            );
+            return;
+        }
+
+        use crate::accounts::blockchain_cache;
+        use crate::accounts::contracts::account_config_contract::ViewsFacet::UsageApiKeyReturn;
+        use alloy::primitives::{Bytes, U256};
+        use alloy::rpc::client::RpcClient;
+        use alloy::rpc::json_rpc::{RequestPacket, ResponsePacket};
+        use alloy::sol_types::{SolCall, SolEvent};
+        use alloy::transports::mock::{Asserter, MockTransport};
+        use alloy::transports::{TransportError, TransportFut};
+        use std::sync::{Arc, Mutex};
+        // Reuse Tonic's existing tower-service re-export; no new dependency.
+        use tonic::codegen::Service;
+
+        // Asserter checks response consumption, not the outgoing RPC. Record at
+        // the transport boundary so the real contract client's serialized call
+        // (including its target and account/pagination arguments) is checked.
+        #[derive(Clone)]
+        struct RecordingTransport {
+            inner: MockTransport,
+            requests: Arc<Mutex<Vec<serde_json::Value>>>,
+        }
+
+        impl Service<RequestPacket> for RecordingTransport {
+            type Response = ResponsePacket;
+            type Error = TransportError;
+            type Future = TransportFut<'static>;
+
+            fn poll_ready(
+                &mut self,
+                cx: &mut std::task::Context<'_>,
+            ) -> std::task::Poll<Result<(), Self::Error>> {
+                self.inner.poll_ready(cx)
+            }
+
+            fn call(&mut self, request: RequestPacket) -> Self::Future {
+                self.requests
+                    .lock()
+                    .unwrap()
+                    .push(serde_json::to_value(&request).unwrap());
+                self.inner.call(request)
+            }
+        }
+
+        let account = U256::from(0x103001u64);
+        let usage_keys = [U256::from(0x103002u64), U256::from(0x103004u64)];
+        let unrelated = U256::from(0x103003u64);
+        let cid = U256::from(42u64);
+        let wallet = Address::repeat_byte(0x42);
+        let path = U256::from(123u64);
+        let contract_address = Address::repeat_byte(0x73);
+        let asserter = Asserter::new();
+        let response = AccountConfig::listApiKeysCall::abi_encode_returns(
+            &usage_keys
+                .map(|hash| UsageApiKeyReturn {
+                    apiKeyHash: hash,
+                    ..Default::default()
+                })
+                .to_vec(),
+        );
+        asserter.push_success(&Bytes::from(response));
+        // Leave a sentinel in the queue so an accidental second RPC cannot
+        // pass silently when the invalidator logs and swallows its failure.
+        asserter.push_failure_msg("unexpected extra listApiKeys call");
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let transport = RecordingTransport {
+            inner: MockTransport::new(asserter.clone()),
+            requests: requests.clone(),
+        };
+        let client = ProviderBuilder::new()
+            .connect_client(RpcClient::new(transport, true))
+            .erased();
+        assert!(GLOBAL_READ_ONLY_CLIENT.set(client).is_ok());
+        GLOBAL_NODE_CONFIG
+            .set(crate::config::NodeConfig {
+                chain: Chain::Anvil,
+                contract_address: contract_address.to_string(),
+            })
+            .unwrap();
+        blockchain_cache::init();
+        let cache = blockchain_cache::get().unwrap();
+        for hash in [account, usage_keys[0], usage_keys[1], unrelated] {
+            cache
+                .wallet_derivation_cache()
+                .insert(cache.wallet_derivation_key(hash, wallet), path)
+                .await;
+            cache
+                .use_wallet_cache()
+                .insert(cache.use_wallet_key(hash, cid, wallet), true)
+                .await;
+            cache
+                .execute_and_wallet_cache()
+                .insert(
+                    cache.execute_and_wallet_key(hash, cid, wallet),
+                    (true, true),
+                )
+                .await;
+            assert_eq!(
+                cache
+                    .wallet_derivation_cache()
+                    .get(&cache.wallet_derivation_key(hash, wallet))
+                    .await,
+                Some(path)
+            );
+            assert_eq!(
+                cache
+                    .use_wallet_cache()
+                    .get(&cache.use_wallet_key(hash, cid, wallet))
+                    .await,
+                Some(true)
+            );
+            assert_eq!(
+                cache
+                    .execute_and_wallet_cache()
+                    .get(&cache.execute_and_wallet_key(hash, cid, wallet))
+                    .await,
+                Some((true, true))
+            );
+        }
+        let log = alloy::rpc::types::Log {
+            inner: alloy::primitives::Log {
+                address: contract_address,
+                data: AccountConfig::WalletDerivationRemoved {
+                    apiKeyHash: account,
+                    pkpId: wallet,
+                }
+                .encode_log_data(),
+            },
+            ..Default::default()
+        };
+        // Duplicate logs must still expand the account only once per poll.
+        crate::account_events::process_logs(&[log.clone(), log]).await;
+        {
+            let requests = requests.lock().unwrap();
+            assert_eq!(
+                requests.len(),
+                1,
+                "duplicate logs must issue exactly one RPC"
+            );
+            let request = &requests[0];
+            assert_eq!(request["method"], "eth_call");
+            let params = request["params"].as_array().unwrap();
+            assert_eq!(params.len(), 2);
+            assert_eq!(params[1], "latest");
+            let transaction: alloy::rpc::types::TransactionRequest =
+                serde_json::from_value(params[0].clone()).unwrap();
+            assert_eq!(transaction.to, Some(contract_address.into()));
+            let calldata = transaction.input.input().unwrap();
+            // Verify the selector independently of the generated call binding,
+            // then decode all arguments, including the current first-page limit.
+            assert_eq!(
+                &calldata[..4],
+                &alloy::primitives::keccak256("listApiKeys(uint256,uint256,uint256)")[..4]
+            );
+            assert_eq!(calldata.len(), 4 + 3 * 32);
+            let call = AccountConfig::listApiKeysCall::abi_decode(calldata).unwrap();
+            assert_eq!(
+                call.accountApiKeyHash, account,
+                "must enumerate the removed wallet's account"
+            );
+            assert_eq!(call.pageNumber, U256::ZERO);
+            assert_eq!(call.pageSize, U256::from(1000u64));
+        }
+        for hash in [account, usage_keys[0], usage_keys[1]] {
+            assert_eq!(
+                cache
+                    .wallet_derivation_cache()
+                    .get(&cache.wallet_derivation_key(hash, wallet))
+                    .await,
+                None,
+                "deleted wallet derivation must miss for {hash}"
+            );
+            assert_eq!(
+                cache
+                    .use_wallet_cache()
+                    .get(&cache.use_wallet_key(hash, cid, wallet))
+                    .await,
+                None,
+                "wallet permission must miss for {hash}"
+            );
+            assert_eq!(
+                cache
+                    .execute_and_wallet_cache()
+                    .get(&cache.execute_and_wallet_key(hash, cid, wallet))
+                    .await,
+                None,
+                "combined permission must miss for {hash}"
+            );
+        }
+        assert_eq!(
+            cache
+                .wallet_derivation_cache()
+                .get(&cache.wallet_derivation_key(unrelated, wallet))
+                .await,
+            Some(path)
+        );
+        assert_eq!(
+            cache
+                .use_wallet_cache()
+                .get(&cache.use_wallet_key(unrelated, cid, wallet))
+                .await,
+            Some(true)
+        );
+        assert_eq!(
+            cache
+                .execute_and_wallet_cache()
+                .get(&cache.execute_and_wallet_key(unrelated, cid, wallet))
+                .await,
+            Some((true, true))
+        );
+        assert_eq!(
+            asserter.read_q().len(),
+            1,
+            "exactly one listApiKeys response must be consumed"
+        );
+    }
+
     #[test]
     fn nonce_cache_cold_reserve_misses_then_seeded_reserves_advance() {
         let cache = NonceCache::new();
