@@ -1,0 +1,9 @@
+{
+  "name": "lit-bridge-contracts",
+  "version": "0.0.1",
+  "private": true,
+  "description": "lit-bridge on-chain pieces: BridgeConfigRegistry (control plane) + BridgeToken (burn/mint cross-chain ERC-20). Built with Foundry; OpenZeppelin pulled via npm.",
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.2"
+  }
+}
