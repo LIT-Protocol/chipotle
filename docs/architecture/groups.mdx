@@ -83,6 +83,32 @@ A single wallet can belong to multiple groups. This is useful when multiple dApp
 4. **Update** — `POST /core/v1/update_group` to change name, description, or permission lists.
 5. **Delete** — `POST /core/v1/remove_group` to remove the group. Usage keys that referenced it lose that access.
 
+## Revocation during a running action
+
+Each PKP private-key request and PKP AES encrypt/decrypt operation checks wallet
+permission through the shared blockchain cache, including repeated operations in
+the same action execution. An execution does not retain its first permission
+decision for its entire lifetime.
+
+Revocation is not instantaneous. API mutation hooks and the on-chain account-event
+listener selectively invalidate affected cache entries; the listener polls every
+10 seconds. Cached grants expire after 300 seconds without a hit; each hit
+renews that window. Cached denials expire 30 seconds after insertion or update,
+without extension on reads. Both grants and denials are invalidated by relevant
+events: once a grant event is processed successfully, the next lookup can observe
+the new permission without waiting for the denial TTL. This is not instantaneous;
+mining, polling, RPC visibility, and usage-key invalidation affect propagation.
+
+There is no hard maximum age for a continuously used grant. If the listener misses
+an event or invalidation is incomplete, a hot stale grant can remain usable
+indefinitely. Denials retain their short TTL as a fallback. Once a fresh lookup is
+required, lookup errors stop the operation rather than falling back to an old
+grant. Wallet-derivation caching retains its separate fixed five-minute TTL.
+
+An operation whose permission check started before invalidation may still finish.
+Revocation does not erase a private key already returned to action code, terminate
+the running action, or revoke access granted through another matching group.
+
 ## Permission Flags on Groups
 
 When creating a group, two convenience flags control default access:

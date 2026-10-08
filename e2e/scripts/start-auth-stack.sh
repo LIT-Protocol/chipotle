@@ -13,7 +13,7 @@ API_BIN="$REPO_DIR/lit-api-server/target/debug/lit-api-server"
 PAYMENTS_BIN="${LIT_PAYMENTS_BIN:-$REPO_DIR/lit-payments/target/debug/lit-payments}"
 DEPLOYER_BIN="$REPO_DIR/lit-api-server/blockchain/rust_generator_and_deployer/target/debug/contract_deployer"
 LOG_DIR="$REPO_DIR/e2e/artifacts/auth-stack"
-RUN_DIR=$(mktemp -d /tmp/lit-auth-XXXXXX)
+RUN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/lit-auth-XXXXXX")
 PIDS=()
 
 cleanup() {
@@ -120,7 +120,14 @@ done
 PAYER_ARRAY="[$(IFS=,; echo "${PAYERS[*]}")]"
 send "$CONTRACT_ADDRESS" 'setApiPayers(address[])' "$PAYER_ARRAY"
 
-(cd "$RUN_DIR" && LIT_DISABLE_BILLING=true ROCKET_ADDRESS=127.0.0.1 ROCKET_PORT=8000 \
+# Shared CI runners can report high host CPU pressure while Chromium and the
+# password crypto worker run. This suite tests account access, not load shedding;
+# keep ambient host pressure from rejecting its real API requests. Scope these
+# thresholds to this disposable API process, leaving production defaults intact.
+# Use ample headroom for PSI too: its sampler may span more than one second.
+(cd "$RUN_DIR" && LIT_DISABLE_BILLING=true \
+  CPU_OVERLOAD_MULTIPLIER=1000000 CPU_PSI_THRESHOLD=1000000 \
+  ROCKET_ADDRESS=127.0.0.1 ROCKET_PORT=8000 \
   RUST_LOG=info exec "$API_BIN") > "$RUN_DIR/api.log" 2>&1 &
 PIDS+=("$!")
 # /health also checks the unrelated Action worker. Probe account configuration.

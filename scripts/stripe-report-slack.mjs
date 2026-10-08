@@ -2,7 +2,7 @@
 // Post a Stripe usage digest to Slack from a stripe_report CSV.
 //
 // Reads the CSV produced by `cargo run --bin stripe_report` (columns:
-// date,customer_id,wallet_address,email,charges_count,charges_cents,credits_cents),
+// date,customer_id,wallet_address,email,charges_count,charges_cents,credits_cents,window_start,window_end,identified_requests_count,unattributed_charges_count),
 // aggregates per customer across the whole window, and POSTs a top-spenders
 // summary to the Slack incoming webhook in $SLACK_WEBHOOK_URL.
 //
@@ -26,8 +26,8 @@ function parseArgs(argv) {
     else throw new Error(`unexpected argument: ${a}`);
   }
   if (!args.csv) throw new Error("usage: stripe-report-slack.mjs <report.csv|-> [--days N] [--top N] [--dry-run]");
-  if (args.days !== null && !Number.isFinite(args.days)) throw new Error("--days must be a number");
-  if (!Number.isFinite(args.top) || args.top < 1) throw new Error("--top must be a positive number");
+  if (args.days !== null && (!Number.isSafeInteger(args.days) || args.days < 1 || args.days > 3660)) throw new Error("--days must be an integer between 1 and 3660");
+  if (!Number.isSafeInteger(args.top) || args.top < 1) throw new Error("--top must be a positive integer");
   return args;
 }
 
@@ -55,6 +55,7 @@ function parseCsv(text) {
       // swallow; \n handles the row break
     } else field += c;
   }
+  if (inQuotes) throw new Error("CSV contains an unterminated quoted field");
   // flush trailing field/row if the file didn't end on a newline
   if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
   return rows;
@@ -73,31 +74,65 @@ function shortWallet(w) {
   return `${w.slice(0, 6)}…${w.slice(-4)}`;
 }
 
+function validDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
+}
+
+function unsignedInteger(value) {
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) throw new Error("CSV contains invalid charge data");
+  return Number(value);
+}
+
+function escapeSlack(value) {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("`", "'").replace(/[\r\n]/g, " ");
+}
+
 function aggregate(rows) {
   const header = rows[0] || [];
   const idx = Object.fromEntries(header.map((h, i) => [h.trim(), i]));
-  for (const col of ["customer_id", "charges_count", "charges_cents"]) {
+  for (const col of ["date", "customer_id", "charges_count", "charges_cents", "window_start", "window_end", "identified_requests_count", "unattributed_charges_count"]) {
     if (idx[col] === undefined) throw new Error(`CSV missing expected column: ${col}`);
   }
   const byCustomer = new Map();
-  const dates = new Set();
+  let windowStart;
+  let windowEnd;
   for (const r of rows.slice(1)) {
     if (r.length === 1 && r[0] === "") continue; // blank line
+    if (r.length !== header.length) throw new Error("CSV row has the wrong number of fields");
+    const start = r[idx.window_start];
+    const end = r[idx.window_end];
+    if (!validDate(start) || !validDate(end) || start > end) throw new Error("CSV has invalid window bounds");
+    if (windowStart && (windowStart !== start || windowEnd !== end)) throw new Error("CSV has inconsistent window bounds");
+    windowStart = start;
+    windowEnd = end;
+    const cents = unsignedInteger(r[idx.charges_cents]);
+    const count = unsignedInteger(r[idx.charges_count]);
+    const requests = unsignedInteger(r[idx.identified_requests_count]);
+    const unattributed = unsignedInteger(r[idx.unattributed_charges_count]);
+    if (requests + unattributed > count) throw new Error("CSV request counts exceed charge counts");
     const id = r[idx.customer_id];
-    if (!id) continue;
+    if (!id) {
+      if (cents !== 0 || count !== 0 || r[idx.date]) throw new Error("CSV has invalid empty-window row");
+      continue;
+    }
     const date = r[idx.date];
-    if (date) dates.add(date);
-    const cents = Number(r[idx.charges_cents] || 0);
-    const count = Number(r[idx.charges_count] || 0);
+    if (!validDate(date) || date < start || date > end) throw new Error("CSV activity is outside the window");
     const cur = byCustomer.get(id) || {
       id,
       wallet: r[idx.wallet_address] || "",
       email: r[idx.email] || "",
       cents: 0,
       count: 0,
+      requests: 0,
+      unattributed: 0,
     };
     cur.cents += cents;
     cur.count += count;
+    cur.requests += requests;
+    cur.unattributed += unattributed;
+    if (!Number.isSafeInteger(cur.cents) || !Number.isSafeInteger(cur.count)) throw new Error("CSV totals exceed safe integer range");
     if (!cur.wallet && r[idx.wallet_address]) cur.wallet = r[idx.wallet_address];
     if (!cur.email && r[idx.email]) cur.email = r[idx.email];
     byCustomer.set(id, cur);
@@ -107,19 +142,24 @@ function aggregate(rows) {
     .sort((a, b) => b.cents - a.cents || b.count - a.count);
   const totalCents = customers.reduce((s, c) => s + c.cents, 0);
   const totalCount = customers.reduce((s, c) => s + c.count, 0);
-  const sortedDates = [...dates].sort();
+  if (!windowStart) throw new Error("CSV has no window metadata");
+  if (!Number.isSafeInteger(totalCents) || !Number.isSafeInteger(totalCount)) throw new Error("CSV totals exceed safe integer range");
   return {
     customers,
     totalCents,
     totalCount,
-    firstDate: sortedDates[0] || null,
-    lastDate: sortedDates[sortedDates.length - 1] || null,
+    totalRequests: customers.reduce((s, c) => s + c.requests, 0),
+    totalUnattributed: customers.reduce((s, c) => s + c.unattributed, 0),
+    firstDate: windowStart,
+    lastDate: windowEnd,
   };
 }
 
 function buildMessage(agg, { days, top }) {
-  const window = days ? `last ${days} day${days === 1 ? "" : "s"}` : "window";
-  const range = agg.firstDate ? ` (${agg.firstDate} → ${agg.lastDate} UTC)` : "";
+  const actualDays = (Date.parse(agg.lastDate) - Date.parse(agg.firstDate)) / 86_400_000 + 1;
+  if (days !== null && days !== actualDays) throw new Error("--days does not match the CSV window");
+  const window = `last ${actualDays} completed UTC day${actualDays === 1 ? "" : "s"}`;
+  const range = ` (${agg.firstDate} → ${agg.lastDate} UTC)`;
   const lines = [];
   lines.push(`*📊 Stripe usage — ${window}*${range}`);
 
@@ -130,18 +170,20 @@ function buildMessage(agg, { days, top }) {
   }
 
   lines.push(
-    `*${centsToUsd(agg.totalCents)}* across *${agg.totalCount}* call${agg.totalCount === 1 ? "" : "s"} ` +
+    `*${centsToUsd(agg.totalCents)}* across *${agg.totalCount}* billing charge${agg.totalCount === 1 ? "" : "s"} ` +
       `from *${agg.customers.length}* customer${agg.customers.length === 1 ? "" : "s"}`,
   );
+  lines.push(`*${agg.totalRequests}* distinct billed request IDs; *${agg.totalUnattributed}* charges without request IDs.`);
+  lines.push("_Counts are settled billing charges, not API requests; one execution can create several charges._");
   lines.push("");
 
   const shown = agg.customers.slice(0, top);
   shown.forEach((c, i) => {
-    const wallet = shortWallet(c.wallet);
-    const label = wallet ? `\`${wallet}\`` : `\`${c.id}\``;
-    const email = c.email ? ` (${c.email})` : "";
+    const wallet = escapeSlack(shortWallet(c.wallet));
+    const label = wallet ? `\`${wallet}\`` : `\`${escapeSlack(c.id)}\``;
+    const email = c.email ? ` (${escapeSlack(c.email)})` : "";
     lines.push(
-      `${i + 1}. ${label}${email} — ${centsToUsd(c.cents)} · ${c.count} call${c.count === 1 ? "" : "s"}`,
+      `${i + 1}. ${label}${email} — ${centsToUsd(c.cents)} · ${c.count} billing charge${c.count === 1 ? "" : "s"} · ${c.requests} identified billed requests · ${c.unattributed} charges without IDs`,
     );
   });
 

@@ -72,13 +72,8 @@ impl Client {
                 .into()
             }
             UnionResponse::AesEncrypt(AesEncryptRequest { pkp_id, message }) => {
-                if !op_code_helpers::can_use_wallet_in_action_cached(
-                    &mut self.state,
-                    &self.api_key,
-                    &key_id,
-                    &pkp_id,
-                )
-                .await?
+                if !op_code_helpers::can_use_wallet_in_action(&self.api_key, &key_id, &pkp_id)
+                    .await?
                 {
                     bail!("API key cannot use selected wallet in selected action");
                 }
@@ -95,13 +90,8 @@ impl Client {
                 .into()
             }
             UnionResponse::AesDecrypt(AesDecryptRequest { pkp_id, ciphertext }) => {
-                if !op_code_helpers::can_use_wallet_in_action_cached(
-                    &mut self.state,
-                    &self.api_key,
-                    &key_id,
-                    &pkp_id,
-                )
-                .await?
+                if !op_code_helpers::can_use_wallet_in_action(&self.api_key, &key_id, &pkp_id)
+                    .await?
                 {
                     bail!("API key cannot use selected wallet in selected action");
                 }
@@ -119,13 +109,8 @@ impl Client {
             }
             UnionResponse::GetPrivateKey(GetPrivateKeyRequest { pkp_id }) => {
                 self.check_get_keys_limit()?;
-                if !op_code_helpers::can_use_wallet_in_action_cached(
-                    &mut self.state,
-                    &self.api_key,
-                    &key_id,
-                    &pkp_id,
-                )
-                .await?
+                if !op_code_helpers::can_use_wallet_in_action(&self.api_key, &key_id, &pkp_id)
+                    .await?
                 {
                     bail!("API key cannot use selected wallet in selected action");
                 }

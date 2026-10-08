@@ -1,5 +1,8 @@
 //! `stripe_report` — download the last N days of Stripe billing data and
-//! emit a usage-per-day-per-client report.
+//! emit a usage-per-day-per-client report for completed UTC days.
+//! Counts are settled billing charges, not API requests; one execution can
+//! produce multiple charges. Unidentified debits are excluded. Distinct billed
+//! request IDs are counted across the window, with missing IDs reported separately.
 //!
 //! The binary reads `STRIPE_SECRET_KEY` and `STRIPE_PUBLISHABLE_KEY` from the
 //! environment (same as the running API server), lists every Stripe customer,
@@ -64,8 +67,8 @@ fn parse_args() -> Result<Args, String> {
                 days = v
                     .parse::<u32>()
                     .map_err(|_| format!("--days: not a positive integer: {v}"))?;
-                if days == 0 {
-                    return Err("--days must be >= 1".to_string());
+                if !(1..=3660).contains(&days) {
+                    return Err("--days must be between 1 and 3660".to_string());
                 }
             }
             "--out" => {
@@ -155,7 +158,7 @@ USAGE:
     stripe_report [OPTIONS]
 
 OPTIONS:
-    --days <N>       Window size in days (default: {DEFAULT_DAYS}).
+    --days <N>       Completed UTC days, excluding today (1–3660; default: {DEFAULT_DAYS}).
     --out <PATH>     Output path prefix (default: {DEFAULT_OUT}).
                      Writes <PATH>.csv and <PATH>.html.
     --email <ADDR>   Only include customer(s) with this email (case-insensitive).
@@ -195,18 +198,19 @@ async fn main() -> ExitCode {
         return ExitCode::from(1);
     };
 
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    // Snap to UTC midnight so the Stripe query window, the rendered date
-    // columns, and the "last N days" label all refer to the same whole days.
-    // Without this the first bucket is partial (starts at `now`'s time-of-day)
-    // and we end up with N+1 date columns.
-    let today_start = now - now.rem_euclid(86_400);
-    let since = today_start - (args.days.saturating_sub(1) as i64) * 86_400;
+    let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(d) => d.as_secs() as i64,
+        Err(_) => {
+            eprintln!("error: system clock is before the Unix epoch");
+            return ExitCode::from(1);
+        }
+    };
+    let (since, until) = match stripe::completed_days_window(now, args.days) {
+        Ok(window) => window,
+        Err(_) => return ExitCode::from(2),
+    };
     let since_date = stripe::unix_to_utc_date(since);
-    let until_date = stripe::unix_to_utc_date(today_start);
+    let until_date = stripe::unix_to_utc_date(until - 1);
 
     eprintln!(
         "Fetching Stripe customers and balance transactions for {since_date} .. {until_date} ({} days) …",
@@ -215,12 +219,8 @@ async fn main() -> ExitCode {
 
     let customers = match stripe::list_all_customers(&stripe_state).await {
         Ok(c) => c,
-        Err(e) => {
-            if args.csv_stdout {
-                eprintln!("error: list_all_customers failed");
-            } else {
-                eprintln!("error: list_all_customers failed: {e}");
-            }
+        Err(_) => {
+            eprintln!("error: customer listing failed; no report emitted");
             return ExitCode::from(1);
         }
     };
@@ -229,51 +229,14 @@ async fn main() -> ExitCode {
     // Narrow to the requested account(s) before the expensive per-customer
     // balance-transaction fetch below.
     let customers = filter_customers(customers, args.email.as_deref(), args.wallet.as_deref());
-    if !args.csv_stdout && (args.email.is_some() || args.wallet.is_some()) {
-        let mut parts = Vec::new();
-        if let Some(e) = &args.email {
-            parts.push(format!("email={e}"));
-        }
-        if let Some(w) = &args.wallet {
-            parts.push(format!("wallet={w}"));
-        }
-        eprintln!(
-            "  filtered to {} customer(s) matching {}",
-            customers.len(),
-            parts.join(" & ")
-        );
-        if customers.is_empty() {
-            eprintln!("  warning: no customers matched the filter; report will be empty");
-        }
-    }
-
     let mut transactions: Vec<ReportBalanceTx> = Vec::new();
-    for (i, c) in customers.iter().enumerate() {
-        match stripe::list_balance_transactions_since(&stripe_state, &c.id, since).await {
-            Ok(txs) => {
-                if !args.csv_stdout && !txs.is_empty() {
-                    eprintln!(
-                        "  [{}/{}] {} ({}): {} txs",
-                        i + 1,
-                        customers.len(),
-                        c.id,
-                        c.wallet_address.as_deref().unwrap_or("-"),
-                        txs.len()
-                    );
-                }
-                transactions.extend(txs);
-            }
-            Err(e) => {
-                if args.csv_stdout {
-                    eprintln!("error: list_balance_transactions failed; no report emitted");
-                    return ExitCode::from(1);
-                }
-                eprintln!(
-                    "  [{}/{}] {}: list_balance_transactions failed: {e}",
-                    i + 1,
-                    customers.len(),
-                    c.id
-                );
+    for c in &customers {
+        match stripe::list_balance_transactions_in_window(&stripe_state, &c.id, since, until).await
+        {
+            Ok(txs) => transactions.extend(txs),
+            Err(_) => {
+                eprintln!("error: transaction listing or validation failed; no report emitted");
+                return ExitCode::from(1);
             }
         }
     }
@@ -285,7 +248,7 @@ async fn main() -> ExitCode {
         use std::io::Write as _;
         if let Err(e) = std::io::stdout()
             .lock()
-            .write_all(render_csv(&rows).as_bytes())
+            .write_all(render_csv(&rows, &since_date, &until_date).as_bytes())
         {
             eprintln!("error: writing CSV to stdout: {e}");
             return ExitCode::from(1);
@@ -294,7 +257,7 @@ async fn main() -> ExitCode {
     }
 
     let csv_path = format!("{}.csv", args.out);
-    if let Err(e) = std::fs::write(&csv_path, render_csv(&rows)) {
+    if let Err(e) = std::fs::write(&csv_path, render_csv(&rows, &since_date, &until_date)) {
         eprintln!("error: writing {csv_path}: {e}");
         return ExitCode::from(1);
     }
@@ -317,14 +280,14 @@ async fn main() -> ExitCode {
 
 // ─── CSV ─────────────────────────────────────────────────────────────────────
 
-fn render_csv(rows: &[ReportRow]) -> String {
+fn render_csv(rows: &[ReportRow], window_start: &str, window_end: &str) -> String {
     let mut out = String::from(
-        "date,customer_id,wallet_address,email,charges_count,charges_cents,credits_cents\n",
+        "date,customer_id,wallet_address,email,charges_count,charges_cents,credits_cents,window_start,window_end,identified_requests_count,unattributed_charges_count\n",
     );
     for r in rows {
         writeln!(
             &mut out,
-            "{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{}",
             csv_escape(&r.date),
             csv_escape(&r.customer_id),
             csv_escape(r.wallet_address.as_deref().unwrap_or("")),
@@ -332,8 +295,20 @@ fn render_csv(rows: &[ReportRow]) -> String {
             r.charges_count,
             r.charges_cents,
             r.credits_cents,
+            csv_escape(window_start),
+            csv_escape(window_end),
+            r.identified_requests_count,
+            r.unattributed_charges_count,
         )
         .expect("writeln! to String cannot fail");
+    }
+    // Preserve the requested bounds even when the window has no activity.
+    if rows.is_empty() {
+        out.push_str(&format!(
+            ",,,,0,0,0,{},{},0,0\n",
+            csv_escape(window_start),
+            csv_escape(window_end)
+        ));
     }
     out
 }
@@ -484,7 +459,7 @@ fn render_html(
     writeln!(&mut html, "<h1>Stripe Usage Report</h1>").unwrap();
     writeln!(
         &mut html,
-        "<p class=\"subtitle\">Last {days} days · {} → {} UTC · {} client(s) · {} across {} charge(s)</p>",
+        "<p class=\"subtitle\">Last {days} completed UTC days · {} → {} UTC · {} client(s) · {} across {} charge(s)</p>",
         html_escape(since_date),
         html_escape(until_date),
         client_list.len(),
@@ -492,6 +467,10 @@ fn render_html(
         grand_total_count,
     )
     .unwrap();
+
+    let identified: u64 = rows.iter().map(|r| r.identified_requests_count).sum();
+    let unattributed: u64 = rows.iter().map(|r| r.unattributed_charges_count).sum();
+    html.push_str(&format!("<p>{identified} distinct billed request IDs observed in this window; {unattributed} charges without request IDs. Charges are not API calls: one execution can create several charges. Requests are attributed to their first charge in the window.</p>\n"));
 
     if client_list.is_empty() {
         writeln!(
@@ -564,7 +543,7 @@ fn write_cell(html: &mut String, cents: i64, count: u64, total: bool) {
     }
     write!(
         html,
-        "<td class=\"{class}\">{}<br><span class=\"count\">{}\u{00a0}call{}</span></td>",
+        "<td class=\"{class}\">{}<br><span class=\"count\">{}\u{00a0}charge{}</span></td>",
         html_escape(&cents_to_display(cents)),
         count,
         if count == 1 { "" } else { "s" },
@@ -732,6 +711,8 @@ mod tests {
             email: None,
             charges_count: if charges_cents == 0 { 0 } else { 1 },
             charges_cents,
+            identified_requests_count: 0,
+            unattributed_charges_count: if charges_cents == 0 { 0 } else { 1 },
             credits_cents: 0,
         }
     }
@@ -739,7 +720,7 @@ mod tests {
     #[test]
     fn csv_has_header_and_rows() {
         let rows = vec![mkrow("2026-04-21", "cus_a", 5)];
-        let csv = render_csv(&rows);
+        let csv = render_csv(&rows, "2026-04-21", "2026-04-21");
         assert!(csv.starts_with("date,customer_id,wallet_address,email,"));
         assert!(csv.contains("2026-04-21,cus_a,,,1,5,0"));
     }
@@ -748,7 +729,7 @@ mod tests {
     fn csv_escapes_commas_and_quotes() {
         let mut row = mkrow("2026-04-21", "cus_a", 5);
         row.email = Some(r#"a,"b"@example.com"#.to_string());
-        let csv = render_csv(&[row]);
+        let csv = render_csv(&[row], "2026-04-21", "2026-04-21");
         assert!(csv.contains(r#""a,""b""@example.com""#));
     }
 
@@ -857,13 +838,13 @@ mod tests {
         assert!(html.contains("$5.00"));
         assert!(html.contains("$3.00"));
         assert!(html.contains("$1.00"));
-        // Per-day counts (1 call each in the test data).
-        assert!(html.contains("1\u{00a0}call</span>"));
-        // Per-client totals: cus_a = $8.00 / 2 calls; cus_b = $1.00 / 1 call.
+        // Per-day billing charge counts.
+        assert!(html.contains("1\u{00a0}charge</span>"));
+        // Per-client totals: cus_a = $8.00 / 2 charges; cus_b = $1.00 / 1 charge.
         assert!(html.contains("$8.00"));
-        // Column total for 2026-04-22: $4.00 across 2 calls.
+        // Column total for 2026-04-22: $4.00 across 2 charges.
         assert!(html.contains("$4.00"));
-        assert!(html.contains("2\u{00a0}calls</span>"));
+        assert!(html.contains("2\u{00a0}charges</span>"));
         // Subtitle reports the grand-total count.
         assert!(html.contains("across 3 charge(s)"));
     }
@@ -871,11 +852,11 @@ mod tests {
     #[test]
     fn html_zero_cells_render_placeholder() {
         // cus_a has activity only on 2026-04-21; the 2026-04-22 cell must be the
-        // muted placeholder (no "0 calls" line).
+        // muted placeholder (no "0 charges" line).
         let rows = vec![mkrow("2026-04-21", "cus_a", 100)];
         let html = render_html(&rows, &[], "2026-04-21", "2026-04-22", 2);
         assert!(html.contains("class=\"zero\">·</td>"));
-        assert!(!html.contains("0\u{00a0}call"));
+        assert!(!html.contains("0\u{00a0}charge"));
     }
 
     #[test]
@@ -885,5 +866,11 @@ mod tests {
         let html = render_html(&[row], &[], "2026-04-21", "2026-04-21", 1);
         assert!(!html.contains("<script>alert(1)</script>"));
         assert!(html.contains("&lt;script&gt;"));
+    }
+    #[test]
+    fn empty_csv_preserves_requested_window() {
+        let csv = render_csv(&[], "2026-04-15", "2026-04-21");
+        assert!(csv.contains("credits_cents,window_start,window_end,identified_requests_count,unattributed_charges_count"));
+        assert!(csv.ends_with(",,,,0,0,0,2026-04-15,2026-04-21,0,0\n"));
     }
 }

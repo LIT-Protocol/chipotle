@@ -61,6 +61,7 @@ macro_rules! for_each_writes_facet_event {
         $mac!(PkpAddedToGroup, |e| vec![e.apiKeyHash]);
         $mac!(PkpRemovedFromGroup, |e| vec![e.apiKeyHash]);
         $mac!(WalletDerivationRegistered, |e| vec![e.apiKeyHash]);
+        $mac!(WalletDerivationRemoved, |e| vec![e.apiKeyHash]);
         $mac!(UsageApiKeySet, |e| vec![
             e.accountApiKeyHash,
             e.usageApiKeyHash
@@ -137,7 +138,7 @@ fn account_hashes_from_log(log: &alloy::primitives::Log) -> Vec<U256> {
 ///
 /// Both sets are deduped so each account triggers at most one `listApiKeys`
 /// chain call per poll, regardless of how many of its events appear in the batch.
-async fn process_logs(logs: &[alloy::rpc::types::Log]) {
+pub(crate) async fn process_logs(logs: &[alloy::rpc::types::Log]) {
     let mut direct: HashSet<U256> = HashSet::new();
     let mut accounts: HashSet<U256> = HashSet::new();
 
@@ -292,12 +293,187 @@ mod tests {
     }
 
     #[test]
+    fn grant_events_clear_cached_denials_without_waiting_for_ttl() {
+        // Keep initialized global caches out of other library tests.
+        const CHILD: &str = "CHIPOTLE_GRANT_EVENT_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "account_events::tests::grant_events_clear_cached_denials_without_waiting_for_ttl",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success(),
+                "{stdout}\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(stdout.contains("1 passed; 0 failed"), "{stdout}");
+            return;
+        }
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            blockchain_cache::init();
+            let cache = blockchain_cache::get().unwrap();
+            let master = U256::from(10401);
+            let usage = U256::from(10402);
+            let unrelated = U256::from(10403);
+            let cid = U256::from(10404);
+            let wallet = Address::ZERO;
+            for hash in [master, usage, unrelated] {
+                cache
+                    .execute_action_cache()
+                    .insert(cache.execute_action_key(hash, cid), false)
+                    .await;
+                cache
+                    .use_wallet_cache()
+                    .insert(cache.use_wallet_key(hash, cid, wallet), false)
+                    .await;
+                cache
+                    .execute_and_wallet_cache()
+                    .insert(
+                        cache.execute_and_wallet_key(hash, cid, wallet),
+                        (false, false),
+                    )
+                    .await;
+            }
+            // Real decode + dispatch. The usage-key grant explicitly carries its
+            // hash. Account enumeration has no client in this fixture: it does
+            // not claim to test successful expansion for group-only events.
+            let logs = [
+                alloy::rpc::types::Log {
+                    inner: log_for(&ac::ActionAddedToGroup {
+                        apiKeyHash: master,
+                        groupId: U256::from(1),
+                        action: cid,
+                    }),
+                    ..Default::default()
+                },
+                alloy::rpc::types::Log {
+                    inner: log_for(&ac::UsageApiKeySet {
+                        accountApiKeyHash: master,
+                        usageApiKeyHash: usage,
+                    }),
+                    ..Default::default()
+                },
+            ];
+            process_logs(&logs).await;
+            for hash in [master, usage] {
+                let execute_key = cache.execute_action_key(hash, cid);
+                let wallet_key = cache.use_wallet_key(hash, cid, wallet);
+                let pair_key = cache.execute_and_wallet_key(hash, cid, wallet);
+                assert_eq!(cache.execute_action_cache().get(&execute_key).await, None);
+                assert_eq!(cache.use_wallet_cache().get(&wallet_key).await, None);
+                assert_eq!(cache.execute_and_wallet_cache().get(&pair_key).await, None);
+                assert!(
+                    cache
+                        .execute_action_cache()
+                        .try_get_with(execute_key, async { Ok::<_, anyhow::Error>(true) })
+                        .await
+                        .unwrap()
+                );
+                assert!(
+                    cache
+                        .use_wallet_cache()
+                        .try_get_with(wallet_key, async { Ok::<_, anyhow::Error>(true) })
+                        .await
+                        .unwrap()
+                );
+                assert_eq!(
+                    cache
+                        .execute_and_wallet_cache()
+                        .try_get_with(pair_key, async { Ok::<_, anyhow::Error>((true, true)) })
+                        .await
+                        .unwrap(),
+                    (true, true)
+                );
+            }
+            assert_eq!(
+                cache
+                    .execute_action_cache()
+                    .get(&cache.execute_action_key(unrelated, cid))
+                    .await,
+                Some(false)
+            );
+            assert_eq!(
+                cache
+                    .use_wallet_cache()
+                    .get(&cache.use_wallet_key(unrelated, cid, wallet))
+                    .await,
+                Some(false)
+            );
+            assert_eq!(
+                cache
+                    .execute_and_wallet_cache()
+                    .get(&cache.execute_and_wallet_key(unrelated, cid, wallet))
+                    .await,
+                Some((false, false))
+            );
+        });
+    }
+
+    #[test]
     fn event_signatures_are_complete_and_unique() {
         let sigs = event_signatures();
         // One signature per WritesFacet account/permission mutation event.
-        assert_eq!(sigs.len(), 15, "expected 15 WritesFacet event signatures");
+        assert_eq!(sigs.len(), 16, "expected 16 WritesFacet event signatures");
         let unique: HashSet<_> = sigs.iter().collect();
         assert_eq!(unique.len(), sigs.len(), "signatures must be unique");
+    }
+
+    #[test]
+    fn subscription_covers_current_writes_facet_events() {
+        // Compare against the contract, not another hand-maintained event count.
+        // Historical migration declarations have no emit sites; node config
+        // changes do not affect account permissions or wallet derivations.
+        let source = include_str!(
+            "../blockchain/lit_node_express/contracts/AccountConfigFacets/WritesFacet.sol"
+        );
+        let declared: HashSet<_> = source
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("event "))
+            .map(|declaration| declaration.split('(').next().unwrap().trim())
+            .collect();
+        let mut covered = HashSet::new();
+        macro_rules! collect_name {
+            ($ev:ident, $extract:expr) => {
+                covered.insert(stringify!($ev));
+            };
+        }
+        for_each_writes_facet_event!(collect_name);
+        covered.extend([
+            "PkpOwnerBackfilled",
+            "PathOwnerBackfilled",
+            "NodeConfigurationSet",
+        ]);
+        assert_eq!(
+            declared, covered,
+            "classify new WritesFacet events for cache invalidation"
+        );
+    }
+
+    #[test]
+    fn wallet_removal_is_subscribed_and_decoded() {
+        let account = U256::from(0x103u64);
+        // Construct the indexed-topic layout independently of the generated
+        // binding encoder: signature, account hash, wallet address; no data.
+        let signature = alloy::primitives::keccak256("WalletDerivationRemoved(uint256,address)");
+        let log = Log {
+            address: Address::ZERO,
+            data: alloy::primitives::LogData::new_unchecked(
+                vec![
+                    signature,
+                    B256::from(account.to_be_bytes::<32>()),
+                    Address::repeat_byte(0x42).into_word(),
+                ],
+                Default::default(),
+            ),
+        };
+        assert!(event_signatures().contains(&signature));
+        assert_eq!(account_hashes_from_log(&log), vec![account]);
     }
 
     #[test]
@@ -469,6 +645,10 @@ mod tests {
                 apiKeyHash: account,
                 pkpId: Address::ZERO,
                 derivationPath: U256::ZERO,
+            }),
+            log_for(&ac::WalletDerivationRemoved {
+                apiKeyHash: account,
+                pkpId: Address::ZERO,
             }),
             log_for(&ac::UsageApiKeySet {
                 accountApiKeyHash: account,

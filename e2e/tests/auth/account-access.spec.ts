@@ -109,7 +109,7 @@ test('missing signup fields never send an account-creation request', async ({ da
   expect(creationRequests).toBe(0);
 });
 
-test('a failed signup shows an error and can be retried against the real backend', async ({ dashboard, page }) => {
+test('a failed signup shows an error and can be retried against the real backend', async ({ dashboard, page, request }) => {
   await page.route(`${api}/new_account`, route => route.fulfill({
     status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Signup temporarily unavailable' }),
   }));
@@ -124,9 +124,17 @@ test('a failed signup shows an error and can be retried against the real backend
   await expect(page.locator('#dashboard-wrap')).toBeHidden();
   await expect(page.locator('#new-account-banner')).toBeHidden();
   await page.unroute(`${api}/new_account`);
+  const creation = page.waitForResponse(`${api}/new_account`);
   await page.locator('#btn-create-account').click();
+  const response = await creation;
+  expect(response.status(), 'Real signup retry must succeed').toBe(200);
   await dashboard.expectLoggedIn();
-  await expect(page.locator('#new-account-key-text')).not.toBeEmpty();
+  const key = (await page.locator('#new-account-key-text').textContent())?.trim();
+  expect(key).toBeTruthy();
+  expect((await response.json()).api_key).toBe(key);
+  const exists = await request.get(`${api}/account_exists`, { headers: { 'X-Api-Key': key! } });
+  expect(exists.ok()).toBe(true);
+  expect(await exists.json()).toBe(true);
 });
 
 test('a failed login shows an error and allows another attempt', async ({ dashboard, page }) => {
@@ -213,8 +221,8 @@ test('password-manager style signup and autofill unlock a real account', async (
   await page.locator('#password-create-password').evaluate((input, value) => { (input as HTMLInputElement).value = value; }, password);
   await page.locator('#password-create-confirm').evaluate((input, value) => { (input as HTMLInputElement).value = value; }, password);
   const created = page.waitForResponse(`${api}/new_account`);
-  await Promise.all([page.waitForNavigation(), page.locator('#password-create-submit').click()]);
-  expect((await created).ok()).toBe(true);
+  await page.locator('#password-create-submit').click();
+  expect((await created).status(), 'Real password signup retry must succeed').toBe(200);
   await dashboard.expectLoggedIn();
   const key = await page.evaluate(() => sessionStorage.getItem('accountconfig_api_key'));
   expect(key).toBeTruthy();

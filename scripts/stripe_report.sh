@@ -6,6 +6,7 @@
 #   STRIPE_PUBLISHABLE_KEY=pk_live_...  \
 #   ./scripts/stripe_report.sh [--days N] [--out PATH] [--csv-only] [--csv-stdout]
 #
+# Counts billing charges, not API requests; excludes today (UTC).
 # Defaults: --days 14, --out ./stripe-report (writes .csv and .html).
 # Use --csv-stdout to pipe CSV directly to a consumer without creating files.
 #
