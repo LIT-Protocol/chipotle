@@ -259,7 +259,9 @@ if (runRamp) {
 
 export const options = {
   scenarios,
-  setupTimeout: "3m", // accounts × 2 API calls each; ~6s/call; 3m allows for slow responses
+  // Account creation, permission transactions, and up to 45s readiness per account.
+  setupTimeout: "15m",
+  teardownTimeout: "3m",
   // Include p(99) so the JSON summary / baseline captures it (default stats omit it).
   summaryTrendStats: ["avg", "min", "med", "max", "p(95)", "p(99)"],
   thresholds,
@@ -268,6 +270,8 @@ export const options = {
 export interface SoakAccountData {
   usageApiKey: string;
   pkpId: string;
+  accountApiKey: string;
+  permissionGroupId?: string;
 }
 
 export type SoakSetupData = SoakAccountData[];
@@ -296,10 +300,11 @@ export function setup(): SoakSetupData {
         usageKeyDescription: "ephemeral k6 soak gate usage key",
         setupContext: "soak",
       });
-      created.push({ usageApiKey: acc.usageApiKey, pkpId: acc.walletAddress });
+      created.push({
+        usageApiKey: acc.usageApiKey, pkpId: acc.walletAddress, accountApiKey: acc.apiKey,
+      });
     }
-    logBillingWallets(created);
-    return created;
+    return prepareWalletPermissions(created);
   }
 
   // Pre-seeded pool. Need at least one account; if the pool is smaller than the
@@ -322,10 +327,95 @@ export function setup(): SoakSetupData {
   for (let i = 0; i < useCount; i++) {
     const account = PRECREATED_ACCOUNTS[i];
     ensureAccountCredits(client, { "X-Api-Key": account.apiKey });
-    accounts.push({ usageApiKey: account.usageApiKey, pkpId: account.walletAddress });
+    accounts.push({
+      usageApiKey: account.usageApiKey, pkpId: account.walletAddress, accountApiKey: account.apiKey,
+    });
   }
-  logBillingWallets(accounts);
-  return accounts;
+  return prepareWalletPermissions(accounts);
+}
+
+// Execution permission alone does not grant access to a wallet. Keep each
+// temporary group limited to this account's wallet and the two tested actions.
+function prepareWalletPermissions(accounts: SoakSetupData): SoakSetupData {
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
+  try {
+    const actionCids = [ENCRYPT_CODE, DECRYPT_CODE].map((code) => {
+      const result = client.getLitActionIpfsId(code);
+      if (!assertOk("setup/getCid", "POST /get_lit_action_ipfs_id", result)) {
+        throw new Error("soak setup failed: get action CID");
+      }
+      return (result.response.body as string).replace(/^"|"$/g, "").trim();
+    });
+    for (const [index, account] of accounts.entries()) {
+      const adminHeaders = { "X-Api-Key": account.accountApiKey };
+      const group = client.addGroup({
+        group_name: `k6-soak-${K6_RUN_ID}-${index}`,
+        group_description: "Temporary soak encrypt/decrypt permissions",
+        pkp_ids_permitted: [account.pkpId],
+        cid_hashes_permitted: [],
+      }, adminHeaders);
+      if (!assertOk("setup/addGroup", "POST /add_group", group)) {
+        throw new Error("soak setup failed: add permission group");
+      }
+      // Record immediately so partial setup failures also clean up this group.
+      account.permissionGroupId = (group.data as { group_id: string }).group_id;
+      for (const cid of actionCids) {
+        const grant = client.addActionToGroup({
+          group_id: Number(account.permissionGroupId), action_ipfs_cid: cid,
+        }, adminHeaders);
+        if (!assertOk("setup/grantAction", "POST /add_action_to_group", grant)) {
+          throw new Error("soak setup failed: grant action");
+        }
+      }
+
+      // Probe both operations before measuring load. Expected propagation
+      // denials must not count as failed checks in the measured workload.
+      const deadline = Date.now() + 45_000;
+      const headers = { "X-Api-Key": account.usageApiKey };
+      let ready = false;
+      while (Date.now() < deadline) {
+        const encrypted = client.litAction({
+          code: ENCRYPT_CODE,
+          js_params: { pkpId: account.pkpId, challenge: "permission readiness" },
+        }, headers);
+        if (encrypted.response.status === 200) {
+          const body = JSON.parse(encrypted.response.body as string);
+          if (!body.has_error && typeof body.response === "string") {
+            const decrypted = client.litAction({
+              code: DECRYPT_CODE,
+              js_params: { pkpId: account.pkpId, ciphertext: body.response },
+            }, headers);
+            if (decrypted.response.status === 200) {
+              const result = JSON.parse(decrypted.response.body as string);
+              if (!result.has_error && result.response === "permission readiness") {
+                ready = true;
+                break;
+              }
+            }
+          }
+        }
+        sleep(1);
+      }
+      if (!ready) throw new Error("soak setup failed: wallet permissions not usable within 45s");
+    }
+    logBillingWallets(accounts);
+    return accounts;
+  } catch (error) {
+    // k6 does not call teardown when setup throws.
+    teardown(accounts);
+    throw error;
+  }
+}
+
+export function teardown(accounts: SoakSetupData | undefined) {
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
+  for (const account of accounts ?? []) {
+    if (account.permissionGroupId === undefined) continue;
+    const result = client.removeGroup({ group_id: account.permissionGroupId }, {
+      "X-Api-Key": account.accountApiKey,
+    });
+    assertOk("teardown/removeGroup", "POST /remove_group", result);
+  }
 }
 
 /**
