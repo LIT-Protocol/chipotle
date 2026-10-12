@@ -1,3 +1,4 @@
+import { analytics, endDashboardSession, trackDashboardOperation } from './analytics.js';
 import { initPasswordLogin, resetPasswordIdentity } from './password-login.js';
 import { enabled as passwordLoginEnabled } from './password-client.js';
 /**
@@ -121,6 +122,7 @@ export function isAuthenticated() {
 
 /** Full sign-out: clears api-key, ChainSecured session, and the client cache. */
 export function logOut() {
+  endDashboardSession();
   hideStatus('login-status');
   resetPasswordIdentity();
   sessionStorage.removeItem(STORAGE_KEY_API);
@@ -374,7 +376,7 @@ export async function getClient() {
             const sovereignLifecycle = await buildSovereignLifecycle(target, prop);
             args = [{ ...args[0], sovereignLifecycle }];
           }
-          const result = await val.apply(target, args);
+          const result = await trackDashboardOperation(prop, mode, () => val.apply(target, args));
           if (_onApiCallSuccess) {
             try { _onApiCallSuccess(prop); } catch (cbErr) { console.error('onApiCallSuccess', cbErr); }
           }
@@ -869,6 +871,7 @@ export function initLogin() {
         resetPasswordIdentity();
         apiKeyInput.value = '';
         setApiKey(key);
+        analytics.capture('login_completed', { method: 'api_key' });
         showStatus('login-status', 'Logged in. You can now use the dashboard.', 'success');
       } else {
         showStatus('login-status', 'Account not found or not mutable for this API key.', 'error');
@@ -923,6 +926,7 @@ export function initLogin() {
       const res = await client.newAccount({ accountName: name, accountDescription: desc, email: email || undefined });
       resetPasswordIdentity();
       setApiKey(res.api_key);
+      analytics.capture('signup_completed', { method: 'api_key' });
       showNewAccountBanner(res.api_key);
       document.getElementById('new-account-name').value = '';
       document.getElementById('new-account-desc').value = '';
@@ -979,6 +983,7 @@ async function loginWithWallet(btn) {
       return;
     }
     await setChainSecuredSession({ walletAddress: address, apiKeyHash });
+    analytics.capture('login_completed', { method: 'wallet' });
     showStatus('login-status', 'Connected. Wallet is the account admin.', 'success');
     runPostConnectDriftCheck(client).catch((e) => logError('drift-check', e));
   } catch (e) {
@@ -1011,6 +1016,7 @@ async function createChainSecuredAccount(btn) {
     // Proxy auto-runs ensureSovereignSigner → wallet-connect before the tx.
     const res = await client.newChainSecuredAccount({ accountName: name, accountDescription: desc });
     await setChainSecuredSession({ walletAddress: res.wallet_address, apiKeyHash: res.api_key_hash });
+    analytics.capture('signup_completed', { method: 'wallet' });
     showChainSecuredBanner(res.wallet_address);
     const nameEl = document.getElementById('new-chainsecured-name');
     const descEl = document.getElementById('new-chainsecured-desc');
