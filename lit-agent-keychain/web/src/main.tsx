@@ -1,3 +1,8 @@
+import {
+  analytics,
+  trackKeychainSession,
+  OPERATIONS,
+} from "./product-analytics.ts";
 import React, {
   useState,
   useEffect,
@@ -65,6 +70,8 @@ import {
   type TwoFactorPrompt,
 } from "./TwoFactor.tsx";
 import "./style.css";
+
+analytics.page("sign-in");
 
 const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID;
 const config = projectId
@@ -242,6 +249,9 @@ function App() {
       .catch(() => setError("Unable to connect to Keychain."));
   }, []);
   const signOutLocally = () => {
+    analytics.capture("signed_out");
+    analytics.reset();
+    analytics.page("sign-in");
     clearSession();
     if (client) client.lit.usageApiKey = undefined;
     signerRef.current = undefined;
@@ -256,12 +266,25 @@ function App() {
   };
   const work = async (label: string, operation: () => Promise<void>) => {
     if (busy) return;
+    const trackedOperation = OPERATIONS[label];
+    if (trackedOperation)
+      analytics.capture("product_operation_started", {
+        operation: trackedOperation,
+      });
     setBusy(label);
     setError("");
     setNotice("");
     try {
       await operation();
+      if (trackedOperation)
+        analytics.capture("product_operation_completed", {
+          operation: trackedOperation,
+        });
     } catch (e) {
+      if (trackedOperation)
+        analytics.capture("product_operation_failed", {
+          operation: trackedOperation,
+        });
       if (e instanceof HttpError && e.status === 401 && client) {
         signOutLocally();
         setNotice("Your session expired. Sign in again.");
@@ -347,6 +370,8 @@ function App() {
         });
         c.lit.usageApiKey = usageApiKey;
         if (cancelled) return;
+        trackKeychainSession(stored.owner, c.vaultId, true);
+        analytics.page("secrets");
         setClient(c);
         await refresh(c);
         const policy = await c.getCredentials();
@@ -383,6 +408,8 @@ function App() {
     work("Verifying owner authorization…", async () => {
       const c = openClient(identity, authority);
       await c.login();
+      trackKeychainSession(identity.owner, c.vaultId);
+      analytics.page("secrets");
       identity.remember?.(c.googleApproval);
       setBusy("Loading your vault…");
       setClient(c);
@@ -619,6 +646,8 @@ function App() {
                       const identity = await createPasskey("My Keychain");
                       const c = openClient(identity);
                       await c.login();
+                      trackKeychainSession(identity.owner, c.vaultId);
+                      analytics.page("secrets");
                       setBusy("Loading your vault…");
                       setClient(c);
                       await c.api("/api/billing/refresh", { method: "POST" });
@@ -642,6 +671,8 @@ function App() {
                         recovery || found.authority,
                       );
                       await c.login();
+                      trackKeychainSession(found.identity.owner, c.vaultId);
+                      analytics.page("secrets");
                       setBusy("Loading your vault…");
                       setClient(c);
                       await c.api("/api/billing/refresh", { method: "POST" });
@@ -705,6 +736,7 @@ function App() {
                     className={tab === t ? "active" : ""}
                     onClick={() => {
                       setTab(t);
+                      analytics.page(t);
                       if (t === "activity")
                         void work("Loading activity…", async () =>
                           setEvents((await client.api("/api/audit")).events),
@@ -807,6 +839,9 @@ function App() {
                     disabled={!!busy || !billing}
                     onClick={() =>
                       work("Opening secure checkout…", async () => {
+                        analytics.capture("checkout_started", {
+                          plan: "standard",
+                        });
                         const { url } = await client.api(
                           "/api/billing/checkout",
                           { method: "POST" },
@@ -824,6 +859,7 @@ function App() {
                     disabled={!!busy}
                     onClick={() =>
                       work("Opening billing management…", async () => {
+                        analytics.capture("billing_portal_opened");
                         const { url } = await client.api(
                           "/api/billing/portal",
                           { method: "POST" },
@@ -1473,6 +1509,7 @@ function App() {
                       setSelected(undefined);
                     }}
                     onApproved={async () => {
+                      analytics.capture("agent_approved");
                       setSelected(undefined);
                       await refresh();
                     }}

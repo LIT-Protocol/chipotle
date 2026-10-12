@@ -1,3 +1,4 @@
+import { analytics } from './analytics.js';
 /**
  * Billing — Stripe integration, payment flow.
  *
@@ -114,6 +115,7 @@ async function resolveLitkeyPaymentWallet() {
 }
 
 async function openLitkeyPaymentPage() {
+  analytics.capture('checkout_started', { method: 'litkey' });
   const btn = document.getElementById('billing-litkey-btn');
   if (btn) btn.disabled = true;
   setStatus('Preparing LITKEY payment link…', 'info');
@@ -567,6 +569,7 @@ function closeBillingModal() {
 }
 
 async function handleContinue() {
+  analytics.capture('checkout_started', { plan: 'prepaid_credits' });
   const apiKey = billingAuthKey();
   if (!apiKey) return;
 
