@@ -12,11 +12,15 @@ pub fn get_random_secret() -> [u8; 32] {
     secret
 }
 
-// Generate a unique derivation path for a new wallet.
+pub const WALLET_PATH_TAG: [u8; 12] = *b"lit-wallet:1";
+
+// Generate a unique derivation path for a new wallet: WALLET_PATH_TAG in the
+// top 96 bits, 160 random bits below it.
 pub fn generate_unique_derivation_path() -> (U256, String) {
     let seed_bytes = get_random_secret();
-    let derivation_bytes = keccak256(seed_bytes);
-    let derivation_u256 = U256::from_be_bytes(derivation_bytes.0);
+    let mut derivation_bytes = keccak256(seed_bytes).0;
+    derivation_bytes[..WALLET_PATH_TAG.len()].copy_from_slice(&WALLET_PATH_TAG);
+    let derivation_u256 = U256::from_be_bytes(derivation_bytes);
     // feels redundant, but it's a good way to ensure the derivation path is always the same for a given seed
     let derivation_path = u256_to_derivation_path(derivation_u256);
     (derivation_u256, derivation_path)
@@ -79,6 +83,30 @@ mod tests {
         let (_, path1) = generate_unique_derivation_path();
         let (_, path2) = generate_unique_derivation_path();
         assert_ne!(path1, path2);
+    }
+
+    #[test]
+    fn generated_paths_carry_the_wallet_tag() {
+        // Must match AppStorage.WALLET_PATH_TAG (pinned in
+        // WalletPathTagUpgrade.t.sol::test_tagConstantIsPinned).
+        let tag = U256::from_be_slice(&hex::decode("6c69742d77616c6c65743a31").unwrap());
+        assert_eq!(U256::from_be_slice(&WALLET_PATH_TAG), tag);
+        for _ in 0..64 {
+            let (u, path) = generate_unique_derivation_path();
+            assert_eq!(u >> 160, tag);
+            assert!(path.starts_with("6c69742d77616c6c65743a31"));
+            assert_eq!(path, u256_to_derivation_path(u));
+        }
+    }
+
+    #[test]
+    fn lit_action_paths_do_not_carry_the_wallet_tag() {
+        // A registration of keccak256("lit_action_" + CID) is rejected
+        // on-chain because it lacks the tag (probability 2^-96 per CID).
+        for cid in ["QmaYPwBgungtioR4c4W9Ar72kAr6SqVW7MYZijivW2rJon", "QmTest"] {
+            let p = generate_lit_action_derivation_path(&format!("lit_action_{cid}"));
+            assert!(!p.starts_with("6c69742d77616c6c65743a31"));
+        }
     }
 
     // ── generate_lit_action_derivation_path ─────────────────────────────

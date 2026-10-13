@@ -90,7 +90,7 @@ contract UsageKeyExpirationTest is BaseTest {
         vm.warp(expiration);
         vm.prank(apiPayer);
         vm.expectRevert(abi.encodeWithSelector(AppStorage.UsageApiKeyExpired.selector, USAGE));
-        writes.registerWalletDerivation(USAGE, makeAddr("pkp"), uint256(keccak256("path")), "w", "");
+        writes.registerWalletDerivation(USAGE, makeAddr("pkp"), wp(uint256(keccak256("path"))), "w", "");
     }
 
     function test_expiredUsageKeyCannotAddPkpToGroup() public {

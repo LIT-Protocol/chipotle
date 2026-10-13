@@ -164,52 +164,33 @@ contract ViewsFacet {
         if (derivation == 0) {
             return 0;
         }
-        // Cross-account hijack defense (#575). This view is the exact read the
-        // node uses to resolve a derivation path before signing/decrypting, so
-        // enforce the global first-owner binding HERE, not just at registration:
-        // if the wallet has an owner and the resolving (master) account is not
-        // that owner, the local pkpData entry is a stale pre-fix hijack
-        // registration — fail closed instead of leaking the victim's path.
-        // owner == 0 means a pre-migration wallet not yet backfilled: fall
-        // through for deployments that have not migrated. Completed bindings
-        // survive removal of the historical backfill entry point.
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         uint256 resolvedMaster = s.allApiKeyHashesToMaster[apiKeyHash];
         uint256 owner = s.pkpIdToOwnerMaster[walletAddress];
-        if (owner != 0) {
-            if (owner != resolvedMaster) {
-                revert AppStorage.InvalidRequest("PKP owned by another account");
-            }
+        if (owner != resolvedMaster) {
+            revert AppStorage.InvalidRequest("PKP owned by another account");
         }
-        // Path-aliasing defense (companion to the pkpId binding above). The pkpId
-        // binding only protects the address label; the key is derived from the
-        // path. If a resolving account is not the path's first owner, this is a
-        // stale pre-fix aliasing registration pointing at someone else's key —
-        // fail closed instead of releasing it. owner == 0 means a pre-migration
-        // path not yet backfilled. Keep the legacy fallback for deployments that
-        // have not migrated; completed bindings survive removal of the backfill.
         uint256 pathOwner = s.pathToOwnerMaster[derivation];
-        if (pathOwner != 0 && pathOwner != resolvedMaster) {
+        if (pathOwner != resolvedMaster) {
             revert AppStorage.InvalidRequest("derivation path owned by another account");
         }
         return derivation;
     }
 
     /// @notice Return the master apiKeyHash that first registered a pkpId, or 0 if
-    ///         the pkpId has never been bound (pre-migration wallet or never registered).
+    ///         the pkpId has never been registered.
     /// @dev The binding survives removeWalletDerivation by design; used to audit the
-    ///      global first-owner rule and the one-time backfill migration.
+    ///      global first-owner rule.
     function getPkpOwnerMaster(address pkpId) public view returns (uint256) {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         return s.pkpIdToOwnerMaster[pkpId];
     }
 
     /// @notice Return the master apiKeyHash that first registered a derivationPath,
-    ///         or 0 if the path has never been bound (pre-migration wallet or never
-    ///         registered).
+    ///         or 0 if the path has never been registered.
     /// @dev Companion to getPkpOwnerMaster. The binding survives
     ///      removeWalletDerivation by design; used to audit the path first-owner
-    ///      rule and the backfillPathOwners migration.
+    ///      rule.
     function getPathOwnerMaster(
         uint256 derivationPath
     ) public view returns (uint256) {

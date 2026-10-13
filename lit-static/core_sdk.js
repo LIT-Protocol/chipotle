@@ -28,6 +28,38 @@ import {
 } from './account_config_full_abi.js';
 import { runContractWrite, TX_STATES } from './tx_lifecycle.js';
 
+export const WALLET_PATH_TAG_HEX = '6c69742d77616c6c65743a31';
+const INVALID_WALLET_PATH_TAG = 'invalid wallet derivation path tag';
+
+/** True when `derivationPath` (0x-hex or bigint) carries the wallet path tag. */
+export function isTaggedWalletPath(derivationPath) {
+  return BigInt(derivationPath).toString(16).padStart(64, '0').startsWith(WALLET_PATH_TAG_HEX);
+}
+
+/**
+ * Mint a wallet and register it on-chain, re-minting once if the minted path
+ * predates the wallet path tag. During a rollout a not-yet-upgraded node can
+ * still hand out an untagged path; if the contract has been upgraded by the
+ * time the client registers it, registration reverts with the tag error. The
+ * wallet was never registered, so minting a fresh (tagged) one is safe.
+ *
+ * @param {() => Promise<{wallet_address: string, derivation_path: string}>} mint
+ * @param {(minted: Object) => Promise<Object>} register
+ */
+export async function mintAndRegisterWallet(mint, register) {
+  const minted = await mint();
+  try {
+    return { minted, ...(await register(minted)) };
+  } catch (err) {
+    const msg = `${err?.decoded ?? ''} ${err?.message ?? ''}`;
+    const tagRejected = msg.includes(INVALID_WALLET_PATH_TAG) || err?.reverted === true;
+    if (isTaggedWalletPath(minted.derivation_path) || !tagRejected) throw err;
+    const reminted = await mint();
+    if (!isTaggedWalletPath(reminted.derivation_path)) throw err;
+    return { minted: reminted, ...(await register(reminted)) };
+  }
+}
+
 // --- Request types (match core/v1/models/request.rs) ---
 
 /**
@@ -904,34 +936,43 @@ export class LitNodeSimpleApiClient {
         throw new Error('createWallet (sovereign): chainId could not be resolved from RPC');
       }
       const signerAddress = await this.signer.getAddress();
-      const issuedAt = Math.floor(Date.now() / 1000);
-      // EIP-712 typed data — wallet UI surfaces `primaryType: CreateWallet`
-      // and labelled fields. primaryType is part of the type hash, so a
-      // signature minted here cannot be replayed against the secret-emitting
-      // /add_usage_api_key_with_signature endpoint (CPL-286).
-      const typedData = buildChainSecuredTypedData({
-        primaryType: PRIMARY_TYPE_CREATE_WALLET,
-        address: signerAddress,
-        chainId: this.chainId,
-        issuedAt,
-      });
-      const { typed_data, signature } = await signChainSecuredTypedData(this.signer, typedData);
-      const res = await fetch(`${this.baseUrl}/create_wallet_with_signature`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ typed_data, signature }),
-      });
-      const minted = await parseResponse(res, 'create_wallet_with_signature');
-      const { wallet_address, derivation_path } = minted;
+      // The retry mint must carry a different issuedAt than the first one: an
+      // identical (address, issuedAt) yields an identical EIP-712 digest, which
+      // the server's replay cache rejects.
+      let lastIssuedAt = 0;
+      const mint = async () => {
+        const issuedAt = Math.max(Math.floor(Date.now() / 1000), lastIssuedAt + 1);
+        lastIssuedAt = issuedAt;
+        // EIP-712 typed data — wallet UI surfaces `primaryType: CreateWallet`
+        // and labelled fields. primaryType is part of the type hash, so a
+        // signature minted here cannot be replayed against the secret-emitting
+        // /add_usage_api_key_with_signature endpoint (CPL-286). A fresh
+        // signature per mint: the server consumes each one.
+        const typedData = buildChainSecuredTypedData({
+          primaryType: PRIMARY_TYPE_CREATE_WALLET,
+          address: signerAddress,
+          chainId: this.chainId,
+          issuedAt,
+        });
+        const { typed_data, signature } = await signChainSecuredTypedData(this.signer, typedData);
+        const res = await fetch(`${this.baseUrl}/create_wallet_with_signature`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ typed_data, signature }),
+        });
+        return parseResponse(res, 'create_wallet_with_signature');
+      };
 
       const contract = await this._getWriteContract();
       const adminHash = await this._adminHash(apiKey);
-      const { txHash } = await runContractWrite({
-        contract, method: 'registerWalletDerivation',
-        args: [adminHash, wallet_address, derivation_path, name, description],
-        ...(sovereignLifecycle ?? {}),
-      });
-      return { wallet_address, transaction_hash: txHash };
+      const { minted, txHash } = await mintAndRegisterWallet(mint, ({ wallet_address, derivation_path }) =>
+        runContractWrite({
+          contract, method: 'registerWalletDerivation',
+          args: [adminHash, wallet_address, derivation_path, name, description],
+          ...(sovereignLifecycle ?? {}),
+        }),
+      );
+      return { wallet_address: minted.wallet_address, transaction_hash: txHash };
     }
 
     const res = await fetch(`${this.baseUrl}/create_wallet`, {

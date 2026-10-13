@@ -420,7 +420,7 @@ The no-signature equivalent of `create_wallet_with_signature`. Returns a freshly
 
 The wallet-ownership signature on `create_wallet_with_signature` authorizes nothing durable: the real authorization boundary is your own on-chain `registerWalletDerivation`, signed inside your owner transaction. So this endpoint safely omits it.
 
-**No API key. No request body.** The server generates the derivation path itself (256-bit CSPRNG entropy); you cannot supply your own.
+**No API key. No request body.** The server generates the derivation path itself (a fixed 96-bit wallet-path prefix plus 160 bits of CSPRNG entropy); you cannot supply your own. `registerWalletDerivation` rejects a new path without that prefix, so always register the `derivation_path` returned by the server verbatim.
 
 **Response:**
 

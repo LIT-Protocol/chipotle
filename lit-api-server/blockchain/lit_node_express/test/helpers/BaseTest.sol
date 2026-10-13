@@ -2,6 +2,7 @@
 pragma solidity =0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {AppStorage} from "../../contracts/AccountConfigFacets/AppStorage.sol";
 import {DiamondDeploy} from "./DiamondDeploy.sol";
 import {ViewsFacet} from "../../contracts/AccountConfigFacets/ViewsFacet.sol";
 import {WritesFacet} from "../../contracts/AccountConfigFacets/WritesFacet.sol";
@@ -49,6 +50,12 @@ abstract contract BaseTest is Test {
         apiConfig.setApiPayers(payers);
         vm.prank(owner);
         apiConfig.setAdminApiPayerAccount(adminApiPayer);
+    }
+
+    function wp(uint256 n) internal pure returns (uint256) {
+        return
+            (AppStorage.WALLET_PATH_TAG << AppStorage.WALLET_PATH_TAG_SHIFT) |
+            (n & type(uint160).max);
     }
 
     function apiKeyHashOf(address wallet) internal pure returns (uint256) {

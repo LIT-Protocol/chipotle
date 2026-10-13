@@ -24,7 +24,7 @@ contract UsageKeyManagementExpirationTest is BaseTest {
         address[] memory wallets = new address[](1);
         wallets[0] = WALLET;
         group = writes.addGroup(MASTER, "original", "", actions, wallets);
-        writes.registerWalletDerivation(MASTER, WALLET, 401, "wallet", "");
+        writes.registerWalletDerivation(MASTER, WALLET, wp(401), "wallet", "");
         _setKey(DEADLINE);
         vm.stopPrank();
     }
@@ -65,7 +65,7 @@ contract UsageKeyManagementExpirationTest is BaseTest {
         if (route == 2) {
             return
                 abi.encodeCall(
-                    WritesFacet.registerWalletDerivation, (key, NEW_WALLET, 402, "new", "")
+                    WritesFacet.registerWalletDerivation, (key, NEW_WALLET, wp(402), "new", "")
                 );
         }
         if (route == 3) return abi.encodeCall(WritesFacet.addPkpToGroup, (key, group, NEW_WALLET));
@@ -90,7 +90,7 @@ contract UsageKeyManagementExpirationTest is BaseTest {
                 views_.allPkpIdsAt(2),
                 views_.getWalletDerivation(MASTER, NEW_WALLET),
                 views_.getPkpOwnerMaster(NEW_WALLET),
-                views_.getPathOwnerMaster(402)
+                views_.getPathOwnerMaster(wp(402))
             )
         );
     }
@@ -299,7 +299,7 @@ contract UsageKeyManagementExpirationTest is BaseTest {
     // composing multiple diamond calls and verify a late rejection rolls back
     // earlier successful writes, including global derivation ownership bindings.
     function batch() external {
-        writes.registerWalletDerivation(MASTER, NEW_WALLET, 402, "new", "");
+        writes.registerWalletDerivation(MASTER, NEW_WALLET, wp(402), "new", "");
         writes.addActionToGroup(USAGE, group, 302);
     }
 
@@ -311,7 +311,7 @@ contract UsageKeyManagementExpirationTest is BaseTest {
         apiConfig.setApiPayers(payers);
         uint256 snapshot = vm.snapshotState();
         this.batch();
-        assertEq(views_.getPathOwnerMaster(402), MASTER);
+        assertEq(views_.getPathOwnerMaster(wp(402)), MASTER);
         assertTrue(vm.revertToState(snapshot));
         bytes32 beforeState = _state();
         vm.warp(DEADLINE);

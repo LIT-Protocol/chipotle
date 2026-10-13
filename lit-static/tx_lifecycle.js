@@ -240,7 +240,13 @@ export async function runContractWrite({
     // definitive on-chain revert. Callers minting client-side secrets use these
     // to decide whether the secret is still worth surfacing to the user.
     wrapped.txHash = txHash;
-    wrapped.reverted = !!err?.reverted;
+    // ethers v6 `tx.wait()` throws CALL_EXCEPTION carrying the mined receipt
+    // when the tx reverted (status 0). That is just as definitive as the
+    // explicit status check above, so classify it the same way. Timeouts and
+    // other receipt-wait failures (no mined status-0 receipt) stay unrevert-ed.
+    wrapped.reverted =
+      !!err?.reverted ||
+      (txHash != null && err?.code === 'CALL_EXCEPTION' && err?.receipt != null && Number(err.receipt.status) === 0);
     throw wrapped;
   }
 }

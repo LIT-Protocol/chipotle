@@ -378,9 +378,9 @@ contract AccountsTest is BaseTest {
 
         address pkpAddr = address(0xBEEF);
         vm.prank(user);
-        writes.registerWalletDerivation(hash, pkpAddr, 42, "pkp-1", "first pkp");
+        writes.registerWalletDerivation(hash, pkpAddr, wp(42), "pkp-1", "first pkp");
 
-        assertEq(views_.getWalletDerivation(hash, pkpAddr), 42);
+        assertEq(views_.getWalletDerivation(hash, pkpAddr), wp(42));
         AppStorage.PkpData[] memory pkps = views_.listPkps(hash, 0, 10);
         assertEq(pkps.length, 1);
         assertEq(pkps[0].pkpId, pkpAddr);
@@ -390,7 +390,7 @@ contract AccountsTest is BaseTest {
         vm.expectRevert(
             abi.encodeWithSelector(AppStorage.InvalidRequest.selector, "PKP already registered")
         );
-        writes.registerWalletDerivation(hash, pkpAddr, 43, "dup", "dup");
+        writes.registerWalletDerivation(hash, pkpAddr, wp(43), "dup", "dup");
     }
 
     function test_removeWalletDerivation_hardDeletesAndCompacts() public {
@@ -402,9 +402,9 @@ contract AccountsTest is BaseTest {
         address pkpB = address(0xB0B);
         address pkpC = address(0xCA75);
         vm.startPrank(user);
-        writes.registerWalletDerivation(hash, pkpA, 11, "a", "a");
-        writes.registerWalletDerivation(hash, pkpB, 22, "b", "b");
-        writes.registerWalletDerivation(hash, pkpC, 33, "c", "c");
+        writes.registerWalletDerivation(hash, pkpA, wp(11), "a", "a");
+        writes.registerWalletDerivation(hash, pkpB, wp(22), "b", "b");
+        writes.registerWalletDerivation(hash, pkpC, wp(33), "c", "c");
         vm.stopPrank();
 
         // Remove the middle wallet.
@@ -428,8 +428,8 @@ contract AccountsTest is BaseTest {
 
         // The address can be registered again after deletion (metadata fully cleared).
         vm.prank(user);
-        writes.registerWalletDerivation(hash, pkpB, 44, "b2", "b2");
-        assertEq(views_.getWalletDerivation(hash, pkpB), 44);
+        writes.registerWalletDerivation(hash, pkpB, wp(44), "b2", "b2");
+        assertEq(views_.getWalletDerivation(hash, pkpB), wp(44));
     }
 
     function test_registerWalletDerivation_crossAccountHijackReverts() public {
@@ -440,7 +440,7 @@ contract AccountsTest is BaseTest {
 
         address pkpAddr = address(0xBEEF);
         vm.prank(user);
-        writes.registerWalletDerivation(victimHash, pkpAddr, 42, "v", "v");
+        writes.registerWalletDerivation(victimHash, pkpAddr, wp(42), "v", "v");
         assertEq(views_.getPkpOwnerMaster(pkpAddr), victimHash);
 
         // Attacker with their own account cannot register the victim's pkpId,
@@ -456,7 +456,7 @@ contract AccountsTest is BaseTest {
                 "PKP owned by another account"
             )
         );
-        writes.registerWalletDerivation(attackerHash, pkpAddr, 42, "a", "a");
+        writes.registerWalletDerivation(attackerHash, pkpAddr, wp(42), "a", "a");
     }
 
     function test_pkpOwnerBinding_survivesRemoveWalletDerivation() public {
@@ -469,7 +469,7 @@ contract AccountsTest is BaseTest {
 
         address pkpAddr = address(0xBEEF);
         vm.prank(user);
-        writes.registerWalletDerivation(victimHash, pkpAddr, 42, "v", "v");
+        writes.registerWalletDerivation(victimHash, pkpAddr, wp(42), "v", "v");
         vm.prank(user);
         writes.removeWalletDerivation(victimHash, pkpAddr);
 
@@ -484,12 +484,12 @@ contract AccountsTest is BaseTest {
                 "PKP owned by another account"
             )
         );
-        writes.registerWalletDerivation(attackerHash, pkpAddr, 42, "a", "a");
+        writes.registerWalletDerivation(attackerHash, pkpAddr, wp(42), "a", "a");
 
         // The original owner can re-register (recovery / re-add after delete).
         vm.prank(user);
-        writes.registerWalletDerivation(victimHash, pkpAddr, 42, "v2", "v2");
-        assertEq(views_.getWalletDerivation(victimHash, pkpAddr), 42);
+        writes.registerWalletDerivation(victimHash, pkpAddr, wp(42), "v2", "v2");
+        assertEq(views_.getWalletDerivation(victimHash, pkpAddr), wp(42));
         assertEq(views_.getPkpOwnerMaster(pkpAddr), victimHash);
     }
 
@@ -514,17 +514,10 @@ contract AccountsTest is BaseTest {
         return keccak256(abi.encode(derivationPath, mapSlot));
     }
 
-    /// The core path-aliasing attack: the private key is a stateless function of
-    /// the derivationPath, and paths are public. The #575 pkpId binding only
-    /// protects the address label, so an attacker could register a FRESH,
-    /// self-owned pkpId carrying the victim's public path and drive the node to
-    /// release the victim's key. The path first-owner binding blocks that at
-    /// registration — note the attacker uses a DIFFERENT pkpId than the victim,
-    /// so it is the path binding, not the pkpId binding, doing the work.
     function test_registerWalletDerivation_pathAliasingAcrossAccountsReverts()
         public
     {
-        uint256 victimPath = 42;
+        uint256 victimPath = wp(42);
 
         vm.prank(user);
         writes.newChainSecuredAccount("victim", "victim");
@@ -569,7 +562,7 @@ contract AccountsTest is BaseTest {
     function test_pathOwnerBinding_survivesRemoveAndAllowsOwnerReRegister()
         public
     {
-        uint256 path = 42;
+        uint256 path = wp(42);
 
         vm.prank(user);
         writes.newChainSecuredAccount("victim", "victim");
@@ -612,7 +605,7 @@ contract AccountsTest is BaseTest {
     }
 
     function test_getWalletDerivation_preExistingPathAliasFailsClosed() public {
-        uint256 path = 42;
+        uint256 path = wp(42);
 
         // Attacker holds a legitimate account-local entry keyed on a fresh label
         // pointing at `path` — exactly the stale row a pre-fix aliasing attack
@@ -638,8 +631,6 @@ contract AccountsTest is BaseTest {
             attackerHash
         );
 
-        // Simulate post-backfill truth: the VICTIM was the real first owner of
-        // the path. (The attacker still owns the pkpId label locally.)
         uint256 victimHash = apiKeyHashOf(user);
         vm.store(address(views_), _pathOwnerSlot(path), bytes32(victimHash));
         assertEq(views_.getPathOwnerMaster(path), victimHash);
@@ -666,7 +657,7 @@ contract AccountsTest is BaseTest {
         uint256 attackerHash = apiKeyHashOf(stranger);
         address pkpAddr = address(0xBEEF);
         vm.prank(stranger);
-        writes.registerWalletDerivation(attackerHash, pkpAddr, 42, "a", "a");
+        writes.registerWalletDerivation(attackerHash, pkpAddr, wp(42), "a", "a");
 
         // Sanity: verify our slot math matches the contract's own getter before
         // we rely on vm.store — guards against a silent storage-layout drift.
@@ -675,7 +666,6 @@ contract AccountsTest is BaseTest {
             attackerHash
         );
 
-        // Simulate the post-backfill truth: the VICTIM was the real first owner.
         uint256 victimHash = apiKeyHashOf(user);
         vm.store(address(views_), _pkpOwnerSlot(pkpAddr), bytes32(victimHash));
         assertEq(views_.getPkpOwnerMaster(pkpAddr), victimHash);
@@ -693,23 +683,127 @@ contract AccountsTest is BaseTest {
         views_.getWalletDerivation(attackerHash, pkpAddr);
     }
 
-    function test_getWalletDerivation_legacyUnboundStillReadable() public {
-        // A pre-migration wallet has a local entry but no owner binding yet
-        // (owner==0). It must keep resolving so signing doesn't break in the
-        // window between the facet upgrade and the backfill run.
+    function _registerStrangerWallet() internal returns (uint256 hash, address pkpAddr) {
         vm.prank(stranger);
         writes.newChainSecuredAccount("u", "u");
-        uint256 hash = apiKeyHashOf(stranger);
-        address pkpAddr = address(0xBEEF);
+        hash = apiKeyHashOf(stranger);
+        pkpAddr = address(0xBEEF);
         vm.prank(stranger);
-        writes.registerWalletDerivation(hash, pkpAddr, 42, "a", "a");
+        writes.registerWalletDerivation(hash, pkpAddr, wp(42), "a", "a");
+        assertEq(views_.getWalletDerivation(hash, pkpAddr), wp(42));
+    }
 
-        // Clear the binding to reproduce the not-yet-backfilled legacy state.
+    function _mintStrangerUsageKey(uint256 master, uint256 usageHash) internal {
+        uint256[] memory empty = new uint256[](0);
+        vm.prank(stranger);
+        writes.setUsageApiKey(
+            master,
+            usageHash,
+            0,
+            0,
+            "execution",
+            "",
+            false,
+            false,
+            false,
+            empty,
+            empty,
+            empty,
+            empty
+        );
+        assertEq(views_.getWalletDerivation(usageHash, address(0xBEEF)), wp(42));
+    }
+
+    function test_getWalletDerivation_unboundPkpFailsClosed() public {
+        (uint256 hash, address pkpAddr) = _registerStrangerWallet();
+
         vm.store(address(views_), _pkpOwnerSlot(pkpAddr), bytes32(uint256(0)));
         assertEq(views_.getPkpOwnerMaster(pkpAddr), 0);
 
-        // owner==0 falls through: the wallet still resolves for its account.
-        assertEq(views_.getWalletDerivation(hash, pkpAddr), 42);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "PKP owned by another account"
+            )
+        );
+        views_.getWalletDerivation(hash, pkpAddr);
+    }
+
+    function test_getWalletDerivation_unboundPathFailsClosed() public {
+        (uint256 hash, address pkpAddr) = _registerStrangerWallet();
+        assertEq(views_.getPathOwnerMaster(wp(42)), hash);
+
+        vm.store(address(views_), _pathOwnerSlot(wp(42)), bytes32(uint256(0)));
+        assertEq(views_.getPathOwnerMaster(wp(42)), 0);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "derivation path owned by another account"
+            )
+        );
+        views_.getWalletDerivation(hash, pkpAddr);
+    }
+
+    function test_getWalletDerivation_unboundPkpFailsClosedViaUsageKey() public {
+        (uint256 hash, address pkpAddr) = _registerStrangerWallet();
+        uint256 usageHash = uint256(keccak256("stranger-usage"));
+        _mintStrangerUsageKey(hash, usageHash);
+
+        vm.store(address(views_), _pkpOwnerSlot(pkpAddr), bytes32(uint256(0)));
+        assertEq(views_.getPkpOwnerMaster(pkpAddr), 0);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "PKP owned by another account"
+            )
+        );
+        views_.getWalletDerivation(usageHash, pkpAddr);
+    }
+
+    function test_getWalletDerivation_unboundPathFailsClosedViaUsageKey() public {
+        (uint256 hash, address pkpAddr) = _registerStrangerWallet();
+        uint256 usageHash = uint256(keccak256("stranger-usage"));
+        _mintStrangerUsageKey(hash, usageHash);
+
+        vm.store(address(views_), _pathOwnerSlot(wp(42)), bytes32(uint256(0)));
+        assertEq(views_.getPathOwnerMaster(wp(42)), 0);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "derivation path owned by another account"
+            )
+        );
+        views_.getWalletDerivation(usageHash, pkpAddr);
+    }
+
+    function test_getWalletDerivation_resolvesThroughConvertedAlias() public {
+        uint256 managedHash = uint256(keccak256("managed-wallet"));
+        vm.prank(apiPayer);
+        writes.newAccount(managedHash, true, "managed", "m", apiPayer);
+        address preWallet = address(0xB4);
+        vm.prank(apiPayer);
+        writes.registerWalletDerivation(managedHash, preWallet, wp(7), "pre", "");
+        assertEq(views_.getWalletDerivation(managedHash, preWallet), wp(7));
+
+        vm.prank(apiPayer);
+        writes.convertToChainSecuredAccount(managedHash, user);
+        uint256 aliasHash = apiKeyHashOf(user);
+
+        assertEq(views_.getPkpOwnerMaster(preWallet), managedHash);
+        assertEq(views_.getPathOwnerMaster(wp(7)), managedHash);
+        assertEq(views_.getWalletDerivation(managedHash, preWallet), wp(7));
+        assertEq(views_.getWalletDerivation(aliasHash, preWallet), wp(7));
+
+        address postWallet = address(0xA4);
+        vm.prank(user);
+        writes.registerWalletDerivation(managedHash, postWallet, wp(8), "post", "");
+        assertEq(views_.getPkpOwnerMaster(postWallet), managedHash);
+        assertEq(views_.getPathOwnerMaster(wp(8)), managedHash);
+        assertEq(views_.getWalletDerivation(aliasHash, postWallet), wp(8));
+        assertEq(views_.getWalletDerivation(managedHash, postWallet), wp(8));
     }
 
     function test_removeWalletDerivation_unregisteredReverts() public {
