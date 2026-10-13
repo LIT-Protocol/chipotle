@@ -7,6 +7,41 @@ Lit's core guarantee is simple to state: **a key's authority is on-chain state.*
 
 We call this **Chain Secured**.
 
+## Video overview
+
+This video explains how Chain Secured works in about four and a half minutes. It covers who can change your wallet's rules and how the runtime checks them on every request.
+
+<Frame>
+  <video
+    controls
+    playsInline
+    preload="metadata"
+    className="w-full aspect-video rounded-xl"
+    poster="/videos/chain-secured-poster.jpg"
+    src="/videos/chain-secured.mp4"
+  ></video>
+</Frame>
+
+<Accordion title="Video transcript">
+A programmable wallet has two parts. There's a private key, and there are rules that decide when the key can sign. Most of the work in this space goes into protecting the key. Providers keep it in secure hardware, or they split it into shares so that no single party holds all of it. Protecting the key is important. But the rules decide what the key signs, so whoever can change the rules has real control over the wallet.
+
+That's why I think the most useful question to ask about a wallet system is who can change the rules. It breaks down into four smaller questions. Who can change the permissions? Who can approve the software that enforces them? Who can stop access? And who can restore access if something goes wrong? Let's see how a typical hosted wallet answers these, and then how Lit's Chain Secured mode answers them.
+
+In a typical hosted wallet service, the key is well protected, often in secure hardware. The rules live inside the provider's system. You read them and change them through the provider's API. The provider's own operators decide which software is trusted to enforce those rules. Good providers run that process carefully, and some let you verify which software is running. But the approval still happens inside the provider, and you can only see the rules through its API. Splitting a key into shares doesn't remove this question either. You still need to know who administers the policies and roles around the shares.
+
+Chain Secured mode puts the rules on a blockchain. Your account's permissions are stored in smart contracts on Base, and a wallet you control owns the account. That can be a regular wallet or a multisig. Inside the account you create groups. A group lists some keys and the Lit Actions that are allowed to use them. Each Action is listed by the hash of its code, its IPFS CID. To change a group, the owner wallet sends a transaction on Base. API keys only get the scopes you grant them on-chain. An execute key can run your Actions, but it can't add itself to a group or swap in new code.
+
+Here's what happens on every request. The runtime receives the Action's code and an API key. It hashes the code to get the CID. Then it reads Base and checks one thing. Does this API key have permission to execute in a group that contains both this CID and this key? If yes, the Action runs and can sign. If not, nothing gets signed. The runtime reads the current state on Base, so a change you make applies as soon as the transaction is on-chain.
+
+The rules also depend on the software that enforces them, so that software is under on-chain control too. The runtime runs in confidential hardware. Its code hash has to be approved in a contract on Base before the key management service will give it any keys. Deploying new code isn't enough to reach the keys. Each approval is a public transaction, so anyone can see which releases were approved and when.
+
+This changes what you can check. You don't need the provider's API to read the rules. Anyone can read an account's groups straight from Base, along with every change to them and the wallet that made it. And because each Action is identified by its hash and can't be edited, you know exactly which code is allowed to sign. To change the logic, you approve a new version, and the key keeps its address.
+
+This is useful for agent wallets. An agent can only sign through code you've approved, and its limits are written into that code. It's also useful for treasuries. If a multisig owns the account, every rule change needs approval from several signers, and each change is recorded on-chain.
+
+There are limits to keep in mind. The runtime operator can still pause signing. Your permissions stay on-chain, but signing needs the runtime and the key service, so you still need a recovery plan. The account contracts can also be upgraded under their own approval rules, so review those as well. Within those limits, here's the difference. The rules that control your keys live on a public chain, and changing them takes a transaction from your wallet. The docs show how to set up a Chain Secured account. They're at developer.litprotocol.com.
+</Accordion>
+
 ## The chain holds the authority
 
 Authorization isn't a flag in someone's database. It's on-chain state that you own:
