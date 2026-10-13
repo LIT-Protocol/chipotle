@@ -279,6 +279,7 @@ jobs:
         id: prepare
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          INPUT_CVM: ${{ inputs.phala_cvm_name }}
         run: |
           set -euo pipefail
 
@@ -286,7 +287,7 @@ jobs:
           # it via the phala_cvm_name input (break-glass / to provision + propose
           # against a freshly-added replica on a new Phala node). Empty on tag
           # pushes, so tagged prod releases auto-select the COLD replica below.
-          CVM_NAME="${{ inputs.phala_cvm_name }}"
+          CVM_NAME="$INPUT_CVM"
           if [ -z "$CVM_NAME" ]; then
             # Auto-select the COLD prod replica: of the two long-lived prod
             # replicas, propose against whichever one is NOT currently serving
@@ -304,36 +305,47 @@ jobs:
             #
             # To change the replica set, edit PROD_REPLICAS below.
             PROD_REPLICAS=("chipotle-prod-rep-r68r6" "chipotle-prod-rep-08tv3")
-            PUBLIC_DOMAIN="${{ vars.DOMAIN_PROD }}"
-            [ -z "$PUBLIC_DOMAIN" ] && PUBLIC_DOMAIN="api.chipotle.litprotocol.com"
+            # Must match CERTBOT_DOMAIN in the compose preparation above and
+            # the public URLs written into deploy-context.json below.
+            PUBLIC_DOMAIN="api.chipotle.litprotocol.com"
 
-            # node_of_dns <host> — print the dstack node token that <host> is a
-            # CNAME for, using whichever resolver is installed on the runner.
+            # Consume all matches: never silently choose one of several nodes.
+            # Match the Phala hostname suffix, not a token in an arbitrary URL.
+            unique_node() {
+              local nodes
+              nodes=$(grep -oE 'dstack-base-prod[0-9]+\.phala\.network\.?([/:[:space:]]|$)' \
+                | sed -E 's/\.phala\.network.*$//' | sort -u) || return 1
+              [ -n "$nodes" ] && [[ "$nodes" != *$'\n'* ]] || return 1
+              printf '%s\n' "$nodes"
+            }
+
+            # Query the routing CNAME explicitly rather than address records.
             node_of_dns() {
               local host="$1" out=""
               if command -v dig >/dev/null 2>&1; then
-                out=$(dig +short "$host" 2>/dev/null)
+                out=$(dig +short CNAME "$host" 2>/dev/null) || return 1
               elif command -v host >/dev/null 2>&1; then
-                out=$(host "$host" 2>/dev/null)
+                out=$(host -t CNAME "$host" 2>/dev/null) || return 1
               elif command -v nslookup >/dev/null 2>&1; then
-                out=$(nslookup "$host" 2>/dev/null)
+                out=$(nslookup -type=CNAME "$host" 2>/dev/null) || return 1
+              else
+                return 1
               fi
-              echo "$out" | grep -oE 'dstack-base-prod[0-9]+' | head -1
+              printf '%s\n' "$out" | unique_node
             }
 
-            # node_of_cvm <cvm> — print the dstack node token the CVM's default
-            # Phala app URL lives on (same jq patterns as wait-for-api-restart).
+            # Accept either CLI endpoint layout, including gateway metadata for
+            # stopped replicas with no app endpoints. Reject conflicting nodes.
             node_of_cvm() {
-              local cvm="$1" json app
-              json=$(phala cvms get "$cvm" --json 2>/dev/null) || return 0
-              app=$(echo "$json" | jq -r '.endpoints[]? | select(.app != null and (.app | tostring | test("-8000\\."))) | .app' | head -1)
-              [ -z "$app" ] && app=$(echo "$json" | jq -r '.public_urls[0].app // empty')
-              [ -z "$app" ] && app=$(echo "$json" | jq -r '(.endpoints // [])[0].app // empty')
-              echo "$app" | grep -oE 'dstack-base-prod[0-9]+' | head -1
+              local cvm="$1" json addresses
+              json=$(phala cvms get "$cvm" --json 2>/dev/null) || return 1
+              addresses=$(printf '%s\n' "$json" | jq -r '
+                [.gateway.cname, .endpoints[]?.app, .public_urls[]?.app]
+                | .[] | select(type == "string")') || return 1
+              printf '%s\n' "$addresses" | unique_node
             }
 
-            LIVE_NODE=$(node_of_dns "$PUBLIC_DOMAIN")
-            if [ -z "$LIVE_NODE" ]; then
+            if ! LIVE_NODE=$(node_of_dns "$PUBLIC_DOMAIN"); then
               echo "::error::Could not determine the live prod node from DNS for $PUBLIC_DOMAIN. Re-run with the phala_cvm_name input to target a replica explicitly."
               exit 1
             fi
@@ -341,8 +353,7 @@ jobs:
 
             COLD_CVM=""; LIVE_CVM=""
             for rep in "${PROD_REPLICAS[@]}"; do
-              n=$(node_of_cvm "$rep")
-              if [ -z "$n" ]; then
+              if ! n=$(node_of_cvm "$rep"); then
                 echo "::error::Could not resolve the node for replica '$rep' via 'phala cvms get'. Cannot safely auto-select the cold box; re-run with phala_cvm_name."
                 exit 1
               fi
