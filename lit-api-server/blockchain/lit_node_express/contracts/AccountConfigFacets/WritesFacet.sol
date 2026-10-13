@@ -161,6 +161,7 @@ contract WritesFacet {
                 revert AppStorage.AccountAlreadyExists(apiKeyHash);
             }
             s.accounts[existingMaster].usageApiKeysList.remove(apiKeyHash);
+            clearUsageApiKeyPermissions(s.accounts[existingMaster].usageApiKeys[apiKeyHash]);
             delete s.accounts[existingMaster].usageApiKeys[apiKeyHash];
             emit UsageApiKeyRemoved(existingMaster, apiKeyHash);
         }
@@ -374,10 +375,7 @@ contract WritesFacet {
         apiKeyStorage.createPKPs = createPKPs;
 
         // clear and reload - this isn't super efficient, but should be fine for most use cases.
-        apiKeyStorage.manageIPFSIdsInGroups.clear();
-        apiKeyStorage.addPkpToGroups.clear();
-        apiKeyStorage.removePkpFromGroups.clear();
-        apiKeyStorage.executeInGroups.clear();
+        clearUsageApiKeyPermissions(apiKeyStorage);
         for (uint256 i = 0; i < manageIPFSIdsInGroups.length; i++) {
             apiKeyStorage.manageIPFSIdsInGroups.add(manageIPFSIdsInGroups[i]);
         }
@@ -686,6 +684,15 @@ contract WritesFacet {
             .description = description;
     }
 
+    /// @dev Clear membership mappings while their enumerable values still exist.
+    /// Deleting the enclosing struct first would leave orphaned set positions.
+    function clearUsageApiKeyPermissions(AppStorage.UsageApiKey storage apiKeyStorage) private {
+        apiKeyStorage.manageIPFSIdsInGroups.clear();
+        apiKeyStorage.addPkpToGroups.clear();
+        apiKeyStorage.removePkpFromGroups.clear();
+        apiKeyStorage.executeInGroups.clear();
+    }
+
     function removeUsageApiKey(
         uint256 accountApiKeyHash,
         uint256 usageApiKeyHash
@@ -699,6 +706,7 @@ contract WritesFacet {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         AppStorage.Account storage account = s.accounts[accountApiKeyHash];
         account.usageApiKeysList.remove(usageApiKeyHash);
+        clearUsageApiKeyPermissions(account.usageApiKeys[usageApiKeyHash]);
         delete account.usageApiKeys[usageApiKeyHash];
         delete s.allApiKeyHashesToMaster[usageApiKeyHash];
         emit UsageApiKeyRemoved(accountApiKeyHash, usageApiKeyHash);

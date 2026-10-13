@@ -75,6 +75,8 @@ covering the following components, subject to the exclusions below:
 
 Out of scope:
 
+- **gVisor** — gVisor is not deployed and is out of scope. This includes the
+  gVisor / any-language action runner and any finding that depends on enabling it.
 - **User misconfiguration** — issues caused by a user configuring their setup
   insecurely, such as granting overly broad permissions or disabling available
   security controls, are user error and are not valid bounty reports. The ability

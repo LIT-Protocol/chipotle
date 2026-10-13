@@ -1,3 +1,4 @@
+import { analytics, trackDashboardSession } from './analytics.js';
 /**
  * Lit Express Node Dashboard — entry point.
  * Imports all feature modules and orchestrates initialization.
@@ -136,6 +137,7 @@ function initSidebar() {
     a.addEventListener('click', (e) => {
       e.preventDefault();
       const id = a.getAttribute('data-scroll');
+      analytics.page(id);
       showStandaloneSection(STANDALONE_SECTION_IDS.includes(id) ? id : null);
       const el = document.getElementById('section-' + id);
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -283,6 +285,7 @@ function refreshChangeOwnershipVisibility() {
 // ----- Auth ready callback -----
 
 function onAuthReady() {
+  void trackDashboardSession();
   updateStatCards();
   preloadAllTables();
   updateUsageKeyOverrideUI();
@@ -307,6 +310,7 @@ function showDevWarning() {
 }
 
 function init() {
+  analytics.page(isAuthenticated() ? 'overview' : 'sign-in');
   setTheme(getTheme());
   if (showDevWarning()) return;
   initModalClose();
