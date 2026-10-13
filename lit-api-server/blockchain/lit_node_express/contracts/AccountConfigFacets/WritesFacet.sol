@@ -754,6 +754,14 @@ contract WritesFacet {
         // Enforced symmetrically at resolve time in ViewsFacet.getWalletDerivation.
         uint256 existingPathOwner = s.pathToOwnerMaster[derivationPath];
         if (existingPathOwner == 0) {
+            if (
+                derivationPath >> AppStorage.WALLET_PATH_TAG_SHIFT !=
+                AppStorage.WALLET_PATH_TAG
+            ) {
+                revert AppStorage.InvalidRequest(
+                    "invalid wallet derivation path tag"
+                );
+            }
             s.pathToOwnerMaster[derivationPath] = masterHash;
         } else if (existingPathOwner != masterHash) {
             revert AppStorage.InvalidRequest("derivation path owned by another account");

@@ -92,14 +92,14 @@ contract WildcardExecutionTest is BaseTest {
         writes.newChainSecuredAccount("victim", "");
         uint256 victimMaster = apiKeyHashOf(stranger);
         vm.prank(stranger);
-        writes.registerWalletDerivation(victimMaster, WALLET, 42, "victim wallet", "");
+        writes.registerWalletDerivation(victimMaster, WALLET, wp(42), "victim wallet", "");
 
         // Group membership is not ownership. Even an explicit foreign address
         // (or an all-wallets wildcard) can pass all five permission views.
         addGroup(user, allActions ? 0 : CID, allWallets ? address(0) : WALLET);
         assertPermissions(USAGE, CID, WALLET, true, true);
         assertEq(views_.getPkpOwnerMaster(WALLET), victimMaster);
-        assertEq(views_.getWalletDerivation(victimMaster, WALLET), 42);
+        assertEq(views_.getWalletDerivation(victimMaster, WALLET), wp(42));
         assertEq(views_.getWalletDerivation(USAGE, WALLET), 0);
 
         // The caller cannot attach the victim's public derivation path to its
@@ -111,19 +111,17 @@ contract WildcardExecutionTest is BaseTest {
                 AppStorage.InvalidRequest.selector, "PKP owned by another account"
             )
         );
-        writes.registerWalletDerivation(master, WALLET, 42, "stolen", "");
+        writes.registerWalletDerivation(master, WALLET, wp(42), "stolen", "");
         assertEq(views_.getWalletDerivation(USAGE, WALLET), 0);
     }
 
     function test_ownGroupCannotReleaseStaleForeignWalletDerivation() public {
         vm.prank(user);
-        writes.registerWalletDerivation(master, WALLET, 42, "legacy registration", "");
+        writes.registerWalletDerivation(master, WALLET, wp(42), "legacy registration", "");
         addGroup(user, CID, WALLET);
         assertPermissions(USAGE, CID, WALLET, true, true);
-        assertEq(views_.getWalletDerivation(USAGE, WALLET), 42);
+        assertEq(views_.getWalletDerivation(USAGE, WALLET), wp(42));
 
-        // Simulate an old cross-account registration after the real owner's
-        // binding is backfilled, as in AccountsTest. Check slot layout first.
         bytes32 base = keccak256("com.litprotocol.accountconfig.storage");
         bytes32 ownerSlot = keccak256(abi.encode(WALLET, bytes32(uint256(base) + 18)));
         assertEq(uint256(vm.load(address(views_), ownerSlot)), master);

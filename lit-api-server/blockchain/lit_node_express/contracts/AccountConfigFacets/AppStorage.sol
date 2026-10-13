@@ -18,6 +18,10 @@ library AppStorage {
     bytes32 constant ACCOUNT_CONFIG_STORAGE_POSITION =
         keccak256("com.litprotocol.accountconfig.storage");
 
+    uint256 internal constant WALLET_PATH_TAG =
+        uint256(uint96(bytes12("lit-wallet:1")));
+    uint256 internal constant WALLET_PATH_TAG_SHIFT = 160;
+
     error AccountDoesNotExist(uint256 apiKeyHash);
     error NoAccountAccess(uint256 apiKeyHash, address sender);
     error AccountAlreadyExists(uint256 apiKeyHash);
@@ -126,18 +130,6 @@ library AppStorage {
         // function of the public path). Deliberately NOT cleared by
         // removeWalletDerivation — only the first owner may ever (re-)register.
         mapping(address => uint256) pkpIdToOwnerMaster;
-        // derivationPath => master apiKeyHash that first registered it.
-        // Companion to pkpIdToOwnerMaster that closes the path-aliasing hole:
-        // pkpIdToOwnerMaster binds the *address label*, but the private key is a
-        // stateless function of the *derivationPath*, and paths are public
-        // (WalletDerivationRegistered data + getWalletDerivation). Without this,
-        // an attacker could register a fresh, self-owned pkpId carrying a victim's
-        // public path and drive the node to release the victim's key. Binding the
-        // path itself to its first owner makes that registration revert. The key is
-        // the uint256 derivationPath directly (already fixed-width; no hashing
-        // needed). Like pkpIdToOwnerMaster, it is deliberately NOT cleared by
-        // removeWalletDerivation — only the first owner may ever (re-)register a
-        // path, keeping the recovery flow intact.
         mapping(uint256 => uint256) pathToOwnerMaster;
     }
 
