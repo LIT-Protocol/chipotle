@@ -1,3 +1,4 @@
+import { analytics } from './analytics.js';
 import {
   enabled,
   request,
@@ -68,6 +69,8 @@ export function resetPasswordIdentity() {
   if (hadIdentity || hasAuthSession()) void signOutService();
 }
 function enter(record, apiKey) {
+  analytics.identify('dashboard-user:' + record.parameters.id, { email: record.email });
+  analytics.capture('login_completed', { method: 'password' });
   verified = null;
   sessionStorage.setItem(
     MARKER,
@@ -127,6 +130,7 @@ function showCreate(record) {
     record.state === "creating" ? "Finish saving account" : "Create account";
 }
 async function createAccount(password) {
+  analytics.capture('signup_started', { method: 'password' });
   await validateNewPassword(password);
   let record = verified;
   if (!record) throw new Error("Verify your email first.");
@@ -247,6 +251,7 @@ async function createAccount(password) {
   $("password-backup-key").value = "";
   $("password-backup").hidden = true;
   enter(record, pending.apiKey);
+  analytics.capture("signup_completed", { method: "password" });
   // The success navigation reloads the page; show the reminder after it.
   sessionStorage.setItem(NOTICE, help);
   return true;
