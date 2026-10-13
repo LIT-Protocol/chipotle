@@ -124,8 +124,8 @@ Returns the new key once in the response (`usage_api_key`). Permissions are set 
 | `can_create_groups` | bool | Allow this key to create new groups |
 | `can_delete_groups` | bool | Allow this key to delete groups |
 | `can_create_pkps` | bool | Allow this key to create PKPs |
-| `manage_ipfs_ids_in_groups` | `u64[]` | Group IDs where this key can add/remove IPFS actions. Use `[0]` as a wildcard for all groups. |
-| `add_pkp_to_groups` | `u64[]` | Group IDs where this key can add PKPs. Use `[0]` for all groups. |
+| `manage_ipfs_ids_in_groups` | `u64[]` | Group IDs where this key can add/remove IPFS actions (any CID, including the all-actions wildcard `0`). Use `[0]` as a wildcard for all groups. See [Delegating group management](/architecture/groups#delegating-group-management). |
+| `add_pkp_to_groups` | `u64[]` | Group IDs where this key can add PKPs. Scoped by group, not by wallet: the key can add **any** wallet in the account to these groups, including the all-wallets wildcard (zero address). Use `[0]` for all groups. See [Delegating group management](/architecture/groups#delegating-group-management). |
 | `remove_pkp_from_groups` | `u64[]` | Group IDs where this key can remove PKPs. Use `[0]` for all groups. |
 | `execute_in_groups` | `u64[]` | Group IDs where this key can execute lit-actions. `[0]` allows arbitrary code without a group; PKP wallet access still requires a matching group. |
 

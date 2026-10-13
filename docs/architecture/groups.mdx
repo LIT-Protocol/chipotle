@@ -71,6 +71,16 @@ For example, `console.log("hello")` needs no group with a wildcard key. An actio
 
 Use a scoped key when you want to restrict which code can execute. Expired and revoked keys do not gain access through wildcard permissions.
 
+### Delegating group management
+
+The group-management permissions on a usage key (`add_pkp_to_groups`, `remove_pkp_from_groups`, `manage_ipfs_ids_in_groups`) are scoped by **group**, not by wallet or action. Treat a key holding them as an administrator of those groups:
+
+- `add_pkp_to_groups: [g]` lets the key add **any** wallet in the account to group `g`, including wallets that were never in `g` and the all-wallets wildcard (zero address), which also covers wallets created later. There is no per-wallet grant on a usage key.
+- `manage_ipfs_ids_in_groups: [g]` lets the key add any action CID to `g`, including the all-actions wildcard `0`.
+- Any key with `execute_in_groups` containing `g` (including a wildcard execution key) can then use those wallets with those actions, which includes signing, decryption and `getPrivateKey`.
+
+So add rights on `g` combined with execute rights in `g`, whether held by one key or by two, give effective access to every wallet in the account. This is by design. If some wallets must stay out of a delegate's reach, keep them in a separate account, or keep wallet membership changes on the account key and give delegates only `execute_in_groups`.
+
 ### Shared wallets across groups
 
 A single wallet can belong to multiple groups. This is useful when multiple dApps need to sign with the same address but run different actions.
