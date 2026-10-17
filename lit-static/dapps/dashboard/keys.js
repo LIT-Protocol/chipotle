@@ -3,7 +3,7 @@
  */
 
 import { getEffectiveApiKey, isAuthenticated, getClient, getUsageKeysStore, setUsageKeysStore, getGroupsStore, setStat, updateStatCards, maskApiKey, LIST_PAGE_SIZE } from './auth.js';
-import { escapeHtml, showStatus, hideStatus, showActionProgress, closeActionProgress, openModal, closeModal, confirmDelete, copyToClipboard, formatError, logError, ICON_PENCIL, ICON_TRASH, ICON_COPY } from './ui-utils.js';
+import { escapeHtml, showStatus, hideStatus, showActionProgress, closeActionProgress, openModal, closeModal, confirmDelete, copyToClipboard, formatError, logError, ICON_PENCIL, ICON_TRASH, ICON_COPY, ICON_WARNING } from './ui-utils.js';
 import { buildGroupMultiSelect, attachGroupMultiSelectLogic, updateMultiSelectSummary, getSelectedGroupIds } from './groups.js';
 
 // ----- Helpers -----
@@ -23,6 +23,23 @@ export function normalizeUsageKeyItem(item) {
     can_remove_pkp_from_groups: item.can_remove_pkp_from_groups ?? [],
     can_execute_in_groups: item.can_execute_in_groups ?? [],
   };
+}
+
+// A usage key carrying the "All Groups" wildcard (group id 0) in its execute set
+// can run actions in *every* group this account owns — reaching every PKP scoped
+// by any of those groups. This is the broad-access case worth flagging. Note that
+// an *empty* execute set is the opposite: it grants no execute access at all
+// (see apiKeyCanExecuteForAnyGroup in ViewsFacet.sol), so it is not flagged.
+const USAGE_KEY_WILDCARD_WARNING =
+  'This usage key can execute in All Groups (wildcard). It can use every PKP scoped by any group in this account.';
+
+export function usageKeyHasAllGroupsWildcard(item) {
+  const ids = item && item.can_execute_in_groups;
+  return Array.isArray(ids) && ids.some((id) => Number(id) === 0);
+}
+
+function warnBadge(tooltip, label) {
+  return '<span class="warn-badge" role="img" aria-label="' + escapeHtml(label) + '" title="' + escapeHtml(tooltip) + '">' + ICON_WARNING + '</span>';
 }
 
 export function renderPermissionSummary(item) {
@@ -80,8 +97,11 @@ export function renderUsageKeysTable() {
       return new Date(ts * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
     })();
     const tr = document.createElement('tr');
+    const nameWarn = usageKeyHasAllGroupsWildcard(item)
+      ? warnBadge(USAGE_KEY_WILDCARD_WARNING, 'Broad access warning')
+      : '';
     tr.innerHTML =
-      '<td>' + escapeHtml(item.name || '') + '</td>' +
+      '<td>' + escapeHtml(item.name || '') + nameWarn + '</td>' +
       '<td class="mono">' + escapeHtml(item.description || '') + '</td>' +
       '<td class="mono" style="font-size:0.82em;">' + escapeHtml(renderPermissionSummary(item)) + '</td>' +
       '<td class="mono">' + escapeHtml(expiration) + '</td>' +
