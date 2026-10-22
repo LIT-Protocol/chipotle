@@ -72,7 +72,7 @@ Create a Railway project with:
 - push to `main` → Railway **staging** environment
 - push of a `v*` tag → Railway **production** environment
 
-It runs `railway up` from the `lit-triggers/` directory (matching the service root) and selects the service with `--service`. Auth uses environment-scoped Railway **project tokens**, so no `railway link` is needed.
+It runs `railway up` from the repository root and selects the service with `--service`. Railway then applies the service root directory (`lit-triggers`) to the uploaded snapshot, making `lit-triggers/` the Docker build context. Uploading from inside `lit-triggers/` would omit the parent directory that Railway expects. Auth uses environment-scoped Railway **project tokens**, so no `railway link` is needed.
 
 Required repo secrets:
 
