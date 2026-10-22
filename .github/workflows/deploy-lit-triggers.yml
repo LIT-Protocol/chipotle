@@ -12,9 +12,9 @@
 # token encodes both the Railway project and its environment, so there is no
 # `railway link` step — we only pass the service name.
 #
-# lit-triggers is self-contained: its Dockerfile `COPY . .`s from the
-# `lit-triggers/` directory, so `railway up` runs from that directory (Railway
-# service root = lit-triggers, config = lit-triggers/railway.json).
+# Upload from the repo root so Railway can apply its service root directory
+# (`lit-triggers`) to the uploaded snapshot. The Docker build context remains
+# `lit-triggers/` (config = lit-triggers/railway.json).
 # (See lit-triggers/README.md → "Railway deployment".)
 #
 # Required repository secrets:
@@ -57,9 +57,6 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging')
     runs-on: self-hosted
     environment: staging
-    defaults:
-      run:
-        working-directory: lit-triggers
     steps:
       - uses: actions/checkout@v4
 
@@ -71,7 +68,7 @@ jobs:
         run: npm install -g @railway/cli@5.57.2
 
       - name: Deploy to Railway (staging)
-        # Build context = lit-triggers/ to match the Dockerfile's `COPY . .`.
+        # Upload the repo; Railway selects lit-triggers/ as the build context.
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_TRIGGERS_STAGING }}
         run: railway up --ci --service "${{ vars.RAILWAY_TRIGGERS_SERVICE || 'lit-triggers' }}"
@@ -82,9 +79,6 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.environment == 'production')
     runs-on: self-hosted
     environment: production
-    defaults:
-      run:
-        working-directory: lit-triggers
     steps:
       - uses: actions/checkout@v4
 
@@ -96,7 +90,7 @@ jobs:
         run: npm install -g @railway/cli@5.57.2
 
       - name: Deploy to Railway (production)
-        # Build context = lit-triggers/ to match the Dockerfile's `COPY . .`.
+        # Upload the repo; Railway selects lit-triggers/ as the build context.
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_TRIGGERS_PRODUCTION }}
         run: railway up --ci --service "${{ vars.RAILWAY_TRIGGERS_SERVICE || 'lit-triggers' }}"
