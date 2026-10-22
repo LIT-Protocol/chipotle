@@ -115,6 +115,28 @@ services:
   # reverse-proxies HTTPS :443 → lit-api-server :8000.
   dstack-ingress:
     image: dstacktee/dstack-ingress:1.4@sha256:11c0481ca1e2ef9c959187ff3c01c7f59c26d631c7717a571ad994b96203bb0b
+    # eMudhra intermediate CA compromise (2026-10-20, CVE-2026-111943): this image (no
+    # fixed upstream tag yet) ships ca-certificates 20230311, which trusts "emSign ECC
+    # Root CA - G3" and "AAA Certificate Services", the roots the compromised
+    # intermediates chain to. Every TLS client in it reads that OS store: curl, requests
+    # (Debian certifi), pip (including the pip and packages the entrypoint installs from
+    # PyPI at startup) and boto3 (STS / Route 53). So: distrust both roots, refuse to
+    # start if either is still trusted, then run the image's own entrypoint with its
+    # default command (overriding entrypoint drops the image CMD). Same step as our
+    # Dockerfiles; remove once the pinned image ships ca-certificates >= 20250419~deb12u2.
+    # Keep dollar signs out of this script: compose would interpolate them.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        sed -i -E 's@^mozilla/(emSign_ECC_Root_CA_-_G3|Comodo_AAA_Services_root)[.]crt@!&@' /etc/ca-certificates.conf
+        && update-ca-certificates --fresh >/dev/null
+        && openssl crl2pkcs7 -nocrl -certfile /etc/ssl/certs/ca-certificates.crt | openssl pkcs7 -print_certs -noout >/tmp/ca-subjects
+        && grep -q 'ISRG Root X1' /tmp/ca-subjects
+        && ! grep -E 'emSign ECC Root CA - G3|AAA Certificate Services' /tmp/ca-subjects
+        && ! find /etc/ssl/certs -lname '*emSign_ECC_Root_CA_-_G3*' -o -lname '*Comodo_AAA_Services_root*' | grep .
+        && rm /tmp/ca-subjects
+        && exec /scripts/entrypoint.sh nginx -g 'daemon off;'
     ports:
       - "443:443"
     environment:

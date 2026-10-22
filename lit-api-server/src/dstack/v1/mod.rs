@@ -1,6 +1,7 @@
 use crate::utils::generate_lit_action_derivation_path;
 use alloy::primitives::keccak256;
 use tracing::instrument;
+pub mod attestation_v2;
 mod dstack;
 pub mod endpoints;
 

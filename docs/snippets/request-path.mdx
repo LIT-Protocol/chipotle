@@ -1,0 +1,14 @@
+```mermaid
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart TD
+    A["Request: usage key,<br/>code, js_params"] --> C(["Can this key run<br/>this code's CID?"])
+    C -->|no| X["Refused with 403"]
+    C -->|yes| D["Run main(js_params)<br/>in the TEE"]
+    D -->|asks for a PKP| F(["Is the PKP in a group<br/>with this CID that<br/>the key can use?"])
+    F -->|no| Y["The PKP call fails"]
+    F -->|yes| G["Derive the PKP key<br/>in the TEE"]
+    G --> R["Response: whatever<br/>main returned"]
+    D -->|no PKP| R
+```
+
+Every request takes this path. A group answers "Can this action use this PKP?" A usage key's scopes answer "Can this caller use this group?" A wildcard key (`execute_in_groups: [0]`) passes the first check for any code, but it still needs a group to use a PKP.

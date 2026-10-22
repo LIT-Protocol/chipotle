@@ -1,0 +1,148 @@
+---
+title: "Glossary"
+description: "One definition for each term in the Lit docs, with the other names you may see for it in the API, the contracts, and older pages."
+---
+
+Each term has one definition on this page. When the docs, the API, or the contracts use another name for the same thing, that name is listed with the definition.
+
+## Accounts and keys
+
+### Account
+
+Your account is a record in the AccountConfig contract on Base. It owns your groups, PKPs, usage keys, and registered actions. Its stable on-chain ID is its `apiKeyHash`.
+
+Other names: `adminHash` in some contract call signatures.
+
+### Account key
+
+The credential that `new_account` returns, once, when you create an API-mode account. It manages the account: it creates usage keys, groups, and PKPs. It can't run actions. ChainSecured accounts have no account key, because the owner wallet signs changes instead.
+
+Other names: master key, master API key, account API key, account master key.
+
+### Usage key
+
+A key that runs actions. You create it with the account key, or with the owner wallet in ChainSecured mode. Its scopes say which groups it can use, and you can delete it without affecting anything else in the account.
+
+Other names: usage API key, execution key. An execute-only key is a usage key whose only scope is `execute`.
+
+### Scope
+
+A permission on a usage key, such as `execute` or `group:addPkp`. Most scopes name the groups they apply to. The [Authentication Model](/architecture/authModel#scopes-and-api-fields) maps each scope to its API field.
+
+### Wildcard
+
+Group `0` in a scope list, as in `execute_in_groups: [0]`. A wildcard execute grant lets a key run any code without a group. Using a PKP still needs a group that lists both the action and the PKP.
+
+### api_payer
+
+A server wallet that submits on-chain writes for API-mode accounts. `GET /core/v1/get_api_payers` lists them. ChainSecured accounts don't use one.
+
+### Billing wallet
+
+The wallet that identifies your account's Stripe customer. It is set when the account is created and doesn't change when you convert to ChainSecured or transfer ownership, so your credits stay with the account.
+
+## Actions, PKPs, and groups
+
+### Lit Action
+
+A JavaScript program that runs inside the TEE. Its `main` function receives `js_params` and returns the response. An action is identified by its CID.
+
+### CID
+
+The IPFS content ID of an action's code, which is a hash of that code. Changing one character changes the CID. The server computes the CID from the code you send. It doesn't fetch code from IPFS.
+
+Other names: IPFS ID, `ipfs_id`, `action_ipfs_cid`.
+
+### CID hash
+
+The keccak256 hash of a CID, which is how the contracts store it. Endpoints that add an action take the CID, and endpoints that update or remove one take the CID hash.
+
+Other names: hashed CID, `hashed_cid`. The entries in `cid_hashes_permitted` are CID hashes.
+
+### PKP
+
+A Programmable Key Pair. It is a key that the TEE derives from the root key and the PKP's derivation path when an action asks for it. The key never leaves the TEE. A PKP's ID is its wallet address.
+
+Other names: wallet, PKP wallet, `pkpId`, `pkp_id`, `wallet_address`.
+
+### Action identity key
+
+A key derived from an action's CID. Only that exact code can use it, and a new version of the code gets a new key. An action gets it with `Lit.Actions.getLitActionPrivateKey()`.
+
+Other names: identity key, code-bound key, action-derived key.
+
+### Group
+
+A list of PKPs and action CIDs in your account. A group answers "Can this action use this PKP?" A usage key's scopes answer "Can this caller use this group?" The group doesn't list keys. See [Groups](/architecture/groups).
+
+### js_params
+
+The JSON values you send with a request. Your action's `main` function receives them as its argument. Treat them as untrusted input, because anyone who can call the action can send any values.
+
+Other names: `jsParams` in the JavaScript SDK.
+
+## Account modes
+
+### Chain Secured
+
+The design in which a key's authority is on-chain state on Base and an attested TEE enforces it by reading the chain. Every account is Chain Secured. See [Chain Secured](/architecture/chain-secured).
+
+### ChainSecured mode
+
+The account mode in which a wallet you control, such as an EOA or a Safe, owns the account and signs every change. See [API Mode vs ChainSecured Mode](/management/account_modes).
+
+Other names: sovereign, self-sovereign, unmanaged (`managed = false`). The docs use these names for code identifiers.
+
+### API mode
+
+The account mode in which a Lit-managed credential owns the account and the server submits your admin writes for you.
+
+Other names: managed (`managed = true`).
+
+## Runtime and verification
+
+### TEE
+
+A trusted execution environment. It is hardware that keeps a program's memory sealed off from the machine's operator and can prove what it is running. Lit runs on Intel TDX.
+
+Other names: enclave.
+
+### CVM
+
+The confidential virtual machine that runs Lit inside Intel TDX, with all of Lit's containers.
+
+### Attestation quote
+
+A document, signed by the TEE's hardware, that records the measurements of everything that booted. It becomes useful once you have checked its signature, its measurements, and its binding to your connection. See [What Is Attestation?](/architecture/verification/attestation).
+
+### Compose hash
+
+The SHA-256 hash of `app-compose.json`, which pins every container by digest. It identifies a Lit release and is recorded in RTMR3 of the quote. The KMS releases keys only to a release whose compose hash is on the allowlist.
+
+Other names: release hash (in the explainer videos), compose-hash.
+
+### Allowlist
+
+The list of approved compose hashes in the DstackApp contract, read with `allowedComposeHashes`. The Lit Safe adds new hashes.
+
+Other names: whitelist.
+
+### KMS
+
+The key management service that releases keys only to TEEs running an approved release. Its rules live in contracts on Base. See [On-Chain KMS](/architecture/verification/onchain-kms).
+
+Other names: the shared KMS contract on Base appears as Phala KMS, DstackKms, and KmsAuth.
+
+### Root key
+
+The infrastructure secret that PKPs and action identity keys are derived from. The KMS manages it and releases it only to approved releases. It is unrelated to your account key.
+
+### Lit Safe
+
+The Safe multisig on Base that approves new Lit releases. Two of its four signers must approve each change. It owns the DstackApp contract and the AccountConfig contract. See [Upgrade Governance](/architecture/verification/upgrade-governance).
+
+### AccountConfig
+
+The contract on Base that holds accounts, usage keys, PKPs, and groups.
+
+Other names: Account contract, Permissions Contract.

@@ -465,7 +465,7 @@ pub async fn add_action(
     let action_hash = ipfs_cid_to_u256(&req.action_ipfs_cid)?;
     accounts::add_action(signer_pool, api_key, action_hash, req.into_inner())
         .await
-        .map_err(|e| ApiStatus::internal_server_error(e, "add_action failed"))?;
+        .map_err(|e| map_contract_error(e, "add_action failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
@@ -483,7 +483,7 @@ pub async fn delete_action(
     }
     accounts::remove_action(signer_pool, api_key, action_hash)
         .await
-        .map_err(|e| ApiStatus::internal_server_error(e, "delete_action failed"))?;
+        .map_err(|e| map_contract_error(e, "delete_action failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
@@ -573,7 +573,8 @@ pub async fn add_usage_api_key(
         "API Key Wallet",
         "Usage API Key Wallet",
     )
-    .await?;
+    .await
+    .map_err(|e| map_contract_error(e, "add_usage_api_key failed"))?;
 
     let usage_api_key = encode_api_key_from_secret(&secret)?;
 
@@ -586,7 +587,7 @@ pub async fn add_usage_api_key(
         req.into_inner(),
     )
     .await
-    .map_err(|e| ApiStatus::internal_server_error(e, "add_usage_api_key failed"))?;
+    .map_err(|e| map_contract_error(e, "add_usage_api_key failed"))?;
     Ok(AddUsageApiKeyResponse {
         success: true,
         usage_api_key,
@@ -618,7 +619,7 @@ pub async fn remove_usage_api_key(
 ) -> Result<AccountOpResponse, ApiStatus> {
     accounts::remove_usage_api_key(signer_pool, api_key, &req.usage_api_key)
         .await
-        .map_err(|e| ApiStatus::internal_server_error(e, "remove_usage_api_key failed"))?;
+        .map_err(|e| map_contract_error(e, "remove_usage_api_key failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
@@ -649,7 +650,7 @@ pub async fn update_usage_api_key(
         req.into_inner(),
     )
     .await
-    .map_err(|e| ApiStatus::internal_server_error(e, "update_usage_api_key failed"))?;
+    .map_err(|e| map_contract_error(e, "update_usage_api_key failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
@@ -677,7 +678,7 @@ pub async fn update_group(
         pkp_ids,
     )
     .await
-    .map_err(|e| ApiStatus::internal_server_error(e, "update_group failed"))?;
+    .map_err(|e| map_contract_error(e, "update_group failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
@@ -721,7 +722,7 @@ pub async fn update_action_metadata(
         &req.description,
     )
     .await
-    .map_err(|e| ApiStatus::internal_server_error(e, "update_action_metadata failed"))?;
+    .map_err(|e| map_contract_error(e, "update_action_metadata failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
@@ -738,7 +739,7 @@ pub async fn update_usage_api_key_metadata(
         &req.description,
     )
     .await
-    .map_err(|e| ApiStatus::internal_server_error(e, "update_usage_api_key_metadata failed"))?;
+    .map_err(|e| map_contract_error(e, "update_usage_api_key_metadata failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
@@ -976,6 +977,7 @@ pub async fn get_admin_api_payer() -> Result<String, ApiStatus> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket::http::Status;
 
     /// Base64 of 32 bytes is always 44 chars, so it can never collide with the
     /// 66-char `0x[hex]{64}` precomputed-hash shape (CPL-285). This test pins
@@ -1032,6 +1034,81 @@ mod tests {
             assert!(
                 !is_account_not_yet_visible(&anyhow::anyhow!("{other}")),
                 "unrelated error {other:?} must not be retried as a visibility race"
+            );
+        }
+    }
+
+    /// A permission revert is the caller's problem, not the server's: it must
+    /// come back as 403 with a fixed message (the revert detail is only logged).
+    /// The input shape is what `send_transaction` returns for a reverted
+    /// pre-send simulation.
+    #[test]
+    fn map_contract_error_maps_permission_reverts_to_403() {
+        for revert in [
+            "NotAllowedToCreateGroup",
+            "NotAllowedToManageIPFSIdsInGroup",
+            "NotMasterAccount",
+            "NoAccountAccess",
+        ] {
+            let err = anyhow::anyhow!("Simulation failed: Contract error: {revert} (0x7b0f9c07…)");
+            let status = map_contract_error(err, "update_group failed");
+            assert_eq!(status.status, Status::Forbidden, "{revert} must map to 403");
+            assert_eq!(status.message, "Permission denied");
+        }
+    }
+
+    /// Every other failure stays a 500 that names the endpoint.
+    #[test]
+    fn map_contract_error_keeps_other_failures_500() {
+        for other in [
+            "Simulation failed: Contract error: InvalidRequest(\"name too long\")",
+            "Failed to send transaction: nonce too low",
+            "no receipt for transaction 0x… within 30s",
+        ] {
+            let status = map_contract_error(anyhow::anyhow!("{other}"), "update_group failed");
+            assert_eq!(status.status, Status::InternalServerError, "{other}");
+            assert!(
+                status.message.starts_with("update_group failed"),
+                "500 message must name the endpoint: {}",
+                status.message
+            );
+        }
+    }
+
+    /// Every endpoint that writes to AccountConfig must send contract errors
+    /// through `map_contract_error`, so a permission revert is a 403 and not a
+    /// 500. Pins the call sites so a new or edited write
+    /// endpoint can't silently fall back to `internal_server_error`.
+    #[test]
+    fn contract_write_endpoints_use_map_contract_error() {
+        let src = include_str!("account_management.rs");
+        let src = &src[..src.find("#[cfg(test)]").expect("test module marker")];
+        for endpoint in [
+            "add_action",
+            "add_action_to_group",
+            "add_group",
+            "add_pkp_to_group",
+            "add_usage_api_key",
+            "convert_to_chain_secured_account",
+            "create_wallet",
+            "delete_action",
+            "delete_wallet",
+            "remove_action_from_group",
+            "remove_group",
+            "remove_pkp_from_group",
+            "remove_usage_api_key",
+            "update_action_metadata",
+            "update_group",
+            "update_usage_api_key",
+            "update_usage_api_key_metadata",
+        ] {
+            assert!(
+                src.contains(&format!("map_contract_error(e, \"{endpoint} failed\")")),
+                "{endpoint} must map contract errors with map_contract_error"
+            );
+            assert!(
+                !src.contains(&format!("internal_server_error(e, \"{endpoint} failed\")")),
+                "{endpoint} must not turn contract errors into a blanket 500"
             );
         }
     }

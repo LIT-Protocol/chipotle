@@ -5,7 +5,7 @@ use alloy::primitives::Address;
 use lit_actions_grpc::proto::{
     AesDecryptRequest, AesEncryptRequest, GetPrivateKeyRequest, UnionResponse,
 };
-use lit_api_server::accounts::blockchain_cache;
+use lit_api_server::accounts::blockchain_cache::{self, CachedPermission, GrantDeadline};
 use lit_api_server::actions::client::{Client, ClientBuilder};
 use lit_api_server::utils::parse_with_hash::{api_key_hash, ipfs_cid_to_u256};
 
@@ -35,7 +35,10 @@ async fn store(api_key: &str, permitted: bool) {
     blockchain_cache::get()
         .unwrap()
         .use_wallet_cache()
-        .insert(cache_key(api_key), permitted)
+        .insert(
+            cache_key(api_key),
+            CachedPermission::new(permitted, GrantDeadline::Never),
+        )
         .await;
 }
 
@@ -163,7 +166,7 @@ async fn late_old_generation_fill_cannot_authorize_next_operation() {
     blockchain_cache::get()
         .unwrap()
         .use_wallet_cache()
-        .insert(old_key, true)
+        .insert(old_key, CachedPermission::new(true, GrantDeadline::Never))
         .await;
     assert_eq!(op_error(&mut execution, key_op()).await, DENIED);
     assert_reaches_derivation(&mut other_execution, key_op()).await;

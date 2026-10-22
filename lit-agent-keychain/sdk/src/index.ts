@@ -70,14 +70,19 @@ import {
 import { jsonFetch, HttpError } from "../../protocol/client-http.ts";
 import {
   ATTESTED_ORIGINS,
+  AttestationError,
   verifyAttestation,
+  verifyAttestationV2,
   type AttestationPolicy,
   type AttestationReport,
+  type AttestationReportV2,
 } from "../../protocol/attestation.ts";
 export {
   verifyAttestation,
+  verifyAttestationV2,
   verifyQuote,
   replayEventLog,
+  AttestationError,
   CHIPOTLE_ATTESTATION_POLICY,
   ATTESTED_ORIGINS,
   BASE_PUBLIC_RPC_URLS,
@@ -85,6 +90,8 @@ export {
 export type {
   AttestationPolicy,
   AttestationReport,
+  AttestationReportV2,
+  AttestationErrorCode,
 } from "../../protocol/attestation.ts";
 export { authorizationTypedData } from "../../protocol/identity.ts";
 export { HttpError } from "../../protocol/client-http.ts";
@@ -288,6 +295,10 @@ function origin(value: string) {
  * `false` disables the check; a policy pins the expected dstack app and
  * governance contracts. Omitted: known Lit origins use their pinned policy and
  * unknown origins (local development, test adapters) are not attested.
+ *
+ * Connections run the original checks (`verifyAttestation`) for every origin.
+ * The stronger v2 checks run only where an application calls
+ * `verifyLitEndpoint()` itself.
  */
 export type AttestationOption = AttestationPolicy | false | undefined;
 export type AttestationHooks = {
@@ -296,6 +307,87 @@ export type AttestationHooks = {
   /** Re-verify after this many milliseconds. Default one hour. */
   maxAgeMs?: number;
 };
+/**
+ * `url`'s origin with trailing dots dropped from the hostname. A fully
+ * qualified name ("host.") is the same host, so `verifyLitEndpoint` treats it
+ * as that built-in origin rather than an unknown one.
+ */
+function canonicalOrigin(url: string) {
+  const u = new URL(url);
+  if (u.hostname.endsWith(".")) {
+    const hostname = u.hostname.replace(/\.+$/, "");
+    requireThat(hostname.length > 0, "Invalid origin");
+    u.hostname = hostname;
+  }
+  return u.origin;
+}
+/**
+ * Origins with a built-in policy when this module loaded: the origins
+ * `verifyLitEndpoint` accepts. A snapshot, so an origin an application adds to
+ * `ATTESTED_ORIGINS` at runtime is not taken for a Lit endpoint.
+ */
+const BUILT_IN_ORIGINS: ReadonlySet<string> = new Set(
+  Object.keys(ATTESTED_ORIGINS),
+);
+/**
+ * Proves `url` (default: the Lit Chipotle API) is a genuine Lit TEE running the
+ * governed release, with nothing to configure. It runs every check: Intel quote
+ * signature, event-log replay, measured app identity, KMS-certified boot
+ * binding (the endpoint's OS image matches the hardware measurement), KMS
+ * identity, a fresh nonce, on-chain governance and, in Node, the TLS
+ * certificate binding.
+ *
+ * Resolves with the verified report or rejects with an `AttestationError`
+ * whose `code` says why. There is no partial result.
+ *
+ * Opt-in: nothing in the SDK calls it. Keychain, Owner, the CLI and MCP keep
+ * running the original checks (`verifyAttestation`), so upgrading the package
+ * changes nothing until an application calls this.
+ *
+ * In Node the report's `tlsCertificateSha256` is the certificate the origin
+ * served and the enclave holds. Requests are bound to the attested enclave only
+ * if the connection that carries them pins that certificate; SDK clients do not.
+ *
+ * `rpcUrl` replaces the public Base RPC rotation with your own endpoint;
+ * `timeoutMs` bounds each request. Neither changes which checks run.
+ */
+export async function verifyLitEndpoint(
+  url: string = DEFAULT_LIT_API_URL,
+  { rpcUrl, timeoutMs = 30000 }: { rpcUrl?: string; timeoutMs?: number } = {},
+): Promise<AttestationReportV2> {
+  let target: string;
+  try {
+    target = canonicalOrigin(url);
+  } catch {
+    throw new AttestationError("UNKNOWN_ORIGIN", `Invalid URL: ${url}`);
+  }
+  const builtIn = BUILT_IN_ORIGINS.has(target)
+    ? ATTESTED_ORIGINS[target]
+    : undefined;
+  if (!builtIn)
+    throw new AttestationError(
+      "UNKNOWN_ORIGIN",
+      `No attestation policy is built in for ${target}`,
+    );
+  const policy = rpcUrl ? { ...builtIn, rpcUrl, fallbackRpcUrls: [] } : builtIn;
+  return verifyAttestationV2(target, policy, {
+    timeoutMs,
+    tlsCertificateSha256: await observeCertificate(target, timeoutMs),
+  });
+}
+/** The certificate `url` serves (Node), as an `AttestationError` on failure. */
+async function observeCertificate(url: string, timeoutMs: number) {
+  try {
+    return await peerCertificateSha256(url, timeoutMs);
+  } catch (error) {
+    throw new AttestationError(
+      "TLS_BINDING_FAILED",
+      `could not read the TLS certificate of ${url}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
 /** Retry policy for the first request made with a freshly minted usage key. */
 export type FreshKeySettle = {
   /** Give up after this many milliseconds. Default 45000. */

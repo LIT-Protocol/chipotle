@@ -173,6 +173,41 @@ library SecurityLib {
         return s.allApiKeyHashesToMaster[apiKeyHash];
     }
 
+    /// @notice Canonicalize the account argument of an admin write: returns the
+    ///         master hash when `apiKeyHash` is the current admin's own wallet
+    ///         hash on a ChainSecured account and `sender` is that admin, and
+    ///         returns `apiKeyHash` unchanged otherwise.
+    /// @dev    convertToChainSecuredAccount and transferChainSecuredAccountOwnership
+    ///         keep the master hash and register keccak256(abi.encodePacked(newAdmin))
+    ///         as an alias of it. That alias is the identity the dashboard and
+    ///         core_sdk.js send for every write after a wallet login, but the
+    ///         write guards only gave master authority to the master hash itself,
+    ///         so the alias fell through to the usage-key scope checks (it has no
+    ///         scopes) or to revertIfNotMasterAccount (#147).
+    ///         Everything else keeps its existing treatment: usage keys, a previous
+    ///         admin's alias, and managed accounts (an api_payer can also write to
+    ///         those, and a usage key may sit at the admin wallet's hash).
+    function adminWriteAccountHash(
+        uint256 apiKeyHash,
+        address sender
+    ) internal view returns (uint256) {
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        uint256 masterHash = s.allApiKeyHashesToMaster[apiKeyHash];
+        if (masterHash == 0 || masterHash == apiKeyHash) {
+            return apiKeyHash;
+        }
+        AppStorage.Account storage account = s.accounts[masterHash];
+        if (
+            account.managed ||
+            sender != account.adminWalletAddress ||
+            apiKeyHash != uint256(keccak256(abi.encodePacked(sender))) ||
+            account.usageApiKeys[apiKeyHash].apiKeyHash == apiKeyHash
+        ) {
+            return apiKeyHash;
+        }
+        return masterHash;
+    }
+
     /// @dev Match ViewsFacet._isExpired: zero never expires; the deadline itself
     ///      is expired. Master-key writes bypass the usage-scope guards below.
     function revertIfUsageKeyExpired(AppStorage.UsageApiKey storage usageApiKey) private view {

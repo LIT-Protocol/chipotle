@@ -1,0 +1,47 @@
+# Check that the pinned dstack-verifier image (.github/dstack-verifier/Dockerfile)
+# was built by Phala's release workflow from the matching verifier-v<version> tag,
+# using its signed SLSA build provenance. Runs on every change to the pin,
+# including Dependabot bump PRs (#113). Phala's release workflow builds on
+# GitHub-hosted runners, so self-hosted provenance is rejected.
+
+name: dstack-verifier provenance
+
+on:
+  pull_request:
+    paths:
+      - .github/dstack-verifier/**
+      - scripts/dstack-verifier-image.sh
+      - .github/workflows/dstack-verifier-provenance.yml
+  push:
+    branches: [main]
+    paths:
+      - .github/dstack-verifier/**
+      - scripts/dstack-verifier-image.sh
+      - .github/workflows/dstack-verifier-provenance.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  provenance:
+    name: verify dstack-verifier build provenance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify signed build provenance of the pinned image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          IMAGE=$(bash scripts/dstack-verifier-image.sh)
+          VERSION=${IMAGE#*:}
+          VERSION=${VERSION%@*}
+          DIGEST=${IMAGE#*@}
+          echo "Checking $IMAGE (source ref refs/tags/verifier-v$VERSION)"
+          gh attestation verify "oci://ghcr.io/dstack-tee/dstack-verifier@$DIGEST" \
+            --repo Dstack-TEE/dstack \
+            --signer-workflow Dstack-TEE/dstack/.github/workflows/verifier-release.yml \
+            --source-ref "refs/tags/verifier-v$VERSION" \
+            --deny-self-hosted-runners

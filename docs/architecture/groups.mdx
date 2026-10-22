@@ -3,13 +3,21 @@ title: "Groups"
 description: "How groups organize wallets, actions, and usage keys in Lit Chipotle."
 ---
 
+import RequestPath from "/snippets/request-path.mdx";
+
+Can this action use this key? A group is how your account answers that question. Here is one concrete case. Usage key K has execute permission in group 7. Group 7 lists the action `QmABC` and the PKP `pkp_001`. When K sends the code whose CID is `QmABC`, the action runs, and it may sign with `pkp_001`. If K sends different code, the CID is different and the request is refused. If the action asks for a PKP that group 7 doesn't list, that call fails.
+
+The group holds the actions and the PKPs. The permission to use a group lives on the usage key, as a scope that names the group. Every request checks both:
+
+<RequestPath />
+
 ## What is a Group?
 
 A **group** is the core organizing unit in Lit Chipotle. It binds together three things:
 
 1. **Wallets (PKPs)** — which wallets can be used
 2. **IPFS Actions** — which lit-actions can be executed
-3. **Usage API Keys** — which keys have access (via their permission arrays)
+3. **Usage API Keys** — which keys have access (via their permission arrays). This access is stored on each key, as a permission that names the group. The group itself doesn't keep a list of keys.
 
 Think of a group as an access-control boundary: scoped usage keys can run actions in their permitted groups, and PKP wallet access requires a group permitting both the action and wallet. Wildcard execution keys can run arbitrary code without a group, but still need that group match to use a PKP wallet.
 
@@ -103,15 +111,25 @@ decision for its entire lifetime.
 Revocation is not instantaneous. API mutation hooks and the on-chain account-event
 listener selectively invalidate affected cache entries; the listener polls every
 10 seconds. Cached grants expire after 300 seconds without a hit; each hit
-renews that window. Cached denials expire 30 seconds after insertion or update,
-without extension on reads. Both grants and denials are invalidated by relevant
-events: once a grant event is processed successfully, the next lookup can observe
-the new permission without waiting for the denial TTL. This is not instantaneous;
-mining, polling, RPC visibility, and usage-key invalidation affect propagation.
+renews that window, but never past the calling usage key's expiration. Cached
+denials expire 30 seconds after insertion or update, without extension on reads.
+Both grants and denials are invalidated by relevant events: once a grant event is
+processed successfully, the next lookup can observe the new permission without
+waiting for the denial TTL. This is not instantaneous; mining, polling, RPC
+visibility, and usage-key invalidation affect propagation.
 
-There is no hard maximum age for a continuously used grant. If the listener misses
-an event or invalidation is incomplete, a hot stale grant can remain usable
-indefinitely. Denials retain their short TTL as a fallback. Once a fresh lookup is
+A usage key's expiration emits no event, so it is enforced by the cache itself:
+when a grant is cached, the server reads the calling key's expiration from chain
+and does not serve the grant from cache at or after that time, however often it is
+used. The next lookup goes back to the chain, which rejects the expired key. The
+expiration is compared with the server's clock, which can differ from block
+timestamps by a few seconds. If the expiration cannot be read, the grant is not
+cached, and the read is retried after 30 seconds.
+
+There is no hard maximum age for a continuously used grant of a key without an
+expiration. If the listener misses an event or invalidation is incomplete, a hot
+stale grant can remain usable indefinitely, or until the key expires if it has an
+expiration. Denials retain their short TTL as a fallback. Once a fresh lookup is
 required, lookup errors stop the operation rather than falling back to an old
 grant. Wallet-derivation caching retains its separate fixed five-minute TTL.
 
@@ -128,14 +146,16 @@ When creating a group, two convenience flags control default access:
 
 These are set in the Dashboard's group creation form or via the `pkp_ids_permitted` and `cid_hashes_permitted` arrays in the API. On-chain, these flags are *not* separate booleans: they are encoded using wildcard values in the arrays:
 
-- To permit **all wallets**, include the zero PKP ID in `pkp_ids_permitted`:
-  - `pkp_ids_permitted: ["0x0000000000000000000000000000000000000000000000000000000000000000"]`
-- To permit **all actions**, include `0` in `cid_hashes_permitted`:
-  - `cid_hashes_permitted: [0]`
+- To permit **all wallets**, include the zero PKP ID in `pkp_ids_permitted`. PKP IDs are 20-byte wallet addresses, so this is the zero address:
+  - `pkp_ids_permitted: ["0x0000000000000000000000000000000000000000"]`
+- To permit **all actions**, include `0` in `cid_hashes_permitted`. The array holds strings, so send it as `"0"`:
+  - `cid_hashes_permitted: ["0"]`
 
 Leaving these arrays empty or omitting them does **not** mean "all" — it means no wallets/actions are automatically permitted by default.
+
 ## Further Reading
 
 - [API Reference](/management/api_direct) — Full endpoint docs for group management
 - [API Keys](/management/api_keys) — How usage keys connect to groups
 - [Architecture](/architecture/index) — System design overview
+- [Authentication Model](/architecture/authModel) — every scope, the permission matrix, and how ChainSecured mode emerges from configuration

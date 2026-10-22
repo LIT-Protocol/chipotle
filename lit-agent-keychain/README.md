@@ -34,10 +34,17 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 
 ## SDK release coordination
 
-This source prepares SDK **2.2.3**. It adds authenticator-app 2FA enrollment,
-recovery-code management, and the owner client's second-factor login callback.
-The accompanying owner UI/API enforce hosted-login 2FA; no action templates or
-catalog locks change.
+This source prepares SDK **2.3.0**. It adds an opt-in `verifyLitEndpoint()`
+that reads `/attestation/v2`: the OS image is tied to the hardware measurement
+through the dstack KMS signature chain, and each verification signs a fresh
+nonce. Nothing else changes: Keychain, Owner, the CLI and MCP run exactly the
+2.2.3 checks, and `verifyAttestation()` is unchanged. Publish after
+`/attestation/v2` is live on `https://api.chipotle.litprotocol.com`, so the new
+function works from day one (before that it fails with `ENDPOINT_TOO_OLD`, and
+nothing else is affected). No action templates or catalog locks change.
+
+SDK 2.2.3 added authenticator-app 2FA enrollment, recovery-code management, and
+the owner client's second-factor login callback.
 
 SDK 2.2.2 updated error guidance and documentation to use live discovery after
 removing agent-config downloads from the website.
@@ -96,7 +103,7 @@ Consequences, all handled by the release mechanism described in
   release still takes one signature per document (`PRE_BATCH_AUTHORITY_HASHES`).
 
 Release checks: run `npm test` and `npm run build`, publish through the normal
-maintainer release process, verify `npm view @lit-protocol/keychain@2.2.3 version`,
+maintainer release process, verify `npm view @lit-protocol/keychain@2.3.0 version`,
 then repeat the strict external TypeScript consumer and attestation-enabled Node
 smoke test from the registry artifact. Only then deploy the owner UI/API and create,
 rotate and read a secret against production. See the QA reports under `docs/` for

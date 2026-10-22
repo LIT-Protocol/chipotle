@@ -20,7 +20,7 @@ pub fn routes() -> Vec<Route> {
 
 /// Routes for root-level attestation (GET /attestation) and info (GET /info). Mount at "/".
 pub fn attestation_routes() -> Vec<Route> {
-    routes![attestation, info]
+    routes![attestation, info, super::attestation_v2::attestation_v2]
 }
 
 /// GET /attestation — returns quote, event_log, vm_config for CVM verification.

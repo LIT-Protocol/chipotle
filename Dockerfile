@@ -35,10 +35,23 @@ FROM ubuntu:24.04 AS runtime
 WORKDIR /app
 
 # Runtime deps: OpenSSL and CA certs for TLS / HTTPS
+# eMudhra intermediate CA compromise (2026-10-20, CVE-2026-111943): the private keys of
+# eight eMudhra intermediates are public. They chain to "emSign ECC Root CA - G3" and, through
+# Sectigo cross-signs, to "AAA Certificate Services". Distrust both roots in the OS trust store
+# whatever ca-certificates version apt resolves (Ubuntu 20260816ubuntu0.24.04.1 drops the same two), and
+# fail the build if either is still trusted: OpenSSL/native-tls and rustls-native-certs clients
+# verify against this store. https://emudhra.we-have-a-problem.com/
 RUN apt-get update -y && apt-get install -y --no-install-recommends \
     openssl \
     ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && sed -i -E 's@^mozilla/(emSign_ECC_Root_CA_-_G3|Comodo_AAA_Services_root)\.crt$@!&@' /etc/ca-certificates.conf \
+    && update-ca-certificates --fresh \
+    && openssl crl2pkcs7 -nocrl -certfile /etc/ssl/certs/ca-certificates.crt | openssl pkcs7 -print_certs -noout > /tmp/ca-subjects \
+    && grep -q 'ISRG Root X1' /tmp/ca-subjects \
+    && ! grep -E 'emSign ECC Root CA - G3|AAA Certificate Services' /tmp/ca-subjects \
+    && ! find /etc/ssl/certs -lname '*emSign_ECC_Root_CA_-_G3*' -o -lname '*Comodo_AAA_Services_root*' | grep . \
+    && rm /tmp/ca-subjects
 
 # Copy built binaries into PATH
 COPY --from=builder /app/lit-api-server/target/release/lit-api-server /usr/local/bin/

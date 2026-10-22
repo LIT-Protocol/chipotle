@@ -345,7 +345,7 @@ Module imports operate under the same security model as the rest of the Lit Acti
 
 Module imports are subject to the same [resource limits](/lit-actions/limits) as the rest of your action:
 
-- **Memory** — Imported modules count toward the action's memory limit (default 128 MB).
+- **Memory** — Imported modules count toward the action's memory limit (default 64 MB).
 - **Timeout** — Module fetch time counts toward the action's execution timeout (default 15 minutes).
 - **Network** — Module fetches use a separate HTTP client from the action's `fetch()` API and do not count toward the per-action fetch limit. However, they share the same execution timeout.
 - **Module size** — Individual modules are capped at 10 MB.

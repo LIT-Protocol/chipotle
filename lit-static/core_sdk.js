@@ -131,7 +131,7 @@ export async function mintAndRegisterWallet(mint, register) {
 /**
  * @typedef {Object} UpdateUsageApiKeyOptions
  * @property {string} apiKey - Account API key
- * @property {string} usageApiKey - The existing usage API key to update
+ * @property {string} usageApiKey - The existing usage API key to update, or its 0x-prefixed keccak256 hash (`api_key_hash` from listApiKeys)
  * @property {string} name - Name
  * @property {string} description - Description
  * @property {boolean} [canCreateGroups=false]
@@ -146,7 +146,7 @@ export async function mintAndRegisterWallet(mint, register) {
 /**
  * @typedef {Object} RemoveUsageApiKeyOptions
  * @property {string} apiKey - Account API key
- * @property {string} usageApiKey - Usage API key to remove
+ * @property {string} usageApiKey - Usage API key to remove, or its 0x-prefixed keccak256 hash (`api_key_hash` from listApiKeys)
  */
 
 /**
@@ -183,7 +183,7 @@ export async function mintAndRegisterWallet(mint, register) {
 /**
  * @typedef {Object} UpdateUsageApiKeyMetadataOptions
  * @property {string} apiKey - Account API key
- * @property {string} usageApiKey - Usage API key to update
+ * @property {string} usageApiKey - Usage API key to update, or its 0x-prefixed keccak256 hash (`api_key_hash` from listApiKeys)
  * @property {string} name - Name
  * @property {string} description - Description
  */
@@ -225,7 +225,7 @@ export async function mintAndRegisterWallet(mint, register) {
  * @property {string} name - Name
  * @property {string} description - Description
  * @property {string} expiration - Expiration (unix timestamp string)
- * @property {number} balance - Balance (u64)
+ * @property {number|string} balance - Balance (API: number; sovereign: exact uint256 decimal string)
  * @property {boolean} can_create_groups - Permission to create groups
  * @property {boolean} can_delete_groups - Permission to delete groups
  * @property {boolean} can_create_pkps - Permission to create PKPs
@@ -443,6 +443,25 @@ async function loadEthers() {
     });
   }
   return _ethersPromise;
+}
+
+/**
+ * The on-chain hash of a usage API key argument, which may be the key itself
+ * or its keccak256 hash. listApiKeys returns only the hash (`api_key_hash`), so
+ * the hash is all the dashboard has for a key it loaded from chain, such as a
+ * key a previous admin issued. A 0x-prefixed 32-byte hex string is already the
+ * hash; anything else is a key and gets hashed. That is the shape test of the
+ * server's usage_api_key_to_hash (lit-api-server/src/utils/parse_with_hash.rs),
+ * except that the server trims surrounding whitespace first and this does not:
+ * the argument is used exactly as given, as raw keys always were. Issued keys
+ * never have that shape: addUsageApiKey mints 'lk_' + hex and the server
+ * issues 44-character base64 keys.
+ */
+function usageApiKeyHash(ethers, usageApiKey) {
+  if (typeof usageApiKey === 'string' && /^0x[0-9a-fA-F]{64}$/.test(usageApiKey)) {
+    return usageApiKey;
+  }
+  return ethers.keccak256(ethers.toUtf8Bytes(usageApiKey));
 }
 
 export class LitNodeSimpleApiClient {
@@ -1326,7 +1345,7 @@ export class LitNodeSimpleApiClient {
       const ethers = await loadEthers();
       const contract = await this._getWriteContract();
       const hash = await this._adminHash(apiKey);
-      const usageHash = ethers.keccak256(ethers.toUtf8Bytes(usageApiKey));
+      const usageHash = usageApiKeyHash(ethers, usageApiKey);
       // setUsageApiKey is an upsert; existing expiration/balance are
       // overwritten. Sovereign callers should fetch current values via
       // listApiKeys and pass them back if preservation is desired.
@@ -1384,7 +1403,7 @@ export class LitNodeSimpleApiClient {
       const ethers = await loadEthers();
       const contract = await this._getWriteContract();
       const hash = await this._adminHash(apiKey);
-      const usageHash = ethers.keccak256(ethers.toUtf8Bytes(usageApiKey));
+      const usageHash = usageApiKeyHash(ethers, usageApiKey);
       const { txHash } = await runContractWrite({
         contract, method: 'removeUsageApiKey',
         args: [hash, usageHash],
@@ -1552,7 +1571,7 @@ export class LitNodeSimpleApiClient {
       const ethers = await loadEthers();
       const contract = await this._getWriteContract();
       const hash = await this._adminHash(apiKey);
-      const usageHash = ethers.keccak256(ethers.toUtf8Bytes(usageApiKey));
+      const usageHash = usageApiKeyHash(ethers, usageApiKey);
       const { txHash } = await runContractWrite({
         contract, method: 'updateUsageApiKeyMetadata',
         args: [hash, usageHash, name ?? '', description ?? ''],
@@ -1590,7 +1609,9 @@ export class LitNodeSimpleApiClient {
         name: r.metadata.name,
         description: r.metadata.description,
         expiration: r.expiration.toString(),
-        balance: Number(r.balance),
+        // Edits send this uint256 back to setUsageApiKey; Number would round
+        // values above MAX_SAFE_INTEGER and could even overflow uint256.
+        balance: r.balance.toString(),
         can_create_groups: r.createGroups,
         can_delete_groups: r.deleteGroups,
         can_create_pkps: r.createPKPs,

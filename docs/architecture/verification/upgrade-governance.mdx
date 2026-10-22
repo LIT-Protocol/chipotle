@@ -39,6 +39,7 @@ on Base.
 | **Signers** | 4 distinct Lit-controlled keys | `cast call 0xF688…1098 "getOwners()(address[])" --rpc-url https://mainnet.base.org` |
 | **Safe version** | 1.4.1 | `cast call 0xF688…1098 "VERSION()(string)" --rpc-url https://mainnet.base.org` |
 | **Timelock** | None — the Safe owns the `DstackApp` contract directly | `owner()` on the app returns the Safe address, not a timelock |
+| **AccountConfig** | The same Safe owns the production AccountConfig contract ([`0xaaaa…a7aa`](https://basescan.org/address/0xaaaaa9120fe271f653cfdb6bf400db93d2dea7aa)) and approves its upgrades (`diamondCut` is owner-only), also with no timelock | `cast call 0xaaaaa9120fe271f653cfdb6bf400db93d2dea7aa "owner()(address)" --rpc-url https://mainnet.base.org` |
 
 The shared **Phala KMS** contract ([`0x2f83…Ba9C`](https://basescan.org/address/0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C))
 — which whitelists allowed OS images and KMS instances — is **not** owned by the Lit Safe.

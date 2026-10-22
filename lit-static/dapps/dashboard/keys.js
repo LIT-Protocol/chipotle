@@ -15,6 +15,7 @@ export function normalizeUsageKeyItem(item) {
     name: item.name,
     description: item.description,
     expiration: item.expiration,
+    balance: item.balance,
     can_create_groups: item.can_create_groups ?? false,
     can_delete_groups: item.can_delete_groups ?? false,
     can_create_pkps: item.can_create_pkps ?? false,
@@ -22,6 +23,87 @@ export function normalizeUsageKeyItem(item) {
     can_add_pkp_to_groups: item.can_add_pkp_to_groups ?? [],
     can_remove_pkp_from_groups: item.can_remove_pkp_from_groups ?? [],
     can_execute_in_groups: item.can_execute_in_groups ?? [],
+  };
+}
+
+/**
+ * Store row for an item returned by listApiKeys. listApiKeys returns only the
+ * key's hash, so the hash is also the row's usage_api_key: it is all an edit
+ * or delete has to name a key loaded from chain.
+ */
+export function usageKeyRowFromListItem(it) {
+  return {
+    id: it.id,
+    api_key_hash: it.api_key_hash,
+    usage_api_key: it.api_key_hash,
+    name: it.name ?? '',
+    description: it.description ?? '',
+    expiration: it.expiration,
+    balance: it.balance,
+    can_create_groups: it.can_create_groups ?? false,
+    can_delete_groups: it.can_delete_groups ?? false,
+    can_create_pkps: it.can_create_pkps ?? false,
+    can_manage_ipfs_ids_in_groups: it.can_manage_ipfs_ids_in_groups ?? [],
+    can_add_pkp_to_groups: it.can_add_pkp_to_groups ?? [],
+    can_remove_pkp_from_groups: it.can_remove_pkp_from_groups ?? [],
+    can_execute_in_groups: it.can_execute_in_groups ?? [],
+  };
+}
+
+/**
+ * Store row for a usage key this session just added, from the addUsageApiKey
+ * options it was sent (without apiKey). The cleartext key is shown once and
+ * kept as usage_api_key, which the SDK hashes for an edit or a delete. The
+ * row keeps the permissions the key was created with, because the Edit
+ * dialog ticks only what the row has: without them, editing the key before
+ * the next Load would write it back with no permissions. It has no expiration
+ * or balance: the dashboard sends neither, so in sovereign mode both start at
+ * 0, which is what an edit writes back for an empty expiration and a missing
+ * balance.
+ */
+export function usageKeyRowFromCreated(usageKey, {
+  name, description, canCreateGroups, canDeleteGroups, canCreatePkps,
+  manageIpfsIdsInGroups, addPkpToGroups, removePkpFromGroups, executeInGroups,
+} = {}) {
+  return {
+    id: usageKey.slice(0, 12),
+    api_key: usageKey,
+    usage_api_key: usageKey,
+    name: name || '',
+    description: description || '',
+    expiration: '',
+    can_create_groups: !!canCreateGroups,
+    can_delete_groups: !!canDeleteGroups,
+    can_create_pkps: !!canCreatePkps,
+    can_manage_ipfs_ids_in_groups: manageIpfsIdsInGroups ?? [],
+    can_add_pkp_to_groups: addPkpToGroups ?? [],
+    can_remove_pkp_from_groups: removePkpFromGroups ?? [],
+    can_execute_in_groups: executeInGroups ?? [],
+  };
+}
+
+/**
+ * updateUsageApiKey options for a saved edit of `item` (a normalized store
+ * row). The modal can't change the account-level permissions, so those come
+ * from the item. In sovereign mode the SDK calls setUsageApiKey directly, which
+ * overwrites expiration and balance (0 = never expires), so the loaded values
+ * are sent back to keep them. API mode ignores both.
+ */
+export function usageKeyUpdateArgs(item, { apiKey, name, description, manageIpfsIdsInGroups, addPkpToGroups, removePkpFromGroups, executeInGroups }) {
+  return {
+    apiKey,
+    usageApiKey: item.usage_api_key,
+    name,
+    description,
+    canCreateGroups: item.can_create_groups,
+    canDeleteGroups: item.can_delete_groups,
+    canCreatePkps: item.can_create_pkps,
+    manageIpfsIdsInGroups,
+    addPkpToGroups,
+    removePkpFromGroups,
+    executeInGroups,
+    expiration: item.expiration,
+    balance: item.balance,
   };
 }
 
@@ -45,16 +127,9 @@ export function renderPermissionSummary(item) {
 // Record a freshly-created usage key into the in-memory store + UI. Extracted
 // so both the success path and the "broadcast but unconfirmed" recovery path
 // (sovereign mode) surface the once-only cleartext key identically.
-function recordCreatedUsageKey(usageKey, name, description) {
+function recordCreatedUsageKey(usageKey, addOptions) {
   if (!usageKey) return;
-  getUsageKeysStore().push({
-    id: usageKey.slice(0, 12),
-    api_key: usageKey,
-    usage_api_key: usageKey,
-    name: name || '',
-    description: description || '',
-    expiration: '',
-  });
+  getUsageKeysStore().push(usageKeyRowFromCreated(usageKey, addOptions));
   setStat('usageKeys', getUsageKeysStore().length);
   renderUsageKeysTable();
   updateStatCards();
@@ -132,21 +207,7 @@ export async function loadUsageKeys() {
   try {
     const client = await getClient();
     const items = await client.listApiKeys({ apiKey, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
-    const mapped = items.map((it) => ({
-      id: it.id,
-      api_key_hash: it.api_key_hash,
-      usage_api_key: it.api_key_hash,
-      name: it.name ?? '',
-      description: it.description ?? '',
-      expiration: it.expiration,
-      can_create_groups: it.can_create_groups ?? false,
-      can_delete_groups: it.can_delete_groups ?? false,
-      can_create_pkps: it.can_create_pkps ?? false,
-      can_manage_ipfs_ids_in_groups: it.can_manage_ipfs_ids_in_groups ?? [],
-      can_add_pkp_to_groups: it.can_add_pkp_to_groups ?? [],
-      can_remove_pkp_from_groups: it.can_remove_pkp_from_groups ?? [],
-      can_execute_in_groups: it.can_execute_in_groups ?? [],
-    }));
+    const mapped = items.map(usageKeyRowFromListItem);
     setUsageKeysStore(mapped);
     setStat('usageKeys', mapped.length);
     renderUsageKeysTable();
@@ -246,19 +307,15 @@ function openUsageKeyModal(item = null) {
       try {
         showActionProgress('Updating usage API key', 'Saving changes to usage API key.');
         const client = await getClient();
-        await client.updateUsageApiKey({
+        await client.updateUsageApiKey(usageKeyUpdateArgs(item, {
           apiKey,
-          usageApiKey: item.usage_api_key,
           name,
           description,
-          canCreateGroups: item.can_create_groups,
-          canDeleteGroups: item.can_delete_groups,
-          canCreatePkps: item.can_create_pkps,
           manageIpfsIdsInGroups,
           addPkpToGroups,
           removePkpFromGroups,
           executeInGroups,
-        });
+        }));
         const store = getUsageKeysStore();
         const idx = store.findIndex((k) => k.usage_api_key === item.usage_api_key);
         if (idx !== -1) {
@@ -278,19 +335,21 @@ function openUsageKeyModal(item = null) {
         closeActionProgress();
       }
     } else {
+      // The new row records the options the key was created with.
+      const addOptions = {
+        name, description,
+        canCreateGroups, canDeleteGroups, canCreatePkps,
+        manageIpfsIdsInGroups,
+        addPkpToGroups,
+        removePkpFromGroups,
+        executeInGroups,
+      };
       try {
         showActionProgress('Adding usage API key', 'Creating a new usage API key for this account.');
         const client = await getClient();
-        const res = await client.addUsageApiKey({
-          apiKey, name, description,
-          canCreateGroups, canDeleteGroups, canCreatePkps,
-          manageIpfsIdsInGroups,
-          addPkpToGroups,
-          removePkpFromGroups,
-          executeInGroups,
-        });
+        const res = await client.addUsageApiKey({ apiKey, ...addOptions });
         const usageKey = res && res.usage_api_key ? res.usage_api_key : '';
-        recordCreatedUsageKey(usageKey, name, description);
+        recordCreatedUsageKey(usageKey, addOptions);
         showStatus('overview-status-usage-keys', 'Usage API key added. Copy and store your key now (shown once): ' + usageKey, 'success');
       } catch (e) {
         logError('addUsageKey', e);
@@ -300,7 +359,7 @@ function openUsageKeyModal(item = null) {
         // it isn't lost forever — the write may still land on-chain. Surface it
         // with a warning instead of masking it behind the generic error.
         if (e && e.usage_api_key) {
-          recordCreatedUsageKey(e.usage_api_key, name, description);
+          recordCreatedUsageKey(e.usage_api_key, addOptions);
           showStatus(
             'overview-status-usage-keys',
             'Usage API key created, but the transaction could not be confirmed — it may still be processing on-chain. Copy and store your key NOW (shown once, cannot be recovered): ' + e.usage_api_key + ' — then use "Load" shortly to verify it registered.',

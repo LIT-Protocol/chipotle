@@ -1,0 +1,11 @@
+version: 2
+updates:
+  # dstack-verifier image used by the CI attestation checks (#113). The pin is
+  # .github/dstack-verifier/Dockerfile; Dependabot bumps its tag and digest when
+  # Phala publishes a newer stable release (pre-releases are skipped).
+  - package-ecosystem: docker
+    directory: /.github/dstack-verifier
+    schedule:
+      interval: daily
+    commit-message:
+      prefix: "chore(deps)"

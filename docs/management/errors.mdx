@@ -32,11 +32,11 @@ diagnostic detail.
 | `400 Bad Request` | `bad_request` | The body is malformed JSON or a parameter has the wrong shape. | Compare your request against the [OpenAPI spec](https://api.chipotle.litprotocol.com/core/v1/swagger-ui). |
 | `401 Unauthorized` | `unauthorized` | No API key was sent, **or the key does not resolve to any account** (typo'd, revoked, or never created). | Send the key via `X-Api-Key` or `Authorization: Bearer`. Verify it with `GET /core/v1/account_exists`. |
 | `402 Payment Required` | `payment_required` | Your account exists but its credit balance cannot cover this operation. The `message` includes the required amount and your balance. | [Add funds](/management/pricing) — card or [crypto](/management/crypto) — or `POST /core/v1/billing/create_payment_intent`. Check balance with `GET /core/v1/billing/balance`. |
-| `403 Forbidden` | `forbidden` | The key is valid and funded but not permitted to do this — usually a usage key acting outside its granted groups. | Inspect scopes with `GET /core/v1/list_api_keys`, or use the account master key. See [API Keys](/management/api_keys). |
+| `403 Forbidden` | `forbidden` | The key is valid and funded but not permitted to do this — usually a usage key acting outside its granted groups. | Inspect scopes with `GET /core/v1/list_api_keys`, or use the account master key for management calls. The account key can't run actions, so for `/lit_action` use a usage key with execute permission. See [API Keys](/management/api_keys). |
 | `404 Not Found` | `not_found` | No such endpoint or resource. | Browse `/core/v1/swagger-ui`. |
 | `422 Unprocessable Entity` | `unprocessable_entity` | The body parsed as JSON but doesn't match the endpoint's schema. | Compare field names and types against the OpenAPI spec. |
-| `429 Too Many Requests` | `too_many_requests` | The node is shedding load (CPU pressure). | Retry with backoff. |
-| `500 Internal Server Error` | `internal_error` | Something failed on our side. | Retry; report it if persistent. |
+| `429 Too Many Requests` | `too_many_requests` | The node is shedding load (CPU pressure). `new_account` is also rate limited per client IP. | Retry with backoff. |
+| `500 Internal Server Error` | `internal_error` | Something failed on our side. A Lit Action that throws also returns 500 today (see [below](#failed-actions-return-500)). | Read the message first. Retry; report it if persistent. |
 | `503 Service Unavailable` | `service_unavailable` | A dependency (billing, chain RPC, or the actions runtime) is temporarily down. Nothing was charged. | Retry in a few seconds. |
 
 ## Billing guarantees on errors
@@ -50,10 +50,35 @@ diagnostic detail.
 - **Billing outages are a 503, not a 402.** If Stripe or the chain RPC is
   unreachable, the API tells you to retry — it does not tell you to pay.
 
+## Failed actions return 500
+
+If your Lit Action throws, `/lit_action` returns `500` with the action's error
+in the message, even though retrying the same request won't fix it. A
+successful response always has `has_error: false`, so check the status code to
+detect a failed action.
+
+When the contract refuses a management call because the key lacks permission,
+every write endpoint returns `403` with the body `"Permission denied"`. Check the
+key's scopes with `GET /core/v1/list_api_keys` before you retry.
+
 ## Common sequences
 
+**"`/lit_action` returns 403."**
+The message is "The provided API key is not authorized to execute the specified
+action". The key needs execute permission in a group that lists this exact
+code's CID, or a wildcard (`[0]`) execute grant. Check three things: that you
+sent a usage key (the account key can't run actions), that the key's
+`execute_in_groups` includes the group, and that the CID you registered matches
+the code you sent. Changing the code by one character changes its CID. See
+[Run lit-action](/management/api_direct#7-run-lit-action).
+
+**"`/lit_action` returns 400 with 'No cached code found'."**
+You sent `ipfs_id` without `code`. The server runs code by CID only if it has
+already received that code and still has it cached. It does not fetch code from
+IPFS. Send the code itself.
+
 **"I created an account but every call says 402."**
-New accounts start with no credits unless the node grants starter credits.
+New accounts start with no credits.
 Running Lit Actions and write/metered management calls (creating wallets,
 groups, usage keys) consume credits; read-only calls (`list_*`, `account_exists`,
 `billing/balance`) are free. [Add funds](/management/pricing) to proceed.

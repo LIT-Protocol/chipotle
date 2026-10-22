@@ -26,6 +26,8 @@ require(
 
 Changing a rule is an on-chain transaction — public, auditable, and authorized by an owner you control. Put a Safe in the owner slot and it takes a multisig vote. See the [Authentication Model](/architecture/authModel) for the full permission matrix.
 
+import RequestPath from "/snippets/request-path.mdx";
+
 ## An attested TEE enforces it — by reading
 
 On-chain rules are only as strong as what enforces them. In Lit, that's a sealed TEE that **reads** the contracts on every request:
@@ -33,6 +35,12 @@ On-chain rules are only as strong as what enforces them. In Lit, that's a sealed
 1. A request arrives: an API key, and "run action `QmABC` with `pkp_001`."
 2. The TEE reads on-chain — does this key have `execute` scope on a group where both `QmABC` and `pkp_001` are listed?
 3. If yes, it derives the key inside the enclave, runs the action, and signs. If no, it refuses.
+
+This is the same path every request takes:
+
+<RequestPath />
+
+The [Overview](/architecture/index#follow-one-request) follows one request through these checks step by step.
 
 Key material never leaves the enclave, and the enclave can only run code that on-chain governance has whitelisted — so the read is trustworthy, not just convenient. You can verify the exact enclave yourself: see [Security & Verification](/architecture/verification/index) and [On-Chain KMS](/architecture/verification/onchain-kms).
 
@@ -51,7 +59,15 @@ Because authority lives on-chain and the TEE only ever enforces it:
 
 - A leaked execute-only key can invoke the actions it is already permitted to, and nothing else. It cannot add itself to new groups, swap in new code, or move funds outside policy.
 - Changing *what the rules are* requires an owner transaction on Base. Put the owner behind a Safe, and an evil admin holding an execute key can invoke existing actions but cannot change the rules.
-- The rules are visible to anyone, at any time. Don't trust — verify.
+- The rules are visible to anyone, at any time, so you can read them on Base and check them yourself.
+
+## Limits
+
+Chain Secured covers who can change the rules. Keep these limits in mind as well:
+
+- **The operator can pause signing.** Your rules stay on-chain while signing is paused, but signing needs the runtime and the key service, so plan for recovery.
+- **The contracts can be upgraded.** The Lit Safe that approves new releases (2 of 4 signers) also owns the AccountConfig contract, and an upgrade to that contract can change how rules are enforced. There is no timelock: an upgrade takes effect as soon as the Safe executes it. See [Upgrade Governance](/architecture/verification/upgrade-governance) for the Safe's settings and how to check them.
+- **Attestation shows which code is running.** It doesn't prove that the code is free of bugs, and it relies on Intel's hardware being secure. See [What Is Attestation?](/architecture/verification/attestation).
 
 ## Further reading
 
@@ -59,3 +75,5 @@ Because authority lives on-chain and the TEE only ever enforces it:
 - [System Diagram](/architecture/diagram) — on-chain vs TEE boundaries and management paths
 - [On-Chain KMS](/architecture/verification/onchain-kms) — how Base contracts gate root-key release
 - [Security & Verification](/architecture/verification/index) — attestation and the full chain of trust
+- [What Is Attestation?](/architecture/verification/attestation) — what the hardware proves about the running code
+- [Upgrade Governance](/architecture/verification/upgrade-governance) — who approves new releases and contract upgrades

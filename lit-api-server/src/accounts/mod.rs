@@ -889,18 +889,18 @@ pub async fn can_execute_action(api_key: &str, cid_hash: U256) -> Result<bool> {
 
     if let Some(cache) = blockchain_cache::get() {
         let key = cache.execute_action_key(account_api_key_hash_alloy, cid_hash);
-        return cache
-            .execute_action_cache()
-            .try_get_with(key, async {
+        return blockchain_cache::get_or_fetch(cache.execute_action_cache(), key, || async move {
+            let check = async {
                 let contract = get_read_only_account_config_contract().await?;
                 let can_execute = contract
                     .canExecuteAction(account_api_key_hash, cid_hash_eth)
                     .call()
                     .await?;
-                Ok(can_execute)
-            })
-            .await
-            .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{:#}", e));
+                anyhow::Ok(can_execute)
+            };
+            cache.with_deadline(account_api_key_hash, check).await
+        })
+        .await;
     }
 
     let contract = get_read_only_account_config_contract().await?;
@@ -929,18 +929,18 @@ pub async fn can_use_wallet_in_action(
 
     if let Some(cache) = blockchain_cache::get() {
         let key = cache.use_wallet_key(account_api_key_hash_alloy, cid_hash, wallet_address);
-        return cache
-            .use_wallet_cache()
-            .try_get_with(key, async {
+        return blockchain_cache::get_or_fetch(cache.use_wallet_cache(), key, || async move {
+            let check = async {
                 let contract = get_read_only_account_config_contract().await?;
                 let can_use = contract
                     .canUseWalletInAction(account_api_key_hash, cid_hash_eth, wallet_eth)
                     .call()
                     .await?;
-                Ok(can_use)
-            })
-            .await
-            .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{:#}", e));
+                anyhow::Ok(can_use)
+            };
+            cache.with_deadline(account_api_key_hash, check).await
+        })
+        .await;
     }
 
     let contract = get_read_only_account_config_contract().await?;
@@ -964,18 +964,26 @@ pub async fn can_execute_action_and_use_wallet(
     if let Some(cache) = blockchain_cache::get() {
         let key =
             cache.execute_and_wallet_key(account_api_key_hash_alloy, cid_hash, wallet_address);
-        return cache
-            .execute_and_wallet_cache()
-            .try_get_with(key, async {
-                let contract = get_read_only_account_config_contract().await?;
-                let result = contract
-                    .canExecuteActionAndUseWallet(account_api_key_hash, cid_hash_eth, wallet_eth)
-                    .call()
-                    .await?;
-                Ok((result.canExecute, result.canUseWallet))
-            })
-            .await
-            .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{:#}", e));
+        return blockchain_cache::get_or_fetch(
+            cache.execute_and_wallet_cache(),
+            key,
+            || async move {
+                let check = async {
+                    let contract = get_read_only_account_config_contract().await?;
+                    let result = contract
+                        .canExecuteActionAndUseWallet(
+                            account_api_key_hash,
+                            cid_hash_eth,
+                            wallet_eth,
+                        )
+                        .call()
+                        .await?;
+                    anyhow::Ok((result.canExecute, result.canUseWallet))
+                };
+                cache.with_deadline(account_api_key_hash, check).await
+            },
+        )
+        .await;
     }
 
     let contract = get_read_only_account_config_contract().await?;

@@ -17,9 +17,13 @@ the OS administrators, anyone with physical access to the machine. Any of them
 copy out a private key. You have no way to tell. "Trust us" is the only guarantee.
 
 **Remote attestation removes that trust.** It lets a remote machine produce
-hardware-signed, mathematical proof of *exactly what code it is running* — proof you
-can check yourself, that no operator (including Lit) can forge. Instead of "trust the
-operator," the guarantee becomes "trust the silicon and the math."
+hardware-signed, mathematical proof of *exactly what code it is running*. You can
+check the proof yourself, and no operator (including Lit) can forge it. You no longer
+have to trust the operator. You still trust Intel's hardware and the math that checks
+its signature.
+
+Attestation tells you which code is running. It doesn't tell you that the code is free
+of bugs, which is one reason the Lit Chipotle source is public.
 
 This is the idea behind the broader [Proof of Cloud](https://proofofcloud.org/)
 movement: cloud services that prove what they run rather than asking you to take
@@ -37,6 +41,9 @@ Intel server chips. Inside the TEE:
   records a cryptographic hash of each stage into tamper-proof registers.
 - Secrets generated inside (like the TLS private key) **never leave**. There is no
   API to extract them, by design.
+
+Lit Chipotle runs as a confidential virtual machine, or **CVM**, inside TDX. These
+pages use "CVM" for that machine and "enclave" as another word for the TEE.
 
 A TEE is not magic — it rests on the assumption that Intel's hardware root of trust
 is sound, and TEEs have known classes of side-channel research. But it replaces *many
@@ -56,16 +63,19 @@ The measurements live in registers called **MRTD** and **RTMR0–RTMR3**:
 |---|---|
 | **MRTD** | The virtual firmware |
 | **RTMR0–RTMR2** | Hardware config, kernel, boot parameters — i.e. the **operating system** |
-| **RTMR3** | The **application**: the hash of the docker-compose configuration (the *compose hash*), plus which KMS issued its keys |
+| **RTMR3** | The **application**: the hash of the docker-compose configuration (the *compose hash*, computed over `app-compose.json`), plus which KMS issued its keys |
 
 Two numbers carry most of the weight:
 
 - The **OS measurements** (MRTD/RTMR0–2) prove which operating system image booted.
 - The **compose hash** (in RTMR3) proves which application code booted — it is the
-  SHA-256 of the exact, image-digest-pinned docker-compose that defines Lit Chipotle.
+  SHA-256 of `app-compose.json`, which holds the exact, image-digest-pinned
+  docker-compose that defines Lit Chipotle, plus its metadata. The explainer videos
+  call it the release hash.
 
 If even one byte of the OS or the application changes, these numbers change, and the
-quote no longer matches what is expected.
+quote no longer matches what is expected. For example, if a payment program that sends
+1,000 were changed to send 1,001, its hash would come out completely different.
 
 ## How a stranger turns a quote into trust
 
@@ -84,9 +94,10 @@ from four independent checks, each of which you can run yourself:
 
 4. **Am I really talking to that TEE?** The TLS certificate for
    `api.chipotle.litprotocol.com` was generated *inside* the TEE and bound into the
-   quote, so a successful HTTPS handshake proves your connection terminates in the
-   attested enclave — no proxy in the middle. (See
-   [Zero-Trust TLS](/architecture/verification/index#zero-trust-tls).)
+   quote. Once you have checked that binding and pinned the certificate, a successful
+   HTTPS handshake proves your connection terminates in the attested enclave — no
+   proxy in the middle. A handshake on its own, before those checks, does not prove
+   this. (See [Zero-Trust TLS](/architecture/verification/index#zero-trust-tls).)
 
 The crucial move is in steps 2 and 3: "a version I trust" is not decided by Lit. It
 is decided by a **whitelist held in smart contracts on Base**, governed by a Safe
@@ -107,7 +118,45 @@ Put the pieces together and the trust model inverts:
 - **You** do not have to trust any of the above — you re-derive every measurement and
   read the on-chain whitelist yourself.
 
-That is the whole point of attestation: *don't trust, verify.*
+That is the whole point of attestation: you check the evidence yourself instead of
+taking anyone's word for it.
+
+## The stronger check in the Lit SDK
+
+`verifyLitEndpoint()` in `@lit-protocol/keychain` (2.3.0 and later) runs every check
+above with no configuration. It is opt-in: Keychain, Owner, the CLI and MCP keep
+running the original checks, unchanged, and nothing calls `verifyLitEndpoint()`
+unless your code does. It reads `GET /attestation/v2?nonce=…`, which adds two things
+the plain `/attestation` quote cannot provide:
+
+- **The OS image is tied to the hardware measurement.** The event log that names the
+  OS image is written by the guest itself, so on its own it proves nothing about what
+  booted. dstack's KMS, however, releases an app's keys only to a CVM whose
+  MRTD/RTMR0–2 match a whitelisted OS image and whose compose hash is governed. The
+  endpoint returns a signer derived from those keys with the KMS signature chain, and
+  the SDK checks that chain against the KMS root key published in the DstackKms
+  contract, which must also match the root pinned in the SDK so a dishonest Base RPC
+  cannot substitute its own. A machine that did not boot the approved image cannot
+  produce it.
+- **Freshness.** The signer signs a random nonce chosen by the SDK together with the
+  hash of the quote it serves, so a response cannot be replayed or paired with
+  another machine's quote.
+
+In Node it also binds the TLS certificate the origin serves to the enclave and
+returns it as `tlsCertificateSha256`. Requests are bound to the attested enclave only
+on connections that pin that certificate. The SDK's own connections do not, so pin it
+in your HTTP client if you need that.
+
+Failures throw an `AttestationError` with a stable `code` (for example
+`BOOT_BINDING_FAILED`, `KMS_MISMATCH`, `STALE_OR_REPLAYED`, `NOT_GOVERNED`).
+`verifyAttestation()`, the original check the SDK's connections use, is unchanged and
+performs neither check above.
+
+This relies on the governed KMS enforcing its OS-image whitelist when it releases
+keys (dstack's default). It does not check Intel TCB status or PCK revocation.
+Browsers cannot read or pin TLS certificates: there the check proves that genuine
+Lit evidence was served at the origin, and the requests that follow rely on the
+browser's own TLS validation.
 
 ## Production verification is your integration’s responsibility
 

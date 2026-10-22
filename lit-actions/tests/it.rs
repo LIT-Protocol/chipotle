@@ -717,6 +717,82 @@ async fn fetch_custom_http_client_cannot_bypass_egress(mut client: TestClient) {
     assert!(client.received::<ExecutionResult>().success);
 }
 
+/// The fetch wrapper must not delegate through `Function.prototype.call` or
+/// any other hook an action can replace: the hook would receive the unwrapped
+/// fetch as `this`, and calling it directly skips `op_increment_fetch_count`
+/// and the per-session fetch quota. The hooks forward to the saved
+/// `Reflect.apply` so the request itself proceeds (and is blocked at loopback)
+/// on both the fixed and the vulnerable wrapper.
+#[rstest]
+#[tokio::test]
+async fn fetch_wrapper_does_not_leak_through_call_hooks(mut client: TestClient) {
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&mock_server)
+        .await;
+
+    let code = formatdoc! {r#"
+        async function main() {{
+            const wrappedFetch = globalThis.fetch;
+            const originalCall = Function.prototype.call;
+            const originalApply = Function.prototype.apply;
+            const originalReflectApply = Reflect.apply;
+            let leaked = 0;
+            let outcome;
+            const isUnwrappedFetch = (fn) =>
+                typeof fn === "function" && fn !== wrappedFetch && fn.name === "fetch";
+            try {{
+                Function.prototype.call = function (thisArg, ...args) {{
+                    if (isUnwrappedFetch(this)) leaked++;
+                    return originalReflectApply(this, thisArg, args);
+                }};
+                Function.prototype.apply = function (thisArg, args) {{
+                    if (isUnwrappedFetch(this)) leaked++;
+                    return originalReflectApply(this, thisArg, args ?? []);
+                }};
+                Reflect.apply = function (fn, thisArg, args) {{
+                    if (isUnwrappedFetch(fn)) leaked++;
+                    return originalReflectApply(fn, thisArg, args);
+                }};
+                try {{
+                    await fetch("{uri}");
+                    outcome = "REACHED";
+                }} catch {{
+                    outcome = "BLOCKED";
+                }}
+            }} finally {{
+                Function.prototype.call = originalCall;
+                Function.prototype.apply = originalApply;
+                Reflect.apply = originalReflectApply;
+            }}
+            Lit.Actions.setResponse({{ response: `leaked=${{leaked}} outcome=${{outcome}}` }});
+        }}
+        "#,
+        uri = &mock_server.uri()
+    };
+
+    client
+        .respond_with(IncrementFetchCountResponse { fetch_count: 1 })
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        client.received::<SetResponseRequest>().response,
+        "leaked=0 outcome=BLOCKED"
+    );
+    let hits = mock_server.received_requests().await.unwrap_or_default();
+    assert!(hits.is_empty(), "got {} hit(s)", hits.len());
+
+    let _ = client.received::<IncrementFetchCountRequest>();
+    assert!(client.received::<ExecutionResult>().success);
+}
+
 /// `Lit.Actions.proxiedFetch` is a separate egress surface (a raw `reqwest`
 /// op that never touches Deno's permission engine), so it must be filtered
 /// independently (CPL-295). A *direct* (proxy-less) proxiedFetch to a loopback
@@ -1193,6 +1269,893 @@ async fn deno_exit(mut client: TestClient) {
         );
         assert_eq!(client.received::<ExecutionResult>().success, false);
     }
+}
+
+/// Node's global `process.abort()` must not abort the server (SIGABRT), even
+/// when the action holds a detached reference to the function.
+#[rstest]
+#[case::direct("process.abort()")]
+#[case::detached("const abort = process.abort; abort()")]
+#[tokio::test]
+async fn node_abort_is_denied(#[case] probe: &str, mut client: TestClient) {
+    assert_action_denied_and_server_alive(
+        &mut client,
+        probe,
+        "PermissionDenied: 'process.abort' is not allowed in this context.",
+    )
+    .await;
+}
+
+/// Run one full action source and assert the exact response it sets. The code
+/// is passed through verbatim so JS template literals/objects stay untouched.
+async fn assert_action_response(client: &mut TestClient, code: &str, expected: &str) {
+    client
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+    assert_eq!(client.received::<SetResponseRequest>().response, expected);
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+async fn assert_action_denied_and_server_alive(
+    client: &mut TestClient,
+    probe: &str,
+    expected: &str,
+) {
+    let code = formatdoc! {r#"
+        async function main() {{
+            let outcome;
+            try {{
+                {probe};
+                outcome = "no error";
+            }} catch (e) {{
+                outcome = `${{e.name}}: ${{e.message}}`;
+            }}
+            Lit.Actions.setResponse({{ response: outcome }});
+        }}
+    "#};
+    client
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+    assert_eq!(client.received::<SetResponseRequest>().response, expected);
+    assert!(client.received::<ExecutionResult>().success);
+
+    client
+        .respond_with(SetResponseResponse {})
+        .execute_js(r#"async function main() { Lit.Actions.setResponse({ response: "alive" }) }"#)
+        .await
+        .unwrap();
+    assert_eq!(client.received::<SetResponseRequest>().response, "alive");
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+/// Native TCPWrap methods bypass deno_core's op middleware. The original
+/// bind("localhost", 0) resolves to loopback after the hostname-only check;
+/// it can then listen despite deny_net. Close handles even on a RED run.
+#[rstest]
+#[case::localhost_listener(r#"
+    const bound = handle.bind("localhost", 0);
+    const listening = handle.listen(1);
+    const addr = {};
+    const named = handle.getsockname(addr);
+    if (bound !== 0 || listening !== 0 || named !== 0 || !addr.port) {
+        throw new Error(`listener probe failed: ${bound},${listening},${named},${JSON.stringify(addr)}`);
+    }
+"#)]
+#[case::bind(r#"handle.bind("localhost", 0)"#)]
+#[case::bind_with_flags(r#"handle.bindWithFlags("localhost", 0, 0)"#)]
+#[case::bind6(r#"handle.bind6("localhost", 0, 0)"#)]
+#[case::listen_without_bind("handle.listen(1)")]
+#[case::adopt_fd("handle.open(-1)")]
+#[case::borrowed_bind(r#"TCP.prototype.bind.call(handle, "localhost", 0)"#)]
+#[case::prototype_descriptor(
+    r#"Object.getOwnPropertyDescriptor(TCP.prototype, "bind").value.call(handle, "localhost", 0)"#
+)]
+#[case::constructor_alias(r#"const alias = new handle.constructor(constants.SERVER); try { alias.bind("localhost", 0); } finally { alias.close(); }"#)]
+#[tokio::test]
+async fn node_tcp_listeners_are_denied(#[case] operation: &str, mut client: TestClient) {
+    let probe = formatdoc! {r#"
+        const {{ TCP, constants }} = process.binding("tcp_wrap");
+        const handle = new TCP(constants.SERVER);
+        try {{ {operation}; }} finally {{ handle.close(); }}
+    "#};
+    assert_action_denied_and_server_alive(&mut client, &probe, LISTEN_UNSUPPORTED).await;
+}
+
+/// The SOCKET constructor and subclasses share the same native methods; do
+/// not enforce this policy only on the SERVER constructor argument.
+#[rstest]
+#[case::client("new TCP(constants.SOCKET)")]
+#[case::subclass("new (class extends TCP {})(constants.SERVER)")]
+#[tokio::test]
+async fn node_tcp_listener_constructor_variants_are_denied(
+    #[case] constructor: &str,
+    mut client: TestClient,
+) {
+    let probe = formatdoc! {r#"
+        const {{ TCP, constants }} = process.binding("tcp_wrap");
+        const handle = {constructor};
+        try {{ handle.bind("localhost", 0); handle.listen(1); }} finally {{ handle.close(); }}
+    "#};
+    assert_action_denied_and_server_alive(&mut client, &probe, LISTEN_UNSUPPORTED).await;
+}
+
+/// Pipe listeners and fd adoption are another path to a native listener.
+#[rstest]
+#[case::bind(r#"handle.bind("/nonexistent-lit-actions-test-dir/listener.sock")"#)]
+#[case::listen_without_bind("handle.listen(1)")]
+#[case::adopt_fd("handle.open(-1)")]
+#[tokio::test]
+async fn node_pipe_listeners_are_denied(#[case] operation: &str, mut client: TestClient) {
+    let probe = formatdoc! {r#"
+        const {{ Pipe, constants }} = process.binding("pipe_wrap");
+        const handle = new Pipe(constants.SERVER);
+        try {{ {operation}; }} finally {{ handle.close(); }}
+    "#};
+    assert_action_denied_and_server_alive(&mut client, &probe, LISTEN_UNSUPPORTED).await;
+}
+
+/// Sealing the methods must not disable the distinct outbound connect ops.
+#[rstest]
+#[case::connect("connect")]
+#[case::connect6("connect6")]
+#[tokio::test]
+async fn node_tcp_connect_remains_permission_checked(#[case] method: &str, mut client: TestClient) {
+    let probe = formatdoc! {r#"
+        const {{ TCP, TCPConnectWrap, constants }} = process.binding("tcp_wrap");
+        const handle = new TCP(constants.SOCKET);
+        try {{ handle.{method}(new TCPConnectWrap(), "127.0.0.1", 1234); }} finally {{ handle.close(); }}
+    "#};
+    assert_action_denied_and_server_alive(
+        &mut client,
+        &probe,
+        r#"NotCapable: Requires net access to "127.0.0.1:1234", run again with the --allow-net flag"#,
+    )
+    .await;
+}
+
+/// User mutation cannot recover a native method from the shared prototypes.
+#[rstest]
+#[tokio::test]
+async fn node_listener_guards_are_immutable(mut client: TestClient) {
+    client
+        .respond_with(SetResponseResponse {})
+        .execute_js(indoc! {r#"
+            async function main() {
+                const { TCP } = process.binding("tcp_wrap");
+                const { Pipe } = process.binding("pipe_wrap");
+                for (const [ctor, methods] of [
+                    [TCP, ["bind", "bind6", "bindWithFlags", "listen", "open"]],
+                    [Pipe, ["bind", "listen", "open"]],
+                ]) {
+                    for (const method of methods) {
+                        const descriptor = Object.getOwnPropertyDescriptor(ctor.prototype, method);
+                        if (descriptor.writable || descriptor.configurable ||
+                            Reflect.deleteProperty(ctor.prototype, method) ||
+                            Reflect.set(ctor.prototype, method, () => 0) ||
+                            Reflect.defineProperty(ctor.prototype, method, { value: () => 0 })) {
+                            throw new Error(`Mutable listener guard: ${method}`);
+                        }
+                    }
+                }
+                Lit.Actions.setResponse({ response: "sealed" });
+            }
+        "#})
+        .await
+        .unwrap();
+    assert_eq!(client.received::<SetResponseRequest>().response, "sealed");
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+/// Run one named test with a child-only operator allowlist. Never mutate the
+/// parent environment while other tests assert production loopback denial.
+async fn isolated_network_test_child(name: &str) -> bool {
+    const CHILD: &str = "LIT_TEST_NETWORK_CHILD";
+    if std::env::var(CHILD).as_deref() == Ok(name) {
+        return true;
+    }
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        tokio::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--nocapture"])
+            .env(CHILD, name)
+            .env("LIT_ACTIONS_EGRESS_ALLOWLIST", "127.0.0.1")
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .expect("network test child timed out")
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "network child failed: {}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed; 0 failed"));
+    false
+}
+
+/// Exercise real outbound sockets without public-network dependencies.
+#[tokio::test]
+async fn node_and_deno_outbound_tcp_still_work() {
+    if !isolated_network_test_child("node_and_deno_outbound_tcp_still_work").await {
+        return;
+    }
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let accepted = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (stream, _) = listener.accept().await.unwrap();
+            drop(stream);
+        }
+    });
+    let mut client = TestClient::new(TestServer::start().socket_file);
+    // Even an explicitly allowlisted address must not permit inbound sockets.
+    assert_action_denied_and_server_alive(
+        &mut client,
+        r#"const { TCP, constants } = process.binding("tcp_wrap");
+           const handle = new TCP(constants.SERVER);
+           try { handle.bind("127.0.0.1", 0); } finally { handle.close(); }"#,
+        LISTEN_UNSUPPORTED,
+    )
+    .await;
+    client
+        .respond_with(SetResponseResponse {})
+        .execute_js(formatdoc! {r#"
+            async function main() {{
+                const {{ TCP, TCPConnectWrap, constants }} = process.binding("tcp_wrap");
+                const handle = new TCP(constants.SOCKET);
+                try {{
+                    await new Promise((resolve, reject) => {{
+                        const req = new TCPConnectWrap();
+                        req.oncomplete = (status) => status === 0 ? resolve() : reject(new Error(`connect: ${{status}}`));
+                        const status = handle.connect(req, "127.0.0.1", {port});
+                        if (status !== 0) reject(new Error(`connect: ${{status}}`));
+                    }});
+                }} finally {{ handle.close(); }}
+                const conn = await Deno.connect({{ hostname: "127.0.0.1", port: {port} }});
+                conn.close();
+                Lit.Actions.setResponse({{ response: "connected twice" }});
+            }}
+        "#})
+        .await
+        .unwrap();
+    assert_eq!(
+        client.received::<SetResponseRequest>().response,
+        "connected twice"
+    );
+    assert!(client.received::<ExecutionResult>().success);
+    tokio::time::timeout(std::time::Duration::from_secs(5), accepted)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+/// UDP's raw-fd adoption also bypasses permissions. Use only a disposable
+/// socket in an isolated child: on RED JS takes ownership, on GREEN the OS
+/// closes the deliberately transferred fd when the child exits.
+#[cfg(unix)]
+#[tokio::test]
+async fn node_udp_listeners_and_fd_adoption_are_denied() {
+    use std::os::fd::IntoRawFd;
+
+    if !isolated_network_test_child("node_udp_listeners_and_fd_adoption_are_denied").await {
+        return;
+    }
+    let fd = std::net::UdpSocket::bind("127.0.0.1:0")
+        .unwrap()
+        .into_raw_fd();
+    let mut client = TestClient::new(TestServer::start().socket_file);
+    client
+        .respond_with(SetResponseResponse {})
+        .execute_js(formatdoc! {r#"
+            async function main() {{
+                const {{ UDP }} = process.binding("udp_wrap");
+                const results = [];
+                for (const attempt of [
+                    (handle) => handle.bind("127.0.0.1", 0, 0),
+                    (handle) => handle.bind6("127.0.0.1", 0, 0),
+                    (handle) => handle.open({fd}),
+                ]) {{
+                    const handle = new UDP();
+                    try {{
+                        // Node's UDP wrapper converts NotSupported to an errno.
+                        const status = attempt(handle);
+                        results.push(typeof status === "number" && status < 0 ? "denied" : "allowed");
+                    }} finally {{ handle.close(); }}
+                }}
+                Lit.Actions.setResponse({{ response: results.join(",") }});
+            }}
+        "#})
+        .await
+        .unwrap();
+    assert_eq!(
+        client.received::<SetResponseRequest>().response,
+        "denied,denied,denied"
+    );
+    assert!(client.received::<ExecutionResult>().success);
+    assert_action_denied_and_server_alive(
+        &mut client,
+        "Deno.listen({ port: 0 })",
+        LISTEN_UNSUPPORTED,
+    )
+    .await;
+    // A unix listener used to rely only on the absence of fs permissions;
+    // it must be refused by the denial itself.
+    assert_action_denied_and_server_alive(
+        &mut client,
+        r#"Deno.listen({ transport: "unix", path: "/tmp/lit-actions-denied.sock" })"#,
+        LISTEN_UNSUPPORTED,
+    )
+    .await;
+}
+
+/// Node's TTY binding asserted on native arguments, aborting the host process:
+/// TTY.isTTY(-1) and new TTY(-1) both reached `assert!(fd >= 0)` in
+/// deno_node 0.186.0. Both are reachable through process.binding("tty_wrap").
+#[rstest]
+#[tokio::test]
+async fn node_tty_binding_is_hardened(mut client: TestClient) {
+    let probe = indoc! {r#"
+        async function main() {
+            const { TTY } = process.binding("tty_wrap");
+            const isTTY = TTY.isTTY;
+            const setResponse = (body) => Lit.Actions.setResponse({ response: body });
+            for (const fd of [-1, -2147483648, 2147483647, 4294967295, 1.5, NaN]) {
+                if (isTTY(fd) !== false) {
+                    setResponse(`isTTY(${fd}) !== false`);
+                    return;
+                }
+            }
+            for (const fd of [-1, -2147483648]) {
+                let threw = null;
+                try {
+                    new TTY(fd);
+                } catch (e) {
+                    threw = e;
+                }
+                if (!(threw instanceof RangeError)) {
+                    setResponse(`new TTY(${fd}) did not throw RangeError: ${threw}`);
+                    return;
+                }
+            }
+            // Out-of-range fds must be ignored, not delegated to native code.
+            // Stdio still works: fd 0 exists on the server side.
+            if (typeof isTTY(0) !== "boolean") {
+                setResponse("isTTY(0) is not boolean");
+                return;
+            }
+            // The wrapper must not leak the native constructor through the
+            // prototype chain: `Object.getPrototypeOf(TTY)` would otherwise be
+            // the asserting native function.
+            if (Object.getPrototypeOf(TTY) !== Function.prototype) {
+                setResponse("TTY prototype chain leaks the native constructor");
+                return;
+            }
+            if (TTY.prototype.constructor !== TTY) {
+                setResponse("TTY.prototype.constructor is not the wrapper");
+                return;
+            }
+            // Instances are still real native handles: the native methods
+            // come from the handle's own prototype, not from the wrapper.
+            const handle = new TTY(0);
+            if (typeof handle.getWindowSize !== "function") {
+                setResponse("TTY instance lost its native methods");
+                return;
+            }
+            // ...but an instance must not hand back the native constructor.
+            if (handle.constructor !== TTY) {
+                setResponse("TTY instance leaks the native constructor");
+                return;
+            }
+            setResponse("hardened");
+        }
+    "#};
+    assert_action_response(&mut client, probe, "hardened").await;
+}
+
+/// Mutable call/apply hooks must never receive the guard's captured native
+/// functions. Detect the leak without calling an escaped native with an invalid
+/// fd, which would abort the shared test process on the vulnerable version.
+/// A non-zero count can also mean deno_node itself started delegating through
+/// a mutable hook inside the resolver or `process.binding`; check upstream too.
+#[rstest]
+#[tokio::test]
+async fn node_native_guards_do_not_leak_through_call_hooks(mut client: TestClient) {
+    let probe = indoc! {r#"
+        async function main() {
+            const { TTY } = process.binding("tty_wrap");
+            const M = process.getBuiltinModule("module");
+            const originalCall = Function.prototype.call;
+            const originalApply = Function.prototype.apply;
+            const originalReflectApply = Reflect.apply;
+            let intercepted = 0;
+            let ttyResult;
+            let bindingResult;
+            const trap = function () { intercepted++; return false; };
+            try {
+                Function.prototype.call = trap;
+                Function.prototype.apply = trap;
+                Reflect.apply = trap;
+                ttyResult = TTY.isTTY(0);
+                bindingResult = process.binding("tcp_wrap");
+                // Exercise both delegating resolver wrappers. Native resolution
+                // may reject the request; it must never delegate via our hooks.
+                try { M._resolveFilename("node:path", null, false); } catch {}
+                try { M._load("node:path", null, false); } catch {}
+            } finally {
+                Function.prototype.call = originalCall;
+                Function.prototype.apply = originalApply;
+                Reflect.apply = originalReflectApply;
+            }
+            Lit.Actions.setResponse({ response:
+                `intercepted=${intercepted} tty=${typeof ttyResult} binding=${typeof bindingResult?.TCP}`
+            });
+        }
+    "#};
+    assert_action_response(
+        &mut client,
+        probe,
+        "intercepted=0 tty=boolean binding=function",
+    )
+    .await;
+}
+
+/// Validation and error construction must also use captured built-ins, and
+/// error names are defined rather than assigned through `Error.prototype`. A
+/// fractional fd safely detects a replaced integer check without deliberately
+/// passing a negative fd through to an unguarded native callback.
+#[rstest]
+#[tokio::test]
+async fn node_native_guards_ignore_mutated_validation_builtins(mut client: TestClient) {
+    let probe = indoc! {r#"
+        async function main() {
+            const { TTY } = process.binding("tty_wrap");
+            const M = process.getBuiltinModule("module");
+            const originals = {
+                isInteger: Number.isInteger,
+                startsWith: String.prototype.startsWith,
+                String, Error, RangeError,
+                errorName: Object.getOwnPropertyDescriptor(Error.prototype, "name"),
+            };
+            let intercepted = 0;
+            let fractional, rangeError, permissionError, denied = 0, sameBinding;
+            try {
+                Number.isInteger = () => { intercepted++; return true; };
+                String.prototype.startsWith = () => { intercepted++; return false; };
+                globalThis.String = () => { intercepted++; return "tcp_wrap"; };
+                globalThis.Error = function () { intercepted++; };
+                globalThis.RangeError = function () { intercepted++; };
+                Object.defineProperty(originals.Error.prototype, "name", {
+                    get() { return "Error"; },
+                    set() { intercepted++; },
+                    configurable: true,
+                });
+                fractional = TTY.isTTY(0.5);
+                try { new TTY(0.5); } catch (e) {
+                    rangeError = e instanceof originals.RangeError;
+                }
+                try { new TTY(3); } catch (e) {
+                    permissionError = e instanceof originals.Error && e.name === "NotCapable";
+                }
+                sameBinding = process.binding({ toString: () => "tty_wrap" }).TTY === TTY;
+                for (const spec of ["internal/test/binding", "node:internal/test/binding"]) {
+                    try { M._resolveFilename(spec, null, false); } catch (e) {
+                        if (e instanceof originals.Error && e.name === "NotCapable") denied++;
+                    }
+                    try { M._load(spec, null, false); } catch (e) {
+                        if (e instanceof originals.Error && e.name === "NotCapable") denied++;
+                    }
+                }
+            } finally {
+                Number.isInteger = originals.isInteger;
+                originals.String.prototype.startsWith = originals.startsWith;
+                globalThis.String = originals.String;
+                globalThis.Error = originals.Error;
+                globalThis.RangeError = originals.RangeError;
+                Object.defineProperty(originals.Error.prototype, "name", originals.errorName);
+            }
+            Lit.Actions.setResponse({ response:
+                `intercepted=${intercepted} fractional=${fractional} range=${rangeError} permission=${permissionError} binding=${sameBinding} denied=${denied}`
+            });
+        }
+    "#};
+    assert_action_response(
+        &mut client,
+        probe,
+        "intercepted=0 fractional=false range=true permission=true binding=true denied=4",
+    )
+    .await;
+}
+
+/// fd > 2 needs ReadAll/WriteAll, matching Deno's own TTY constructor gate
+/// (`op_tty_check_fd_permission`). Actions hold neither permission.
+#[rstest]
+#[tokio::test]
+async fn node_tty_constructor_requires_permissions(mut client: TestClient) {
+    let probe = indoc! {r#"
+        async function main() {
+            let outcome;
+            try {
+                new (process.binding("tty_wrap").TTY)(3);
+                outcome = "constructed";
+            } catch (e) {
+                outcome = `${e.name}: ${e.message}`;
+            }
+            Lit.Actions.setResponse({ response: outcome });
+        }
+    "#};
+    assert_action_response(
+        &mut client,
+        probe,
+        "NotCapable: Requires read access to \"node:tty TTY()\", run again with the --allow-read flag",
+    )
+    .await;
+}
+
+/// `process.binding` must not be coerced past the hardening: deno_node looks
+/// the module up with `modules[name]`, so a non-string key such as
+/// `new String("tty_wrap")` hits the raw module even when a strict string
+/// comparison does not. The raw module's `TTY` is the asserting native
+/// constructor.
+#[rstest]
+#[tokio::test]
+async fn node_tty_binding_key_coercion_is_hardened(mut client: TestClient) {
+    let probe = indoc! {r#"
+        async function main() {
+            const out = [];
+            for (const key of [new String("tty_wrap"), { toString: () => "tty_wrap" }]) {
+                const mod = process.binding(key);
+                out.push(`isTTY=${mod.TTY.isTTY(-1)}`);
+                try {
+                    new mod.TTY(-1);
+                    out.push("ctor=allowed");
+                } catch (e) {
+                    out.push(`ctor=${e.name}`);
+                }
+            }
+            const plain = process.binding("tty_wrap");
+            out.push(`same=${process.binding(new String("tty_wrap")).TTY === plain.TTY}`);
+            Lit.Actions.setResponse({ response: out.join(" ") });
+        }
+    "#};
+    assert_action_response(
+        &mut client,
+        probe,
+        "isTTY=false ctor=RangeError isTTY=false ctor=RangeError same=true",
+    )
+    .await;
+}
+
+/// `require()` resolution loads `NodeRequireSys`-backed state that this runtime
+/// never registers: `op_require_node_module_paths` does an unconditional
+/// `state.borrow::<TSys>()`, and the resulting panic cannot unwind out of the
+/// V8 callback, so `createRequire(...)(...)` aborted the whole server. It is
+/// also the route `internal/test/binding` used to reach raw native modules.
+#[rstest]
+#[tokio::test]
+async fn node_require_resolution_is_denied(mut client: TestClient) {
+    let probe = indoc! {r#"
+        async function main() {
+            const out = [];
+            let mod = null;
+            try {
+                mod = process.getBuiltinModule("module");
+                out.push(`mod=${typeof mod?.createRequire}`);
+            } catch (e) {
+                out.push(`mod=${e.name}`);
+            }
+            let req = null;
+            if (mod) {
+                try {
+                    req = mod.createRequire("/x.js");
+                    out.push("created=1");
+                } catch (e) {
+                    out.push(`created=${e.name}`);
+                }
+            }
+            if (req) {
+                for (const [tag, spec] of [
+                    ["builtin", "zlib"],
+                    ["relative", "./nope.js"],
+                    ["internal", "internal/test/binding"],
+                ]) {
+                    try {
+                        const value = req(spec);
+                        out.push(`${tag}=allowed:${typeof value}`);
+                    } catch (e) {
+                        out.push(`${tag}=${e.name}`);
+                    }
+                }
+            }
+            Lit.Actions.setResponse({ response: out.join(" ") });
+        }
+    "#};
+    client
+        .respond_with(SetResponseResponse {})
+        .execute_js(probe)
+        .await
+        .unwrap();
+    let response = client.received::<SetResponseRequest>().response;
+    assert!(client.received::<ExecutionResult>().success);
+    assert!(
+        response.starts_with("mod=function"),
+        "module builtin should stay reachable: {response}"
+    );
+    assert!(
+        !response.contains("allowed"),
+        "require resolution must not succeed: {response}"
+    );
+}
+
+/// `Module._load` resolves anything in `nativeModuleExports` without calling a
+/// single op, and that table includes `internal/*`, so `createRequire` being
+/// denied was not enough: `new Module("").require("internal/test/binding")`
+/// returned the raw binding getter and with it every native binding module.
+#[rstest]
+#[tokio::test]
+async fn node_internal_bindings_are_unreachable(mut client: TestClient) {
+    let probe = indoc! {r#"
+        async function main() {
+            const out = [];
+            const M = process.getBuiltinModule("module");
+            const step = (tag, fn) => {
+                try {
+                    const value = fn();
+                    out.push(`${tag}=${typeof value}`);
+                } catch (e) {
+                    out.push(`${tag}=${e.name}`);
+                }
+            };
+            const m = new M("");
+            step("require", () => m.require("internal/test/binding"));
+            step("load", () => M._load("internal/test/binding"));
+            step("resolve", () => M._resolveFilename("internal/test/binding", null, false));
+            step("nodeRequire", () => m.require("node:internal/test/binding"));
+            Lit.Actions.setResponse({ response: out.join(" ") });
+        }
+    "#};
+    assert_action_response(
+        &mut client,
+        probe,
+        "require=NotCapable load=NotCapable resolve=NotCapable nodeRequire=NotCapable",
+    )
+    .await;
+}
+
+/// `new Worker(specifier)` reaches `op_worker_threads_filename`, which borrows
+/// `NodeRequireLoaderRc` - state this runtime never registers - so the panic
+/// aborted the server before `op_create_worker` could deny the worker itself.
+#[rstest]
+#[tokio::test]
+async fn node_worker_threads_worker_is_denied(mut client: TestClient) {
+    let probe = indoc! {r#"
+        async function main() {
+            const out = [];
+            const wt = process.getBuiltinModule("worker_threads");
+            out.push(`Worker=${typeof wt.Worker}`);
+            try {
+                new wt.Worker("./x.js");
+                out.push("worker=allowed");
+            } catch (e) {
+                out.push(`worker=${e.name}`);
+            }
+            Lit.Actions.setResponse({ response: out.join(" ") });
+        }
+    "#};
+    assert_action_response(&mut client, probe, "Worker=function worker=NotCapable").await;
+}
+
+/// `Buffer()` and `Buffer(0)` run the deprecated-constructor path, which calls
+/// `op_node_call_is_from_dependency`. That op walks the stack and then borrows
+/// `NodeResolverRc` - never registered here - so the panic aborted the server
+/// on an ordinary Node call, with no argument needed to trigger it.
+#[rstest]
+#[tokio::test]
+async fn node_buffer_constructor_is_safe(mut client: TestClient) {
+    let probe = indoc! {r#"
+        async function main() {
+            const out = [];
+            out.push(`zero=${Buffer(0).length}`);
+            try {
+                Buffer();
+                out.push("bare=allowed");
+            } catch (e) {
+                out.push(`bare=${e.name}`);
+            }
+            out.push(`from=${Buffer.from("abc").length}`);
+            out.push(`alloc=${Buffer.alloc(2).length}`);
+            Lit.Actions.setResponse({ response: out.join(" ") });
+        }
+    "#};
+    assert_action_response(&mut client, probe, "zero=0 bare=TypeError from=3 alloc=2").await;
+}
+
+/// `process.constrainedMemory()` borrows `TSys`, which this runtime never
+/// registers, so any call aborted the server.
+#[rstest]
+#[tokio::test]
+async fn node_process_constrained_memory_is_safe(mut client: TestClient) {
+    let probe = indoc! {r#"
+        async function main() {
+            const value = process.constrainedMemory();
+            Lit.Actions.setResponse({
+                response: `type=${typeof value} value=${value}`,
+            });
+        }
+    "#};
+    assert_action_response(&mut client, probe, "type=number value=0").await;
+}
+
+/// `Buffer.prototype.compare` checks its end offsets against `this.length` and
+/// `target.length`, which a `Uint8Array` subclass can spoof with its own
+/// `length` getter. The native compare op then sliced out of bounds and
+/// aborted the process. It must raise a catchable RangeError instead, and keep
+/// comparing valid ranges correctly.
+#[rstest]
+#[tokio::test]
+async fn node_buffer_compare_spoofed_length_is_denied(mut client: TestClient) {
+    let probe = indoc! {r#"
+        async function main() {
+            const out = [];
+            class SpoofedSource extends Uint8Array {
+                get length() { return 1000; }
+            }
+            try {
+                Buffer.prototype.compare.call(
+                    new SpoofedSource(1),
+                    Buffer.from([1, 2, 3]),
+                    1,
+                    3,
+                    0,
+                    1000,
+                );
+                out.push("sourceEnd: allowed");
+            } catch (e) {
+                out.push(`sourceEnd: ${e.name}`);
+            }
+            class SpoofedTarget extends Uint8Array {
+                get length() { return 1000; }
+            }
+            try {
+                Buffer.prototype.compare.call(
+                    Buffer.from([1]),
+                    new SpoofedTarget(1),
+                    0,
+                    1000,
+                );
+                out.push("targetEnd: allowed");
+            } catch (e) {
+                out.push(`targetEnd: ${e.name}`);
+            }
+            out.push(`valid=${Buffer.from("abc").compare(Buffer.from("abd"), 0, 3, 0, 3)}`);
+            out.push(`static=${Buffer.compare(Buffer.from("b"), Buffer.from("a"))}`);
+            Lit.Actions.setResponse({ response: out.join(" ") });
+        }
+    "#};
+    assert_action_response(
+        &mut client,
+        probe,
+        "sourceEnd: RangeError targetEnd: RangeError valid=-1 static=1",
+    )
+    .await;
+}
+
+const VSOCK_UNSUPPORTED: &str =
+    "NotSupported: The vsock transport is not supported in this context.";
+const LISTEN_UNSUPPORTED: &str =
+    "NotSupported: Listening sockets are not supported in this context.";
+
+/// Issue #116: these Deno APIs reach ops that call
+/// `deno_features::FeatureChecker::check_or_exit` for a feature the sandbox
+/// never enables, and the default exit callback is `std::process::exit(70)`.
+/// One call from any action used to terminate the whole lit-actions server,
+/// along with every other tenant's in-flight execution. The `lit_actions`
+/// extension middleware now replaces those ops, so the action gets a catchable
+/// `NotSupported` error and the same server keeps serving requests.
+///
+/// Without the fix, the gated cases do not fail an assertion: the test process
+/// itself exits with status 70.
+///
+/// `Deno.serve` reaches the same listen ops, but in this runtime it throws a
+/// SyntaxError first (its lazily loaded `ext:deno_http/00_serve.ts` is
+/// untranspiled TypeScript), so it has no case here.
+#[rstest]
+#[case::vsock_connect(
+    r#"await Deno.connect({ transport: "vsock", cid: 2, port: 1234 })"#,
+    VSOCK_UNSUPPORTED
+)]
+#[case::vsock_listen(
+    r#"Deno.listen({ transport: "vsock", cid: 2, port: 1234 })"#,
+    VSOCK_UNSUPPORTED
+)]
+#[case::tcp_listen_reuse_port(
+    r#"Deno.listen({ port: 1234, reusePort: true })"#,
+    LISTEN_UNSUPPORTED
+)]
+#[case::tls_listen_reuse_port(
+    r#"Deno.listenTls({ port: 1234, reusePort: true, cert: pem("CERTIFICATE"), key: pem("PRIVATE KEY") })"#,
+    LISTEN_UNSUPPORTED
+)]
+// Not feature-gated, but the replaced op also serves plain listening.
+// Before this change it failed with NotCapable (0.0.0.0/8 is in deny_net).
+#[case::tcp_listen(r#"Deno.listen({ port: 1234 })"#, LISTEN_UNSUPPORTED)]
+// Control: outbound TCP is not replaced and still goes through deny_net.
+#[case::tcp_connect_still_permission_checked(
+    r#"await Deno.connect({ hostname: "127.0.0.1", port: 1234 })"#,
+    r#"NotCapable: Requires net access to "127.0.0.1:1234", run again with the --allow-net flag"#
+)]
+#[tokio::test]
+async fn feature_gated_deno_apis_throw_instead_of_exiting(
+    #[case] probe: &str,
+    #[case] expected: &str,
+    mut client: TestClient,
+) {
+    // `pem` builds PEM framing only. deno_tls parses PEM blocks without
+    // validating the DER inside, so no key material is needed to reach the
+    // listen op through `Deno.listenTls`.
+    let code = formatdoc! {r#"
+        async function main() {{
+            const pem = (label) => `-----BEGIN ${{label}}-----\nAAAA\n-----END ${{label}}-----\n`;
+            let outcome;
+            try {{
+                {probe};
+                outcome = "no error";
+            }} catch (e) {{
+                outcome = `${{e.name}}: ${{e.message}}`;
+            }}
+            Lit.Actions.setResponse({{ response: outcome }});
+        }}
+    "#};
+
+    client
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+    assert_eq!(client.received::<SetResponseRequest>().response, expected);
+    assert!(client.received::<ExecutionResult>().success);
+
+    // The server process survived and still serves the next request.
+    client
+        .respond_with(SetResponseResponse {})
+        .execute_js(r#"async function main() { Lit.Actions.setResponse({ response: "alive" }) }"#)
+        .await
+        .unwrap();
+    assert_eq!(client.received::<SetResponseRequest>().response, "alive");
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+/// The other ops that reach `check_or_exit` (`op_net_listen_udp`,
+/// `op_net_listen_unixpacket`, `op_kv_database_open`, `op_cron_create` and
+/// `op_create_worker`) are replaced too, but no API visible to an action leads
+/// to them, so the test above cannot reach them. `Deno.listenDatagram`,
+/// `Deno.openKv` and `Deno.cron` are unstable namespace members that are never
+/// installed, and PatchDeno deletes `Worker`. This pins that, so whoever
+/// exposes one of them also adds a case to the test above.
+#[rstest]
+#[tokio::test]
+async fn feature_gated_entry_points_are_not_exposed(mut client: TestClient) {
+    client
+        .respond_with(SetResponseResponse {})
+        .execute_js(indoc! {r#"
+            async function main() {
+                const entryPoints = [Deno.listenDatagram, Deno.openKv, Deno.cron, globalThis.Worker];
+                Lit.Actions.setResponse({ response: entryPoints.map((f) => typeof f).join(",") });
+            }
+        "#})
+        .await
+        .unwrap();
+    assert_eq!(
+        client.received::<SetResponseRequest>().response,
+        "undefined,undefined,undefined,undefined"
+    );
+    assert!(client.received::<ExecutionResult>().success);
 }
 
 #[rstest]

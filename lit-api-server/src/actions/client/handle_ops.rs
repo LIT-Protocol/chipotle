@@ -1,9 +1,11 @@
 use super::op_code_helpers;
 use anyhow::{Result, bail};
 use lit_actions_grpc::proto::*;
+use tokio::time::Instant;
 use tracing::{instrument, warn};
 
 use super::Client;
+use super::models::ExecutionState;
 
 /// How many seconds of execution to accumulate before flushing a charge to Stripe.
 const BILLING_FLUSH_INTERVAL_SECS: u64 = 5;
@@ -148,47 +150,26 @@ impl Client {
                 used_kb: _,
             }) => {
                 let cancel_action = if let Some(ref stripe) = self.stripe_state {
-                    // Use wall-clock time from execution_start (set before execution begins)
-                    // instead of the gRPC `tick` field, which reports near-zero.
-                    let current_second = self
-                        .state
-                        .execution_start
-                        .map(|s| s.elapsed().as_secs())
-                        .unwrap_or(0);
-                    let new_seconds = current_second.saturating_sub(self.state.last_billed_second);
-
-                    if new_seconds > 0 {
-                        self.state.unbilled_seconds += new_seconds;
-                        self.state.last_billed_second = current_second;
-                    }
-
-                    // Flush to Stripe every BILLING_FLUSH_INTERVAL_SECS accumulated seconds
-                    if self.state.unbilled_seconds >= BILLING_FLUSH_INTERVAL_SECS {
-                        match crate::stripe::charge_lit_action_time(
-                            &self.api_key,
-                            self.state.unbilled_seconds,
-                            // Derived CID of the action — always set on the billed
-                            // execution path; `charge` normalizes an empty CID
-                            // away (see execution.rs).
-                            Some(self.ipfs_id.as_str()),
-                            self.request_id.as_deref(),
-                            stripe,
-                        )
-                        .await
-                        {
-                            Ok(()) => {
-                                self.state.unbilled_seconds = 0;
-                                false
-                            }
-                            Err(e) => {
-                                warn!("Per-second billing failed, cancelling action: {e}");
-                                self.state.unbilled_seconds = 0;
-                                true
-                            }
-                        }
-                    } else {
-                        false
-                    }
+                    let api_key = self.api_key.as_str();
+                    // Derived CID of the action — always set on the billed
+                    // execution path; `charge` normalizes an empty CID
+                    // away (see execution.rs).
+                    let ipfs_id = self.ipfs_id.as_str();
+                    let request_id = self.request_id.as_deref();
+                    bill_tick(
+                        &mut self.state,
+                        tokio::time::Instant::now(),
+                        move |seconds| {
+                            crate::stripe::charge_lit_action_time(
+                                api_key,
+                                seconds,
+                                Some(ipfs_id),
+                                request_id,
+                                stripe,
+                            )
+                        },
+                    )
+                    .await
                 } else {
                     false
                 };
@@ -214,9 +195,85 @@ impl Client {
     }
 }
 
+/// Bill a runtime tick: accrue the wall-clock seconds since the last billed
+/// second and charge them through `charge` once [`BILLING_FLUSH_INTERVAL_SECS`]
+/// have accumulated. Returns whether to cancel the action because the charge
+/// failed.
+pub(super) async fn bill_tick<F, Fut>(state: &mut ExecutionState, now: Instant, charge: F) -> bool
+where
+    F: FnOnce(u64) -> Fut,
+    Fut: Future<Output = Result<()>>,
+{
+    state.accrue_elapsed_seconds(now);
+    if state.unbilled_seconds < BILLING_FLUSH_INTERVAL_SECS {
+        return false;
+    }
+    match charge(state.unbilled_seconds).await {
+        Ok(()) => {
+            state.unbilled_seconds = 0;
+            false
+        }
+        Err(e) => {
+            // `charge` is all-or-nothing, so nothing was charged. Keep the
+            // seconds: the end-of-run flush settles them and, if the balance
+            // can't cover them, charges what it does cover. Dropping them here
+            // let a run that blocked past its balance and then yielded finish
+            // without paying anything.
+            warn!("Per-second billing failed, cancelling action: {e}");
+            true
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::actions::client::ClientBuilder;
+    use std::future::ready;
+    use tokio::time::Duration;
+
+    #[tokio::test]
+    async fn tick_charges_every_flush_interval() {
+        let start = Instant::now();
+        let mut state = ExecutionState {
+            execution_start: Some(start),
+            ..Default::default()
+        };
+        let mut charged = Vec::new();
+        let cancel = bill_tick(&mut state, start + Duration::from_millis(4_900), |s| {
+            charged.push(s);
+            ready(Ok(()))
+        })
+        .await;
+        assert!(!cancel);
+        assert!(charged.is_empty(), "under the flush interval: {charged:?}");
+        let cancel = bill_tick(&mut state, start + Duration::from_millis(5_100), |s| {
+            charged.push(s);
+            ready(Ok(()))
+        })
+        .await;
+        assert!(!cancel);
+        assert_eq!(charged, [5]);
+        assert_eq!(state.unbilled_seconds, 0);
+    }
+
+    #[tokio::test]
+    async fn refused_tick_keeps_the_debt_and_cancels() {
+        // The action blocked for 60 s, then yielded. The balance can't cover
+        // the 60 s, so the action is cancelled and the 60 s are left for the
+        // end-of-run flush to settle.
+        let start = Instant::now();
+        let mut state = ExecutionState {
+            execution_start: Some(start),
+            ..Default::default()
+        };
+        let cancel = bill_tick(&mut state, start + Duration::from_millis(60_200), |_| {
+            ready(Err(anyhow::anyhow!("insufficient credits")))
+        })
+        .await;
+        assert!(cancel);
+        assert_eq!(state.unbilled_seconds, 60);
+    }
 
     #[test]
     fn get_keys_limit_allows_up_to_max_then_bails() {

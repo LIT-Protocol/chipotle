@@ -7,8 +7,8 @@ Execution goes directly to Chipotle with a scoped, per-vault usage key funded by
 Keychain. That billing key does not authorize secret access by itself.
 
 ```sh
-npm install @lit-protocol/keychain@2.2.3
-npx @lit-protocol/keychain@2.2.3 init ./agent-identity.json
+npm install @lit-protocol/keychain@2.3.0
+npx @lit-protocol/keychain@2.3.0 init ./agent-identity.json
 ```
 
 Give only the **public key** to the owner. On **Secrets → + Add agent**, approve
@@ -88,18 +88,18 @@ receives it over TLS. `get`/`run` are not service operations. MCP uses
 not evidence that your provider account or a live service call has succeeded.
 
 `await keychain.list()` reports each secret's action and input shape; `ACTIONS` exports the
-full catalog compiled into the client. `npx @lit-protocol/keychain@2.2.3 actions` prints it from the CLI and
-`npx @lit-protocol/keychain@2.2.3 use <identity> <name> '<json-input>'` runs one.
+full catalog compiled into the client. `npx @lit-protocol/keychain@2.3.0 actions` prints it from the CLI and
+`npx @lit-protocol/keychain@2.3.0 use <identity> <name> '<json-input>'` runs one.
 
 CLI reads write the requested result to stdout. Avoid sending credential output to logs.
-`npx @lit-protocol/keychain@2.2.3 --help` prints usage and `--version` prints the
+`npx @lit-protocol/keychain@2.3.0 --help` prints usage and `--version` prints the
 installed version. Identity files with an explicit unsupported version or a public
 key inconsistent with their private key are rejected; do not hand-edit key fields.
 After `keychain.destroy()`, create a new client before calling `get`, `use` or
 `attest` again: destroyed instances fail locally.
 
 ```sh
-npx @lit-protocol/keychain@2.2.3 get ./agent-identity.json API_KEY
+npx @lit-protocol/keychain@2.3.0 get ./agent-identity.json API_KEY
 ```
 
 For tools that need the raw credential in their environment, `run` skips stdout
@@ -109,9 +109,9 @@ with the child's status. The Keychain CLI itself does not print the value; a chi
 program can still log or disclose it, including into model context:
 
 ```sh
-npx @lit-protocol/keychain@2.2.3 run ./agent-identity.json -- stripe balance retrieve
-npx @lit-protocol/keychain@2.2.3 run ./id.json --only DATABASE_URL -- psql
-npx @lit-protocol/keychain@2.2.3 run ./id.json --env OPENAI_PROD=OPENAI_API_KEY -- python agent.py
+npx @lit-protocol/keychain@2.3.0 run ./agent-identity.json -- stripe balance retrieve
+npx @lit-protocol/keychain@2.3.0 run ./id.json --only DATABASE_URL -- psql
+npx @lit-protocol/keychain@2.3.0 run ./id.json --env OPENAI_PROD=OPENAI_API_KEY -- python agent.py
 ```
 
 `--only A,B` injects a subset; `--env SECRET=ENV_VAR` renames a variable for tools
@@ -129,9 +129,9 @@ when the command exits. A `--file` secret stays out of the environment unless `-
 names it too. Multi-line values such as PEM keys are written byte for byte.
 
 ```sh
-npx @lit-protocol/keychain@2.2.3 run ./id.json --file GCP_SA=/tmp/sa.json -- \
+npx @lit-protocol/keychain@2.3.0 run ./id.json --file GCP_SA=/tmp/sa.json -- \
   env GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json gcloud storage ls
-npx @lit-protocol/keychain@2.2.3 run ./id.json --file KUBECONFIG_PROD=./kubeconfig -- \
+npx @lit-protocol/keychain@2.3.0 run ./id.json --file KUBECONFIG_PROD=./kubeconfig -- \
   kubectl --kubeconfig ./kubeconfig get pods
 ```
 
@@ -157,8 +157,9 @@ is sent (verification itself fetches attestation evidence and governance state).
 3. Requires the measured `app-id` to be the pinned DstackApp, the measured
    `compose-hash` to equal SHA-256 of the served `app_compose`, and every
    container image in it to be digest-pinned.
-4. Confirms on Base that the compose hash is whitelisted in DstackApp and the OS
-   image in DstackKms, both governed by the Lit Safe multisig. The lookup rotates
+4. Confirms on Base that the compose hash is whitelisted in DstackApp (governed by
+   the Lit Safe multisig) and the OS image in DstackKms (Phala's contract,
+   governed by Phala's multisig). The lookup rotates
    through public Base RPC endpoints (`BASE_PUBLIC_RPC_URLS`), since each one
    throttles bursts from a single IP; a definitive "not whitelisted" answer is
    never retried elsewhere. Pin your own endpoint with `KEYCHAIN_BASE_RPC_URL`
@@ -172,7 +173,7 @@ is sent (verification itself fetches attestation evidence and governance state).
    automatically in the CLI/MCP paths.
 
 ```sh
-npx @lit-protocol/keychain@2.2.3 attest                 # prints the full report for the default origin
+npx @lit-protocol/keychain@2.3.0 attest                 # prints the full report for the default origin
 ```
 
 Independently compare your chosen `litApiUrl` with the endpoint supplied by your trusted
@@ -194,6 +195,56 @@ nonce; step 5 supplies freshness by binding the certificate you connected with.
 Browsers run steps 1-4 only. See `protocol/attestation.ts` and
 https://developer.litprotocol.com/architecture/verification/attestation.
 
+### Optional: `verifyLitEndpoint()`
+
+The checks above are what Keychain, Owner, the CLI and MCP run, unchanged in
+2.3.0. They do not tie the OS image to the hardware: the OS image hash checked in
+step 4 comes from the event log, which the guest writes itself. 2.3.0 adds a
+stronger check that you call yourself. Nothing in the SDK calls it for you, so
+upgrading changes no behaviour until you do.
+
+```ts
+import { verifyLitEndpoint, AttestationError } from "@lit-protocol/keychain";
+
+const report = await verifyLitEndpoint(); // default: https://api.chipotle.litprotocol.com
+// report.bootBinding === "kms-certified"; report.channel says whether TLS was bound
+```
+
+It needs no policy and accepts only built-in Lit origins (a trailing dot in the
+host names the same origin). It runs steps 1-5 against
+`GET /attestation/v2?nonce=…` and adds:
+
+- **Boot binding.** Verifies the dstack KMS signature chain over the endpoint's
+  attestation signer against the KMS root key DstackKms publishes on Base, which
+  must also equal the root compiled into the SDK (`PINNED_KMS_ROOTS`) so a
+  dishonest RPC cannot substitute its own, and requires the quote's
+  `key-provider` to be that KMS. The KMS releases app keys only to CVMs whose
+  MRTD/RTMR0-2 match a whitelisted OS image, so a machine that did not boot an
+  approved image cannot pass.
+- **Freshness.** The signer must have signed this call's random 32-byte nonce
+  (generated by the SDK; callers cannot supply one) together with the hash of
+  the quote it served.
+
+It resolves with the verified report or throws an `AttestationError` whose `code`
+is one of `UNKNOWN_ORIGIN`, `INVALID_POLICY`, `ENDPOINT_TOO_OLD`,
+`ENDPOINT_UNREACHABLE`, `MALFORMED_RESPONSE`, `QUOTE_INVALID`,
+`MEASURED_IDENTITY_MISMATCH`, `BOOT_BINDING_FAILED`, `KMS_MISMATCH`,
+`STALE_OR_REPLAYED`, `NOT_GOVERNED`, `GOVERNANCE_UNAVAILABLE` or
+`TLS_BINDING_FAILED`; there is no partial result. `{ rpcUrl }` replaces the
+public Base RPC rotation and `{ timeoutMs }` bounds each request; neither changes
+which checks run. `verifyAttestationV2(origin, policy)` is the same check with an
+explicit policy.
+
+In Node, `report.tlsCertificateSha256` is the certificate the origin served,
+bound to the enclave. That says nothing about other connections: SDK connections
+do not pin it, so requests are bound to the attested enclave only where your own
+HTTP client pins that certificate. In browsers `report.channel` is `"not-bound"`:
+browsers cannot read or pin certificates, so the result proves genuine Lit
+evidence was served at the origin, while later requests rely on the browser's
+own TLS validation. Boot binding relies on the governed KMS enforcing its
+OS-image whitelist at key release (dstack's default); the response's `vm_config`
+(CPU count, memory size) is not authenticated and is ignored.
+
 ## MCP server
 
 The package ships a local Model Context Protocol server over stdio. Register it
@@ -201,9 +252,9 @@ with any MCP client in one line; pass only the private identity path for live di
 
 ```sh
 # Claude Code
-claude mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.2.3 mcp /absolute/path/agent-identity.json
+claude mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.3.0 mcp /absolute/path/agent-identity.json
 # Codex CLI
-codex mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.2.3 mcp /absolute/path/agent-identity.json
+codex mcp add lit-keychain -- npx -y @lit-protocol/keychain@2.3.0 mcp /absolute/path/agent-identity.json
 ```
 
 Cursor, Windsurf and similar clients take the same command in their JSON config:
@@ -215,7 +266,7 @@ Cursor, Windsurf and similar clients take the same command in their JSON config:
       "command": "npx",
       "args": [
         "-y",
-        "@lit-protocol/keychain@2.2.3",
+        "@lit-protocol/keychain@2.3.0",
         "mcp",
         "/absolute/path/agent-identity.json"
       ]
@@ -255,7 +306,7 @@ Only call `get_secret` if you intend to place plaintext into the model context.
 Tools: `list_secrets` (names, permitted operation and input shape, no values),
 `get_secret`, one tool per catalog action (`stripe_balance`, `openai_chat`,
 `github_read_file`, `slack_post_message`, `supabase_tables`; each takes `name` and,
-where the action declares one, `input`; `list_actions` or `npx @lit-protocol/keychain@2.2.3 actions` shows
+where the action declares one, `input`; `list_actions` or `npx @lit-protocol/keychain@2.3.0 actions` shows
 the current catalog), `list_actions`, and `agent_public_key` (for the owner to
 approve). The server is
 intentionally local rather than hosted: decryption needs the agent's private
@@ -291,7 +342,7 @@ or an unsupported verification environment. Do not disable attestation to get pa
 
 | Artifact       | Shape                                                                                                    |
 | -------------- | -------------------------------------------------------------------------------------------------------- |
-| Agent identity | JSON from `npx @lit-protocol/keychain@2.2.3 init`: `{ v: 2, privateKey: <64 hex>, publicKey: <64 hex> }` |
+| Agent identity | JSON from `npx @lit-protocol/keychain@2.3.0 init`: `{ v: 2, privateKey: <64 hex>, publicKey: <64 hex> }` |
 | Agent config   | JSON `*.keychain.json`: `{ v: 2, litApiUrl, usageApiKey, secrets }`                                      |
 | Usage key      | Opaque Chipotle string (currently 44-character base64). Billing only.                                    |
 | Secret value   | Whatever `get` returns. Never log it.                                                                    |

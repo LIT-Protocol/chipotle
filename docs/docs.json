@@ -14,16 +14,17 @@
         "pages": [
           "index",
           "quickstart",
+          "glossary",
           {
             "group": "Management",
             "pages": [
+              "management/api_keys",
               "management/dashboard",
               "management/api_direct",
               "management/account_modes",
               "management/pricing",
               "management/crypto",
               "management/litkey",
-              "management/api_keys",
               "management/errors"
             ]
           },
@@ -61,23 +62,23 @@
             "pages": [
               "architecture/index",
               "architecture/chain-secured",
-              "architecture/groups",
               "architecture/authModel",
-              "architecture/self-hosting",
+              "architecture/groups",
               "architecture/diagram",
               {
                 "group": "Security & Verification",
                 "pages": [
+                  "architecture/verification/index",
                   "architecture/verification/attestation",
                   "architecture/verification/quick-verify",
-                  "architecture/verification/index",
                   "architecture/verification/onchain-kms",
                   "architecture/verification/upgrade-governance",
-                  "architecture/verification/full-verification",
                   "architecture/verification/chain-of-trust",
+                  "architecture/verification/full-verification",
                   "architecture/verification/bug-bounty"
                 ]
-              }
+              },
+              "architecture/self-hosting"
             ]
           },
           {

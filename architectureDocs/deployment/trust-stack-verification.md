@@ -73,8 +73,8 @@ sequenceDiagram
 **Start as an HTTP server:**
 
 ```bash
-# Docker
-docker run -p 8080:8080 dstacktee/dstack-verifier:latest
+# Docker (Phala's release image)
+docker run -p 8080:8080 ghcr.io/dstack-tee/dstack-verifier:0.6.1
 
 # Or build from source (used in CI)
 cargo build --manifest-path=path/to/dstack/verifier/Cargo.toml --bin dstack-verifier
