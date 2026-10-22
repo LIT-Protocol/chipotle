@@ -9,6 +9,39 @@ Lit Chipotle is built on three composable layers that each handle a distinct con
 
 The throughline: **your keys' authority lives on-chain, and an attested TEE enforces it by reading the chain.** We call this [Chain Secured](/architecture/chain-secured) — on-chain authority, signing at the speed of an API call.
 
+## Video overview
+
+This video explains how Lit works in about four and a half minutes. It covers confidential hardware and how you can check which code is running. It also shows how contracts on Base decide which releases and which Lit Actions can use keys.
+
+<Frame>
+  <video
+    controls
+    playsInline
+    preload="metadata"
+    className="w-full aspect-video rounded-xl"
+    poster="/videos/how-lit-works-poster.jpg"
+    src="/videos/how-lit-works.mp4"
+  ></video>
+</Frame>
+
+<Accordion title="Video transcript">
+Say you're building an app that holds a private key. It might sign transactions for your users, or for an AI agent. The key has to live on a server somewhere. So how does anyone know what that server does with it? Lit is designed so you can check. I'll show you how, starting with two ideas: a hash, and confidential hardware.
+
+A hash function turns any input into a short output of a fixed size. SHA-256 always gives you 256 bits. Here's a tiny program. It approves a payment when the amount is 1,000 or less, and this is its hash. Now I'll change a single character, so the limit is 1,001. About half of the bits flip, and the new hash looks unrelated to the old one. Nobody knows how to find two programs with the same hash. So a hash tells you exactly which program you have.
+
+Now the hardware. Lit runs in a trusted execution environment, or TEE, using Intel TDX. A TEE is a virtual machine that the processor walls off from the rest of the computer. The processor encrypts its memory. The host operating system can't read it, and neither can the cloud provider or the people running the server. That includes us. As the virtual machine boots, each layer of software is hashed before it runs, from the firmware up to the application. The hashes are recorded in registers that software can add to but can't rewrite. The processor can then sign a report of those hashes, called a quote. The signing key exists only in genuine Intel hardware, and Intel's certificates vouch for it. So anyone can check that a quote is real. This is called attestation.
+
+For Lit, the measurement that matters most is the application. The whole Lit runtime is defined by one file. It lists every container and pins each one by its own hash. The hash of that file identifies a Lit release, and it's recorded in the quote.
+
+Approved release hashes are listed in a smart contract on Base. The Lit multisig approves each new one, and the approval is public. Lit's keys come from a key management service that also runs in a TEE. When a Lit machine starts, it sends its quote and asks for keys. The service checks Intel's signature, reads the release hash from the quote, and looks it up on Base. If the hash is approved, the machine gets its keys. If anyone changes the code, even by one character, the hash changes. The lookup fails, and the machine gets no keys. So new code can't reach the keys until it's approved on-chain. That applies to code we deploy too.
+
+You can run these checks yourself before you send anything private. First, fetch the quote from Lit's API and check Intel's signature. Second, hash the published release file and compare it with the quote. Public build records link each container to the open-source code. Third, check that the hash is approved on Base. Fourth, check the TLS certificate. It was generated inside the TEE and it's bound to a quote, so your HTTPS connection ends inside the TEE.
+
+Your own code works the same way. A Lit Action is a JavaScript program that runs inside the TEE. It can fetch data from APIs and blockchains, and sign with a key. Each Action is identified by its IPFS CID, which is a hash of its code. In Chain Secured mode, your wallet owns your account on Base. You create groups that say which Actions can use which keys. On each request, Lit hashes the code to get its CID, and it reads the chain. If the Action and the key aren't in the same group, nothing gets signed. Actions can't be edited. To change the logic, you deploy a new version and update the group. The key keeps its address.
+
+So there are two layers of checks. The hardware shows which Lit release is running, and the chain says which releases can hold keys. Inside that release, the chain also says which Actions can use each key. Attestation tells you what code is running. It doesn't prove that the code is free of bugs, and it relies on Intel's hardware being secure. The source is open, so you can read it. The verification guide has every check as a command you can run. It's at developer.litprotocol.com.
+</Accordion>
+
 ## The Three Layers
 
 **TEE Enclave (Phala / dstack)**
