@@ -4,9 +4,22 @@ ARG OTEL_COLLECTOR_VERSION=0.104.0
 FROM otel/opentelemetry-collector-contrib:${OTEL_COLLECTOR_VERSION} AS collector
 
 # Alpine runtime — provides /bin/sh so the entrypoint script can run.
-FROM alpine:3.19
+# Not 3.19: it is end-of-life and never got the eMudhra intermediate CA compromise fix
+# (2026-10-20, CVE-2026-111943). Its ca-certificates-bundle (20250911-r0) still trusts
+# "emSign ECC Root CA - G3", and the collector's Go TLS client verifies the Google Cloud
+# exporter endpoints against that bundle. Upgrade to 20261020-r0 or later (drops the root) and
+# fail the build if a root the compromised intermediates chain to is still trusted.
+# https://emudhra.we-have-a-problem.com/
+FROM alpine:3.24
 
-RUN adduser -D -u 10001 otel
+RUN apk upgrade --no-cache ca-certificates-bundle \
+    && apk add --no-cache --virtual .ca-check openssl \
+    && openssl crl2pkcs7 -nocrl -certfile /etc/ssl/certs/ca-certificates.crt | openssl pkcs7 -print_certs -noout > /tmp/ca-subjects \
+    && grep -q 'ISRG Root X1' /tmp/ca-subjects \
+    && ! grep -E 'emSign ECC Root CA - G3|AAA Certificate Services' /tmp/ca-subjects \
+    && rm /tmp/ca-subjects \
+    && apk del --no-cache .ca-check \
+    && adduser -D -u 10001 otel
 
 COPY --from=collector /otelcol-contrib /otelcol-contrib
 

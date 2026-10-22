@@ -3,6 +3,29 @@ title: "Overview"
 description: "Lit Actions are immutable JavaScript programs identified by their IPFS CID and executed inside the Lit network's TEE. They can sign with PKP wallets or with their own code-bound key, encrypt and decrypt secrets, and make HTTP requests — all verifiably."
 ---
 
+import RequestPath from "/snippets/request-path.mdx";
+
+How can a smart contract trust a price that came from an HTTP API? A contract can't make HTTP requests, and a server that fetches the price for it is one more party you have to trust. A Lit Action fetches the price inside the TEE and signs it with a key that only that exact code can use. The contract checks the signature, so it knows which code produced the price.
+
+## A minimal example
+
+```javascript
+// Fetch ETH price from an API and sign it with the action's own key.
+// No PKP, no js_params, no setup beyond enrolling the CID in a group.
+async function main() {
+  const res = await fetch("https://api.example.com/eth-price");
+  const { price } = await res.json();
+
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  const payload = `ETH price: ${price}`;
+  const signature = await wallet.signMessage(payload);
+
+  return { payload, signature, signer: wallet.address };
+}
+```
+
+Anyone can verify the output with `ethers.utils.verifyMessage(payload, signature)` and compare the recovered address to the address of this CID, obtained through `getLitActionWalletAddress` from any other action. Swap `getLitActionPrivateKey()` for `getPrivateKey({ pkpId })` if you want the proof bound to a wallet you manage instead.
+
 ## What is a Lit Action?
 
 A Lit Action is an immutable JavaScript program identified by its IPFS CID and executed inside the Lit network's TEE. The CID is both the action's address and a commitment to its code: change one byte and you have a different action.
@@ -15,6 +38,27 @@ Actions have access to a small [SDK](/lit-actions/chipotle) that lets them:
 - **Return a value** to the caller
 
 Because the code is immutable and the keys never leave the enclave, an action's signed output is a proof that *this exact code* produced *this exact result*.
+
+## How a request reaches your code
+
+You run an action by sending its code to `POST /core/v1/lit_action` with a usage key. The server passes `js_params` to your `main` function as its argument, and whatever `main` returns comes back as `response`:
+
+```bash
+curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/lit_action" \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: YOUR_USAGE_KEY" \
+  -d '{"code":"async function main({ symbol }) { return { symbol }; }","js_params":{"symbol":"ETH"}}'
+# Response: {"response":{"symbol":"ETH"},"logs":"","has_error":false}
+```
+
+Two rules follow from this, and the patterns in this section build on both:
+
+- **The source is trusted and `js_params` is not.** The source is fixed by its CID, so anything written in it is part of the action's identity. Anyone who can call the action can put anything in `js_params`, so check those values before you act on them. [Derived Actions](/lit-actions/derived-actions) builds on this rule.
+- **Actions are stateless.** Each run starts fresh and remembers nothing from earlier calls. To keep state, store it outside the action and verify it when you read it back, as [Signed Data in Untrusted Storage](/lit-actions/signed-storage) shows.
+
+## What will this action sign with?
+
+Start from what the signature has to mean. A price proof should mean "this exact code produced this price", so it should be signed with a key that belongs to the code itself. A treasury should keep its address when you ship a new version of its logic, so it should be signed with a wallet you manage. Those two needs map to the two kinds of keys below.
 
 ## Two kinds of keys
 
@@ -31,15 +75,15 @@ Every action can reach two different kinds of key. Knowing which to use is most 
 
 A PKP outlives its code. When you ship a new version of an action, you add the new CID to the group and the PKP keeps its address. An identity key dies with its code. Ship a new version and you have a new key, which is exactly what you want when the key's whole meaning is "this code approved it".
 
-The identity key also unlocks a factory: stamp a small config constant into an audited template and each instance is a new immutable action with a new key. See [Derived Actions](/lit-actions/derived-actions).
+Because the identity key depends on every byte of the source, changing one constant in an audited template gives you a new immutable action with its own key. One template can then serve many users or secrets. See [Derived Actions](/lit-actions/derived-actions).
 
 ## What is a proof?
 
 When an action fetches external data (a price, a weather reading, another chain's state) and signs the result, that signed output is a **proof**. Anyone holding the signer's public key can verify that the specific computation produced it. Smart contracts cannot make HTTP requests; a Lit Action can, and can deliver the result on-chain with a signature the contract checks with `ecrecover`.
 
-- **Trustless data ingestion.** The action fetches and signs; the contract verifies.
-- **Verifiable computation.** The signature is tied either to a PKP you registered or to the exact CID that ran.
-- **No trusted intermediary.** Neither the action author nor a single node can forge a result, because the code is immutable and the key never leaves the TEE.
+- **Data from outside the chain.** The action fetches the data and signs it, and the contract checks the signature.
+- **Computation you can check.** The signature is tied either to a PKP you registered or to the exact CID that ran.
+- **No intermediary to trust.** Neither the action author nor a single node can forge a result, because the code is immutable and the key never leaves the TEE.
 
 ## How actions fit into Chipotle
 
@@ -54,6 +98,10 @@ Account
 ```
 
 When you call `/core/v1/lit_action`, the server hashes the submitted code to its CID, checks that the API key may execute in a group containing that CID, and only then runs it. Inside the action, every `getPrivateKey` / `Encrypt` / `Decrypt` call is checked again: the named PKP must be in a group with the running CID. There is no IPFS upload step. You send the source and the server derives the CID.
+
+The usage key appears in the tree above because it points at the group through `execute_in_groups`. The permission is stored on the key, and the group itself doesn't list keys. Here is the whole path a request takes:
+
+<RequestPath />
 
 ## Patterns that make Chipotle easier
 
@@ -92,26 +140,9 @@ Inside an action, the `Lit.Actions` namespace exposes the SDK. The most used fun
 
 Full reference: [Lit Actions SDK](/lit-actions/chipotle).
 
-## A minimal example
-
-```javascript
-// Fetch ETH price from an API and sign it with the action's own key.
-// No PKP, no js_params, no setup beyond enrolling the CID in a group.
-async function main() {
-  const res = await fetch("https://api.example.com/eth-price");
-  const { price } = await res.json();
-
-  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
-  const payload = `ETH price: ${price}`;
-  const signature = await wallet.signMessage(payload);
-
-  return { payload, signature, signer: wallet.address };
-}
-```
-
-Anyone can verify the output with `ethers.utils.verifyMessage(payload, signature)` and compare the recovered address to the address of this CID, obtained through `getLitActionWalletAddress` from any other action. Swap `getLitActionPrivateKey()` for `getPrivateKey({ pkpId })` if you want the proof bound to a wallet you manage instead.
-
 ## Next steps
+
+To read this section in order, follow the sidebar: [Module Imports](/lit-actions/imports), [WebAssembly](/lit-actions/wasm), [Examples](/lit-actions/examples), [Patterns](/lit-actions/patterns), [Derived Actions](/lit-actions/derived-actions), [Signed Data in Untrusted Storage](/lit-actions/signed-storage), [Secrets](/lit-actions/secrets), and [Limits](/lit-actions/limits). These pages are also useful on their own:
 
 - [Derived Actions](/lit-actions/derived-actions) — per-user and per-secret immutable actions from one template
 - [Signed Data in Untrusted Storage](/lit-actions/signed-storage) — verifiable off-chain state for stateless actions

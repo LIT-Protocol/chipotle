@@ -71,6 +71,8 @@ const recovered = ethers.utils.verifyMessage(ethers.utils.arrayify(digest), sign
 // recovered === signer  →  payload is authentic and unmodified
 ```
 
+Compare `recovered` with the action's address that you looked up yourself, not only with the `signer` field in the receipt. Anyone can write any address into that field. Get the address of this CID from Lit with `Lit.Actions.getLitActionWalletAddress({ ipfsId })` in another action, as [Patterns](/lit-actions/patterns) describes, and pin it in your verifier.
+
 ---
 
 ## 3. Sign a scheduled heartbeat

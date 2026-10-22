@@ -81,6 +81,152 @@ fn op_exit(_state: &mut OpState) -> Result<(), JsErrorBox> {
     ))
 }
 
+// `process.abort()` is exposed by Deno's Node compatibility layer and calls
+// std::process::abort without a permission check. Replace the native op, not
+// just the JS property, so aliases cannot recover the host-killing function.
+#[instrument(skip_all, ret)]
+#[op2(fast)]
+fn op_abort_unsupported() -> Result<(), JsErrorBox> {
+    Err(JsErrorBox::new(
+        "PermissionDenied",
+        "'process.abort' is not allowed in this context.",
+    ))
+}
+
+// Replacements for the deno ops that call `FeatureChecker::check_or_exit`
+// (directly or through `check_unstable`), wired up in the middleware below
+// (#116). The sandbox enables no unstable features and keeps deno's default
+// exit callback, `std::process::exit(70)`, so reaching one of these ops from a
+// Lit Action terminated the whole lit-actions server, including every other
+// in-flight execution. Overriding the exit callback cannot fix this: it cannot
+// throw into JS, and when it returns the op carries on as if the feature were
+// enabled. vsock would then pass the allow-all `allow_net` grant, because
+// `deny_net` only holds IP ranges. So these ops are replaced outright, and none
+// of their code runs.
+//
+// The list comes from searching the pinned deno crates for `check_or_exit(` and
+// `check_unstable(`: deno_net 0.240, deno_kv 0.156, deno_cron 0.128 and
+// deno_runtime 0.256. Repeat that search when bumping deno.
+//
+// `nofast`: none of the replaced ops has a fast path on Linux either.
+
+#[instrument(skip_all, ret)]
+#[op2(nofast)]
+fn op_vsock_unsupported() -> Result<(), JsErrorBox> {
+    Err(JsErrorBox::new(
+        "NotSupported",
+        "The vsock transport is not supported in this context.",
+    ))
+}
+
+#[instrument(skip_all, ret)]
+#[op2(nofast)]
+fn op_listen_unsupported() -> Result<(), JsErrorBox> {
+    Err(JsErrorBox::new(
+        "NotSupported",
+        "Listening sockets are not supported in this context.",
+    ))
+}
+
+// `require()` resolution ops borrow runtime state (`TSys`,
+// `NodeRequireLoaderRc`, `NodeResolverRc`, `PackageJsonResolverRc`) that this
+// runtime never registers. `state.borrow::<T>()` panics when the type is
+// absent, and a panic inside a V8 callback cannot unwind, so an action calling
+// `process.getBuiltinModule("module").createRequire(...)` aborted the server.
+// Denying the resolution surface also closes the `internal/test/binding` route
+// to raw native modules.
+#[instrument(skip_all, ret)]
+#[op2(nofast)]
+fn op_require_unsupported() -> Result<(), JsErrorBox> {
+    Err(JsErrorBox::new(
+        "NotCapable",
+        "Module resolution is not supported in this context.",
+    ))
+}
+
+// This runtime leaves `node_services` unset, so any op that unconditionally
+// borrows `NodeResolverRc` / `TSys` panics inside a V8 callback and aborts the
+// process. These three replacements answer from constants instead of state:
+// `Buffer()` / `Buffer(0)` call the first only to decide whether to print a
+// deprecation warning, `in_npm_package` feeds child_process's CLI translation
+// (that module currently fails to load here, so the stub is defensive), and
+// `constrainedMemory()` reports 0 ("unconstrained") rather than failing.
+#[op2(fast)]
+fn op_node_call_is_from_dependency_safe() -> bool {
+    false
+}
+
+#[op2(fast)]
+fn op_node_in_npm_package_safe(#[string] _path: &str) -> bool {
+    false
+}
+
+#[op2(fast)]
+#[number]
+fn op_node_process_constrained_memory_safe() -> u64 {
+    0
+}
+
+#[instrument(skip_all, ret)]
+#[op2(nofast)]
+fn op_unstable_api_unsupported() -> Result<(), JsErrorBox> {
+    Err(JsErrorBox::new(
+        "NotSupported",
+        "This API is not supported in this context.",
+    ))
+}
+
+/// Bounds-checked replacement for deno_node's `op_node_buffer_compare_offset`.
+///
+/// The original `panic!`s (aborting the process) when a start offset is past
+/// its end offset, and its slice panics when an end offset is past the buffer.
+/// Its only caller, `Buffer.prototype.compare`, validates offsets against
+/// `this.length`/`target.length` - and a `Uint8Array` subclass can spoof
+/// `length` with its own getter, so those checks cannot be relied on. On
+/// invalid input this returns a catchable `RangeError` instead.
+#[op2(fast)]
+#[smi]
+fn op_node_buffer_compare_offset_checked(
+    #[buffer] source: &[u8],
+    #[buffer] target: &[u8],
+    #[smi] source_start: usize,
+    #[smi] target_start: usize,
+    #[smi] source_end: usize,
+    #[smi] target_end: usize,
+) -> Result<i32, JsErrorBox> {
+    // Same precedence and messages as the original for the two offsets it
+    // checked; the remaining cases used to panic.
+    if source_start > source.len() {
+        return Err(JsErrorBox::new(
+            "RangeError",
+            "The value of \"sourceStart\" is out of range.",
+        ));
+    }
+    if target_start > target.len() {
+        return Err(JsErrorBox::new(
+            "RangeError",
+            "The value of \"targetStart\" is out of range.",
+        ));
+    }
+    if source_end > source.len() {
+        return Err(JsErrorBox::new(
+            "RangeError",
+            "The value of \"sourceEnd\" is out of range.",
+        ));
+    }
+    if target_end > target.len() {
+        return Err(JsErrorBox::new(
+            "RangeError",
+            "The value of \"targetEnd\" is out of range.",
+        ));
+    }
+    if source_start > source_end || target_start > target_end {
+        return Err(JsErrorBox::new("RangeError", "Index out of range"));
+    }
+
+    Ok(source[source_start..source_end].cmp(&target[target_start..target_end]) as i32)
+}
+
 #[instrument(skip_all, ret)]
 #[op2(fast)]
 fn op_set_response(state: &mut OpState, #[string] response: String) -> Result<(), JsErrorBox> {
@@ -644,6 +790,12 @@ extension!(
         op_get_private_key,
         op_increment_fetch_count,
         op_lit_proxied_fetch,
+        // Also used by 98_native_guards.js to seal native CppGC listener methods.
+        op_listen_unsupported,
+        op_node_call_is_from_dependency_safe,
+        op_node_in_npm_package_safe,
+        op_node_process_constrained_memory_safe,
+        op_require_unsupported,
         op_set_response,
         op_show_import_details,
         op_update_resource_usage,
@@ -654,11 +806,57 @@ extension!(
         "00_ethers.js",
         "00_viem.js",
         "02_litActionsSDK.js",
+        "98_native_guards.js",
         "99_patches.js",
     ],
     middleware = |op| match op.name {
         "op_print" => op_print(),
         "op_exit" | "op_set_exit_code" => op.with_implementation_from(&op_exit()),
+        "op_process_abort" => op.with_implementation_from(&op_abort_unsupported()),
+        // The native compare op panics on out-of-range offsets; Node's JS
+        // validation trusts a spoofable `length`, so re-check in Rust.
+        "op_node_buffer_compare_offset" => {
+            op.with_implementation_from(&op_node_buffer_compare_offset_checked())
+        }
+        // Feature-gated ops (#116); see `op_vsock_unsupported`.
+        "op_net_connect_vsock" | "op_net_listen_vsock" => {
+            op.with_implementation_from(&op_vsock_unsupported())
+        }
+        "op_net_listen_tcp" | "op_net_listen_tls" | "op_net_listen_udp"
+        | "op_net_listen_unixpacket" | "op_net_listen_unix" => {
+            op.with_implementation_from(&op_listen_unsupported())
+        }
+        // Node's UDP wrapper has independent bind and unchecked fd-adoption ops.
+        // TCP/Pipe CppGC methods bypass this middleware; see 98_native_guards.js.
+        "op_node_udp_bind" | "op_node_udp_open" => {
+            op.with_implementation_from(&op_listen_unsupported())
+        }
+        // Sibling listener ops: only the missing fs permission stood between
+        // these and a listening socket.
+        "op_node_unstable_net_listen_unixpacket" | "op_node_unstable_net_listen_udp"
+        | "op_net_listen_tunnel" => op.with_implementation_from(&op_listen_unsupported()),
+        // Same missing-state class outside module resolution. `Buffer()` and
+        // `Buffer(0)` reach the first op on every call.
+        "op_node_call_is_from_dependency" => {
+            op.with_implementation_from(&op_node_call_is_from_dependency_safe())
+        }
+        "op_node_in_npm_package" => op.with_implementation_from(&op_node_in_npm_package_safe()),
+        "op_node_process_constrained_memory" => {
+            op.with_implementation_from(&op_node_process_constrained_memory_safe())
+        }
+        // `require()` resolution panics on state this runtime never registers.
+        "op_require_node_module_paths" | "op_require_resolve_deno_dir"
+        | "op_require_is_deno_dir_package" | "op_require_resolve_lookup_paths"
+        | "op_require_stat" | "op_require_real_path" | "op_require_try_self"
+        | "op_require_read_file" | "op_require_resolve_exports"
+        | "op_require_is_maybe_cjs" | "op_require_read_package_scope"
+        | "op_worker_threads_filename"
+        | "op_require_package_imports_resolve" | "op_require_break_on_next_statement" => {
+            op.with_implementation_from(&op_require_unsupported())
+        }
+        "op_kv_database_open" | "op_cron_create" | "op_create_worker" => {
+            op.with_implementation_from(&op_unstable_api_unsupported())
+        }
         _ => op,
     },
 );

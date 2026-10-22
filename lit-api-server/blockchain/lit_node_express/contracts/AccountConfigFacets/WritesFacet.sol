@@ -190,6 +190,8 @@ contract WritesFacet {
     ///         no on-chain admin yet. The conversion is one-way: re-running on an already
     ///         unmanaged account reverts. The apiKeyHash is preserved so existing groups,
     ///         actions, PKPs, and usage keys remain attached to the same account.
+    ///         The new admin's alias keccak256(newAdminWalletAddress) acts as the
+    ///         master hash for writes the new admin sends (SecurityLib.adminWriteAccountHash).
     function convertToChainSecuredAccount(
         uint256 apiKeyHash,
         address newAdminWalletAddress
@@ -240,6 +242,9 @@ contract WritesFacet {
     ///         the account storage. A side-effect is that ownership can't be
     ///         transferred back to a wallet that has ever been admin of any
     ///         account, even after a forward transfer.
+    ///         The new admin's alias keccak256(newAdminWalletAddress) acts as
+    ///         the master hash for writes the new admin sends; a previous
+    ///         admin's alias does not (SecurityLib.adminWriteAccountHash).
     function transferChainSecuredAccountOwnership(
         uint256 apiKeyHash,
         address newAdminWalletAddress
@@ -326,6 +331,7 @@ contract WritesFacet {
                 "executeInGroups must be 50 items or fewer"
             );
         }
+        accountApiKeyHash = SecurityLib.adminWriteAccountHash(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
         // The account arg must be the MASTER account, not any key that merely
         // resolves to it. revertIfNoAccountAccess above resolves a usage-key hash
@@ -415,6 +421,7 @@ contract WritesFacet {
                 "pkpIds must be 10 items or fewer"
             );
         }
+        apiKeyHash = SecurityLib.adminWriteAccountHash(apiKeyHash, msg.sender);
         SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
         uint256 masterHash = SecurityLib.resolveToMaster(apiKeyHash);
         if (masterHash != apiKeyHash) {
@@ -457,6 +464,7 @@ contract WritesFacet {
             );
         }
 
+        accountApiKeyHash = SecurityLib.adminWriteAccountHash(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfGroupDoesNotExist(
             accountApiKeyHash,
             groupId,
@@ -489,6 +497,7 @@ contract WritesFacet {
         string memory name,
         string memory description
     ) public {
+        accountApiKeyHash = SecurityLib.adminWriteAccountHash(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfGroupDoesNotExist(
             accountApiKeyHash,
             groupId,
@@ -504,6 +513,7 @@ contract WritesFacet {
     }
 
     function removeGroup(uint256 apiKeyHash, uint256 groupId) public {
+        apiKeyHash = SecurityLib.adminWriteAccountHash(apiKeyHash, msg.sender);
         SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
         uint256 masterHash = SecurityLib.resolveToMaster(apiKeyHash);
         if (masterHash != apiKeyHash) {
@@ -522,6 +532,7 @@ contract WritesFacet {
         uint256 groupId,
         address pkpId
     ) public {
+        apiKeyHash = SecurityLib.adminWriteAccountHash(apiKeyHash, msg.sender);
         SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
         uint256 masterHash = SecurityLib.resolveToMaster(apiKeyHash);
         if (masterHash != apiKeyHash) {
@@ -539,6 +550,7 @@ contract WritesFacet {
         string memory description,
         uint256 actionHash
     ) public {
+        accountApiKeyHash = SecurityLib.adminWriteAccountHash(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
@@ -562,6 +574,7 @@ contract WritesFacet {
                 "Cannot remove action with hash 0x0"
             );
         }
+        accountApiKeyHash = SecurityLib.adminWriteAccountHash(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
@@ -587,6 +600,7 @@ contract WritesFacet {
         uint256 groupId,
         uint256 action
     ) public {
+        apiKeyHash = SecurityLib.adminWriteAccountHash(apiKeyHash, msg.sender);
         SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
         uint256 masterHash = SecurityLib.resolveToMaster(apiKeyHash);
         if (masterHash != apiKeyHash) {
@@ -605,6 +619,7 @@ contract WritesFacet {
         string memory name,
         string memory description
     ) public {
+        accountApiKeyHash = SecurityLib.adminWriteAccountHash(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
@@ -625,6 +640,7 @@ contract WritesFacet {
         uint256 groupId,
         uint256 action
     ) public {
+        apiKeyHash = SecurityLib.adminWriteAccountHash(apiKeyHash, msg.sender);
         SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
         uint256 masterHash = SecurityLib.resolveToMaster(apiKeyHash);
         if (masterHash != apiKeyHash) {
@@ -645,6 +661,7 @@ contract WritesFacet {
         uint256 groupId,
         address pkpId
     ) public {
+        apiKeyHash = SecurityLib.adminWriteAccountHash(apiKeyHash, msg.sender);
         SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
         uint256 masterHash = SecurityLib.resolveToMaster(apiKeyHash);
         if (masterHash != apiKeyHash) {
@@ -665,6 +682,7 @@ contract WritesFacet {
         string memory name,
         string memory description
     ) public {
+        accountApiKeyHash = SecurityLib.adminWriteAccountHash(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfUsageApiKeyDoesNotExist(
             accountApiKeyHash,
@@ -697,6 +715,7 @@ contract WritesFacet {
         uint256 accountApiKeyHash,
         uint256 usageApiKeyHash
     ) public {
+        accountApiKeyHash = SecurityLib.adminWriteAccountHash(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfUsageApiKeyDoesNotExist(
             accountApiKeyHash,
@@ -719,6 +738,7 @@ contract WritesFacet {
         string memory name,
         string memory description
     ) public {
+        apiKeyHash = SecurityLib.adminWriteAccountHash(apiKeyHash, msg.sender);
         SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
         uint256 masterHash = SecurityLib.resolveToMaster(apiKeyHash);
         if (masterHash != apiKeyHash) {
@@ -792,6 +812,7 @@ contract WritesFacet {
     ///      This closes the delete/re-register race that would otherwise let another account
     ///      claim the address (and thus the key, which is a stateless function of the path).
     function removeWalletDerivation(uint256 apiKeyHash, address pkpId) public {
+        apiKeyHash = SecurityLib.adminWriteAccountHash(apiKeyHash, msg.sender);
         SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
         SecurityLib.revertIfNotMasterAccount(apiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();

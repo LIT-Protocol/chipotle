@@ -5,12 +5,13 @@ description: "How accounts, API keys, PKPs, groups, and the TEE root key compose
 
 ## Core Insight
 
-ChainSecured mode and API mode aren't a toggle in the code — they're an emergent property of how you configure the same system. The only things that vary are:
+API mode and ChainSecured mode use the same contracts, the same permission model, and the same execution path. Three things vary:
 
 1. **Who is the Account Owner** (a Lit-managed credential vs a SAFE or EOA you control)
-2. **What scopes the API keys have** (everything vs execute-only vs somewhere in between)
+2. **Whether the TEE may write for you.** Every account has a `managed` flag in the AccountConfig contract. In API mode (`managed = true`), the TEE relays your management calls: it submits the transaction after your account key or a usage key with the right scope authorizes the call. In ChainSecured mode (`managed = false`), the contract accepts writes only from the owner wallet. The TEE still reads the account's rules to authorize every execution, but it can't change them. Converting an account to ChainSecured mode clears the flag, and it can't be set again.
+3. **What scopes the API keys have** (everything vs execute-only vs somewhere in between)
 
-A "ChainSecured-mode" setup is just: owner = a wallet you control (EOA/Safe), API keys = execute-only. An "API-mode" setup is just: owner = a Lit-managed credential, API keys = broad scopes. The contracts don't know or care.
+A "ChainSecured-mode" setup is: owner = a wallet you control (EOA/Safe), `managed = false`, API keys = execute-only. An "API-mode" setup is: owner = a Lit-managed credential, `managed = true`, API keys = as broad as you need.
 
 ---
 
@@ -26,11 +27,11 @@ The owner address can be:
 - A Lit-managed credential (API mode — the fast path: Lit holds the owner key and relays your writes)
 - A SAFE or any governance contract (ChainSecured mode — multisig, voting, timelocks, whatever)
 
-The contracts don't distinguish between these. `msg.sender == owner` is `msg.sender == owner`.
+On-chain, the owner is the account's admin wallet, and the contract accepts writes from it whatever kind of wallet it is. The one difference is the `managed` flag: for an API-mode account the contract also accepts writes from the TEE's relay wallets, and for a ChainSecured account it accepts writes only from the owner.
 
 ### API Key
 
-A wallet keypair registered on-chain under an Account. The user holds the private key and sends it to the TEE over HTTPS. The TEE derives the address and looks up what scopes it has.
+A secret registered on-chain under an Account. The server issues it as a base64 string: the private key of a wallet the TEE derives for the key. The user holds the key and sends it to the TEE over HTTPS. The chain stores only the keccak256 hash of the key string, so the TEE hashes the key it receives and looks up that hash to find the account and the key's scopes.
 
 **API keys have scopes.** A scope is a permission granted by the Account Owner when the key is registered (or updated). There are seven scopes:
 
@@ -46,9 +47,25 @@ A wallet keypair registered on-chain under an Account. The user holds the privat
 
 A key can have any combination of scopes. The owner grants scopes at registration time and can update them later.
 
+#### Scopes and API fields
+
+The REST API names each scope by its request field. `list_api_keys` returns the same fields with a `can_` prefix on the group fields. In the examples on this page, `(*)` means the wildcard group `[0]`.
+
+| Scope                 | Request field (`add_usage_api_key`) | Field in `list_api_keys`        |
+| --------------------- | ----------------------------------- | ------------------------------- |
+| `execute`             | `execute_in_groups`                 | `can_execute_in_groups`         |
+| `pkp:create`          | `can_create_pkps`                   | `can_create_pkps`               |
+| `group:create`        | `can_create_groups`                 | `can_create_groups`             |
+| `group:delete`        | `can_delete_groups`                 | `can_delete_groups`             |
+| `group:manageActions` | `manage_ipfs_ids_in_groups`         | `can_manage_ipfs_ids_in_groups` |
+| `group:addPkp`        | `add_pkp_to_groups`                 | `can_add_pkp_to_groups`         |
+| `group:removePkp`     | `remove_pkp_from_groups`            | `can_remove_pkp_from_groups`    |
+
+`execute(*)` is `execute_in_groups: [0]`. It lets a key run any code without a group, but using a PKP still needs a group that lists both the action and the PKP.
+
 **Four of the seven scopes are per-group.** When you grant an API key `execute`, `group:manageActions`, `group:addPkp`, or `group:removePkp`, you specify _which groups_ it applies to. This is the key security property — a leaked onboarding key that has `group:addPkp(group_1)` can only add PKPs to group_1, not to some new insecure group that someone just created. And because it only has `group:addPkp` (not `group:removePkp`), it can't pull existing PKPs out of the group either.
 
-**Three scopes are account-wide.** `pkp:create` is account-wide because PKPs are created in the account's registry before being assigned to any group. Creating a PKP doesn't grant access to anything by itself — the PKP still has to be added to a group (which requires `group:addPkp` on that specific group) and someone has to have `execute` on that group to actually use it. `group:create` and `group:delete` are account-wide because groups aren't scoped to other groups. In API mode, developers need these to build their app through the API. In ChainSecured mode, you simply don't grant these scopes to any API key, and then only the SAFE can create or delete groups.
+**Three scopes are account-wide.** `pkp:create` is account-wide because PKPs are created in the account's registry before being assigned to any group. Creating a PKP doesn't grant access to anything by itself — the PKP still has to be added to a group (which requires `group:addPkp` on that specific group) and someone has to have `execute` on that group to actually use it. `group:create` and `group:delete` are account-wide because groups aren't scoped to other groups. In API mode, developers need these to build their app through the API. In ChainSecured mode, the TEE can't write to the account, so these scopes have no effect there: only the SAFE can create or delete groups.
 
 **Everything else is owner-only:** adding/revoking API keys, updating scopes, transferring ownership. These are structural operations that affect the trust boundary itself.
 
@@ -60,7 +77,7 @@ The actual key material (signing key + symmetric encryption key) only exists tra
 
 ### Lit Action
 
-Immutable JS code pinned to IPFS, identified by its CID. Actions are **not owned by anyone** — they're public, content-addressed code. Any account can reference any CID in its groups. There is no action registry.
+Immutable JS code identified by its IPFS CID, which is a hash of the code. You can pin an action to IPFS so others can read it, but the TEE doesn't fetch it from there; the code arrives with the request. Actions are **not owned by anyone** — they're public, content-addressed code. Any account can reference any CID in its groups. There is no action registry.
 
 This is intentional. Actions are meant to be reusable across companies and users. An ecosystem of audited, well-known action CIDs that people drop into their groups is more valuable than everyone registering private copies. Think of them like npm packages — you reference them, you don't own them.
 
@@ -77,7 +94,7 @@ That's it. A group is just `{PKPs, Actions}`. "Who can execute" is not a propert
 
 A Group answers the question: "Can this action use this key?" The API key scope answers: "Can this caller use this group?"
 
-Groups are owned by the Account. Only the owner can create or delete them. PKPs can be referenced by multiple groups. The same action CID can appear in groups across completely unrelated accounts.
+Groups are owned by the Account. The owner can create or delete them, and in API mode so can an API key with the `group:create` or `group:delete` scope from the table above. PKPs can be referenced by multiple groups. The same action CID can appear in groups across completely unrelated accounts.
 
 ### Root Key
 
@@ -94,7 +111,7 @@ Account (owner address)
 │     ├── key_dev:     [execute(*), pkp:create, group:create,             ← API mode: broad scopes
 │     │                 group:delete, group:manage*(*)]
 │     ├── key_server:  [execute(group_1)]                                 ← ChainSecured: execution only
-│     └── key_onboard: [pkp:create, group:addPkp(group_1)]               ← ChainSecured: onboarding
+│     └── key_onboard: [pkp:create, group:addPkp(group_1)]               ← API mode: onboarding only
 │
 ├── PKP Registry
 │     ├── pkp_001 (derivation path)
@@ -117,12 +134,14 @@ Note: there is no "authorized callers" list on the group. Which keys can execute
 
 ## Execution Flow (inside the TEE)
 
-1. User sends HTTP request: API key (private key) + "run action QmABC with pkp_001"
-2. TEE derives address from private key
-3. TEE reads on-chain: does this address have an API key with `execute` scope? On which groups?
+1. User sends HTTP request: API key (private key) + "run action QmABC with pkp_001". The request carries the action's code, and the TEE hashes it to get the CID `QmABC`.
+2. TEE hashes the API key (keccak256 of the key string)
+3. TEE reads on-chain: which account does this hash belong to, and on which groups does the key have `execute` scope?
 4. TEE checks: is there a group this key can execute on where QmABC is a listed action AND pkp_001 is a listed PKP?
-5. If yes → derive pkp_001 key material from root key → fetch QmABC from IPFS → execute in sandbox with access to key material → return result
+5. If yes → run the QmABC code from the request in the sandbox → derive pkp_001 key material from root key when the action asks for it → return result
 6. If no → reject
+
+The [request diagram](/architecture/index#follow-one-request) on the Overview page shows the same flow, including the wildcard case.
 
 ---
 
@@ -130,7 +149,7 @@ Note: there is no "authorized callers" list on the group. Which keys can execute
 
 ### Path A: Via TEE (convenience relay)
 
-User sends HTTP + API key to the TEE. TEE checks the key's scopes (including which groups the scope applies to), then signs and submits a transaction to the permissions contracts on Base on the user's behalf.
+User sends HTTP + API key to the TEE. TEE checks the key's scopes (including which groups the scope applies to), then signs and submits a transaction to the permissions contracts on Base on the user's behalf. This path works only for API-mode accounts: the contract rejects a write from the TEE to a ChainSecured account.
 
 ```
 User → HTTP + API key → TEE → tx → Permissions Contract (Base)
@@ -146,20 +165,25 @@ The Account Owner (SAFE, EOA, whatever) submits transactions directly to the per
 SAFE/EOA → tx → Permissions Contract (Base)
 ```
 
-This is how ChainSecured-mode users handle governance operations. It's transparent and auditable — the SAFE proposal is visible on-chain before execution.
+This is the only write path for a ChainSecured account. It's transparent and auditable — the SAFE proposal is visible on-chain before execution.
 
-**Both paths write to the same contracts.** The contract authorization check is:
+**Both paths call the same contract functions.** Every write first runs this check (`accountExistsAndIsMutable` in `AppStorage.sol`), then a scope check when the call names a usage key instead of the account key:
 
 ```
 require(
-  msg.sender == accountOwner ||
-  isAPIKeyWithScope(msg.sender, requiredScope, groupId)
+  msg.sender == account.adminWalletAddress ||
+  (api_payers.contains(msg.sender) && account.managed)  // api_payers = the TEE's relay wallets
 )
+if (apiKeyHash != accountApiKeyHash) {
+  require(usageKeyHasScope(apiKeyHash, requiredScope, groupId))
+}
 ```
 
 ---
 
 ## Permission Matrix
+
+The API Key column applies to API-mode accounts, where the TEE relays the call. On a ChainSecured account an API key can only invoke actions; every other row is an owner transaction.
 
 | Operation                       | Owner | API Key | Scope required                  |
 | ------------------------------- | ----- | ------- | ------------------------------- |
@@ -191,9 +215,8 @@ Consider two setups:
 
 - **Owner:** A 3-of-5 SAFE
 - **API key `server_key`:** scopes = `[execute(group_1)]` — can only run actions on group_1
-- **API key `onboard_key`:** scopes = `[pkp:create, group:addPkp(group_1)]` — can create PKPs and add them to group_1 only
-- **No API keys with `group:create`, `group:delete`, `group:manageActions`, or `group:removePkp` scopes**
-- **Effect:** Day-to-day operations flow through purpose-built API keys. The server can execute actions. The onboarding server can set up new customers without a SAFE vote. But everything structural — creating or deleting groups, adding or swapping action CIDs, removing PKPs — always requires a SAFE multisig vote, because that's the whole point: transparent, auditable governance over what code your PKPs can run and how your groups are organized. If `onboard_key` leaks, the attacker can create PKPs and add them to group_1 (which is annoying but not catastrophic — they're just creating new key material that uses the same already-audited actions). They can't remove existing PKPs from the group, can't add PKPs to any other group, can't change actions, can't create or delete groups, can't execute anything. An evil admin with `server_key` can invoke existing actions but cannot change the rules.
+- **No management scopes on any key.** The account is ChainSecured (`managed = false`), so the contract rejects writes from the TEE and a management scope would have no effect.
+- **Effect:** Day-to-day execution flows through `server_key`. Every change to the account — registering PKPs, adding them to groups, creating or deleting groups, adding or swapping action CIDs, managing API keys — is a SAFE transaction, because that's the whole point: transparent, auditable governance over what code your PKPs can run and how your groups are organized. If `server_key` leaks, the attacker can invoke the existing actions on group_1 and nothing else. An evil admin with `server_key` can invoke existing actions but cannot change the rules.
 
 ---
 
@@ -201,8 +224,8 @@ Consider two setups:
 
 ### In API mode (Setup A)
 
-1. Pin new Lit Action JS to IPFS → get `QmNEW`
-2. `POST /groups/:id/actions` with `{add: ["QmNEW"], remove: ["QmOLD"]}` → TEE submits tx to update group
+1. Pin new Lit Action JS to IPFS → get `QmNEW`. Pinning is optional, because the CID is just the hash of the code; `POST /core/v1/get_lit_action_ipfs_id` computes it without IPFS.
+2. `POST /core/v1/add_action_to_group` with `{"group_id": 1, "action_ipfs_cid": "QmNEW"}`, then `POST /core/v1/remove_action_from_group` with `{"group_id": 1, "hashed_cid": "0x…"}` (the hashed CID of `QmOLD`, from `list_actions`) → TEE submits a tx for each to update the group
 3. Done. Next execution request uses new permissions. `dev_key` has `group:manageActions(*)`, so this is allowed on any group.
 
 ### In ChainSecured mode (Setup B)
@@ -211,21 +234,27 @@ Consider two setups:
 2. Propose a SAFE transaction batch:
    - `group.addAction(groupId, "QmNEW")`
    - `group.removeAction(groupId, "QmOLD")`
+
+   On the AccountConfig contract these are `addActionToGroup(apiKeyHash, groupId, cidHash)` and `removeActionFromGroup(apiKeyHash, groupId, cidHash)`, where `cidHash` is the keccak256 hash of the CID.
 3. SAFE signers review the new code (CID is deterministic — they can fetch and audit it from IPFS)
 4. 3-of-5 signers approve → SAFE executes batch tx directly on the permissions contracts
 5. Done. Next execution request reads updated on-chain state. TEE was not involved in the upgrade at all.
 
-This is intentional. No API key has `group:manageActions` in Setup B, so the only path to change actions is the owner going direct to chain. Every action upgrade is a visible, auditable SAFE proposal.
+This is intentional. The contract accepts writes to a ChainSecured account only from its owner, so the only path to change actions is the SAFE going direct to chain. Every action upgrade is a visible, auditable SAFE proposal.
 
 ---
 
 ## Onboarding Flow Example (Setup B)
 
-1. `POST /pkps/create` using `onboard_key` → TEE submits tx, new PKP registered in account's PKP registry
-2. `POST /groups/group_1/pkps` with `{add: ["pkp_new"]}` using `onboard_key` → TEE submits tx
-3. Done. New customer has a PKP in group_1. The existing `server_key` (which has `execute(group_1)`) can now execute actions with this PKP on the customer's behalf.
+1. `POST /core/v1/prepare_wallet` → the TEE derives a new PKP and returns its `wallet_address` and `derivation_path`. The call needs no API key and registers nothing.
+2. Propose a SAFE transaction batch on the AccountConfig contract:
+   - `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)` adds the PKP to the account's PKP registry
+   - `addPkpToGroup(adminHash, groupId, wallet_address)` adds it to group_1
 
-This is the key reason `onboard_key` exists in Setup B — you don't want to hit the SAFE every time you onboard a new user. Creating PKPs and adding them to a pre-configured group is a high-volume, low-risk operation. The API keys are per-purpose, not per-customer: one `server_key` executes for all customers, one `onboard_key` handles all onboarding. The SAFE only needs to be involved for structural changes: which actions are trusted, which groups exist, and who gets API keys.
+   `adminHash` is the account's `apiKeyHash`, its stable on-chain ID.
+3. Signers approve → SAFE executes the batch. New customer has a PKP in group_1. The existing `server_key` (which has `execute(group_1)`) can now execute actions with this PKP on the customer's behalf.
+
+A ChainSecured account can't hand onboarding to an API key, because the TEE can't write to it. Every new PKP is a SAFE transaction, so batch them: one proposal can register and add PKPs for many customers. The API keys stay per-purpose, not per-customer: one `server_key` executes for all customers.
 
 ---
 
@@ -242,14 +271,14 @@ This is the key reason `onboard_key` exists in Setup B — you don't want to hit
 ### Graduating to ChainSecured mode
 
 1. User deploys a SAFE on Base with their desired signer set
-2. User calls `transferOwnership(safeAddress)` — authorized by the current owner through the dashboard
+2. User converts the account with `POST /core/v1/convert_to_chain_secured_account` (or the dashboard), naming the SAFE as the new admin wallet — authorized by the current owner. See [Converting an API account to ChainSecured](/management/account_modes#converting-an-api-account-to-chainsecured).
 3. Account Owner is now the SAFE
-4. SAFE creates new API keys with restricted scopes, locked to specific groups (e.g. `server_key`, `onboard_key`)
+4. SAFE creates execute-only API keys for the groups it runs (e.g. `server_key`): `POST /core/v1/add_usage_api_key_with_signature` mints the key, then the SAFE registers it on-chain with `registerWalletDerivation` and `setUsageApiKey`
 5. SAFE revokes the old broad-scoped API key
 6. The managed credential is fully out of the loop — the SAFE is the sole on-chain owner
 
 ### Key rotation
 
-Owner registers a new API key address with the desired scopes, then revokes the old one. In API mode, this is an HTTP call (the managed credential authorizes it). In ChainSecured mode, this requires a SAFE vote.
+Owner registers a new API key with the desired scopes, then revokes the old one. In API mode, this is an HTTP call (the managed credential authorizes it). In ChainSecured mode, this requires a SAFE vote.
 
 ---

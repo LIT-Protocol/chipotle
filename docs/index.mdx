@@ -5,6 +5,8 @@ description: "One programmable runtime for everything between an event and a sig
 
 Lit is a programmable runtime that reads data from any source, runs your JavaScript inside a chain-secured TEE, and signs on any chain or API. Keys never leave the enclave, and the code that's allowed to use them is governed on-chain. You get the speed and expressiveness of a single trusted runtime, with the auditability of a smart contract.
 
+This version of Lit is Lit Protocol v3, also called Chipotle. You'll see the name in the API and Dashboard addresses, such as `api.chipotle.litprotocol.com`.
+
 <Card
   title="Start here: Quick Start"
   icon="rocket"
@@ -13,6 +15,8 @@ Lit is a programmable runtime that reads data from any source, runs your JavaScr
 >
   Create an account, fund it, and run your first Lit Action in a few minutes — via the Dashboard or the REST API.
 </Card>
+
+If you want to run code first, take the [Quick Start](/quickstart) and then read the [Lit Actions overview](/lit-actions/index). If you want to understand the trust model first, read [Chain Secured](/architecture/chain-secured) and then [What Is Attestation?](/architecture/verification/attestation). If you're setting up an account for a team, read [Account Modes](/management/account_modes) and then [API Keys](/management/api_keys). The [Glossary](/glossary) defines each term in one place.
 
 ## Build
 
@@ -26,7 +30,7 @@ The fastest paths to a running integration.
     Drive the same workflows from cURL, the lightweight JS SDK, or your own client built from the OpenAPI spec.
   </Card>
   <Card title="Lit Actions" icon="bolt" href="/lit-actions/index">
-    JavaScript that runs inside the network's TEE — read, decide, sign, in one file.
+    JavaScript that runs inside the network's TEE. One file can read data, decide what to do, and sign the result.
   </Card>
 </CardGroup>
 
@@ -62,7 +66,7 @@ The two structural patterns production apps on Chipotle are built from. Both wor
     One audited template plus a stamped-in constant yields a new immutable action, with its own TEE-held key, per user, secret, or tenant.
   </Card>
   <Card title="Signed Data in Untrusted Storage" icon="file-signature" href="/lit-actions/signed-storage">
-    Have an action sign the records you store and verify them at runtime. Your database can fail or roll back, but it can never forge a permission.
+    Have an action sign the records you store and verify them at runtime. Your database can still fail or roll back. It can't forge a permission, because the action only accepts records it signed.
   </Card>
 </CardGroup>
 
@@ -75,13 +79,13 @@ How the runtime works and how trust is established.
     Your keys' authority lives on-chain; an attested TEE enforces it by reading the chain.
   </Card>
   <Card title="Architecture" icon="layer-group" href="/architecture/index">
-    The three layers: chain-secured TEE, on-chain permissions, and IPFS-hosted actions.
+    The three layers: chain-secured TEE, on-chain permissions, and actions addressed by IPFS CID.
   </Card>
   <Card title="Auth Model" icon="shield-check" href="/architecture/authModel">
     How API keys, scopes, and account ownership combine to authorize requests.
   </Card>
   <Card title="Groups" icon="folder-tree" href="/architecture/groups">
-    Bind Programmable Key Pairs to permitted action CIDs and usage keys.
+    Bind Programmable Key Pairs to permitted action CIDs. Usage keys reach a group through their scopes.
   </Card>
   <Card title="Verification" icon="badge-check" href="/architecture/verification/index">
     Attest that the enclave is running the code it claims to be running.
@@ -94,7 +98,7 @@ Account ownership, billing, and key management.
 
 <CardGroup cols={3}>
   <Card title="Account Modes" icon="users-gear" href="/management/account_modes">
-    API mode vs. ChainSecured mode — picking an ownership model and migrating between them.
+    API mode vs. ChainSecured mode — picking an ownership model and migrating between them. Both modes keep the rules on-chain; they differ in who owns the account.
   </Card>
   <Card title="API Keys" icon="key" href="/management/api_keys">
     Account keys vs. usage keys, and how to scope them.
@@ -115,5 +119,8 @@ Account ownership, billing, and key management.
   </Card>
   <Card title="OpenAPI / Swagger" icon="file-code" href="https://api.chipotle.litprotocol.com/core/v1/swagger-ui">
     Full REST API schema — generate clients in any language.
+  </Card>
+  <Card title="Glossary" icon="book-open" href="/glossary">
+    One definition for each term: account key, usage key, PKP, group, CID, TEE, compose hash.
   </Card>
 </CardGroup>

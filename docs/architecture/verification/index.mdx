@@ -5,6 +5,17 @@ description: "How to verify that your connection to Lit Chipotle terminates insi
 
 The Lit Chipotle API server runs inside an Intel TDX [Trusted Execution Environment](https://www.intel.com/content/www/us/en/developer/tools/trust-domain-extensions/overview.html) on [Phala Cloud](https://phala.com/), with its keys gated by smart contracts on Base. This section explains how that works and how to verify it yourself.
 
+There are two layers of checks. The hardware shows which Lit release is running, and the chain says which releases can hold keys. Pick the page that matches your question:
+
+- **What does attestation prove, and why can I trust it?** Start with [What Is Attestation?](/architecture/verification/attestation).
+- **Is the live API running approved code right now?** Run the checks in [Verify in 30 Seconds](/architecture/verification/quick-verify).
+- **Who approves a new release, and how are keys released to it?** Read [On-Chain KMS](/architecture/verification/onchain-kms) and [Upgrade Governance](/architecture/verification/upgrade-governance).
+- **Why does each check matter?** The [Chain of Trust Reference](/architecture/verification/chain-of-trust) explains each step.
+- **How do I enforce this in my own client?** Follow [Production verification](#production-verification) below and the [Full Verification Guide](/architecture/verification/full-verification).
+- **I found a problem.** See the [Bug Bounty](/architecture/verification/bug-bounty).
+
+A Trust Center report or a matching hash tells you what the server is running. It does not protect a later connection by itself. Your client has to check the evidence and pin the certificate on the connection that carries your data, as described below.
+
 <Card
   title="Start with the report and quick diagnostics"
   icon="shield-check"

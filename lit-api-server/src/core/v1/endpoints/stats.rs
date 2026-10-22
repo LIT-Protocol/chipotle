@@ -106,6 +106,15 @@ pub(super) async fn get_system_stats(
             )
             .await,
         );
+        caches.push(
+            entry_stats(
+                "permission_grant_deadlines",
+                "Usage-key expirations capping cached grants",
+                bc.grant_deadline_cache(),
+                flush,
+            )
+            .await,
+        );
         caches.push(CacheStats {
             name: "permission_generations".to_string(),
             description: "Per-account invalidation generation counters".to_string(),

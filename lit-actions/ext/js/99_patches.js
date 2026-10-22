@@ -1,3 +1,4 @@
+import { primordials } from 'ext:core/mod.js';
 import {
   op_eval_context,
   op_increment_fetch_count,
@@ -10,6 +11,8 @@ import {
 import * as _ethers from 'ext:lit_actions/00_ethers.js';
 import * as _viem from 'ext:lit_actions/00_viem.js';
 import * as _actions from 'ext:lit_actions/02_litActionsSDK.js';
+
+const { ReflectApply } = primordials;
 
 // this block scopes oldFetch so that nobody can ever use it after
 {
@@ -33,7 +36,10 @@ import * as _actions from 'ext:lit_actions/02_litActionsSDK.js';
       const { client: _dropped, ...rest } = init;
       init = rest;
     }
-    return oldFetch.call(null, input, init);
+    // Captured primordial, not `oldFetch.call`: an action can replace
+    // `Function.prototype.call` and would receive the unwrapped fetch as
+    // `this`, which skips the per-session fetch quota above.
+    return ReflectApply(oldFetch, null, [input, init]);
   };
   Object.freeze(fetch);
 
@@ -124,3 +130,6 @@ try {
   // marker stays false so the regression test fails loudly instead.
 }
 globalThis.__litSecp256k1Warmed = _secp256k1Warmed;
+
+// Seal native Node listener methods at snapshot creation, before user code.
+import 'ext:lit_actions/98_native_guards.js';

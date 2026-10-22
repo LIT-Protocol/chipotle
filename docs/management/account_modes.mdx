@@ -3,9 +3,25 @@ title: "API Mode vs ChainSecured Mode"
 description: "How the two account ownership models differ, when to choose each, and how to move from API mode to ChainSecured."
 ---
 
-Chipotle accounts come in two flavors. Both speak to the same on-chain
-contracts and run the same Lit Actions; they only differ in **who owns the
-account and how administrative writes are signed**.
+Who signs the transaction when you change your account's rules? Chipotle
+gives two answers, and they are the two account modes. Both speak to the
+same on-chain contracts and run the same Lit Actions; they only differ in
+**who owns the account and how administrative writes are signed**.
+
+Both modes are [Chain Secured](/architecture/chain-secured): the account's
+rules live in the same contracts on Base, and the TEE enforces them the
+same way. ChainSecured mode is the mode where a wallet you control owns the
+account and signs every change.
+
+Before you choose, know these limits:
+
+- Converting an API-mode account to ChainSecured is one-way. There is
+  [no path back](#reverse-direction) to API mode.
+- In ChainSecured mode your wallet pays Base gas for every admin write, so
+  it needs ETH on Base.
+- A wallet that has ever been an account's admin can't receive ownership in
+  a [transfer](#transferring-ownership-of-a-chainsecured-account), and that
+  includes the wallet you just transferred away from.
 
 - **API mode** (managed) — `POST /core/v1/new_account` generates a fresh
   random secret server-side and returns it once as a base64 API key, along
@@ -246,9 +262,11 @@ the server's api\_payer signs the on-chain conversion on their behalf.
 - **Action metadata** (registered IPFS CID names and descriptions).
 - **Usage API keys** — they continue to authorize Lit Action execution
   exactly as before.
-- **Stripe credit balance** — the wallet\_cache entry is invalidated on
-  conversion so billing routes to the new admin wallet's customer record
-  immediately.
+- **Stripe credit balance** — billing uses the account's billing wallet,
+  which is set when the account is created and does not change on
+  conversion, so charges keep going to the same Stripe customer. The
+  server's wallet\_cache entry is invalidated on conversion, so the next
+  billing lookup reads the current on-chain record.
 
 ### What changes
 
@@ -257,6 +275,10 @@ the server's api\_payer signs the on-chain conversion on their behalf.
 - Admin write authority moves entirely to the connected wallet. The
   original master API key can no longer authorize writes on this account
   (the contract rejects api\_payer relays for unmanaged accounts).
+- The wallet's own hash, `uint256(keccak256(abi.encodePacked(newAdminWalletAddress)))`,
+  now resolves to the account. Admin writes signed by that wallet accept
+  it as the account hash (this is what the dashboard sends after a wallet
+  login), as well as the master `apiKeyHash`.
 - Read endpoints that key off `apiKeyHash` continue to resolve to the
   same account.
 
@@ -416,6 +438,8 @@ involvement.
   → master `apiKeyHash` — is registered so the new wallet resolves to the
   account on login. (In ethers this is
   `ethers.solidityPackedKeccak256(['address'], [newAdminWalletAddress])`.)
+  Admin writes signed by the new wallet accept this hash as the account
+  hash, as well as the master `apiKeyHash`.
 
 ### The contract function
 
@@ -524,6 +548,9 @@ account — reconnect with the new wallet to keep managing it.
 - All groups, PKPs, action CIDs, and existing usage API keys are visible
   under the new wallet session, and a Lit Action run with one of those
   usage keys still succeeds.
+- Usage API keys survive the transfer. Revoke any that the previous owner
+  issued and should no longer hold; the new wallet can revoke them from
+  the dashboard.
 - The Stripe credit balance is unchanged.
 
 ## Further reading

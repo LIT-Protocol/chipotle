@@ -1,9 +1,9 @@
 # Verify attestation from a deployed Phala CVM
 #
-# Fetches /attestation from the live API, runs the official
-# dstacktee/dstack-verifier Docker image, and asserts is_valid=true.
-# Unlike the simulator CI job (which can only check quote_verified),
-# a real TDX deployment must produce a fully valid attestation.
+# Fetches /attestation from the live API, runs Phala's dstack-verifier image
+# (pinned by digest in .github/dstack-verifier/Dockerfile), and asserts
+# is_valid=true. Unlike the simulator CI job (which can only check
+# quote_verified), a real TDX deployment must produce a fully valid attestation.
 #
 # Called from Deploy to Phala CVM after the API is available, or manually
 # via workflow_dispatch.
@@ -44,10 +44,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Pull dstack-verifier image
-        run: docker pull --platform linux/amd64 dstacktee/dstack-verifier:latest
+      - name: Pull pinned dstack-verifier image
+        id: verifier
+        run: |
+          set -eu
+          IMAGE=$(bash scripts/dstack-verifier-image.sh)
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          docker pull --platform linux/amd64 "$IMAGE"
 
       - name: Verify remote attestation
+        env:
+          VERIFIER_IMAGE: ${{ steps.verifier.outputs.image }}
         run: |
           set -eu
           ATTESTATION_URL="${{ inputs.base_url }}"
@@ -70,7 +77,7 @@ jobs:
             -v "$TMP_DIR:/verify" \
             -w /verify \
             --platform linux/amd64 \
-            dstacktee/dstack-verifier:latest \
+            "$VERIFIER_IMAGE" \
             --verify /verify/verify-request.json || true
 
           RESULT_FILE="$TMP_DIR/verify-request.json.verification.json"

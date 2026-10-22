@@ -14,12 +14,12 @@ Lit Chipotle uses two distinct types of API keys, each with a different scope an
 Your account key is created once, at account creation time. It is the master credential for your account — treat it like a password.
 
 - **Created:** Automatically generated when you create a new account. Displayed **once** in a one-time success message; copy and store it immediately.
-- **Purpose:** Full administrative access to your account — creating and deleting usage keys, managing groups, registering actions, and creating PKPs.
+- **Purpose:** Full administrative access to your account — creating and deleting usage keys, managing groups, registering actions, and creating PKPs. It does not run lit-actions. Create a usage key for that.
 - **Authentication:** Pass it in the `X-Api-Key` (or `Authorization: Bearer`) header to authenticate as the account owner.
 - **Security:** Because this key is your master credential, it should never be embedded in client-side code, shared with users, or rotated casually. If it is compromised, your entire account is at risk. Store it in a secrets manager or equivalent secure store.
 
 <Warning>
-The account key is shown only once at creation. There is no way to retrieve it again. If it is lost, you will need to contact support.
+The account key is shown only once at creation. There is no way to retrieve it again. If it is lost, create a new account.
 </Warning>
 
 ---
@@ -47,6 +47,8 @@ Wildcard execution does **not** grant unrestricted PKP wallet access. PKP privat
 | Update usage key permissions | Account key only |
 | Delete usage key | Account key only |
 | Run a lit-action | Usage key with execution permission (scoped or wildcard) |
+
+In [ChainSecured mode](/management/account_modes) there is no account key. The owner wallet manages usage keys with on-chain transactions instead.
 
 <Note>
 A freshly-created usage key's group permissions are eventually consistent — the first `/lit_action` call right after `add_usage_api_key` can fail for a beat while the grant propagates. Don't sleep a fixed amount; poll the real execution path until it succeeds. See [Verify the real path before you depend on it](/management/api_direct#7-run-lit-action).
@@ -158,11 +160,13 @@ Returns a paginated list of usage keys on the account. The key value itself is n
   </Tab>
 </Tabs>
 
+The list adds a `can_` prefix to the group fields, so the `execute_in_groups` you set comes back as `can_execute_in_groups`. The [Authentication Model](/architecture/authModel#scopes-and-api-fields) maps each field to its scope name.
+
 ---
 
 **Update a usage key's permissions** — `POST /core/v1/update_usage_api_key`
 
-Replaces all permissions on an existing usage key. Pass the usage key value (not the account key) in the body. The full permission set must be provided — any fields omitted will be reset to their defaults.
+Replaces all permissions on an existing usage key. Pass the usage key value (not the account key) in the body. The full permission set must be provided. Every field is required, and the server rejects a request with a missing field. To keep a permission as it is, send its current value, which you can read with `list_api_keys`.
 
 <Tabs>
   <Tab title="JavaScript (Core SDK)">

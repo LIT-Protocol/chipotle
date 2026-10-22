@@ -19,6 +19,17 @@ const test = base.extend<{ dashboard: DashboardPage; browserErrors: void }>({
   }, { auto: true }],
 });
 
+// A successful password submit shows the dashboard in the current document,
+// then `busy()` replaces the URL with #overview and reloads it. Neither the
+// visible dashboard nor `waitForNavigation` (which also resolves on that
+// same-document replaceState) proves the reload finished, so an `evaluate`
+// can race the old document's teardown. Wait for the marked document to go.
+async function submitAndReload(page: Page, submit: () => Promise<void>) {
+  await page.evaluate(() => { document.documentElement.dataset.beforeSubmit = 'true'; });
+  await submit();
+  await expect(page.locator('html')).not.toHaveAttribute('data-before-submit', 'true');
+}
+
 async function signOut(page: Page) {
   await page.locator('#account-dropdown-trigger').click();
   await page.locator('#account-signout-btn').click();
@@ -221,7 +232,7 @@ test('password-manager style signup and autofill unlock a real account', async (
   await page.locator('#password-create-password').evaluate((input, value) => { (input as HTMLInputElement).value = value; }, password);
   await page.locator('#password-create-confirm').evaluate((input, value) => { (input as HTMLInputElement).value = value; }, password);
   const created = page.waitForResponse(`${api}/new_account`);
-  await page.locator('#password-create-submit').click();
+  await submitAndReload(page, () => page.locator('#password-create-submit').click());
   expect((await created).status(), 'Real password signup retry must succeed').toBe(200);
   await dashboard.expectLoggedIn();
   const key = await page.evaluate(() => sessionStorage.getItem('accountconfig_api_key'));
@@ -250,7 +261,7 @@ test('password-manager style signup and autofill unlock a real account', async (
   };
   await fillLogin(password);
   await expect(page.locator('#password-login-password')).toHaveAttribute('autocomplete', 'current-password');
-  await Promise.all([page.waitForNavigation(), page.locator('#password-login-password').press('Enter')]);
+  await submitAndReload(page, () => page.locator('#password-login-password').press('Enter'));
   await dashboard.expectLoggedIn();
   expect(await page.evaluate(() => sessionStorage.getItem('accountconfig_api_key'))).toBe(key);
   await page.locator('#account-dropdown-trigger').click();
@@ -259,13 +270,13 @@ test('password-manager style signup and autofill unlock a real account', async (
   await page.locator('#password-current').fill(password);
   await page.locator('#password-new').evaluate((input, value) => { (input as HTMLInputElement).value = value; }, replacement);
   await page.locator('#password-new-confirm').evaluate((input, value) => { (input as HTMLInputElement).value = value; }, replacement);
-  await Promise.all([page.waitForNavigation(), page.locator('#password-change-form button[type=submit]').click()]);
+  await submitAndReload(page, () => page.locator('#password-change-form button[type=submit]').click());
   await expect(page.locator('#login-status')).toContainText('Password changed');
   await fillLogin(password);
   await page.locator('#password-login-form button[type=submit]').click();
   await expect(page.locator('#login-status')).toContainText('incorrect');
   await fillLogin(replacement);
-  await Promise.all([page.waitForNavigation(), page.locator('#password-login-form button[type=submit]').click()]);
+  await submitAndReload(page, () => page.locator('#password-login-form button[type=submit]').click());
   await dashboard.expectLoggedIn();
   expect(await page.evaluate(() => sessionStorage.getItem('accountconfig_api_key'))).toBe(key);
   expect(await page.evaluate(() => JSON.stringify({ ...sessionStorage }))).not.toContain(replacement);

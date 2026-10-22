@@ -29,15 +29,16 @@ use rocket::{get, post};
 use rocket_okapi::openapi;
 
 /// Create a new managed account: derives a fresh wallet, registers it on-chain,
-/// and provisions a Stripe customer with starter credits. Returns the account's
-/// API key and wallet address.
+/// and provisions a Stripe customer. The account starts with no credits unless
+/// the node operator enables starter credits. Returns the account's API key and
+/// wallet address.
 ///
 /// No authentication is required (this is how a caller obtains their first API
 /// key), but the endpoint is rate limited per client IP and may return 429 Too
 /// Many Requests when the node is under load or a single source creates
 /// accounts too quickly. Retry those with exponential backoff.
 // Unauthenticated + expensive (two operator-funded on-chain txs, a Stripe
-// customer, and starter credits per call), so it carries two anonymous-abuse
+// customer, and starter credits when enabled), so it carries two anonymous-abuse
 // guards (CPL-367): CpuAvailable sheds load when the node is CPU-bound, and
 // NewAccountRateLimit caps the sustained account-creation rate per client IP.
 #[openapi(tag = "Account Management")]
@@ -78,10 +79,12 @@ pub(super) async fn convert_to_chain_secured_account(
     )
     .await;
 
-    // Conversion changes the account's admin wallet on-chain. The Stripe
-    // wallet_cache maps api_key_hash → wallet_address with a 1-hour TTL, so
-    // without invalidation, billing/credit lookups would resolve to the old
-    // api_payer-generated wallet for up to an hour after conversion.
+    // Conversion changes the account's admin wallet on-chain but not its
+    // billing wallet: the contract keeps it, and backfills it from the old admin
+    // wallet for legacy accounts that had none (CPL-313). Billing resolves
+    // through the billing wallet, so the Stripe wallet_cache (api_key_hash →
+    // billing wallet, 1-hour TTL) stays correct across conversion. Dropping the
+    // entry is defensive: the next billing lookup re-reads the converted state.
     if result.is_ok()
         && let Some(stripe) = stripe_state.as_ref()
     {

@@ -10,7 +10,7 @@ Many capabilities that previously required runtime API calls — permission chec
 [Dashboard application](https://developer.litprotocol.com/) or accessed directly on-chain.
 
 > **Deprecated actions** generally have equivalent functionality derived through the combination of **new actions** and the **on-chain security settings** provided by the Dashboard application (or accessed directly on-chain).
-> Permissions, group membership, and access control are now encoded at account-creation time rather than checked dynamically at execution time.
+> Permissions, group membership, and access control are now encoded on-chain in your account's configuration, which you set up ahead of time, rather than evaluated by condition-checking calls inside the action. The server still checks those on-chain permissions on every request: it confirms that the key may run the action's CID before execution, and checks each PKP request while the action runs. See [How actions fit into Chipotle](/lit-actions/index#how-actions-fit-into-chipotle).
 
 ---
 
@@ -360,7 +360,7 @@ const tokenId = ethers.utils.keccak256(publicKey);
 
 Previously evaluated access control conditions using the Lit condition-checking engine at runtime.
 
-**Replacement:** Access control is enforced on-chain through group and PKP settings managed via the Dashboard or `AccountConfig` contract. Design your system so that permission is established before an action executes rather than checked inside the action.
+**Replacement:** Access control is enforced on-chain through group and PKP settings managed via the Dashboard or `AccountConfig` contract. Design your system so that permission is established before an action executes rather than checked inside the action. That applies to PKP access. An action that signs or decrypts with its own identity key should still check the caller's authorization in its code, because anyone allowed to run the code can invoke it. See [Derived Actions](/lit-actions/derived-actions).
 
 ---
 

@@ -126,8 +126,10 @@ pub fn forbidden(req: &Request<'_>) -> Json<ApiError> {
         req,
         "forbidden",
         "This API key is not permitted to perform this operation.",
-        "Check the key's scopes with GET /core/v1/list_api_keys, or retry with your account \
-         master key. Usage keys only act in the groups they were granted."
+        "Check the key's scopes with GET /core/v1/list_api_keys. Management calls may need \
+         the account key; /lit_action needs a usage key with execute permission for the \
+         action (a group that lists its CID, or the wildcard group 0). Usage keys only act in \
+         the groups they were granted."
             .to_string(),
         DOCS_AUTH_URL,
     )

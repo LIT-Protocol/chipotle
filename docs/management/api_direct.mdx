@@ -13,7 +13,9 @@ The same workflows can be done via the REST API. The API itself is under `/core/
 
 Optionally send `X-Privacy-Mode: true` on any request. The server then tags the request ID and suppresses its own log events for that request, so request details (including `js_params` and action output) are not written to Chipotle's server logs. Use it whenever an action call carries anything you would not want in an operator's logs. The [Lit Agent Keychain](https://github.com/LIT-Protocol/chipotle/tree/main/lit-agent-keychain) sets it on every call.
 
-Examples below assume `KEY=your_account_or_usage_api_key` and `BASE=https://api.chipotle.litprotocol.com` (the hosted production API). The JavaScript examples use the Core SDK (`LitNodeSimpleApiClient`) from `core_sdk.js`.
+Examples below assume `KEY=your_account_or_usage_api_key` and `BASE=https://api.chipotle.litprotocol.com` (the hosted production API). The JavaScript examples use the Core SDK (`LitNodeSimpleApiClient`) from `core_sdk.js`, which lives at [`lit-static/core_sdk.js`](https://github.com/LIT-Protocol/chipotle/blob/main/lit-static/core_sdk.js) in the Chipotle repository.
+
+Two kinds of keys appear on this page. The **account key** is the key that `new_account` returns in step 1. It manages the account, so steps 3 to 6 send it. A **usage key** is a key you create with the account key in step 3. It runs actions in step 7. The account key can't run actions, so `/lit_action` always needs a usage key. See [Usage API Keys](/management/api_keys) for the full rules.
 
 **API workflow:**
 
@@ -57,6 +59,7 @@ Create a new account (returns API key and wallet address). Or verify an existing
     curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/new_account" \
       -H "Content-Type: application/json" \
       -d '{"account_name":"My App","account_description":"Optional","email":"optional@example.com"}'
+    # Response: {"api_key":"...","wallet_address":"0x..."}
 
     # Verify account (replace KEY with your API key)
     curl -s "https://api.chipotle.litprotocol.com/core/v1/account_exists" \
@@ -64,6 +67,8 @@ Create a new account (returns API key and wallet address). Or verify an existing
     ```
   </Tab>
 </Tabs>
+
+The `api_key` in the response is your account key. Send both `account_name` and `account_description`, because the server requires them. The `email` field is optional.
 
 <Note>
 The very first call takes ~15 seconds — account creation waits for an on-chain
@@ -80,9 +85,23 @@ with [crypto](/management/crypto) (ETH, USDC, SOL and more) or
 [billing API](#billing). Without credits the steps below return
 `402 Payment Required` — see [Errors](/management/errors).
 
+You can check your balance at any point:
+
+```bash
+curl -s "https://api.chipotle.litprotocol.com/core/v1/billing/balance" \
+  -H "X-Api-Key: KEY"
+# Response: {"balance_cents":-500,"balance_display":"$5.00 credit"}
+```
+
+`balance_cents` follows Stripe's convention, so a negative number is credit you can spend. In this example, `-500` means $5.00 of credit. Zero means your credits are used up. Paying by card through the API needs Stripe.js running in a browser, so the Dashboard is the simplest way to add your first funds.
+
 ### 3. Add usage API key
 
-Create a usage API key with fine-grained permissions. The response includes the new key only once — store it immediately.
+Create a usage API key with fine-grained permissions. The response includes the new key only once — store it immediately. Send the account key in the header for this call.
+
+<Note>
+**For a first test, use `"execute_in_groups": [0]`.** Group `0` is a wildcard. A key with it can run any code that doesn't use a PKP, without any group, so you can go straight to step 7 and come back to steps 4 to 6 when you need a wallet. The examples below grant group `1` instead. That is the group you create in step 5, so either create the group first or change the key later with `update_usage_api_key`. A wildcard key still needs a matching group to use a PKP. See [Wildcard execution and wallet access](/management/api_keys#wildcard-execution-and-wallet-access).
+</Note>
 
 <Tabs>
   <Tab title="JavaScript (Core SDK)">
@@ -118,6 +137,7 @@ Create a usage API key with fine-grained permissions. The response includes the 
         "remove_pkp_from_groups": [],
         "execute_in_groups": [1]
       }'
+    # Response: {"success":true,"usage_api_key":"..."}
     ```
   </Tab>
 </Tabs>
@@ -149,9 +169,12 @@ Request a new wallet (PKP) for the account. The server returns the wallet addres
     ```bash
     curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/create_wallet" \
       -H "X-Api-Key: KEY"
+    # Response: {"wallet_address":"0x..."}
     ```
   </Tab>
 </Tabs>
+
+The `wallet_address` is also the PKP's ID. Use it as `pkp_id` when you add the PKP to a group in step 6, and as `pkpId` inside your action.
 
 <Note>
 `GET /create_wallet` also works but is deprecated — minting is a metered write,
@@ -161,6 +184,29 @@ and GETs get replayed by prefetchers and retrying proxies. Use POST.
 ### 5. Add group and register IPFS action
 
 Create a group, then add an action (IPFS CID) to scope which keys can run it.
+
+A group lists actions by CID, and the CID is a hash of the action's code. Register the CID of the exact code you will send in step 7. If the code changes by even one character, its CID changes and step 7 returns `403`. Compute the CID from the code first:
+
+<Tabs>
+  <Tab title="JavaScript (Core SDK)">
+    ```javascript
+    const code = 'async function main() { return "hello"; }';
+    const cid = await client.getLitActionIpfsId(code);
+    console.log('CID:', cid); // "Qm..."
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    # The body is the code as a JSON string. No API key is needed.
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/get_lit_action_ipfs_id" \
+      -H "Content-Type: application/json" \
+      -d '"async function main() { return \"hello\"; }"'
+    # Response: "Qm..."
+    ```
+  </Tab>
+</Tabs>
+
+Then create the group and add the CID to it:
 
 <Tabs>
   <Tab title="JavaScript (Core SDK)">
@@ -205,13 +251,16 @@ Create a group, then add an action (IPFS CID) to scope which keys can run it.
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{"group_id": 1, "action_ipfs_cid": "QmYourIpfsCidHere"}'
+    # Response: {"success":true}
     ```
   </Tab>
 </Tabs>
 
+`add_group` returns `group_id` as a string, such as `"1"`. Most requests on this page take it as a number, such as `1`.
+
 ### 6. Add PKP to group (optional)
 
-Restrict which wallets (PKPs) can be used in the group by adding their IDs to the group.
+Restrict which wallets (PKPs) can be used in the group by adding their IDs to the group. A PKP's ID is the `wallet_address` that `create_wallet` returned in step 4.
 
 <Tabs>
   <Tab title="JavaScript (Core SDK)">
@@ -235,7 +284,9 @@ Restrict which wallets (PKPs) can be used in the group by adding their IDs to th
 
 ### 7. Run lit-action
 
-Execute a lit-action by sending JavaScript code and optional params. Use a usage API key (or account key) in the header.
+Execute a lit-action by sending JavaScript code and optional params. Use a usage API key with execute permission in the header. The account key can't run actions, so a call made with it returns `403`.
+
+The server hashes your code to get its CID, checks that the key may run that CID, and then runs it in the TEE. Your `main` function receives `js_params` as its argument, and whatever `main` returns comes back as `response`.
 
 <Tabs>
   <Tab title="JavaScript (Core SDK)">
@@ -260,9 +311,16 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{"code":"async function main() { return \"hello\"; }","js_params":null}'
+    # Response: {"response":"hello","logs":"","has_error":false}
     ```
   </Tab>
 </Tabs>
+
+The response has three fields, `response`, `logs`, and `has_error`. There is no separate field for signatures. If your action signs something, return the signature from `main`, as the JavaScript example does.
+
+If the key isn't allowed to run this code, the call returns `403` with the message "The provided API key is not authorized to execute the specified action". The usual causes are a key without execute permission in a group that lists this CID, or code that no longer matches the CID you registered. See [Errors](/management/errors).
+
+You can send `ipfs_id` instead of `code` to run code the server has already received. The server keeps recently run code in a cache and does not fetch code from IPFS. If the CID isn't in the cache, the call returns `400`, so send `code` unless you know the server has it.
 
 <Warning>
 **Newly-granted permissions are eventually consistent — verify before you depend on them.** After `add_usage_api_key` (or `add_action_to_group` / `add_pkp_to_group`) there's a short, variable delay before the grant works on `/lit_action`, so the first call right after minting a key can fail. Don't sleep a fixed amount (it flakes or over-waits) — poll the real path (run the actual action with the actual key) until it succeeds, then proceed. A small retry on network errors and `5xx` helps too. Worked version: `waitForUsageKeyReady` + retry wrapper in [`examples/action-bound-wallet`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/action-bound-wallet).
@@ -308,9 +366,11 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
 
 ### ChainSecured-mode HTTP endpoints
 
-Three HTTP endpoints back the ChainSecured (sovereign) flow. They sit alongside the on-chain writes — see [API mode vs ChainSecured mode](/management/account_modes) for the full SDK-side workflow and when to choose each mode.
+The rest of this page is for ChainSecured accounts, where a wallet you control owns the account. If you haven't chosen a mode yet, read [API mode vs ChainSecured mode](/management/account_modes) first.
 
-All three (and the billing-auth header described above) share the same EIP-712 typed-data envelope. The wallet UI displays a labelled struct — `address` and `issuedAt` fields under a stable `(name: "Lit ChainSecured", version: "1", chainId)` domain — so users can see exactly what they're signing. The `primaryType` pins the signature to a specific flow and is part of the EIP-712 type hash, so a signature minted for one endpoint is rejected by every other endpoint at the digest level. Typed-data payloads longer than 4 KiB (serialised JSON) are rejected.
+Four HTTP endpoints back the ChainSecured (sovereign) flow, and three of them take a wallet signature. They sit alongside the on-chain writes — see [API mode vs ChainSecured mode](/management/account_modes) for the full SDK-side workflow and when to choose each mode.
+
+The three signed endpoints share the same EIP-712 typed-data envelope. So does the `X-Wallet-Auth` header, which ChainSecured accounts send on billing calls because they have no account key. The wallet UI displays a labelled struct — `address` and `issuedAt` fields under a stable `(name: "Lit ChainSecured", version: "1", chainId)` domain — so users can see exactly what they're signing. The `primaryType` pins the signature to a specific flow and is part of the EIP-712 type hash, so a signature minted for one endpoint is rejected by every other endpoint at the digest level. Typed-data payloads longer than 4 KiB (serialised JSON) are rejected.
 
 | Endpoint | `primaryType` |
 |----------|------------------|
@@ -358,7 +418,7 @@ The `"0x<65-byte hex>"` signatures shown in the request examples below are the E
 
 #### `POST /create_wallet_with_signature`
 
-Mints a PKP via DStack MPC after verifying a wallet-ownership signature. Used by `createWallet` in ChainSecured mode; the response is then passed to the on-chain `registerWalletDerivation` call (signed by the same wallet) to register the PKP to the account.
+Derives a new PKP inside the TEE (from the root key and a fresh derivation path) after verifying a wallet-ownership signature. Used by `createWallet` in ChainSecured mode; the response is then passed to the on-chain `registerWalletDerivation` call (signed by the same wallet) to register the PKP to the account.
 
 No API key required. `primaryType` must be `CreateWallet`.
 
@@ -380,7 +440,7 @@ No API key required. `primaryType` must be `CreateWallet`.
 }
 ```
 
-Pass `derivation_path` verbatim into `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)` on the AccountConfig contract — until that lands, the PKP exists in MPC but is not registered to any account.
+Pass `derivation_path` verbatim into `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)` on the AccountConfig contract — until that lands, the PKP's key can be derived but the PKP is not registered to any account. Here `adminHash` is the account's `apiKeyHash`, its stable on-chain ID.
 
 <Note>
 **Prefer [`POST /prepare_wallet`](#post-prepare-wallet) unless you specifically need the ownership signature.** It returns the same `{ wallet_address, derivation_path }` with no signature and no API key, and exists purely to streamline the ChainSecured wallet-creation ceremony:
@@ -431,7 +491,7 @@ The wallet-ownership signature on `create_wallet_with_signature` authorizes noth
 }
 ```
 
-Pass `derivation_path` verbatim into `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)`. Until that on-chain call lands, the PKP exists in MPC but is registered to no account — an un-registered response is equivalent to a discarded keypair (compute-only cost, exactly like a replay of the signature endpoints).
+Pass `derivation_path` verbatim into `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)`. Until that on-chain call lands, the PKP's key can be derived but the PKP is registered to no account — an un-registered response is equivalent to a discarded keypair (compute-only cost, exactly like a replay of the signature endpoints).
 
 ```bash
 curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/prepare_wallet"
@@ -448,9 +508,9 @@ There is no meaningful *collision* risk between concurrent callers: each gets an
 
 #### `POST /convert_to_chain_secured_account`
 
-Flips a managed (API-mode) account to ChainSecured (unmanaged) in a single on-chain transaction. The account's `apiKeyHash` is preserved — groups, PKPs, action metadata, and usage API keys (everything keyed by `apiKeyHash` on-chain) stay attached. Only the admin wallet and the `managed` flag change on-chain. **Billing should be re-verified after conversion:** Stripe credits are associated with the Stripe customer resolved from the current admin wallet address, so a credit balance is not guaranteed to carry over automatically when the admin wallet changes. There is no reverse path.
+Flips a managed (API-mode) account to ChainSecured (unmanaged) in a single on-chain transaction. The account's `apiKeyHash` is preserved — groups, PKPs, action metadata, and usage API keys (everything keyed by `apiKeyHash` on-chain) stay attached. Only the admin wallet and the `managed` flag change on-chain. **Your credit balance carries over.** Billing is tied to the account's billing wallet, which is set when the account is created and stays the same through conversion, so charges keep going to the same Stripe customer. You can confirm the balance with `GET /billing/balance` after converting. There is no reverse path.
 
-Requires the existing master API key (sent via `X-Api-Key` or `Authorization: Bearer`, per the auth header conventions above). The server's api\_payer signs the on-chain conversion after verifying the wallet signature; the new admin must sign EIP-712 typed data with `primaryType: "ConvertAccount"`.
+Requires the existing master API key, which is the account key (sent via `X-Api-Key` or `Authorization: Bearer`, per the auth header conventions above). The server's api\_payer signs the on-chain conversion after verifying the wallet signature. An api\_payer is a server wallet that submits on-chain writes for API-mode accounts, and `GET /get_api_payers` lists them. The new admin must sign EIP-712 typed data with `primaryType: "ConvertAccount"`.
 
 **Request body:**
 
@@ -492,7 +552,7 @@ See [API mode vs ChainSecured mode → Converting an API account to ChainSecured
 
 #### `POST /add_usage_api_key_with_signature`
 
-The ChainSecured counterpart to `/add_usage_api_key`. Mirrors `create_wallet_with_signature`: the server mints a usage-key wallet via DStack MPC after verifying a wallet-ownership signature, then returns the secret (base64-encoded) plus the wallet address and derivation path. The client follows up on-chain — only the admin wallet of a ChainSecured account can call `setUsageApiKey`, so the server cannot complete the attach for you.
+The ChainSecured counterpart to `/add_usage_api_key`. Mirrors `create_wallet_with_signature`: the server derives a usage-key wallet inside the TEE after verifying a wallet-ownership signature, then returns the secret (base64-encoded) plus the wallet address and derivation path. The client follows up on-chain — only the admin wallet of a ChainSecured account can call `setUsageApiKey`, so the server cannot complete the attach for you.
 
 No API key required. `primaryType` must be `AddUsageApiKey`. Worst-case replay just returns a fresh secret for an unattached wallet — equivalent to a freshly generated keypair until the admin wallet calls the on-chain follow-ups, so compute cost only.
 

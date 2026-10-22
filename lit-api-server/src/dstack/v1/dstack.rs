@@ -24,7 +24,7 @@ const DSTACK_SOCKET_DEFAULT: &str = "/var/run/dstack.sock";
 ///   `/var/run/dstack.sock` (env override disabled).
 /// - **Dev** (`--features dstack`): uses `DSTACK_SOCKET` env var if set, otherwise
 ///   defaults to `/var/run/dstack.sock`.
-fn resolve_socket_path() -> String {
+pub(super) fn resolve_socket_path() -> String {
     #[cfg(feature = "production")]
     {
         DSTACK_SOCKET_DEFAULT.to_string()
@@ -52,7 +52,7 @@ fn get_socket_path() -> Result<String, String> {
 
 /// Check if the dstack socket is available (exists and is a Unix socket).
 #[cfg_attr(not(test), allow(dead_code))]
-fn socket_available(path: &str) -> bool {
+pub(super) fn socket_available(path: &str) -> bool {
     Path::new(path)
         .metadata()
         .map(|m| m.file_type().is_socket())

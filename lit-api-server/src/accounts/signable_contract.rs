@@ -477,7 +477,7 @@ mod tests {
             return;
         }
 
-        use crate::accounts::blockchain_cache;
+        use crate::accounts::blockchain_cache::{self, CachedPermission, GrantDeadline};
         use crate::accounts::contracts::account_config_contract::ViewsFacet::UsageApiKeyReturn;
         use alloy::primitives::{Bytes, U256};
         use alloy::rpc::client::RpcClient;
@@ -526,6 +526,9 @@ mod tests {
         let wallet = Address::repeat_byte(0x42);
         let path = U256::from(123u64);
         let contract_address = Address::repeat_byte(0x73);
+        fn never<T>(result: T) -> CachedPermission<T> {
+            CachedPermission::new(result, GrantDeadline::Never)
+        }
         let asserter = Asserter::new();
         let response = AccountConfig::listApiKeysCall::abi_encode_returns(
             &usage_keys
@@ -563,13 +566,13 @@ mod tests {
                 .await;
             cache
                 .use_wallet_cache()
-                .insert(cache.use_wallet_key(hash, cid, wallet), true)
+                .insert(cache.use_wallet_key(hash, cid, wallet), never(true))
                 .await;
             cache
                 .execute_and_wallet_cache()
                 .insert(
                     cache.execute_and_wallet_key(hash, cid, wallet),
-                    (true, true),
+                    never((true, true)),
                 )
                 .await;
             assert_eq!(
@@ -584,14 +587,14 @@ mod tests {
                     .use_wallet_cache()
                     .get(&cache.use_wallet_key(hash, cid, wallet))
                     .await,
-                Some(true)
+                Some(never(true))
             );
             assert_eq!(
                 cache
                     .execute_and_wallet_cache()
                     .get(&cache.execute_and_wallet_key(hash, cid, wallet))
                     .await,
-                Some((true, true))
+                Some(never((true, true)))
             );
         }
         let log = alloy::rpc::types::Log {
@@ -676,20 +679,626 @@ mod tests {
                 .use_wallet_cache()
                 .get(&cache.use_wallet_key(unrelated, cid, wallet))
                 .await,
-            Some(true)
+            Some(never(true))
         );
         assert_eq!(
             cache
                 .execute_and_wallet_cache()
                 .get(&cache.execute_and_wallet_key(unrelated, cid, wallet))
                 .await,
-            Some((true, true))
+            Some(never((true, true)))
         );
         assert_eq!(
             asserter.read_q().len(),
             1,
             "exactly one listApiKeys response must be consumed"
         );
+    }
+
+    // The deadline a grant is cached with comes from the key's on-chain
+    // expiration, and sustained use cannot keep the grant past it.
+    #[tokio::test]
+    async fn cached_grant_is_rechecked_on_chain_at_usage_key_expiration() {
+        // Own process for the same reason as the wallet-removal fixture.
+        const CHILD_ENV: &str = "LIT_TEST_GRANT_EXPIRY_CHILD";
+        if std::env::var_os(CHILD_ENV).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "accounts::signable_contract::tests::cached_grant_is_rechecked_on_chain_at_usage_key_expiration",
+                    "--nocapture",
+                ])
+                .env(CHILD_ENV, "1")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                output.status.success() && stdout.contains("1 passed; 0 failed"),
+                "isolated grant-expiry regression must run and pass: {stdout}\n{stderr}"
+            );
+            return;
+        }
+
+        use crate::accounts::blockchain_cache::{self, GrantDeadline};
+        use crate::accounts::can_execute_action;
+        use crate::accounts::contracts::account_config_contract::ViewsFacet::UsageApiKeyReturn;
+        use crate::utils::parse_with_hash::api_key_hash;
+        use alloy::primitives::{Bytes, U256};
+        use alloy::rpc::client::RpcClient;
+        use alloy::sol_types::SolCall;
+        use alloy::transports::mock::{Asserter, MockTransport};
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+        let unix_now = || SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        let (expiring, never) = ("issue-165-expiring", "issue-165-never");
+        let cid = U256::from(165u64);
+        // On-chain expirations are whole seconds; leave at least one.
+        let expiration = unix_now().as_secs() + 2;
+        let deadline = Duration::from_secs(expiration);
+        let usage_keys = AccountConfig::listApiKeysCall::abi_encode_returns(&vec![
+            UsageApiKeyReturn {
+                apiKeyHash: U256::from(1u64),
+                ..Default::default()
+            },
+            UsageApiKeyReturn {
+                apiKeyHash: api_key_hash(expiring),
+                expiration: U256::from(expiration),
+                ..Default::default()
+            },
+            UsageApiKeyReturn {
+                apiKeyHash: api_key_hash(never),
+                ..Default::default()
+            },
+        ]);
+        let granted = AccountConfig::canExecuteActionCall::abi_encode_returns(&true);
+        let asserter = Asserter::new();
+        // Each key's first lookup: the grant, then its expiration.
+        for _ in [expiring, never] {
+            asserter.push_success(&Bytes::from(granted.clone()));
+            asserter.push_success(&Bytes::from(usage_keys.clone()));
+        }
+        // The re-check once `expiring` has expired.
+        asserter.push_success(&Bytes::from(
+            AccountConfig::canExecuteActionCall::abi_encode_returns(&false),
+        ));
+        asserter.push_failure_msg("unexpected extra RPC");
+        let client = ProviderBuilder::new()
+            .connect_client(RpcClient::new(MockTransport::new(asserter.clone()), true))
+            .erased();
+        assert!(GLOBAL_READ_ONLY_CLIENT.set(client).is_ok());
+        GLOBAL_NODE_CONFIG
+            .set(crate::config::NodeConfig {
+                chain: Chain::Anvil,
+                contract_address: Address::repeat_byte(0x73).to_string(),
+            })
+            .unwrap();
+        blockchain_cache::init();
+        let cache = blockchain_cache::get().unwrap();
+
+        // Sustained use up to the expiration is served from the cache.
+        let mut uses = 0;
+        while unix_now() + Duration::from_millis(150) < deadline {
+            assert!(can_execute_action(expiring, cid).await.unwrap());
+            assert!(can_execute_action(never, cid).await.unwrap());
+            uses += 1;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(uses > 1, "{uses} uses before expiry");
+        assert_eq!(
+            asserter.read_q().len(),
+            2,
+            "only first lookups hit the chain"
+        );
+        let deadline_of = |api_key| async move {
+            let key = cache.execute_action_key(api_key_hash(api_key), cid);
+            cache
+                .execute_action_cache()
+                .get(&key)
+                .await
+                .map(|p| p.deadline)
+        };
+        assert_eq!(
+            deadline_of(expiring).await,
+            Some(GrantDeadline::At(deadline))
+        );
+        assert_eq!(deadline_of(never).await, Some(GrantDeadline::Never));
+
+        tokio::time::sleep(deadline.saturating_sub(unix_now()) + Duration::from_millis(20)).await;
+        assert!(
+            can_execute_action(never, cid).await.unwrap(),
+            "a key that never expires keeps its cached grant"
+        );
+        assert!(
+            !can_execute_action(expiring, cid).await.unwrap(),
+            "an expired key's grant must be re-checked on chain"
+        );
+        // The chain's denial is cached; nothing else reaches the chain.
+        assert!(!can_execute_action(expiring, cid).await.unwrap());
+        assert_eq!(asserter.read_q().len(), 1, "exactly one re-check");
+    }
+
+    #[tokio::test]
+    async fn usage_key_set_event_rederives_grant_deadline() {
+        // Own process for the same reason as the wallet-removal fixture.
+        const CHILD_ENV: &str = "LIT_TEST_DEADLINE_REDERIVE_CHILD";
+        if std::env::var_os(CHILD_ENV).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "accounts::signable_contract::tests::usage_key_set_event_rederives_grant_deadline",
+                    "--nocapture",
+                ])
+                .env(CHILD_ENV, "1")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                output.status.success() && stdout.contains("1 passed; 0 failed"),
+                "isolated deadline re-derivation regression must run and pass: {stdout}\n{stderr}"
+            );
+            return;
+        }
+
+        use crate::account_events::process_logs;
+        use crate::accounts::blockchain_cache::{self, GrantDeadline};
+        use crate::accounts::can_execute_action;
+        use crate::accounts::contracts::account_config_contract::ViewsFacet::UsageApiKeyReturn;
+        use crate::utils::parse_with_hash::api_key_hash;
+        use alloy::primitives::{Bytes, U256};
+        use alloy::rpc::client::RpcClient;
+        use alloy::sol_types::{SolCall, SolEvent};
+        use alloy::transports::mock::{Asserter, MockTransport};
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+        let unix_now = || SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        let key = "issue-165-expiration-added";
+        let (master, hash) = (U256::from(2u64), api_key_hash(key));
+        let cid = U256::from(165u64);
+        let usage_keys = |expiration: u64| {
+            Bytes::from(AccountConfig::listApiKeysCall::abi_encode_returns(&vec![
+                UsageApiKeyReturn {
+                    apiKeyHash: U256::from(1u64),
+                    ..Default::default()
+                },
+                UsageApiKeyReturn {
+                    apiKeyHash: hash,
+                    expiration: U256::from(expiration),
+                    ..Default::default()
+                },
+            ]))
+        };
+        let check = |allowed: bool| {
+            Bytes::from(AccountConfig::canExecuteActionCall::abi_encode_returns(
+                &allowed,
+            ))
+        };
+        let asserter = Asserter::new();
+        // The key starts without an expiration: the grant, then its deadline.
+        asserter.push_success(&check(true));
+        asserter.push_success(&usage_keys(0));
+        // Its owner then sets one. On-chain expirations are whole seconds;
+        // leave at least one.
+        let expiration = unix_now().as_secs() + 2;
+        let deadline = Duration::from_secs(expiration);
+        // The listener's account expansion, then the next grant and deadline.
+        // The event names the key, so the expansion does not seed it.
+        asserter.push_success(&usage_keys(expiration));
+        asserter.push_success(&check(true));
+        asserter.push_success(&usage_keys(expiration));
+        // The re-check once the new expiration has passed.
+        asserter.push_success(&check(false));
+        asserter.push_failure_msg("unexpected extra RPC");
+        let client = ProviderBuilder::new()
+            .connect_client(RpcClient::new(MockTransport::new(asserter.clone()), true))
+            .erased();
+        assert!(GLOBAL_READ_ONLY_CLIENT.set(client).is_ok());
+        GLOBAL_NODE_CONFIG
+            .set(crate::config::NodeConfig {
+                chain: Chain::Anvil,
+                contract_address: Address::repeat_byte(0x73).to_string(),
+            })
+            .unwrap();
+        blockchain_cache::init();
+        let cache = blockchain_cache::get().unwrap();
+        let deadline_of = || async move {
+            let key = cache.execute_action_key(hash, cid);
+            cache
+                .execute_action_cache()
+                .get(&key)
+                .await
+                .map(|p| p.deadline)
+        };
+
+        assert!(can_execute_action(key, cid).await.unwrap());
+        assert!(can_execute_action(key, cid).await.unwrap());
+        assert_eq!(deadline_of().await, Some(GrantDeadline::Never));
+        assert_eq!(
+            asserter.read_q().len(),
+            5,
+            "only the first lookup hits the chain"
+        );
+
+        // `setUsageApiKey` emits `UsageApiKeySet`; the listener processes it.
+        let event = AccountConfig::UsageApiKeySet {
+            accountApiKeyHash: master,
+            usageApiKeyHash: hash,
+        };
+        process_logs(&[alloy::rpc::types::Log {
+            inner: alloy::primitives::Log {
+                address: Address::ZERO,
+                data: event.encode_log_data(),
+            },
+            ..Default::default()
+        }])
+        .await;
+        assert!(can_execute_action(key, cid).await.unwrap());
+        assert_eq!(
+            deadline_of().await,
+            Some(GrantDeadline::At(deadline)),
+            "the event must re-read the key's expiration"
+        );
+        assert_eq!(asserter.read_q().len(), 2);
+
+        // Sustained use up to the new expiration is served from the cache.
+        let mut uses = 0;
+        while unix_now() + Duration::from_millis(150) < deadline {
+            assert!(can_execute_action(key, cid).await.unwrap());
+            uses += 1;
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(uses > 1, "{uses} uses before expiry");
+        assert_eq!(asserter.read_q().len(), 2, "served from the cache");
+
+        tokio::time::sleep(deadline.saturating_sub(unix_now()) + Duration::from_millis(20)).await;
+        assert!(
+            !can_execute_action(key, cid).await.unwrap(),
+            "the new expiration must be enforced"
+        );
+        assert!(!can_execute_action(key, cid).await.unwrap());
+        assert_eq!(asserter.read_q().len(), 1, "exactly one re-check");
+    }
+
+    /// Re-run test `name` alone in a child process with `child_env` set, as
+    /// the fixtures above do: the read-only client they install is
+    /// process-wide and cannot be reset. Returns whether this is the child,
+    /// which runs the test body.
+    fn in_isolated_child(name: &str, child_env: &str) -> bool {
+        if std::env::var_os(child_env).is_some() {
+            return true;
+        }
+        let test = format!("accounts::signable_contract::tests::{name}");
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", test.as_str(), "--nocapture"])
+            .env(child_env, "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success() && stdout.contains("1 passed; 0 failed"),
+            "isolated {name} must run and pass: {stdout}\n{stderr}"
+        );
+        false
+    }
+
+    /// Read-only RPC fixture that answers each `eth_call` from the mock queue
+    /// of its function selector, so calls in flight together cannot take each
+    /// other's responses. It records the selectors called and runs `on_call`
+    /// as each call is sent. With a `barrier`, no call is answered until that
+    /// many are in flight.
+    #[derive(Clone)]
+    struct SelectorTransport {
+        queues: std::sync::Arc<HashMap<[u8; 4], alloy::transports::mock::Asserter>>,
+        calls: std::sync::Arc<Mutex<Vec<[u8; 4]>>>,
+        on_call: std::sync::Arc<dyn Fn([u8; 4]) + Send + Sync>,
+        barrier: Option<std::sync::Arc<tokio::sync::Barrier>>,
+    }
+
+    impl SelectorTransport {
+        fn new(selectors: &[[u8; 4]]) -> Self {
+            Self {
+                queues: std::sync::Arc::new(
+                    selectors
+                        .iter()
+                        .map(|selector| (*selector, Default::default()))
+                        .collect(),
+                ),
+                calls: Default::default(),
+                on_call: std::sync::Arc::new(|_| {}),
+                barrier: None,
+            }
+        }
+
+        fn push(&self, selector: [u8; 4], response: Vec<u8>) {
+            self.queues[&selector].push_success(&alloy::primitives::Bytes::from(response));
+        }
+
+        /// Selectors called so far, sorted: concurrent calls have no order.
+        fn calls(&self) -> Vec<[u8; 4]> {
+            Self::sorted(self.calls.lock().unwrap().clone())
+        }
+
+        /// [`Self::calls`], then forget them.
+        fn take_calls(&self) -> Vec<[u8; 4]> {
+            Self::sorted(std::mem::take(&mut *self.calls.lock().unwrap()))
+        }
+
+        fn sorted(mut selectors: Vec<[u8; 4]>) -> Vec<[u8; 4]> {
+            selectors.sort();
+            selectors
+        }
+
+        /// Install as the process's read-only client and start the cache.
+        fn install(&self) {
+            let client = ProviderBuilder::new()
+                .connect_client(alloy::rpc::client::RpcClient::new(self.clone(), true))
+                .erased();
+            assert!(GLOBAL_READ_ONLY_CLIENT.set(client).is_ok());
+            GLOBAL_NODE_CONFIG
+                .set(crate::config::NodeConfig {
+                    chain: Chain::Anvil,
+                    contract_address: Address::repeat_byte(0x73).to_string(),
+                })
+                .unwrap();
+            crate::accounts::blockchain_cache::init();
+        }
+    }
+
+    impl tonic::codegen::Service<alloy::rpc::json_rpc::RequestPacket> for SelectorTransport {
+        type Response = alloy::rpc::json_rpc::ResponsePacket;
+        type Error = alloy::transports::TransportError;
+        type Future = alloy::transports::TransportFut<'static>;
+
+        fn poll_ready(
+            &mut self,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, request: alloy::rpc::json_rpc::RequestPacket) -> Self::Future {
+            let json = serde_json::to_value(&request).unwrap();
+            assert_eq!(json["method"], "eth_call", "unexpected RPC: {json}");
+            let transaction: TransactionRequest =
+                serde_json::from_value(json["params"][0].clone()).unwrap();
+            let selector: [u8; 4] = transaction.input.input().unwrap()[..4].try_into().unwrap();
+            self.calls.lock().unwrap().push(selector);
+            (self.on_call)(selector);
+            let asserter = self.queues.get(&selector).unwrap_or_else(|| {
+                panic!(
+                    "unexpected call to {}",
+                    alloy::primitives::hex::encode(selector)
+                )
+            });
+            let mut inner = alloy::transports::mock::MockTransport::new(asserter.clone());
+            let barrier = self.barrier.clone();
+            Box::pin(async move {
+                if let Some(barrier) = barrier {
+                    barrier.wait().await;
+                }
+                tonic::codegen::Service::call(&mut inner, request).await
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn account_invalidation_seeds_usage_key_deadlines() {
+        if !in_isolated_child(
+            "account_invalidation_seeds_usage_key_deadlines",
+            "LIT_TEST_DEADLINE_SEED_CHILD",
+        ) {
+            return;
+        }
+
+        use crate::account_events::process_logs;
+        use crate::accounts::blockchain_cache::{self, GrantDeadline};
+        use crate::accounts::can_execute_action;
+        use crate::accounts::contracts::account_config_contract::ViewsFacet::UsageApiKeyReturn;
+        use crate::utils::parse_with_hash::api_key_hash;
+        use alloy::primitives::U256;
+        use alloy::sol_types::{SolCall, SolEvent};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let list = AccountConfig::listApiKeysCall::SELECTOR;
+        let check = AccountConfig::canExecuteActionCall::SELECTOR;
+        let (expiring, never) = ("issue-165-seeded-expiring", "issue-165-seeded-never");
+        let (master, cid) = (U256::from(0x165u64), U256::from(165u64));
+        // 2100-01-01T00:00:00Z.
+        let expiration = 4_102_444_800u64;
+        let usage_keys = AccountConfig::listApiKeysCall::abi_encode_returns(&vec![
+            UsageApiKeyReturn {
+                apiKeyHash: api_key_hash(expiring),
+                expiration: U256::from(expiration),
+                ..Default::default()
+            },
+            UsageApiKeyReturn {
+                apiKeyHash: api_key_hash(never),
+                ..Default::default()
+            },
+        ]);
+        let granted = AccountConfig::canExecuteActionCall::abi_encode_returns(&true);
+        let disturb = Arc::new(AtomicBool::new(false));
+        let rpc = SelectorTransport {
+            on_call: Arc::new({
+                let disturb = disturb.clone();
+                move |selector| {
+                    // A generation bump while the account's keys are listed,
+                    // as from an API hook after its own update was mined.
+                    if selector == list && disturb.swap(false, Ordering::SeqCst) {
+                        blockchain_cache::invalidate_for_hash(U256::from(0xdeadu64));
+                    }
+                }
+            }),
+            ..SelectorTransport::new(&[list, check])
+        };
+        rpc.install();
+        let cache = blockchain_cache::get().unwrap();
+        let deadline_of = |api_key| async move {
+            let key = cache.execute_action_key(api_key_hash(api_key), cid);
+            cache
+                .execute_action_cache()
+                .get(&key)
+                .await
+                .map(|p| p.deadline)
+        };
+        let log = |data: alloy::primitives::LogData| alloy::rpc::types::Log {
+            inner: alloy::primitives::Log {
+                address: Address::ZERO,
+                data,
+            },
+            ..Default::default()
+        };
+        let group_updated = log(AccountConfig::GroupUpdated {
+            accountApiKeyHash: master,
+            groupId: U256::from(1u64),
+        }
+        .encode_log_data());
+        let sorted = SelectorTransport::sorted;
+        let deadline = GrantDeadline::At(Duration::from_secs(expiration));
+
+        // Both account-wide invalidations seed: the listener's account
+        // expansion, and the API hook after a group/action/PKP change (here
+        // made with the `expiring` usage key).
+        for by_hook in [false, true] {
+            let invalidate = || async {
+                if by_hook {
+                    blockchain_cache::invalidate_for_account(expiring).await;
+                } else {
+                    process_logs(std::slice::from_ref(&group_updated)).await;
+                }
+            };
+
+            // Listing both keys seeds their deadlines; their next grants
+            // then need only the permission check.
+            rpc.push(list, usage_keys.clone());
+            invalidate().await;
+            for _ in [expiring, never] {
+                rpc.push(check, granted.clone());
+            }
+            assert!(can_execute_action(expiring, cid).await.unwrap());
+            assert!(can_execute_action(never, cid).await.unwrap());
+            assert_eq!(
+                rpc.take_calls(),
+                sorted(vec![list, check, check]),
+                "no per-key listApiKeys (by_hook: {by_hook})"
+            );
+            assert_eq!(deadline_of(expiring).await, Some(deadline));
+            assert_eq!(deadline_of(never).await, Some(GrantDeadline::Never));
+
+            // A bump during that read: the keys are invalidated but not
+            // seeded, so the next grant reads its own expiration.
+            disturb.store(true, Ordering::SeqCst);
+            rpc.push(list, usage_keys.clone());
+            invalidate().await;
+            assert!(!disturb.load(Ordering::SeqCst), "the keys were listed");
+            assert_eq!(deadline_of(expiring).await, None, "invalidated");
+            rpc.push(check, granted.clone());
+            rpc.push(list, usage_keys.clone());
+            assert!(can_execute_action(expiring, cid).await.unwrap());
+            assert_eq!(deadline_of(expiring).await, Some(deadline));
+            assert_eq!(
+                rpc.take_calls(),
+                sorted(vec![list, check, list]),
+                "by_hook: {by_hook}"
+            );
+        }
+
+        // `setUsageApiKey` moved `expiring`'s expiration earlier, to
+        // `expiration`, but the listener's listing is served from before the
+        // change. Only the key the event did not name is seeded from it.
+        let before_change = AccountConfig::listApiKeysCall::abi_encode_returns(&vec![
+            UsageApiKeyReturn {
+                apiKeyHash: api_key_hash(expiring),
+                expiration: U256::from(expiration + 3_600),
+                ..Default::default()
+            },
+            UsageApiKeyReturn {
+                apiKeyHash: api_key_hash(never),
+                ..Default::default()
+            },
+        ]);
+        rpc.push(list, before_change);
+        process_logs(std::slice::from_ref(&log(AccountConfig::UsageApiKeySet {
+            accountApiKeyHash: master,
+            usageApiKeyHash: api_key_hash(expiring),
+        }
+        .encode_log_data())))
+        .await;
+        for _ in [expiring, never] {
+            rpc.push(check, granted.clone());
+        }
+        rpc.push(list, usage_keys);
+        assert!(can_execute_action(expiring, cid).await.unwrap());
+        assert!(can_execute_action(never, cid).await.unwrap());
+        assert_eq!(rpc.take_calls(), sorted(vec![list, check, list, check]));
+        assert_eq!(
+            deadline_of(expiring).await,
+            Some(deadline),
+            "the changed key reads its own expiration"
+        );
+        assert_eq!(deadline_of(never).await, Some(GrantDeadline::Never));
+    }
+
+    #[tokio::test]
+    async fn uncached_grant_reads_permission_and_expiration_concurrently() {
+        if !in_isolated_child(
+            "uncached_grant_reads_permission_and_expiration_concurrently",
+            "LIT_TEST_DEADLINE_CONCURRENT_CHILD",
+        ) {
+            return;
+        }
+
+        use crate::accounts::blockchain_cache::{self, GrantDeadline};
+        use crate::accounts::can_execute_action;
+        use crate::accounts::contracts::account_config_contract::ViewsFacet::UsageApiKeyReturn;
+        use crate::utils::parse_with_hash::api_key_hash;
+        use alloy::primitives::U256;
+        use alloy::sol_types::SolCall;
+        use std::sync::Arc;
+
+        let list = AccountConfig::listApiKeysCall::SELECTOR;
+        let check = AccountConfig::canExecuteActionCall::SELECTOR;
+        let (key, cid) = ("issue-165-concurrent", U256::from(165u64));
+        let expiration = 4_102_444_800u64;
+        // Neither read is answered until both are in flight.
+        let rpc = SelectorTransport {
+            barrier: Some(Arc::new(tokio::sync::Barrier::new(2))),
+            ..SelectorTransport::new(&[list, check])
+        };
+        rpc.push(
+            check,
+            AccountConfig::canExecuteActionCall::abi_encode_returns(&true),
+        );
+        rpc.push(
+            list,
+            AccountConfig::listApiKeysCall::abi_encode_returns(&vec![UsageApiKeyReturn {
+                apiKeyHash: api_key_hash(key),
+                expiration: U256::from(expiration),
+                ..Default::default()
+            }]),
+        );
+        rpc.install();
+
+        let granted = tokio::time::timeout(Duration::from_secs(5), can_execute_action(key, cid))
+            .await
+            .expect("the expiration read must not wait for the permission read");
+        assert!(granted.unwrap());
+        assert_eq!(rpc.calls(), SelectorTransport::sorted(vec![check, list]));
+        let cache = blockchain_cache::get().unwrap();
+        let cached = cache
+            .execute_action_cache()
+            .get(&cache.execute_action_key(api_key_hash(key), cid))
+            .await
+            .unwrap();
+        assert_eq!(
+            cached.deadline,
+            GrantDeadline::At(Duration::from_secs(expiration))
+        );
+        assert!(can_execute_action(key, cid).await.unwrap());
+        assert_eq!(rpc.calls().len(), 2, "served from the cache");
     }
 
     #[test]

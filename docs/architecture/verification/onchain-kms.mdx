@@ -78,7 +78,7 @@ cast call 0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC \
 # Expect: true
 ```
 
-A `true` here proves the currently-running code is authorized by on-chain governance. A `false` would mean the CVM is running code that the KMS would refuse to release keys to — which should never happen in production, because the CVM cannot boot without keys.
+A `true` here proves the currently-running code is authorized by on-chain governance. A `false` would mean the CVM is running code that the KMS would refuse to release keys to — which should never happen in production, because a CVM the KMS refuses gets no keys, so it cannot serve traffic. The CVM can still boot, as [Upgrade Governance](/architecture/verification/upgrade-governance) describes.
 
 ### 2. The DstackApp owner is the Safe multisig
 

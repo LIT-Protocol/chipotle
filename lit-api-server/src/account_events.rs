@@ -138,6 +138,9 @@ fn account_hashes_from_log(log: &alloy::primitives::Log) -> Vec<U256> {
 ///
 /// Both sets are deduped so each account triggers at most one `listApiKeys`
 /// chain call per poll, regardless of how many of its events appear in the batch.
+/// The expansion also seeds the listed keys' grant deadlines, except for keys
+/// carried in the events, whose change the listing may predate (see
+/// [`blockchain_cache::invalidate_for_account_hash`]).
 pub(crate) async fn process_logs(logs: &[alloy::rpc::types::Log]) {
     let mut direct: HashSet<U256> = HashSet::new();
     let mut accounts: HashSet<U256> = HashSet::new();
@@ -160,7 +163,7 @@ pub(crate) async fn process_logs(logs: &[alloy::rpc::types::Log]) {
         blockchain_cache::invalidate_for_hash(*hash);
     }
     for account in &accounts {
-        blockchain_cache::invalidate_for_account_hash(*account).await;
+        blockchain_cache::invalidate_for_account_hash(*account, &direct).await;
     }
 }
 
@@ -281,8 +284,14 @@ async fn run_event_listener() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::accounts::blockchain_cache::{CachedPermission, GrantDeadline};
     use alloy::primitives::{Address, Log};
     use std::collections::HashSet;
+
+    /// A cached permission result for a key that never expires.
+    fn cached<T>(result: T) -> CachedPermission<T> {
+        CachedPermission::new(result, GrantDeadline::Never)
+    }
 
     /// Build a primitives `Log` for an event, as it would arrive from the chain.
     fn log_for<E: SolEvent>(event: &E) -> Log {
@@ -326,17 +335,17 @@ mod tests {
             for hash in [master, usage, unrelated] {
                 cache
                     .execute_action_cache()
-                    .insert(cache.execute_action_key(hash, cid), false)
+                    .insert(cache.execute_action_key(hash, cid), cached(false))
                     .await;
                 cache
                     .use_wallet_cache()
-                    .insert(cache.use_wallet_key(hash, cid, wallet), false)
+                    .insert(cache.use_wallet_key(hash, cid, wallet), cached(false))
                     .await;
                 cache
                     .execute_and_wallet_cache()
                     .insert(
                         cache.execute_and_wallet_key(hash, cid, wallet),
-                        (false, false),
+                        cached((false, false)),
                     )
                     .await;
             }
@@ -371,23 +380,28 @@ mod tests {
                 assert!(
                     cache
                         .execute_action_cache()
-                        .try_get_with(execute_key, async { Ok::<_, anyhow::Error>(true) })
+                        .try_get_with(execute_key, async { Ok::<_, anyhow::Error>(cached(true)) })
                         .await
                         .unwrap()
+                        .result
                 );
                 assert!(
                     cache
                         .use_wallet_cache()
-                        .try_get_with(wallet_key, async { Ok::<_, anyhow::Error>(true) })
+                        .try_get_with(wallet_key, async { Ok::<_, anyhow::Error>(cached(true)) })
                         .await
                         .unwrap()
+                        .result
                 );
                 assert_eq!(
                     cache
                         .execute_and_wallet_cache()
-                        .try_get_with(pair_key, async { Ok::<_, anyhow::Error>((true, true)) })
+                        .try_get_with(pair_key, async {
+                            Ok::<_, anyhow::Error>(cached((true, true)))
+                        })
                         .await
-                        .unwrap(),
+                        .unwrap()
+                        .result,
                     (true, true)
                 );
             }
@@ -396,21 +410,21 @@ mod tests {
                     .execute_action_cache()
                     .get(&cache.execute_action_key(unrelated, cid))
                     .await,
-                Some(false)
+                Some(cached(false))
             );
             assert_eq!(
                 cache
                     .use_wallet_cache()
                     .get(&cache.use_wallet_key(unrelated, cid, wallet))
                     .await,
-                Some(false)
+                Some(cached(false))
             );
             assert_eq!(
                 cache
                     .execute_and_wallet_cache()
                     .get(&cache.execute_and_wallet_key(unrelated, cid, wallet))
                     .await,
-                Some((false, false))
+                Some(cached((false, false)))
             );
         });
     }

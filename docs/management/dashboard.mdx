@@ -1,3 +1,7 @@
+---
+title: "Dashboard"
+description: "Create an account, add funds, manage keys, wallets, groups and actions, and run Lit Actions from your browser."
+---
 
 ## Using the Dashboard
 
@@ -39,17 +43,21 @@ Usage API keys are scoped keys you can give to clients or dApps to run specific 
 
 In the **Usage API Keys** section, click **Add**. Set an optional name and description, then click _Confirm_. The server generates a new usage key and displays it in a one-time success message — **copy and store it immediately**, as it will not be shown again. \
 \
+You choose the key's permissions in the same dialog. **All Options** turns on every permission. That includes running any code (`execute_in_groups: [0]`), creating and deleting groups, creating PKPs, and changing the actions and wallets in every group. It's convenient for a first test. For a key you hand to an app or a server, grant only the groups it needs. See [Usage API Keys](/management/api_keys). \
+\
 Use this key in the `X-Api-Key` (or `Authorization: Bearer`) header when calling the node so that usage is attributed to this key.
 
 ### 4. Request new PKPs (wallets)
 
-PKPs (Programmable Key Pairs) are wallets the lit-nodes can use for signing. In the **Wallets** section, click **Add** to create a new wallet to assign to one of your users, or for use in running a lit-action. The server generates a new PKP and returns its address and public key.
+PKPs (Programmable Key Pairs) are wallets the lit-nodes can use for signing. In the **Wallets** section, click **Add** to create a new wallet to assign to one of your users, or for use in running a lit-action. The server generates a new PKP and returns its address. That address is also the PKP's ID, the `pkpId` your actions pass to `Lit.Actions.getPrivateKey`.
 
 You can add existing PKPs to groups (see step 6) via **Add PKP to group** in the Groups section.
 
 ### 5. Register IPFS CIDs (actions)
 
 To scope which usage API keys can run which code, you register **IPFS CIDs** as permitted actions. In the **IPFS Actions** section, pick a group from the dropdown, then **Add** an action: enter the IPFS CID of the lit-action and optional name/description. The server hashes the CID and stores it in the group. Scoped usage keys need permission for a group containing the action. Wildcard execution keys can run code without registering its CID.
+
+The dropdown lists your groups, so if you don't have one yet, create it in step 6 first. The CID has to be the CID of the exact code you will run. To get it, paste your code into the **Action Runner** and click **Get Lit Action IPFS CID**.
 
 ### 6. Create groups
 
@@ -74,7 +82,9 @@ async function main({ pkpId }) {
   return { sig };
 }
 ```
- Choose the usage key to use for the request, then click **Execute**. The node runs the action and returns signatures, response, and logs. Scoped keys require execution permission for a matching group; wildcard execution keys do not require a group just to run code.
+ Choose the usage key to use for the request, then click **Execute**. The node runs the action and returns its response and logs. A signature appears in the response when the action returns one, as the example above does. Scoped keys require execution permission for a matching group; wildcard execution keys do not require a group just to run code.
+
+The node checks the pasted code by its CID. With a scoped key, the code runs only if its CID is in a group the key can execute in, so the code you paste must match the CID you registered in step 5.
 
 ## Daily Usage
 

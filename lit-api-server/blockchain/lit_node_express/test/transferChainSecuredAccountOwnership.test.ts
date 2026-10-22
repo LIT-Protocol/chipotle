@@ -208,4 +208,100 @@ describe("WritesFacet.transferChainSecuredAccountOwnership", () => {
         "Account is not ChainSecured; use convertToChainSecuredAccount instead.",
       );
   });
+
+  // #147: after a wallet login the dashboard and core_sdk.js send
+  // keccak256(abi.encodePacked(wallet)) as the account hash for every write.
+  it("lets the new admin manage the account with their own keccak256(address) hash", async () => {
+    const masterHash = await createChainSecuredAs(admin);
+    const adminAddress = await admin.getAddress();
+    const usageHash = ethers.toBigInt(ethers.id("predecessor-usage-key"));
+    const wAdmin = await writes(admin);
+    await (
+      await wAdmin.setUsageApiKey(
+        masterHash,
+        usageHash,
+        0,
+        0,
+        "old",
+        "",
+        false,
+        false,
+        false,
+        [],
+        [],
+        [],
+        [],
+      )
+    ).wait();
+    await (
+      await wAdmin.transferChainSecuredAccountOwnership(
+        masterHash,
+        await newAdmin.getAddress(),
+      )
+    ).wait();
+
+    const newAdminHash = apiKeyHashFor(await newAdmin.getAddress());
+    const wNew = await writes(newAdmin);
+    await expect(wNew.addGroup(newAdminHash, "g", "", [], []))
+      .to.emit(wNew, "GroupAdded")
+      .withArgs(masterHash, 1n);
+    // The successor can revoke a usage key the previous admin issued.
+    await expect(wNew.removeUsageApiKey(newAdminHash, usageHash))
+      .to.emit(wNew, "UsageApiKeyRemoved")
+      .withArgs(masterHash, usageHash);
+    expect(
+      await (await views(newAdmin)).listApiKeys(newAdminHash, 0, 10),
+    ).to.have.length(0);
+
+    // The previous admin is locked out.
+    await expect(wAdmin.addGroup(masterHash, "x", "", [], []))
+      .to.be.revertedWithCustomError(wAdmin, "NoAccountAccess")
+      .withArgs(masterHash, adminAddress);
+  });
+
+  it("after convert + transfer, only the latest admin's own hash manages the account", async () => {
+    const managedHash = ethers.toBigInt(ethers.id("managed-account-147"));
+    const wOwner = await writes(owner);
+    await (
+      await wOwner.newAccount(
+        managedHash,
+        true,
+        "managed",
+        "desc",
+        await admin.getAddress(),
+      )
+    ).wait();
+    await (
+      await wOwner.convertToChainSecuredAccount(
+        managedHash,
+        await newAdmin.getAddress(),
+      )
+    ).wait();
+    const convertedHash = apiKeyHashFor(await newAdmin.getAddress());
+    const wConverted = await writes(newAdmin);
+    await expect(wConverted.addAction(convertedHash, "a", "", 1n))
+      .to.emit(wConverted, "ActionAdded")
+      .withArgs(managedHash, 1n);
+
+    await (
+      await wConverted.transferChainSecuredAccountOwnership(
+        convertedHash,
+        await stranger.getAddress(),
+      )
+    ).wait();
+    const latestHash = apiKeyHashFor(await stranger.getAddress());
+    const wLatest = await writes(stranger);
+    await expect(wLatest.addAction(latestHash, "b", "", 2n))
+      .to.emit(wLatest, "ActionAdded")
+      .withArgs(managedHash, 2n);
+
+    // A previous admin's hash carries no master authority, even for the
+    // current admin, and the previous admin itself is locked out.
+    await expect(wLatest.addAction(convertedHash, "c", "", 3n))
+      .to.be.revertedWithCustomError(wLatest, "NotMasterAccount")
+      .withArgs(convertedHash);
+    await expect(wConverted.addAction(convertedHash, "c", "", 3n))
+      .to.be.revertedWithCustomError(wConverted, "NoAccountAccess")
+      .withArgs(convertedHash, await newAdmin.getAddress());
+  });
 });

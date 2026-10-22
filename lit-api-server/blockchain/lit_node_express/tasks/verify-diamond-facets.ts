@@ -106,6 +106,9 @@ task(
     // --- 3. Match on-chain facets to compiled artifacts by selectors ---
 
     let allMatch = true;
+    // On-chain facets claimed by a compiled artifact; any facet left unclaimed
+    // after this loop routes selectors to code that was never checked.
+    const matchedFacets = new Set<string>();
 
     for (const artifact of artifacts) {
       // Find the on-chain facet whose selectors overlap with this artifact
@@ -120,6 +123,7 @@ task(
         allMatch = false;
         continue;
       }
+      matchedFacets.add(matchingFacet.facetAddress.toLowerCase());
 
       // Compare selector sets
       const onChainSelectors = new Set(
@@ -159,6 +163,18 @@ task(
         );
         allMatch = false;
       }
+    }
+
+    // --- 4. Reject on-chain facets that match no compiled artifact ---
+
+    for (const facet of onChainFacets) {
+      if (matchedFacets.has(facet.facetAddress.toLowerCase())) continue;
+      const selectors = facet.functionSelectors.map((s) => s.slice(0, 10));
+      console.log(
+        `FAIL  unexpected facet @ ${facet.facetAddress}: matches no compiled artifact`
+      );
+      console.log(`      selectors: ${selectors.join(", ")}`);
+      allMatch = false;
     }
 
     console.log("");

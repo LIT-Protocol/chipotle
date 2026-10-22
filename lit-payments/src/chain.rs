@@ -618,9 +618,28 @@ pub async fn claim_payment(
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
 struct JsonRpcResponse<T> {
+    /// `Some` whenever the `result` member is present, including an explicit
+    /// `null`: `eth_getTransactionReceipt` answers `"result": null` for a
+    /// pending or unknown transaction, which must reach the caller as
+    /// `Some(None)` rather than read as a missing result.
+    #[serde(default, deserialize_with = "deserialize_present_result")]
     result: Option<T>,
     error: Option<JsonRpcError>,
+}
+
+/// Deserialize a present `result` member as `Some(value)`, even when it is
+/// `null` (serde's default `Option` handling reads `null` as absent). A
+/// missing member still defaults to `None`.
+fn deserialize_present_result<'de, D, T>(
+    deserializer: D,
+) -> std::result::Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Deserialize)]
@@ -1240,6 +1259,90 @@ mod tests {
         let err = parse_gateway_payment_log(expected.chain_id, expected.gateway_address, log)
             .unwrap_err();
         assert!(err.to_string().contains("did not match configured gateway"));
+    }
+
+    /// An RPC client whose endpoint answers a single JSON-RPC request on
+    /// loopback with `body`, the way a provider answers
+    /// `eth_getTransactionReceipt`.
+    async fn rpc_answering(body: &'static str) -> HttpGatewayRpc {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let https_url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut socket = BufReader::new(socket);
+            // Read the whole request (headers, then the body) before answering.
+            let mut content_length = 0;
+            loop {
+                let mut line = String::new();
+                socket.read_line(&mut line).await.unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+                if let Some((name, value)) = line.split_once(':')
+                    && name.eq_ignore_ascii_case("content-length")
+                {
+                    content_length = value.trim().parse().unwrap();
+                }
+            }
+            let mut request_body = vec![0; content_length];
+            socket.read_exact(&mut request_body).await.unwrap();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket
+                .get_mut()
+                .write_all(response.as_bytes())
+                .await
+                .unwrap();
+        });
+        HttpGatewayRpc {
+            client: Client::builder().no_proxy().build().unwrap(),
+            https_url,
+        }
+    }
+
+    const RECEIPT_TX_HASH: &str =
+        "0x4444444444444444444444444444444444444444444444444444444444444444";
+
+    // #201: `eth_getTransactionReceipt` answers `"result": null` while a
+    // transaction is pending (or unknown). The claim path must see that as
+    // `Ok(None)` and report `pending_receipt`, not as a "missing result"
+    // error that the route turns into a 500.
+    #[tokio::test]
+    async fn null_receipt_result_is_pending_not_an_error() {
+        let rpc = rpc_answering(r#"{"jsonrpc":"2.0","id":1,"result":null}"#).await;
+        let receipt = rpc.transaction_receipt(RECEIPT_TX_HASH).await.unwrap();
+        assert!(receipt.is_none());
+    }
+
+    // Reading a null result as pending must not loosen anything else: a mined
+    // receipt still decodes, and a response with no `result` member or with an
+    // RPC error is still an error, never a pending transaction.
+    #[tokio::test]
+    async fn receipt_rpc_decodes_receipts_and_rejects_missing_results_and_errors() {
+        let rpc =
+            rpc_answering(r#"{"jsonrpc":"2.0","id":1,"result":{"status":"0x1","logs":[]}}"#).await;
+        let receipt = rpc
+            .transaction_receipt(RECEIPT_TX_HASH)
+            .await
+            .unwrap()
+            .expect("a mined receipt");
+        assert_eq!(receipt.status, Some(1));
+        assert!(receipt.logs.is_empty());
+
+        let rpc = rpc_answering(r#"{"jsonrpc":"2.0","id":1}"#).await;
+        let err = rpc.transaction_receipt(RECEIPT_TX_HASH).await.unwrap_err();
+        assert!(err.to_string().contains("missing result"), "{err:#}");
+
+        let rpc = rpc_answering(
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"invalid argument"}}"#,
+        )
+        .await;
+        let err = rpc.transaction_receipt(RECEIPT_TX_HASH).await.unwrap_err();
+        assert!(err.to_string().contains("invalid argument"), "{err:#}");
     }
 
     fn sample_payment_log() -> PaymentLog {
