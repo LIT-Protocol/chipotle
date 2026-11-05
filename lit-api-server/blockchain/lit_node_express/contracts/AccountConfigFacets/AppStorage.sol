@@ -177,6 +177,8 @@ library AppStorage {
         uint256 accountApiKeyHash,
         uint256 groupId
     ) internal view returns (bool) {
+        // Group IDs start at 1; zero matches uninitialized storage.
+        if (groupId == 0) return false;
         AccountConfigStorage storage s = getStorage();
         Account storage account = s.accounts[accountApiKeyHash];
         Group storage group = account.groups[groupId];
