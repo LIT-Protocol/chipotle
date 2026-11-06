@@ -542,66 +542,6 @@ export interface VersionResponse {
   submodule_versions: unknown[][];
 }
 
-/**
- * Returned by `/get_system_stats` — CVM memory usage and in-process cache statistics powering the monitor dapp's system dashboard.
- */
-export interface SystemStatsResponse {
-  memory: MemoryStats;
-  caches: CacheStats[];
-  runners: RunnerInfo[];
-}
-
-/**
- * CVM-level memory figures from `/proc/meminfo` plus this process's resident set from `/proc/self/status`. Fields are `None` on platforms without procfs (e.g. local macOS development).
- */
-export interface MemoryStats {
-  /**
-   * @minimum 0
-   * @nullable
-   */
-  total_kb?: number | null;
-  /**
-   * @minimum 0
-   * @nullable
-   */
-  available_kb?: number | null;
-  /**
-   * @minimum 0
-   * @nullable
-   */
-  used_kb?: number | null;
-  /**
-   * @minimum 0
-   * @nullable
-   */
-  process_rss_kb?: number | null;
-}
-
-/**
- * Entry statistics for one in-process cache.
- */
-export interface CacheStats {
-  name: string;
-  description: string;
-  /** @minimum 0 */
-  entry_count: number;
-  /**
-   * Approximate bytes held, for caches built with a byte weigher. `None` when the cache only counts entries.
-   * @minimum 0
-   * @nullable
-   */
-  approx_bytes?: number | null;
-}
-
-/**
- * Presence of a Lit Action runner's Unix socket. `socket_present` means the runner container has been deployed and created its socket — it is not a liveness probe (`/health` covers reachability).
- */
-export interface RunnerInfo {
-  name: string;
-  socket_path: string;
-  socket_present: boolean;
-}
-
 export type ListApiKeysParams = {
   /**
    * @minimum 0
@@ -632,8 +572,7 @@ export type ConvertToChainSecuredAccountHeaders = {
 };
 
 export type ConvertToChainSecuredAccountDefault =
-  | AccountOpResponse
-  | ErrMessage;
+  AccountOpResponse | ErrMessage;
 
 export type AccountExistsHeaders = {
   /**
@@ -663,8 +602,7 @@ export type CreateWalletPostHeaders = {
 export type CreateWalletPostDefault = CreateWalletResponse | ErrMessage;
 
 export type CreateWalletWithSignatureDefault =
-  | CreateWalletWithSignatureResponse
-  | ErrMessage;
+  CreateWalletWithSignatureResponse | ErrMessage;
 
 export type PrepareWalletDefault = PrepareWalletResponse | ErrMessage;
 
@@ -761,8 +699,7 @@ export type AddUsageApiKeyHeaders = {
 export type AddUsageApiKeyDefault = AddUsageApiKeyResponse | ErrMessage;
 
 export type AddUsageApiKeyWithSignatureDefault =
-  | AddUsageApiKeyWithSignatureResponse
-  | ErrMessage;
+  AddUsageApiKeyWithSignatureResponse | ErrMessage;
 
 export type UpdateUsageApiKeyHeaders = {
   /**
@@ -911,8 +848,7 @@ export type GetNodeChainConfigDefault = NodeChainConfigResponse | ErrMessage;
 export type GetChainConfigKeysDefault = ChainConfigKeysResponse | ErrMessage;
 
 export type GetLitActionClientConfigDefault =
-  | LitActionClientConfigResponse
-  | ErrMessage;
+  LitActionClientConfigResponse | ErrMessage;
 
 export type GetCacheMetadataHeaders = {
   /**
@@ -924,8 +860,7 @@ export type GetCacheMetadataHeaders = {
 export type GetCacheMetadataDefault = CacheMetadataResponse | ErrMessage;
 
 export type GetSupportedLanguagesDefault =
-  | SupportedLanguagesResponse
-  | ErrMessage;
+  SupportedLanguagesResponse | ErrMessage;
 
 export type GetApiPayersDefault = string[] | ErrMessage;
 
@@ -957,8 +892,7 @@ export type BillingCreatePaymentIntentHeaders = {
 };
 
 export type BillingCreatePaymentIntentDefault =
-  | CreatePaymentIntentResponse
-  | ErrMessage;
+  CreatePaymentIntentResponse | ErrMessage;
 
 export type BillingConfirmPaymentHeaders = {
   /**
@@ -970,8 +904,6 @@ export type BillingConfirmPaymentHeaders = {
 export type BillingConfirmPaymentDefault = AccountOpResponse | ErrMessage;
 
 export type GetVersionDefault = VersionResponse | ErrMessage;
-
-export type GetSystemStatsDefault = SystemStatsResponse | ErrMessage;
 
 /**
  * This is the base client to use for interacting with the API.
@@ -2785,36 +2717,6 @@ NOT IDEMPOTENT: every call returns a brand-new wallet (a fresh random derivation
       response,
       data,
       operationId: "get_version",
-    };
-  }
-
-  getSystemStats(requestParameters?: Params): {
-    response: Response;
-    data: GetSystemStatsDefault;
-    operationId: string;
-  } {
-    const k6url = new URL(this.cleanBaseUrl + `/get_system_stats`);
-    const mergedRequestParameters = this._mergeRequestParameters(
-      requestParameters || {},
-      this.commonRequestParameters,
-    );
-    const response = http.request(
-      "GET",
-      k6url.toString(),
-      undefined,
-      mergedRequestParameters,
-    );
-    let data;
-
-    try {
-      data = response.json();
-    } catch {
-      data = response.body;
-    }
-    return {
-      response,
-      data,
-      operationId: "get_system_stats",
     };
   }
 

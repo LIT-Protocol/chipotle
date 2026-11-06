@@ -3,10 +3,18 @@
  */
 
 import { getEffectiveApiKey, isAuthenticated, getClient, getUsageKeysStore, setUsageKeysStore, getGroupsStore, setStat, updateStatCards, maskApiKey, LIST_PAGE_SIZE } from './auth.js';
-import { escapeHtml, showStatus, hideStatus, showActionProgress, closeActionProgress, openModal, closeModal, confirmDelete, copyToClipboard, formatError, logError, ICON_PENCIL, ICON_TRASH, ICON_COPY } from './ui-utils.js';
-import { buildGroupMultiSelect, attachGroupMultiSelectLogic, updateMultiSelectSummary, getSelectedGroupIds } from './groups.js';
+import { escapeHtml, showStatus, hideStatus, showActionProgress, closeActionProgress, openModal, closeModal, confirmDelete, copyToClipboard, formatError, logError, ICON_PENCIL, ICON_TRASH, ICON_COPY, warnBadge } from './ui-utils.js';
+import { normalizeGroupId, buildGroupMultiSelect, attachGroupMultiSelectLogic, updateMultiSelectSummary, getSelectedGroupIds } from './groups.js';
 
 // ----- Helpers -----
+
+const USAGE_KEY_WILDCARD_WARNING =
+  'This usage key can execute arbitrary code, even code outside any group, until the key expires. Using a PKP wallet still requires a group that permits both the action and the wallet.';
+
+export function usageKeyHasAllGroupsWildcard(item) {
+  return Array.isArray(item?.can_execute_in_groups) &&
+    item.can_execute_in_groups.some((id) => /^(?:0+|0x0+)$/i.test(String(id)));
+}
 
 export function normalizeUsageKeyItem(item) {
   return {
@@ -112,8 +120,12 @@ export function renderPermissionSummary(item) {
   if (item.can_create_groups) parts.push('create groups');
   if (item.can_delete_groups) parts.push('delete groups');
   if (item.can_create_pkps) parts.push('create PKPs');
-  const fmtGroups = (ids) => (ids && ids.length > 0) ? (ids.includes(0) ? 'all' : ids.join(', ')) : null;
-  const exec = fmtGroups(item.can_execute_in_groups);
+  const fmtGroups = (ids, allowAll = false) => {
+    if (!ids?.length) return null;
+    if (allowAll && ids.some((id) => String(id) === '0')) return 'all';
+    return ids.map((id) => String(id) === '0' ? '0 (no management access)' : String(id)).join(', ');
+  };
+  const exec = fmtGroups(item.can_execute_in_groups, true);
   if (exec) parts.push('execute: ' + exec);
   const manage = fmtGroups(item.can_manage_ipfs_ids_in_groups);
   if (manage) parts.push('manage actions: ' + manage);
@@ -156,7 +168,8 @@ export function renderUsageKeysTable() {
     })();
     const tr = document.createElement('tr');
     tr.innerHTML =
-      '<td>' + escapeHtml(item.name || '') + '</td>' +
+      '<td>' + escapeHtml(item.name || '') +
+        (usageKeyHasAllGroupsWildcard(item) ? warnBadge(USAGE_KEY_WILDCARD_WARNING) : '') + '</td>' +
       '<td class="mono">' + escapeHtml(item.description || '') + '</td>' +
       '<td class="mono" style="font-size:0.82em;">' + escapeHtml(renderPermissionSummary(item)) + '</td>' +
       '<td class="mono">' + escapeHtml(expiration) + '</td>' +
@@ -234,12 +247,13 @@ function openUsageKeyModal(item = null) {
       '<label class="checkbox-label"><input type="checkbox" id="modal-usage-can-delete-groups"' + (isEdit ? ' disabled' : '') + '> Can delete groups</label>' +
       '<label class="checkbox-label"><input type="checkbox" id="modal-usage-can-create-pkps"' + (isEdit ? ' disabled' : '') + '> Can create PKPs</label>' +
     '</div>' +
-    '<div class="form-group"><label>Can execute in groups</label>' + buildGroupMultiSelect('modal-usage-execute-groups', false) + '</div>' +
-    '<div class="form-group"><label>Can manage IPFS actions in groups</label>' + buildGroupMultiSelect('modal-usage-manage-ipfs-groups', false) + '</div>' +
-    '<div class="form-group"><label>Can add PKP to groups</label>' + buildGroupMultiSelect('modal-usage-add-pkp-groups', false) + '</div>' +
-    '<div class="form-group"><label>Can remove PKP from groups</label>' + buildGroupMultiSelect('modal-usage-remove-pkp-groups', false) + '</div>';
+    '<div class="form-group"><label>Can execute in groups</label>' + buildGroupMultiSelect('modal-usage-execute-groups', false, { allowAll: true, selectedIds: item?.can_execute_in_groups ?? [] }) + '</div>' +
+    '<div class="form-group"><label>Can manage IPFS actions in groups</label>' + buildGroupMultiSelect('modal-usage-manage-ipfs-groups', false, { allowAll: false, selectedIds: item?.can_manage_ipfs_ids_in_groups ?? [] }) + '</div>' +
+    '<div class="form-group"><label>Can add PKP to groups</label>' + buildGroupMultiSelect('modal-usage-add-pkp-groups', false, { allowAll: false, selectedIds: item?.can_add_pkp_to_groups ?? [] }) + '</div>' +
+    '<div class="form-group"><label>Can remove PKP from groups</label>' + buildGroupMultiSelect('modal-usage-remove-pkp-groups', false, { allowAll: false, selectedIds: item?.can_remove_pkp_from_groups ?? [] }) + '</div>' +
+    '<p>Management permissions apply only to selected group IDs. Group 0 grants no management access. New groups need explicit grants before this key can fill them.</p>';
   const footer =
-    (!isEdit ? '<button type="button" class="btn btn-outline" id="modal-all-options-btn" style="margin-right:auto;">All Options</button>' : '') +
+    (!isEdit ? '<button type="button" class="btn btn-outline" id="modal-all-options-btn" style="margin-right:auto;">All displayed options</button>' : '') +
     '<button type="button" class="btn btn-outline" id="modal-cancel-btn">Cancel</button>' +
     '<button type="button" class="btn btn-primary" id="modal-save-btn">' + (isEdit ? 'Save' : 'Add') + '</button>';
   openModal(isEdit ? 'Edit usage API key' : 'Add usage API key', body, footer);
@@ -251,7 +265,7 @@ function openUsageKeyModal(item = null) {
     const preSelect = (msId, ids) => {
       const wrap = document.getElementById(msId);
       if (!wrap || !ids) return;
-      const idSet = new Set(ids.map(String));
+      const idSet = new Set(ids.map(normalizeGroupId));
       wrap.querySelectorAll('input[type="checkbox"]').forEach((cb) => { if (idSet.has(cb.value)) cb.checked = true; });
       updateMultiSelectSummary(msId);
     };
@@ -261,9 +275,9 @@ function openUsageKeyModal(item = null) {
     preSelect('modal-usage-remove-pkp-groups', item.can_remove_pkp_from_groups);
   }
   attachGroupMultiSelectLogic('modal-usage-execute-groups');
-  attachGroupMultiSelectLogic('modal-usage-manage-ipfs-groups');
-  attachGroupMultiSelectLogic('modal-usage-add-pkp-groups');
-  attachGroupMultiSelectLogic('modal-usage-remove-pkp-groups');
+  attachGroupMultiSelectLogic('modal-usage-manage-ipfs-groups', false);
+  attachGroupMultiSelectLogic('modal-usage-add-pkp-groups', false);
+  attachGroupMultiSelectLogic('modal-usage-remove-pkp-groups', false);
   if (!isEdit) {
     document.getElementById('modal-all-options-btn').addEventListener('click', () => {
       document.getElementById('modal-usage-can-create-groups').checked = true;
@@ -272,7 +286,7 @@ function openUsageKeyModal(item = null) {
       ['modal-usage-execute-groups', 'modal-usage-manage-ipfs-groups', 'modal-usage-add-pkp-groups', 'modal-usage-remove-pkp-groups'].forEach((id) => {
         const wrap = document.getElementById(id);
         if (!wrap) return;
-        wrap.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = cb.value === '0'; });
+        wrap.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = id === 'modal-usage-execute-groups' ? cb.value === '0' : cb.value !== '0'; });
         updateMultiSelectSummary(id);
       });
     });

@@ -212,6 +212,19 @@ export async function execute(
         envelope.metadata.version === request.version &&
         envelope.metadata.release === manifest.release,
     );
+    // A successful claim is single-use, including failures after this point.
+    // This lives in the action so direct, independently funded calls cannot bypass it.
+    const claim = await jsonFetch(
+      `${manifest.registry}/api/registry/requests/consume`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(signedRequest),
+      },
+      8000,
+      1024,
+    );
+    requireThat(claim?.ok === true);
     // Do not request the decryption key until all independently verified checks pass.
     actionKey = unhex(
       (await Lit.Actions.getLitActionPrivateKey()).replace(/^0x/, ""),

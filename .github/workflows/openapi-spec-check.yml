@@ -1,4 +1,4 @@
-# Run openapi-to-k6 against deployed OpenAPI spec and fail if litApiServer.ts has drifted.
+# Compare the deployed API with a fresh client generated from this checkout.
 # Called from Deploy to Phala CVM after wait-for-api-restart, or manually via workflow_dispatch.
 
 name: OpenAPI Spec Check
@@ -38,28 +38,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: ./.github/actions/generate-k6-client
         with:
-          node-version: "20"
+          output_directory: ${{ runner.temp }}/k6-source
 
-      - name: Generate litApiServer from deployed OpenAPI spec
-        run: |
-          npm install -g @grafana/openapi-to-k6
-          openapi-to-k6 --verbose "${{ inputs.api_root_url }}/openapi.json" "${{ runner.temp }}/k6-generated"
+      - name: Generate client from deployed OpenAPI spec
+        env:
+          API_ROOT_URL: ${{ inputs.api_root_url }}
+        run: bash k6/generate-client.sh "${API_ROOT_URL%/}/openapi.json" "${{ runner.temp }}/k6-deployed"
 
-      - name: Compare with committed litApiServer.ts
+      - name: Compare deployed API with sources
         run: |
-          # openapi-to-k6 does not pin its internal prettier, so union-type
-          # formatting (e.g. `A | B` vs leading-pipe multiline) drifts between
-          # tool installs even at the same tool version. Normalize both sides
-          # through a pinned prettier before diffing so only real spec changes
-          # fail this check.
-          cp ./k6/litApiServer.ts "${{ runner.temp }}/k6-committed.ts"
-          npx --yes prettier@3.9.5 --write "${{ runner.temp }}/k6-generated/litApiServer.ts" "${{ runner.temp }}/k6-committed.ts"
-          if ! diff -q "${{ runner.temp }}/k6-generated/litApiServer.ts" "${{ runner.temp }}/k6-committed.ts"; then
-            echo "::error::Deployed OpenAPI spec differs from committed k6/litApiServer.ts. Regenerate with: openapi-to-k6 <BASE_URL>/openapi.json ./k6"
-            diff "${{ runner.temp }}/k6-generated/litApiServer.ts" "${{ runner.temp }}/k6-committed.ts" || true
+          if ! diff -u "${{ runner.temp }}/k6-source/litApiServer.ts" "${{ runner.temp }}/k6-deployed/litApiServer.ts"; then
+            echo "::error::Deployed OpenAPI differs from this checkout's sources. Check the deployed revision and rollout; regenerating the committed client cannot fix this mismatch."
             exit 1
           fi
-          echo "litApiServer.ts matches deployed OpenAPI spec"
+          echo "Deployed OpenAPI matches sources"

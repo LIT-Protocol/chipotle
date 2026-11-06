@@ -398,6 +398,7 @@ jobs:
                 "CERTBOT_AWS_ROLE_ARN",
                 "CERTBOT_AWS_REGION",
                 "LIT_INTERNAL_SHARED_SECRET",
+                "PHALA_CVM_NAME",
                 "NEW_ACCOUNT_RATE_LIMIT_ENABLED"
               ]
             }' > "$PROVISION_FILE"
@@ -514,6 +515,8 @@ jobs:
           CERTBOT_AWS_REGION: ${{ vars.CERTBOT_AWS_REGION }}
           LIT_INTERNAL_SHARED_SECRET: ${{ secrets.LIT_INTERNAL_SHARED_SECRET }}
           ENCRYPT_PUBKEY: ${{ steps.fetch-pubkey.outputs.encrypt_pubkey }}
+          # The CVM this proposal targets; names the replica in OTEL logs.
+          PHALA_CVM_NAME: ${{ steps.prepare.outputs.cvm_name }}
         run: |
           set -euo pipefail
 
@@ -538,6 +541,7 @@ jobs:
               { key: "CERTBOT_AWS_ROLE_ARN", value: process.env.CERTBOT_AWS_ROLE_ARN },
               { key: "CERTBOT_AWS_REGION", value: process.env.CERTBOT_AWS_REGION },
               { key: "LIT_INTERNAL_SHARED_SECRET", value: process.env.LIT_INTERNAL_SHARED_SECRET },
+              { key: "PHALA_CVM_NAME", value: process.env.PHALA_CVM_NAME },
               // Shared gateway IP makes the per-IP new-account limit a global cap.
               { key: "NEW_ACCOUNT_RATE_LIMIT_ENABLED", value: "false" },
             ];

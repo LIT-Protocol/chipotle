@@ -153,8 +153,8 @@ The same system, two very different security postures — determined by who the 
 | | |
 |---|---|
 | **Owner** | A Lit-managed credential |
-| **API Key** | `dev_key` with all scopes: `execute(*)`, `pkp:create`, `group:create`, `group:delete`, `group:manageActions(*)`, `group:addPkp(*)`, `group:removePkp(*)` |
-| **Effect** | Developer does everything via HTTP. Only API key management and ownership transfer require the dashboard. Recovery = re-authenticating to the dashboard. |
+| **API Key** | `dev_key` with execution and group 1 management: `execute(*)`, `pkp:create`, `group:create`, `group:delete`, `group:manageActions(group_1)`, `group:addPkp(group_1)`, `group:removePkp(group_1)` |
+| **Effect** | Developer executes actions and manages group 1 via HTTP. The owner grants explicit management permissions for additional groups. Recovery = re-authenticating to the dashboard. |
 
 ### ChainSecured Mode
 

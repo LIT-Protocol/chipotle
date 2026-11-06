@@ -2,13 +2,11 @@ mod account_management;
 mod actions;
 mod billing;
 mod configuration;
-mod stats;
 
 use self::account_management::*;
 use self::actions::*;
 use self::billing::*;
 use self::configuration::*;
-use self::stats::*;
 
 use rocket::Route;
 use rocket_okapi::okapi::openapi3::OpenApi;
@@ -59,6 +57,31 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         billing_create_payment_intent,
         billing_confirm_payment,
         get_version,
-        get_system_stats,
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::routes_with_spec;
+
+    #[test]
+    fn system_stats_is_not_exposed_in_routes_or_openapi() {
+        let (routes, spec) = routes_with_spec();
+        assert!(
+            !routes
+                .iter()
+                .any(|route| route.uri.path() == "/get_system_stats")
+        );
+        assert!(!spec.paths.contains_key("/get_system_stats"));
+        let schemas = &spec.components.expect("OpenAPI components").schemas;
+        for name in [
+            "SystemStatsResponse",
+            "MemoryStats",
+            "CacheStats",
+            "RunnerInfo",
+        ] {
+            assert!(!schemas.contains_key(name), "unexpected schema: {name}");
+        }
+        assert!(spec.paths.contains_key("/get_supported_languages"));
+    }
 }

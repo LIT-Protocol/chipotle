@@ -95,7 +95,7 @@ Endpoints guarded by `BilledManagementApiKey` (all state-mutating endpoints incl
 
 | Endpoint | Method | Request body | Response | Notes |
 |----------|--------|-------------|----------|-------|
-| `/add_group` | POST | `{ "group_name": "", "group_description": "", "pkp_ids_permitted": [], "cid_hashes_permitted": [] }` | `{ "success": true, "group_id": "" }` | Wildcard: pass the zero address (`"0x0000000000000000000000000000000000000000"`) in `pkp_ids_permitted` for all wallets, or `"0x0"` in `cid_hashes_permitted` for all actions. Empty = none. |
+| `/add_group` | POST | `{ "group_name": "", "group_description": "", "pkp_ids_permitted": [], "cid_hashes_permitted": [] }` | `{ "success": true, "group_id": "" }` | Wildcard: pass the zero address (`"0x0000000000000000000000000000000000000000"`) in `pkp_ids_permitted` for all wallets, or `"0x0"` in `cid_hashes_permitted` for all actions. Empty = none. A usage key needs the new group's id in `add_pkp_to_groups` / `manage_ipfs_ids_in_groups` to pass non-empty lists. |
 | `/list_groups` | GET | `?page_number=&page_size=` | `[{ "id": "", "name": "", "description": "" }]` | Free. Uses `ListMetadataItem` shape. |
 | `/update_group` | POST | `{ "group_id": 1, "name": "", "description": "", "pkp_ids_permitted": [], "cid_hashes_permitted": [] }` | `{ "success": true }` | |
 | `/remove_group` | POST | `{ "group_id": "" }` | `{ "success": true }` | Affected usage keys lose access to that group. |
@@ -138,7 +138,7 @@ Endpoints guarded by `BilledManagementApiKey` (all state-mutating endpoints incl
   "execute_in_groups": [1, 2]
 }
 ```
-Use `[0]` as wildcard for "all groups" in any group array.
+Only `executeInGroups` / `execute_in_groups` supports `[0]` as a wildcard for all groups. The three management arrays require explicit group IDs; `[0]` grants no management access. Create a group empty, have the account owner grant its ID, then add its wallets and actions.
 
 ### Billing
 

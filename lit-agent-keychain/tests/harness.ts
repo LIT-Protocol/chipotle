@@ -44,9 +44,24 @@ export class Harness {
   extraFetch: typeof fetch | undefined;
   calls: { url: string; init?: RequestInit }[] = [];
   privateKeyCalls = 0;
+  usedNonces = new Set<string>();
+  claimFailure = false;
   fetch: typeof fetch = async (input, init) => {
     const url = String(input);
     this.calls.push({ url, init });
+    if (url.endsWith("/api/registry/requests/consume")) {
+      if (this.claimFailure) return json({ ok: false }, 503);
+      const { request: r } = JSON.parse(String(init?.body));
+      const key = JSON.stringify([
+        r.vaultId,
+        r.agentPublicKey,
+        r.operation,
+        r.nonce,
+      ]);
+      if (this.usedNonces.has(key)) return json({ ok: false }, 409);
+      this.usedNonces.add(key);
+      return json({ ok: true });
+    }
     if (url.includes("/api/registry/credentials/"))
       return json({ policy: this.registry.get(url) ?? null });
     if (this.registry.has(url)) return json({ policy: this.registry.get(url) });

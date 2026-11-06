@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
@@ -130,7 +130,20 @@ impl TestClient {
             }
             UnionResponse::IncrementFetchCount(req) => {
                 self.messages.put(req);
-                self.messages.take::<IncrementFetchCountResponse>().into()
+                // Multi-fetch fixtures queue distinct counter responses. Keep any
+                // remainder in the store so Drop also detects unused responses.
+                if let Some(mut responses) = self
+                    .messages
+                    .try_take::<VecDeque<IncrementFetchCountResponse>>()
+                {
+                    let response = responses.pop_front().expect("empty fetch response queue");
+                    if !responses.is_empty() {
+                        self.messages.put(responses);
+                    }
+                    response.into()
+                } else {
+                    self.messages.take::<IncrementFetchCountResponse>().into()
+                }
             }
             UnionResponse::AesDecrypt(req) => {
                 self.messages.put(req);
@@ -2512,7 +2525,12 @@ async fn keychain_encrypted_release(mut client: TestClient) {
     let mut request: ExecutionRequest = vector["code"].as_str().unwrap().to_owned().into();
     request.js_params = Some(serde_json::to_vec(&vector["params"]).unwrap());
     client
-        .respond_with(IncrementFetchCountResponse { fetch_count: 1 })
+        // Policy lookup followed by the single-use nonce claim. Missing or
+        // additional fetches must fail the fixture's response accounting.
+        .respond_with(VecDeque::from([
+            IncrementFetchCountResponse { fetch_count: 1 },
+            IncrementFetchCountResponse { fetch_count: 2 },
+        ]))
         .respond_with(GetLitActionPublicKeyResponse {
             public_key: vector["authorityPublicKey"].as_str().unwrap().into(),
         })

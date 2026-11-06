@@ -34,14 +34,18 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 
 ## SDK release coordination
 
-This source prepares SDK **2.3.0**. It adds an opt-in `verifyLitEndpoint()`
-that reads `/attestation/v2`: the OS image is tied to the hardware measurement
-through the dstack KMS signature chain, and each verification signs a fresh
-nonce. Nothing else changes: Keychain, Owner, the CLI and MCP run exactly the
-2.2.3 checks, and `verifyAttestation()` is unchanged. Publish after
-`/attestation/v2` is live on `https://api.chipotle.litprotocol.com`, so the new
-function works from day one (before that it fails with `ENDPOINT_TOO_OLD`, and
-nothing else is affected). No action templates or catalog locks change.
+This source includes SDK **2.3.1** with updated dependencies. The API, CLI and
+MCP interfaces remain compatible with 2.3.0. Client string limits use Unicode
+code points; action templates use UTF-16 units, so some input accepted by the
+client may be rejected during action execution.
+
+Action releases are pinned by the catalog lock. Existing secrets keep their
+pinned action release; clients must support the catalog entries they use.
+
+SDK 2.3.0 added an opt-in `verifyLitEndpoint()` that reads `/attestation/v2`:
+the OS image is tied to the hardware measurement through the dstack KMS
+signature chain, and each verification signs a fresh nonce. Keychain, Owner,
+the CLI and MCP kept the 2.2.3 checks, and `verifyAttestation()` was unchanged.
 
 SDK 2.2.3 added authenticator-app 2FA enrollment, recovery-code management, and
 the owner client's second-factor login callback.
@@ -103,7 +107,7 @@ Consequences, all handled by the release mechanism described in
   release still takes one signature per document (`PRE_BATCH_AUTHORITY_HASHES`).
 
 Release checks: run `npm test` and `npm run build`, publish through the normal
-maintainer release process, verify `npm view @lit-protocol/keychain@2.3.0 version`,
+maintainer release process, verify `npm view @lit-protocol/keychain@2.3.1 version`,
 then repeat the strict external TypeScript consumer and attestation-enabled Node
 smoke test from the registry artifact. Only then deploy the owner UI/API and create,
 rotate and read a secret against production. See the QA reports under `docs/` for

@@ -2,8 +2,10 @@
  * Groups — CRUD, table rendering, multi-select builders.
  */
 
-import { getEffectiveApiKey, isAuthenticated, getClient, getGroupsStore, setGroupsStore, getWalletsStore, getActionsStore, setStat, updateStatCards, LIST_PAGE_SIZE } from './auth.js';
-import { escapeHtml, showStatus, hideStatus, showActionProgress, closeActionProgress, openModal, closeModal, confirmDelete, formatError, logError, ICON_PENCIL, ICON_TRASH } from './ui-utils.js';
+import { getEffectiveApiKey, isAuthenticated, getClient, getGroupsStore, setGroupsStore, getWalletsStore, getActionsStore, setStat, updateStatCards, LIST_PAGE_SIZE, getMode, getChainSecuredHash, getChainSecuredWallet, getBaseUrl, getChainSecuredRpcUrl } from './auth.js';
+import { escapeHtml, showStatus, hideStatus, showActionProgress, closeActionProgress, openModal, closeModal, confirmDelete, formatError, logError, ICON_PENCIL, ICON_TRASH, warnBadge } from './ui-utils.js';
+
+import { populateWildcardWarnings } from './wildcard-warnings.js';
 
 // ----- Multi-select builders -----
 
@@ -37,8 +39,19 @@ export function normalizeGroupId(id) {
   }
 }
 
-export function buildGroupMultiSelect(id, disabled) {
-  const items = [{ id: '0', name: 'All Groups' }, ...getGroupsStore()];
+export function buildGroupMultiSelect(id, disabled, { allowAll = false, selectedIds = [] } = {}) {
+  const items = getGroupsStore().filter((g) => normalizeGroupId(g.id) !== '0');
+  if (allowAll) items.unshift({ id: '0', name: 'All Groups' });
+  // Preserve saved grants that aren't in the loaded page, including legacy 0.
+  // Editing a name must not silently revoke permissions.
+  const listed = new Set(items.map((g) => normalizeGroupId(g.id)));
+  for (const value of selectedIds) {
+    const groupId = normalizeGroupId(value);
+    if (!listed.has(groupId)) {
+      items.push({ id: groupId, name: groupId === '0' ? '0 (no management access)' : `Group ${groupId} (not listed)` });
+      listed.add(groupId);
+    }
+  }
   return buildMultiSelect(id, items, (g) => normalizeGroupId(g.id), (g) => g.name || String(g.id), 'Select groups\u2026', disabled);
 }
 
@@ -82,11 +95,11 @@ function closeMultiSelect(wrap) {
   }
 }
 
-export function attachGroupMultiSelectLogic(id) {
+export function attachGroupMultiSelectLogic(id, allowAll = true) {
   const wrap = document.getElementById(id);
   if (!wrap) return;
   const trigger = wrap.querySelector('.ms-trigger');
-  const allCb = wrap.querySelector('input[value="0"]');
+  const allCb = allowAll ? wrap.querySelector('input[value="0"]') : null;
 
   trigger.addEventListener('click', (e) => {
     e.preventDefault();
@@ -129,7 +142,15 @@ function selectAllInMultiSelect(id) {
 
 // ----- Table rendering -----
 
+let groupRenderVersion = 0;
+
+function warningSession() {
+  return JSON.stringify([getEffectiveApiKey(), getMode(), getChainSecuredHash(),
+    getChainSecuredWallet(), getBaseUrl(), getChainSecuredRpcUrl()]);
+}
+
 export function renderGroupsTable(items) {
+  const version = ++groupRenderVersion;
   const tbody = document.getElementById('groups-tbody');
   const empty = document.getElementById('groups-empty');
   if (!tbody) return;
@@ -139,10 +160,12 @@ export function renderGroupsTable(items) {
     return;
   }
   if (empty) empty.style.display = 'none';
+  const rows = [];
   items.forEach((item) => {
     const tr = document.createElement('tr');
     tr.innerHTML =
-      '<td><strong>' + escapeHtml(item.name || '') + '</strong></td>' +
+      '<td><strong>' + escapeHtml(item.name || '') + '</strong>' +
+        '<span class="warn-slot"></span></td>' +
       '<td class="mono">' + escapeHtml(item.description || '') + '</td>' +
       '<td class="cell-actions"></td>';
     const actionsCell = tr.querySelector('.cell-actions');
@@ -161,12 +184,27 @@ export function renderGroupsTable(items) {
     delBtn.addEventListener('click', () => confirmAndRemoveGroup(item));
     actionsCell.appendChild(delBtn);
     tbody.appendChild(tr);
+    rows.push({ groupId: normalizeGroupId(item.id), slot: tr.querySelector('.warn-slot') });
+  });
+  if (!isAuthenticated()) return;
+  const session = warningSession();
+  const apiKey = getEffectiveApiKey();
+  const isCurrent = () => version === groupRenderVersion && isAuthenticated() && session === warningSession();
+  void populateWildcardWarnings({
+    rows, getClient, apiKey, pageSize: Number(LIST_PAGE_SIZE), isCurrent,
+    onWarning: ({ slot }) => {
+      if (slot.isConnected) slot.innerHTML = warnBadge(
+        'This group permits All PKPs (wildcard), including PKPs scoped more narrowly in other groups. Action restrictions still apply.');
+    },
+    onError: (error) => logError('groupPkpWildcard:list', error),
   });
 }
 
 // ----- Load -----
 
 export async function loadGroups() {
+  const version = ++groupRenderVersion;
+  const session = warningSession();
   const apiKey = getEffectiveApiKey();
   if (!isAuthenticated()) return;
   hideStatus('groups-status');
@@ -175,6 +213,7 @@ export async function loadGroups() {
   try {
     const client = await getClient();
     const items = await client.listGroups({ apiKey, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
+    if (version !== groupRenderVersion || session !== warningSession() || !isAuthenticated()) return [];
     setGroupsStore(items);
     renderGroupsTable(items);
     setStat('groups', items.length);

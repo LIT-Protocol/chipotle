@@ -283,22 +283,57 @@ test("honest revocation denies; DB rollback deliberately restores still-valid ol
   f.h.registry.set(f.registryUrl, old);
   assert.equal((await f.h.run(f.manifest, f.params)).ok, true);
 });
-test("identical signed request can repeat; response remains encrypted to the same agent", async () => {
+test("identical signed requests are single-use, including concurrent execution", async () => {
   const f = await fixture();
-  for (let i = 0; i < 2; i++) {
-    const out = await f.h.run(f.manifest, f.params);
-    assert.equal(out.ok, true);
-    assert.equal(
-      decode(
-        await open(
-          f.responseKey,
-          out.result.payload.sealed,
-          responseContext(f.request),
-        ),
-      ),
-      f.secret,
-    );
-  }
+  const results = await Promise.all(
+    Array.from({ length: 8 }, () => f.h.run(f.manifest, f.params)),
+  );
+  assert.equal(results.filter((r) => r.ok).length, 1);
+  assert.equal(f.h.privateKeyCalls, 1);
+  assert.equal((await f.h.run(f.manifest, f.params)).ok, false);
+  f.request.nonce = "ab".repeat(32);
+  f.params.signedRequest.signature = signAgent(f.request, f.agentKey);
+  assert.equal((await f.h.run(f.manifest, f.params)).ok, true);
+});
+test("nonce claim fails closed before decrypting and does not consume invalid signatures", async () => {
+  const f = await fixture();
+  f.h.claimFailure = true;
+  assert.equal((await f.h.run(f.manifest, f.params)).ok, false);
+  assert.equal(f.h.privateKeyCalls, 0);
+  f.h.claimFailure = false;
+  const invalid = structuredClone(f.params);
+  invalid.signedRequest.signature = "00".repeat(64);
+  assert.equal((await f.h.run(f.manifest, invalid)).ok, false);
+  assert.equal(f.h.usedNonces.size, 0);
+  assert.equal((await f.h.run(f.manifest, f.params)).ok, true);
+});
+test("concurrent replays send only one external write", async () => {
+  const f = await fixture("slack_post_message", undefined, {
+    input: { channel: "C0123ABC", text: "test-only" },
+  });
+  let writes = 0;
+  f.h.extraFetch = async (url, init) => {
+    assert.equal(String(url), "https://slack.com/api/chat.postMessage");
+    assert.equal(init?.method, "POST");
+    writes++;
+    return json({ ok: true, channel: "C0123ABC", ts: "1700000001.000200" });
+  };
+  const results = await Promise.all(
+    Array.from({ length: 8 }, () => f.h.run(f.manifest, f.params)),
+  );
+  assert.equal(results.filter((r) => r.ok).length, 1);
+  assert.equal(writes, 1);
+});
+test("external failures retain the nonce and cannot repeat the upstream call", async () => {
+  const f = await fixture("stripe_balance");
+  let calls = 0;
+  f.h.extraFetch = async () => {
+    calls++;
+    return json({}, 503);
+  };
+  assert.equal((await f.h.run(f.manifest, f.params)).ok, false);
+  assert.equal((await f.h.run(f.manifest, f.params)).ok, false);
+  assert.equal(calls, 1);
 });
 test("changing action code changes the encryption identity", async () => {
   const f = await fixture();

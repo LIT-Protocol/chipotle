@@ -13,6 +13,7 @@
 //! - [`reporting`] — pagination helpers + per-day aggregation for the
 //!   `stripe_report` binary.
 //! - [`format`] — pure helpers (`cents_to_display`, `unix_to_utc_date`).
+//! - [`ids`] — shape checks for Stripe ids and request paths.
 //!
 //! Caching, charge flows, and PaymentIntent flows are intentionally NOT here —
 //! they live in `lit-api-server` because they depend on its in-process caches
@@ -25,6 +26,7 @@ pub mod customer;
 pub mod eip712;
 pub mod format;
 pub mod http;
+pub mod ids;
 pub mod invoice;
 pub mod on_chain;
 pub mod reporting;

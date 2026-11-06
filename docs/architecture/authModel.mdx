@@ -29,6 +29,8 @@ The owner address can be:
 
 On-chain, the owner is the account's admin wallet, and the contract accepts writes from it whatever kind of wallet it is. The one difference is the `managed` flag: for an API-mode account the contract also accepts writes from the TEE's relay wallets, and for a ChainSecured account it accepts writes only from the owner.
 
+In API mode the admin wallet is the Account Master Wallet that `POST /new_account` creates, and the account key is that wallet's private key. The wallet also appears among the account's PKPs, but Lit Actions can never export its key: `Lit.Actions.getPrivateKey` refuses the account's admin and billing wallets, so a usage key cannot recover the account key or sign as the owner. This still holds after the account converts to ChainSecured, when the Account Master Wallet remains the billing wallet. See [The Account Master Wallet](/architecture/groups#the-account-master-wallet).
+
 ### API Key
 
 A secret registered on-chain under an Account. The server issues it as a base64 string: the private key of a wallet the TEE derives for the key. The user holds the key and sends it to the TEE over HTTPS. The chain stores only the keccak256 hash of the key string, so the TEE hashes the key it receives and looks up that hash to find the account and the key's scopes.
@@ -49,7 +51,7 @@ A key can have any combination of scopes. The owner grants scopes at registratio
 
 #### Scopes and API fields
 
-The REST API names each scope by its request field. `list_api_keys` returns the same fields with a `can_` prefix on the group fields. In the examples on this page, `(*)` means the wildcard group `[0]`.
+The REST API names each scope by its request field. `list_api_keys` returns the same fields with a `can_` prefix on the group fields. In the examples on this page, `execute(*)` means the execution wildcard `[0]`. Management scopes require explicit group IDs; `[0]` grants no management access.
 
 | Scope                 | Request field (`add_usage_api_key`) | Field in `list_api_keys`        |
 | --------------------- | ----------------------------------- | ------------------------------- |
@@ -65,7 +67,7 @@ The REST API names each scope by its request field. `list_api_keys` returns the 
 
 **Four of the seven scopes are per-group.** When you grant an API key `execute`, `group:manageActions`, `group:addPkp`, or `group:removePkp`, you specify _which groups_ it applies to. This is the key security property — a leaked onboarding key that has `group:addPkp(group_1)` can only add PKPs to group_1, not to some new insecure group that someone just created. And because it only has `group:addPkp` (not `group:removePkp`), it can't pull existing PKPs out of the group either.
 
-**Three scopes are account-wide.** `pkp:create` is account-wide because PKPs are created in the account's registry before being assigned to any group. Creating a PKP doesn't grant access to anything by itself — the PKP still has to be added to a group (which requires `group:addPkp` on that specific group) and someone has to have `execute` on that group to actually use it. `group:create` and `group:delete` are account-wide because groups aren't scoped to other groups. In API mode, developers need these to build their app through the API. In ChainSecured mode, the TEE can't write to the account, so these scopes have no effect there: only the SAFE can create or delete groups.
+**Three scopes are account-wide.** `pkp:create` is account-wide because PKPs are created in the account's registry before being assigned to any group. Creating a PKP doesn't grant access to anything by itself — the PKP still has to be added to a group (which requires `group:addPkp` on that specific group) and someone has to have `execute` on that group to actually use it. `group:create` and `group:delete` are account-wide because groups aren't scoped to other groups. `group:create` alone creates an empty group: listing wallets or actions when creating it needs `group:addPkp` or `group:manageActions` on the new group, as adding them afterwards does. In API mode, developers need these to build their app through the API. In ChainSecured mode, the TEE can't write to the account, so these scopes have no effect there: only the SAFE can create or delete groups.
 
 **Everything else is owner-only:** adding/revoking API keys, updating scopes, transferring ownership. These are structural operations that affect the trust boundary itself.
 
@@ -189,7 +191,7 @@ The API Key column applies to API-mode accounts, where the TEE relays the call. 
 | ------------------------------- | ----- | ------- | ------------------------------- |
 | Invoke action + PKP             | ✓     | ✓       | `execute(group_id)`             |
 | Create PKP                      | ✓     | ✓       | `pkp:create`                    |
-| Create group                    | ✓     | ✓       | `group:create`                  |
+| Create group                    | ✓     | ✓       | `group:create`; membership grants for initial contents |
 | Delete group                    | ✓     | ✓       | `group:delete`                  |
 | Add/remove action CIDs in group | ✓     | ✓       | `group:manageActions(group_id)` |
 | Add PKPs to group               | ✓     | ✓       | `group:addPkp(group_id)`        |
@@ -208,8 +210,8 @@ Consider two setups:
 ### Setup A: "API mode"
 
 - **Owner:** a Lit-managed credential (the fast path)
-- **API key `dev_key`:** scopes = `[execute(*), pkp:create, group:create, group:delete, group:manageActions(*), group:addPkp(*), group:removePkp(*)]`
-- **Effect:** The developer can do everything via HTTP calls except manage API keys and transfer ownership (those are owner-only, done through the dashboard). This is the full development experience — create groups, add actions, create PKPs, execute, iterate. Fast iteration, no multisig overhead. Recovery is re-authenticating to the dashboard. When the app is production-ready, the developer can revoke the broad-scoped `dev_key` and replace it with purpose-built keys that have narrower scopes.
+- **API key `dev_key`:** scopes = `[execute(*), pkp:create, group:create, group:delete, group:manageActions(group_1), group:addPkp(group_1), group:removePkp(group_1)]`
+- **Effect:** The developer can execute actions, create PKPs and empty groups, and manage membership in group 1 via HTTP. The owner must grant explicit management permissions for each additional group before the key can fill it. API key management and ownership transfer remain owner-only. Fast iteration, no multisig overhead. Recovery is re-authenticating to the dashboard. When the app is production-ready, the developer can revoke the broad-scoped `dev_key` and replace it with purpose-built keys that have narrower scopes.
 
 ### Setup B: "ChainSecured mode"
 
@@ -226,7 +228,7 @@ Consider two setups:
 
 1. Pin new Lit Action JS to IPFS → get `QmNEW`. Pinning is optional, because the CID is just the hash of the code; `POST /core/v1/get_lit_action_ipfs_id` computes it without IPFS.
 2. `POST /core/v1/add_action_to_group` with `{"group_id": 1, "action_ipfs_cid": "QmNEW"}`, then `POST /core/v1/remove_action_from_group` with `{"group_id": 1, "hashed_cid": "0x…"}` (the hashed CID of `QmOLD`, from `list_actions`) → TEE submits a tx for each to update the group
-3. Done. Next execution request uses new permissions. `dev_key` has `group:manageActions(*)`, so this is allowed on any group.
+3. Done. Next execution request uses new permissions. `dev_key` has `group:manageActions(group_1)`, so this is allowed on group 1.
 
 ### In ChainSecured mode (Setup B)
 

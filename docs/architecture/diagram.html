@@ -1239,11 +1239,11 @@
       </div>
       <div class="config-item">
         <span class="config-label">API KEY</span>
-        <span class="config-value"><code>dev_key</code> with all scopes: <code>execute(*)</code>, <code>pkp:create</code>, <code>group:create</code>, <code>group:delete</code>, <code>group:manageActions(*)</code>, <code>group:addPkp(*)</code>, <code>group:removePkp(*)</code></span>
+        <span class="config-value"><code>dev_key</code> with execution and group 1 management: <code>execute(*)</code>, <code>pkp:create</code>, <code>group:create</code>, <code>group:delete</code>, <code>group:manageActions(group_1)</code>, <code>group:addPkp(group_1)</code>, <code>group:removePkp(group_1)</code></span>
       </div>
       <div class="config-item">
         <span class="config-label">EFFECT</span>
-        <span class="config-value">Developer does everything via HTTP. Only API key management and ownership transfer require Stytch-authenticated dashboard. Recovery = Stytch re-auth.</span>
+        <span class="config-value">Developer executes actions and manages group 1 via HTTP. The owner grants explicit management permissions for additional groups. Recovery = Stytch re-auth.</span>
       </div>
     </div>
 

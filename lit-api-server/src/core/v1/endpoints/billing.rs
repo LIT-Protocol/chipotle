@@ -176,6 +176,14 @@ async fn billing_confirm_payment_impl(
     stripe_state: &Option<Arc<StripeState>>,
     req: Json<ConfirmPaymentRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
+    // Checked first: the id names the credit's idempotency key, and a
+    // non-canonical spelling still retrieves the same PaymentIntent.
+    if !lit_billing_core::ids::is_payment_intent_id(&req.payment_intent_id) {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("payment_intent_id is not a canonical PaymentIntent id"),
+            "payment_intent_id is not a PaymentIntent id",
+        ));
+    }
     let stripe = stripe_state.as_ref().ok_or_else(billing_disabled_err)?;
     let wallet = stripe::resolve_wallet_address(api_key, stripe)
         .await
@@ -219,6 +227,32 @@ mod tests {
     /// RPC/transport failures (anything that isn't a known missing-account
     /// revert) stay 500 so transient infra problems aren't reported to clients
     /// as a bad API key.
+    /// A non-canonical PaymentIntent id still retrieves the same intent from
+    /// Stripe but yields a different credit idempotency key, which reopens the
+    /// concurrent double-credit window the key exists to close. It must be
+    /// refused before anything else, including when billing is unconfigured, so
+    /// this needs no Stripe state.
+    #[tokio::test]
+    async fn confirm_payment_refuses_non_canonical_pi_ids_first() {
+        for id in [
+            "x/../pi_3MtwBwLkdIwHu7ix28a3tqPa",
+            "./pi_3MtwBwLkdIwHu7ix28a3tqPa",
+            "pi_3MtwBwLkdIwHu7ix28a3tqPa/.",
+            "pi_3MtwBwLkdIwHu7ix28a3tqPa?expand[]=customer",
+            "%70i_3MtwBwLkdIwHu7ix28a3tqPa",
+        ] {
+            let req = Json(ConfirmPaymentRequest {
+                payment_intent_id: id.to_string(),
+            });
+            let status = billing_confirm_payment_impl("unused", &None, req)
+                .await
+                .map(|_| ())
+                .unwrap_err()
+                .status;
+            assert_eq!(status, Status::BadRequest, "{id:?}");
+        }
+    }
+
     #[test]
     fn other_errors_map_to_500() {
         let err = anyhow::anyhow!("error sending request: connection refused");

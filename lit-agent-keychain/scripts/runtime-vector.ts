@@ -3,9 +3,21 @@ import { writeFile } from "node:fs/promises";
 import { fixture, keyFor, pubFor } from "../tests/harness.ts";
 import { actionSource } from "../protocol/actions.ts";
 import { hex } from "../protocol/crypto.ts";
+const used = new Set<string>();
 const server = http.createServer((_req, res) => {
   res.setHeader("Content-Type", "application/json");
-  res.end(JSON.stringify({ policy: f.sign(f.policy) }));
+  if (_req.url === "/api/registry/requests/consume") {
+    let body = "";
+    _req.on("data", (chunk) => {
+      body += chunk;
+    });
+    _req.on("end", () => {
+      const nonce = JSON.parse(body).request.nonce;
+      res.statusCode = used.has(nonce) ? 409 : 200;
+      used.add(nonce);
+      res.end(JSON.stringify({ ok: res.statusCode === 200 }));
+    });
+  } else res.end(JSON.stringify({ policy: f.sign(f.policy) }));
 });
 await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
 const f = await fixture(

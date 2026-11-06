@@ -5,6 +5,11 @@ User-facing changes to the Chipotle API and stack. For the full history, see
 Release verification (image digests, attestation, governance) is covered in the
 [upgrade governance docs](https://developer.litprotocol.com/architecture/verification/upgrade-governance).
 
+## November 2026 maintenance release
+
+Bundled service, SDK, dashboard, documentation, and dependency updates, with
+compatibility and reliability improvements across the project.
+
 ## Unreleased
 
 Docs for unreleased features are parked in `docs-reserve/` (see its README for

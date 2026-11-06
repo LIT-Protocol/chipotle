@@ -31,7 +31,7 @@
     "react-dom": "18.3.1",
     "viem": "2.56.3",
     "wagmi": "2.19.5",
-    "zod": "4.3.6"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@playwright/test": "1.58.2",
@@ -44,7 +44,8 @@
     "prettier": "3.9.6",
     "tsx": "4.21.0",
     "typescript": "5.9.3",
-    "vite": "7.3.7"
+    "vite": "7.3.7",
+    "zod-action-templates": "npm:zod@4.3.6"
   },
   "engines": {
     "node": ">=22.16"
@@ -52,8 +53,9 @@
   "overrides": {
     "axios": "1.20.0",
     "ws": "8.21.3",
-    "decode-uri-component": "0.5.0",
+    "decode-uri-component": "0.5.1",
     "uuid": "11.1.1",
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "@vanilla-extract/css": "1.21.3"
   }
 }

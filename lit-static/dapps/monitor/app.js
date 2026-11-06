@@ -1015,24 +1015,7 @@ async function fetchNodeConfigValues({ silent = false } = {}) {
   }
 }
 
-/* ═══ System dashboard — runtimes, CVM memory, caches, languages (CPL-353) ═══ */
-
-function fmtBytes(bytes) {
-  if (bytes == null || isNaN(bytes)) return '—';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let v = Number(bytes);
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
-  return (i === 0 ? String(v) : v.toFixed(1)) + ' ' + units[i];
-}
-
-function fmtKb(kb) {
-  return kb == null ? '—' : fmtBytes(Number(kb) * 1024);
-}
-
-function fmtCount(n) {
-  return n == null ? '—' : Number(n).toLocaleString('en-US');
-}
+/* ═══ System dashboard — runtimes and languages (CPL-353) ═══ */
 
 async function fetchJson(url) {
   const res = await fetch(url);
@@ -1057,8 +1040,8 @@ function setCardError(bodyId, errId, e) {
   if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
 }
 
-function runtimeRow(name, sub, state, text, socketPath) {
-  return `<div class="sys-row"${socketPath ? ` title="${escapeHtml(socketPath)}"` : ''}>` +
+function runtimeRow(name, sub, state, text) {
+  return '<div class="sys-row">' +
     `<span class="health-dot ${state}"></span>` +
     `<span>${escapeHtml(name)}</span>` +
     `<span class="badge">${escapeHtml(sub)}</span>` +
@@ -1066,11 +1049,9 @@ function runtimeRow(name, sub, state, text, socketPath) {
   `</div>`;
 }
 
-function renderRuntimes(health, stats) {
+function renderRuntimes(health) {
   const body = el('runtimes-body');
   if (!body) return;
-  const runner = name => stats?.runners?.find(r => r.name === name);
-  const js = runner('js');
   const rows = [];
 
   // JS runner — /health probes its socket with a real gRPC connect.
@@ -1079,7 +1060,6 @@ function renderRuntimes(health, stats) {
     'JS runner', 'Deno / V8 isolate',
     jsUp == null ? 'unknown' : jsUp ? 'healthy' : 'critical',
     jsUp == null ? 'unknown' : jsUp ? 'reachable' : 'unreachable',
-    js?.socket_path,
   ));
 
   if (health) {
@@ -1087,71 +1067,14 @@ function renderRuntimes(health, stats) {
       'CPU', 'request admission',
       health.cpu_available ? 'healthy' : 'critical',
       health.cpu_available ? 'available' : 'overloaded',
-      null,
     ));
     rows.push(runtimeRow(
       'Billing keys', 'Stripe configuration',
       health.billing_keys_present ? 'healthy' : 'unknown',
       health.billing_keys_present ? 'present' : 'absent',
-      null,
     ));
   }
   setHtml(body, rows.join(''));
-}
-
-function renderMemory(mem) {
-  const body = el('memory-body');
-  if (!body) return;
-  // Fields are independently nullable — render whatever procfs provided
-  // rather than blanking the card when only /proc/meminfo is missing.
-  if (!mem || (mem.total_kb == null && mem.process_rss_kb == null)) {
-    setHtml(body, '<span class="sys-empty">Memory figures unavailable (no procfs on this node).</span>');
-    return;
-  }
-  const parts = [];
-  if (mem.total_kb != null) {
-    const pct = mem.used_kb != null ? (Number(mem.used_kb) / Number(mem.total_kb)) * 100 : null;
-    const cls = pct == null ? '' : pct >= 85 ? 'critical' : pct >= 70 ? 'warning' : '';
-    parts.push(
-      `<div class="sys-row" style="border-bottom:none;padding-bottom:0">` +
-        `<span class="sys-label">Used</span>` +
-        `<span class="sys-value">${fmtKb(mem.used_kb)} / ${fmtKb(mem.total_kb)}${pct != null ? ` (${pct.toFixed(1)}%)` : ''}</span>` +
-      `</div>`,
-      `<div class="gauge"><div class="gauge-fill ${cls}" style="width:${pct == null ? 0 : Math.min(100, pct).toFixed(1)}%"></div></div>`,
-      `<div class="sys-row"><span class="sys-label">Available</span><span class="sys-value">${fmtKb(mem.available_kb)}</span></div>`
-    );
-  } else {
-    parts.push('<div class="sys-empty" style="margin-bottom:0.35rem">CVM totals unavailable (no /proc/meminfo on this node).</div>');
-  }
-  if (mem.process_rss_kb != null) {
-    parts.push(`<div class="sys-row"><span class="sys-label">API server RSS</span><span class="sys-value">${fmtKb(mem.process_rss_kb)}</span></div>`);
-  }
-  setHtml(body, parts.join(''));
-}
-
-function renderCaches(caches) {
-  const body = el('caches-body');
-  if (!body) return;
-  if (!Array.isArray(caches) || caches.length === 0) {
-    setHtml(body, '<span class="sys-empty">No cache statistics reported.</span>');
-    return;
-  }
-  const totalEntries = caches.reduce((s, c) => s + (c.entry_count ?? 0), 0);
-  const totalBytes = caches.reduce((s, c) => s + (c.approx_bytes ?? 0), 0);
-  setHtml(body,
-    `<table><thead><tr><th>Cache</th><th class="eth">Entries</th><th class="eth">Size</th></tr></thead><tbody>` +
-    caches.map(c =>
-      `<tr title="${escapeHtml(c.description ?? '')}">` +
-        `<td>${escapeHtml(c.name)}</td>` +
-        `<td class="eth">${fmtCount(c.entry_count)}</td>` +
-        `<td class="eth">${c.approx_bytes != null ? fmtBytes(c.approx_bytes) : '—'}</td>` +
-      `</tr>`
-    ).join('') +
-    `</tbody></table>` +
-    `<div class="sys-row" style="border-bottom:none;margin-top:0.5rem">` +
-      `<span class="sys-label">Total</span>` +
-      `<span class="sys-value">${fmtCount(totalEntries)} entries &middot; ${fmtBytes(totalBytes)} tracked</span>` +
-    `</div>`);
 }
 
 function renderLanguages(languages) {
@@ -1188,31 +1111,13 @@ async function fetchHealth(serverUrl) {
 }
 
 async function refreshSystemDashboard(serverUrl) {
-  const [healthResult, statsResult] = await Promise.allSettled([
-    fetchHealth(serverUrl),
-    fetchJson(`${serverUrl}/get_system_stats`),
-  ]);
-  const health = healthResult.status === 'fulfilled' ? healthResult.value : null;
-  const stats = statsResult.status === 'fulfilled' ? statsResult.value : null;
-
-  if (health == null && stats == null) {
-    setCardError('runtimes-body', 'runtimes-error', healthResult.reason ?? statsResult.reason);
-  } else {
+  try {
+    const health = await fetchHealth(serverUrl);
     const errEl = el('runtimes-error');
     if (errEl) errEl.style.display = 'none';
-    renderRuntimes(health, stats);
-  }
-
-  if (stats) {
-    for (const id of ['memory-error', 'caches-error']) {
-      const errEl = el(id);
-      if (errEl) errEl.style.display = 'none';
-    }
-    renderMemory(stats.memory);
-    renderCaches(stats.caches);
-  } else {
-    setCardError('memory-body', 'memory-error', statsResult.reason);
-    setCardError('caches-body', 'caches-error', statsResult.reason);
+    renderRuntimes(health);
+  } catch (e) {
+    setCardError('runtimes-body', 'runtimes-error', e);
   }
 }
 

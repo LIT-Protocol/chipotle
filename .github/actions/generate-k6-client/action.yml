@@ -1,0 +1,29 @@
+name: Generate k6 client from source
+description: Build the OpenAPI spec and generate a pinned k6 client for this checkout.
+inputs:
+  output_directory:
+    description: Destination for litApiServer.ts
+    default: k6
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@1.91
+    - name: Install protobuf-compiler
+      shell: bash
+      run: |
+        for i in 1 2 3 4 5; do
+          if sudo apt-get update -qq && sudo apt-get install -y protobuf-compiler; then
+            exit 0
+          fi
+          echo "apt unavailable, waiting 10s (attempt $i/5)..."
+          sleep 10
+        done
+        exit 1
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+    - name: Generate client
+      shell: bash
+      env:
+        OUTPUT_DIRECTORY: ${{ inputs.output_directory }}
+      run: bash k6/generate-client.sh '' "$OUTPUT_DIRECTORY"

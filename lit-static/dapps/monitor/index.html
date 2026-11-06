@@ -376,11 +376,6 @@
         margin-bottom: 1.5rem;
         align-items: start;
       }
-      .sys-stack {
-        display: flex;
-        flex-direction: column;
-        gap: 1.5rem;
-      }
       .sys-grid .card h2 {
         font-size: 1rem;
         font-weight: 600;
@@ -411,22 +406,6 @@
         margin-left: auto;
         text-align: right;
       }
-      .gauge {
-        height: 10px;
-        background: var(--bg);
-        border: 1px solid var(--border);
-        border-radius: 5px;
-        overflow: hidden;
-        margin: 0.6rem 0 0.35rem;
-      }
-      .gauge-fill {
-        height: 100%;
-        width: 0;
-        background: var(--success);
-        transition: width 0.4s ease, background 0.4s ease;
-      }
-      .gauge-fill.warning { background: var(--warning); }
-      .gauge-fill.critical { background: var(--critical); }
       .badge {
         display: inline-block;
         padding: 0.1rem 0.5rem;
@@ -556,34 +535,18 @@
 
     <!-- ═══ CVM System dashboard ═══ -->
     <div class="sys-grid">
-      <div class="sys-stack">
-        <div class="card">
-          <h2>Runtimes</h2>
-          <p class="endpoint-hint"><code>GET /health</code> &middot; <code>GET /get_system_stats</code> — Lit Action runners inside the CVM.</p>
-          <div id="runtimes-body"><span class="sys-empty">Loading&hellip;</span></div>
-          <div id="runtimes-error" class="sys-error" style="display: none"></div>
-        </div>
-
-        <div class="card">
-          <h2>Supported Languages</h2>
-          <p class="endpoint-hint"><code>GET /get_supported_languages</code> — language capability surface of this node.</p>
-          <div id="languages-body"><span class="sys-empty">Loading&hellip;</span></div>
-          <div id="languages-error" class="sys-error" style="display: none"></div>
-        </div>
+      <div class="card">
+        <h2>Runtimes</h2>
+        <p class="endpoint-hint"><code>GET /health</code> — Lit Action runners inside the CVM.</p>
+        <div id="runtimes-body"><span class="sys-empty">Loading&hellip;</span></div>
+        <div id="runtimes-error" class="sys-error" style="display: none"></div>
       </div>
 
       <div class="card">
-        <h2>CVM Memory</h2>
-        <p class="endpoint-hint"><code>GET /get_system_stats</code> — memory of the confidential VM, from <code>/proc/meminfo</code>.</p>
-        <div id="memory-body"><span class="sys-empty">Loading&hellip;</span></div>
-        <div id="memory-error" class="sys-error" style="display: none"></div>
-      </div>
-
-      <div class="card">
-        <h2>Caches</h2>
-        <p class="endpoint-hint"><code>GET /get_system_stats</code> — in-process cache population (action code, permissions, billing).</p>
-        <div id="caches-body"><span class="sys-empty">Loading&hellip;</span></div>
-        <div id="caches-error" class="sys-error" style="display: none"></div>
+        <h2>Supported Languages</h2>
+        <p class="endpoint-hint"><code>GET /get_supported_languages</code> — language capability surface of this node.</p>
+        <div id="languages-body"><span class="sys-empty">Loading&hellip;</span></div>
+        <div id="languages-error" class="sys-error" style="display: none"></div>
       </div>
     </div>
 

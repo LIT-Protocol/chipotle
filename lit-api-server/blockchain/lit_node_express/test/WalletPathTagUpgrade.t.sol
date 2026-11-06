@@ -18,6 +18,12 @@ import {LegacyViewsFacet} from "./legacy/LegacyViewsFacet.sol";
 import {LegacyWritesFacet} from "./legacy/LegacyWritesFacet.sol";
 import {LegacyAPIConfigFacet} from "./legacy/LegacyAPIConfigFacet.sol";
 
+/// @notice Upgrade test for the wallet path tag (#140). State is written with
+///         the PRE-UPGRADE facet code (untagged paths, exactly what the node
+///         issued until now), the facets are then cut over the way the deployer
+///         does it, and every pre-existing wallet must behave exactly as before.
+///         Because the derivation path is unchanged, the node derives exactly
+///         the same key for these wallets as before the upgrade.
 contract WalletPathTagUpgradeTest is Test {
     address internal owner = makeAddr("owner");
     address internal apiPayer = makeAddr("apiPayer");
@@ -27,6 +33,7 @@ contract WalletPathTagUpgradeTest is Test {
 
     address payable internal diamond;
 
+    // Pre-upgrade wallets, all with untagged (pre-tag) paths.
     address internal constant WALLET_PLAIN = address(0xA001); // registered only
     address internal constant WALLET_GROUPED = address(0xA002); // in a group with an action
     address internal constant WALLET_REMOVED = address(0xA003); // removed before the upgrade
@@ -49,6 +56,9 @@ contract WalletPathTagUpgradeTest is Test {
         _seedWithLegacyFacets();
     }
 
+    // ---------------------------------------------------------------------
+    // Old wallets keep working
+    // ---------------------------------------------------------------------
 
     function test_oldWalletsResolveIdenticallyAfterUpgrade() public {
         Snapshot memory beforeUpgrade = _snapshot();
@@ -59,6 +69,7 @@ contract WalletPathTagUpgradeTest is Test {
     function test_oldWalletsKeepWorkingThroughPostUpgradeWrites() public {
         _upgradeFacets();
 
+        // Add an old wallet to a new group.
         uint256[] memory cids = new uint256[](1);
         cids[0] = ACTION;
         address[] memory noPkps = new address[](0);
@@ -72,11 +83,14 @@ contract WalletPathTagUpgradeTest is Test {
         );
         assertEq(ViewsFacet(diamond).getWalletDerivation(aliceHash, WALLET_PLAIN), PATH_PLAIN);
 
+        // Recovery flow on a wallet removed BEFORE the upgrade: its untagged
+        // path is already bound to Alice, so re-registering it still works.
         vm.prank(alice);
         WritesFacet(diamond)
             .registerWalletDerivation(aliceHash, WALLET_REMOVED, PATH_REMOVED, "restored", "");
         assertEq(ViewsFacet(diamond).getWalletDerivation(aliceHash, WALLET_REMOVED), PATH_REMOVED);
 
+        // Remove + re-register of a live old wallet after the upgrade.
         vm.prank(alice);
         WritesFacet(diamond).removeWalletDerivation(aliceHash, WALLET_GROUPED);
         vm.prank(alice);
@@ -84,17 +98,20 @@ contract WalletPathTagUpgradeTest is Test {
             .registerWalletDerivation(aliceHash, WALLET_GROUPED, PATH_GROUPED, "again", "");
         assertEq(ViewsFacet(diamond).getWalletDerivation(aliceHash, WALLET_GROUPED), PATH_GROUPED);
 
+        // Bob's old wallet is untouched by all of this.
         assertEq(ViewsFacet(diamond).getWalletDerivation(bobHash, WALLET_BOB), PATH_BOB);
     }
 
     function test_newWalletsNeedNodeIssuedPathsAfterUpgrade() public {
         _upgradeFacets();
 
+        // A node-issued (tagged) path registers normally.
         uint256 tagged = _tagged(uint256(keccak256("fresh")));
         vm.prank(alice);
         WritesFacet(diamond).registerWalletDerivation(aliceHash, address(0xA0FF), tagged, "new", "");
         assertEq(ViewsFacet(diamond).getWalletDerivation(aliceHash, address(0xA0FF)), tagged);
 
+        // A fresh untagged path is rejected.
         vm.prank(alice);
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -105,6 +122,9 @@ contract WalletPathTagUpgradeTest is Test {
             .registerWalletDerivation(aliceHash, address(0xA0FE), uint256(keccak256("x")), "x", "");
     }
 
+    /// #140 after the upgrade: registering a Lit Action's KMS path as a wallet
+    /// (directly, or by laundering the action's address through a tagged
+    /// registration first) is rejected.
     function test_actionPathCannotBeRegisteredAfterUpgrade() public {
         _upgradeFacets();
         address actionWallet = makeAddr("actionWallet");
@@ -119,6 +139,8 @@ contract WalletPathTagUpgradeTest is Test {
         WritesFacet(diamond)
             .registerWalletDerivation(malloryHash, actionWallet, actionPath, "a", "");
 
+        // Bind the action's address with a legit tagged path, delete it, then
+        // try to re-register the address with the action's path.
         vm.prank(mallory);
         WritesFacet(diamond)
             .registerWalletDerivation(malloryHash, actionWallet, _tagged(7), "a", "");
@@ -137,8 +159,10 @@ contract WalletPathTagUpgradeTest is Test {
     function test_preExistingOwnershipChecksStillApplyAfterUpgrade() public {
         _upgradeFacets();
 
+        // Bob has no entry for Alice's old wallet.
         assertEq(ViewsFacet(diamond).getWalletDerivation(bobHash, WALLET_PLAIN), 0);
 
+        // Bob cannot take over Alice's old pkpId...
         vm.prank(bob);
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -147,6 +171,7 @@ contract WalletPathTagUpgradeTest is Test {
         );
         WritesFacet(diamond).registerWalletDerivation(bobHash, WALLET_PLAIN, _tagged(1), "x", "");
 
+        // ...nor alias her old (untagged, already bound) path.
         vm.prank(bob);
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -158,6 +183,9 @@ contract WalletPathTagUpgradeTest is Test {
         assertEq(ViewsFacet(diamond).getWalletDerivation(aliceHash, WALLET_PLAIN), PATH_PLAIN);
     }
 
+    /// Rollout order: api-servers are upgraded first and start issuing tagged
+    /// paths while the contract still runs the old code. Those registrations
+    /// must keep working across the contract upgrade.
     function test_taggedWalletRegisteredBeforeUpgradeKeepsWorking() public {
         uint256 early = _tagged(uint256(keccak256("issued-by-new-node-before-upgrade")));
         vm.prank(alice);
@@ -171,6 +199,11 @@ contract WalletPathTagUpgradeTest is Test {
         assertEq(ViewsFacet(diamond).getWalletDerivation(aliceHash, address(0xA0EE)), early);
     }
 
+    /// Straddler: an OLD node issued an untagged path before the upgrade, and
+    /// the client registers it only after the facet cut. That registration
+    /// reverts loudly with the tag error (no wallet is left half-created), and
+    /// minting again from an upgraded node (what the SDK's createWallet does on
+    /// this error) succeeds.
     function test_untaggedPathIssuedBeforeUpgradeRegisteredAfterRevertsAndRemintWorks() public {
         uint256 issuedByOldNode = uint256(keccak256("issued-by-old-node"));
         _upgradeFacets();
@@ -188,11 +221,15 @@ contract WalletPathTagUpgradeTest is Test {
         assertEq(ViewsFacet(diamond).getWalletDerivation(aliceHash, address(0xA0DC)), reminted);
     }
 
+    /// The api-server mints paths with the same tag (pinned on both sides).
     function test_tagConstantIsPinned() public pure {
         assertEq(AppStorage.WALLET_PATH_TAG, 0x6c69742d77616c6c65743a31); // "lit-wallet:1"
         assertEq(AppStorage.WALLET_PATH_TAG_SHIFT, 160);
     }
 
+    // ---------------------------------------------------------------------
+    // Snapshot helpers (only selectors present on both legacy and new facets)
+    // ---------------------------------------------------------------------
 
     struct Snapshot {
         uint256 plain;
@@ -235,6 +272,7 @@ contract WalletPathTagUpgradeTest is Test {
         assertEq(b.ownerRemoved, a.ownerRemoved, "owner removed");
         assertEq(b.pathOwnerPlain, a.pathOwnerPlain, "path owner plain");
         assertEq(b.pathOwnerRemoved, a.pathOwnerRemoved, "path owner removed");
+        // Sanity: the seeded state is what we think it is.
         assertEq(a.plain, PATH_PLAIN);
         assertEq(a.grouped, PATH_GROUPED);
         assertEq(a.removed, 0);
@@ -246,10 +284,14 @@ contract WalletPathTagUpgradeTest is Test {
         assertEq(a.ownerRemoved, aliceHash);
         assertEq(a.pathOwnerPlain, aliceHash);
         assertEq(a.pathOwnerRemoved, aliceHash);
+        // The seeded paths really are pre-tag (untagged) paths.
         assertTrue(PATH_PLAIN >> AppStorage.WALLET_PATH_TAG_SHIFT != AppStorage.WALLET_PATH_TAG);
         assertTrue(PATH_REMOVED >> AppStorage.WALLET_PATH_TAG_SHIFT != AppStorage.WALLET_PATH_TAG);
     }
 
+    // ---------------------------------------------------------------------
+    // Deployment: pre-upgrade diamond, seeding, and the facet upgrade
+    // ---------------------------------------------------------------------
 
     function _deployLegacyDiamond() internal {
         IDiamond.FacetCut[] memory cut = new IDiamond.FacetCut[](7);
@@ -295,6 +337,7 @@ contract WalletPathTagUpgradeTest is Test {
         vm.prank(bob);
         w.registerWalletDerivation(bobHash, WALLET_BOB, PATH_BOB, "bob", "bob");
 
+        // The pre-upgrade code accepts untagged fresh paths (this is the bug).
         vm.prank(mallory);
         w.newChainSecuredAccount("m0", "m0");
         vm.prank(mallory);
@@ -303,6 +346,8 @@ contract WalletPathTagUpgradeTest is Test {
         );
     }
 
+    /// Mirrors the production deployer: Replace every facet selector with the
+    /// new facet address (this change adds no selectors).
     function _upgradeFacets() internal {
         address newViews = address(new ViewsFacet());
         address newWrites = address(new WritesFacet());
@@ -324,6 +369,9 @@ contract WalletPathTagUpgradeTest is Test {
         );
     }
 
+    // ---------------------------------------------------------------------
+    // Small helpers
+    // ---------------------------------------------------------------------
 
     function _hashOf(address a) internal pure returns (uint256) {
         return uint256(keccak256(abi.encodePacked(a)));

@@ -424,11 +424,22 @@ contract WritesFacet {
         apiKeyHash = SecurityLib.adminWriteAccountHash(apiKeyHash, msg.sender);
         SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
         uint256 masterHash = SecurityLib.resolveToMaster(apiKeyHash);
-        if (masterHash != apiKeyHash) {
-            SecurityLib.canCreateGroup(apiKeyHash);
-        }
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         AppStorage.Account storage account = s.accounts[masterHash];
+        if (masterHash != apiKeyHash) {
+            SecurityLib.canCreateGroup(apiKeyHash);
+            // The initial lists are the same writes as addActionToGroup and
+            // addPkpToGroup on the new group, so a usage key needs the same
+            // per-group grants for them. createGroups alone creates an empty
+            // group (#231).
+            uint256 newGroupId = account.groupCount + 1;
+            if (cidHashes.length > 0) {
+                SecurityLib.canAccountManageIPFSIdsInGroup(apiKeyHash, newGroupId);
+            }
+            if (pkpIds.length > 0) {
+                SecurityLib.canAccountAddPkpToGroup(apiKeyHash, newGroupId);
+            }
+        }
         account.groupCount++;
         account.groupList.add(account.groupCount);
         AppStorage.Group storage group = account.groups[account.groupCount];
@@ -774,6 +785,14 @@ contract WritesFacet {
         // Enforced symmetrically at resolve time in ViewsFacet.getWalletDerivation.
         uint256 existingPathOwner = s.pathToOwnerMaster[derivationPath];
         if (existingPathOwner == 0) {
+            // Key-family separation (#140): a path that has never been bound
+            // must carry the wallet path tag. The tag is a required prefix, not
+            // proof of node issuance (anyone can build a tagged path, and the
+            // node's address == pkpId check still applies); what it guarantees
+            // is that the path is not a Lit Action key path
+            // (keccak256("lit_action_" + CID) carries it with probability
+            // 2^-96). Already-bound paths (every wallet registered before this
+            // check existed) remain re-registrable by their owner (recovery).
             if (
                 derivationPath >> AppStorage.WALLET_PATH_TAG_SHIFT !=
                 AppStorage.WALLET_PATH_TAG

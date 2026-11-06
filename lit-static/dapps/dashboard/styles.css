@@ -28,6 +28,7 @@
   --btn-primary-bg-hover: #30302c;
   --danger: #dc2626;
   --success: #16a34a;
+  --warning: #b45309;
   --bg-muted: #f0f0eb;
   --shadow: 0 1px 2px 0 rgba(24, 24, 24, 0.04);
   --radius: 7px;
@@ -53,6 +54,7 @@
   --btn-primary-bg-hover: #818cf8;
   --danger: #f87171;
   --success: #4ade80;
+  --warning: #fbbf24;
   --bg-muted: #1e293b;
   --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3);
 }
@@ -1729,6 +1731,23 @@ textarea.input.textarea-sm {
 .cell-actions {
   text-align: right;
   white-space: nowrap;
+}
+
+/* Over-broad-permission warning badge (usage keys / groups tables) */
+.warn-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  margin-left: 0.4rem;
+  color: var(--warning);
+  cursor: help;
+}
+
+.warn-badge svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  fill: currentColor;
 }
 
 /* ----- Modals ----- */

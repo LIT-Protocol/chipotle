@@ -35,5 +35,10 @@ fi
 
 export GOOGLE_APPLICATION_CREDENTIALS="$CREDS_FILE"
 
-echo "[otel-collector] Starting collector for GCP project: $GCP_PROJECT_ID"
+# Replica label for log entries (config.yaml resource/replica). The collector
+# refuses to start if the value is empty, so never let a missing name take
+# down telemetry.
+export PHALA_CVM_NAME="${PHALA_CVM_NAME:-unknown}"
+
+echo "[otel-collector] Starting collector for GCP project: $GCP_PROJECT_ID (replica: $PHALA_CVM_NAME)"
 exec /otelcol-contrib --config /etc/otelcol-contrib/config.yaml "$@"

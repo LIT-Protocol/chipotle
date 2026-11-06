@@ -28,6 +28,9 @@ import {
 } from './account_config_full_abi.js';
 import { runContractWrite, TX_STATES } from './tx_lifecycle.js';
 
+// Required prefix (top 96 bits, bytes12 "lit-wallet:1") of every new wallet
+// derivation path. `registerWalletDerivation` rejects a never-registered path
+// without it (#140). Must match `AppStorage.WALLET_PATH_TAG`.
 export const WALLET_PATH_TAG_HEX = '6c69742d77616c6c65743a31';
 const INVALID_WALLET_PATH_TAG = 'invalid wallet derivation path tag';
 
@@ -122,9 +125,9 @@ export async function mintAndRegisterWallet(mint, register) {
  * @property {boolean} [canCreateGroups=false] - Permission to create groups
  * @property {boolean} [canDeleteGroups=false] - Permission to delete groups
  * @property {boolean} [canCreatePkps=false] - Permission to create PKPs
- * @property {number[]} [manageIpfsIdsInGroups=[]] - Group IDs to grant manage-IPFS-IDs permission (0 = all groups)
- * @property {number[]} [addPkpToGroups=[]] - Group IDs to grant add-PKP permission (0 = all groups)
- * @property {number[]} [removePkpFromGroups=[]] - Group IDs to grant remove-PKP permission (0 = all groups)
+ * @property {number[]} [manageIpfsIdsInGroups=[]] - Group IDs to grant manage-IPFS-IDs permission (explicit IDs only; 0 grants no management access)
+ * @property {number[]} [addPkpToGroups=[]] - Group IDs to grant add-PKP permission (explicit IDs only; 0 grants no management access)
+ * @property {number[]} [removePkpFromGroups=[]] - Group IDs to grant remove-PKP permission (explicit IDs only; 0 grants no management access)
  * @property {number[]} [executeInGroups=[]] - Group IDs to grant execute permission (0 = all groups)
  */
 
@@ -229,9 +232,9 @@ export async function mintAndRegisterWallet(mint, register) {
  * @property {boolean} can_create_groups - Permission to create groups
  * @property {boolean} can_delete_groups - Permission to delete groups
  * @property {boolean} can_create_pkps - Permission to create PKPs
- * @property {number[]} can_manage_ipfs_ids_in_groups - Group IDs allowed to manage IPFS action CIDs (0 = all groups)
- * @property {number[]} can_add_pkp_to_groups - Group IDs allowed to add PKPs (0 = all groups)
- * @property {number[]} can_remove_pkp_from_groups - Group IDs allowed to remove PKPs (0 = all groups)
+ * @property {number[]} can_manage_ipfs_ids_in_groups - Group IDs allowed to manage IPFS action CIDs (explicit IDs only; 0 grants no management access)
+ * @property {number[]} can_add_pkp_to_groups - Group IDs allowed to add PKPs (explicit IDs only; 0 grants no management access)
+ * @property {number[]} can_remove_pkp_from_groups - Group IDs allowed to remove PKPs (explicit IDs only; 0 grants no management access)
  * @property {number[]} can_execute_in_groups - Group IDs allowed to execute actions (0 = all groups)
  */
 

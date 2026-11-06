@@ -32,6 +32,10 @@ contract UsageKeyManagementExpirationTest is BaseTest {
     function _setKey(uint256 expiration) internal {
         uint256[] memory groups = new uint256[](1);
         groups[0] = group;
+        // Route 0 creates group + 1 with members, which needs these grants on it (#231).
+        uint256[] memory fill = new uint256[](2);
+        fill[0] = group;
+        fill[1] = group + 1;
         writes.setUsageApiKey(
             MASTER,
             USAGE,
@@ -42,8 +46,8 @@ contract UsageKeyManagementExpirationTest is BaseTest {
             true,
             true,
             true,
-            groups,
-            groups,
+            fill,
+            fill,
             groups,
             groups
         );

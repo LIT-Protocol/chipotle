@@ -1,0 +1,23 @@
+{
+  "accepted": [
+    {
+      "advisory": "GHSA-mrhx-c7xc-m3w5",
+      "package": "zod",
+      "paths": [
+        "node_modules/@coinbase/cdp-sdk/node_modules/zod",
+        "node_modules/@reown/appkit/node_modules/zod",
+        "node_modules/@reown/appkit-controllers/node_modules/zod",
+        "node_modules/@reown/appkit-utils/node_modules/zod",
+        "node_modules/@reown/appkit-wallet/node_modules/zod",
+        "node_modules/@walletconnect/utils/node_modules/zod"
+      ],
+      "reason": "zod 3 copies in wagmi's wallet-connector dependencies: @reown/appkit-wallet 1.7.8 and @coinbase/cdp-sdk 1.55.0 depend on zod 3, and the other four are peers of old abitype 1.0.x copies in the WalletConnect/Reown tree. zod fixed this only in 4.6.6+, with no 3.x release, and the latest @coinbase/cdp-sdk (1.60.0) and @reown/appkit-wallet (1.8.24) still depend on zod 3. Remove when they move to zod >= 4.6.6."
+    },
+    {
+      "advisory": "GHSA-mrhx-c7xc-m3w5",
+      "package": "zod",
+      "paths": ["node_modules/zod-action-templates"],
+      "reason": "zod 4.3.6 bundled into the Lit Action templates, whose bytes are pinned in actions/catalog.lock.json. Moving them to zod 4.6.7 changes every template, which is a template release: agents on older SDKs could not read secrets created after it. Each execution runs under the Lit Action memory limit, so oversized input fails only that execution. Remove at the next template release."
+    }
+  ]
+}

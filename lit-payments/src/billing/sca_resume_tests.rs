@@ -428,3 +428,55 @@ async fn get_resume_preserves_token_on_stripe_failure() {
         "transient Stripe failure must NOT burn the recovery token"
     );
 }
+
+/// The PaymentIntent id keys both the `auto_topup_credits` row and the
+/// balance-transaction idempotency key. A spelling such as `x/../pi_123` still
+/// retrieves `pi_123` from Stripe (the client's URL parsing collapses the dot
+/// segments) but dedups as a different PaymentIntent, so `/complete` must
+/// refuse it before asking Stripe or touching the database.
+///
+/// Needs neither Stripe nor Postgres: the pool is lazy and never connects, and
+/// a refusal has to happen before either is used. If a regression lets an id
+/// through, the handler tries Stripe and answers 503 instead of 400.
+#[tokio::test]
+async fn complete_refuses_non_canonical_pi_ids_before_stripe() {
+    let db = "postgres://unused:unused@127.0.0.1:9/unused";
+    let cfg = test_config("sk_test_unused".into(), db.into());
+    let stripe = StripeClient::new("sk_test_unused".into()).expect("stripe client");
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .connect_lazy(db)
+        .expect("lazy pool");
+    let rocket = Rocket::build()
+        .manage(cfg)
+        .manage(stripe)
+        .manage(pool)
+        .mount(
+            "/",
+            routes![super::sca_resume::post_auto_topup_resume_complete],
+        );
+    let client = Client::tracked(rocket).await.expect("rocket client");
+    for id in [
+        "x/../pi_3MtwBwLkdIwHu7ix28a3tqPa",
+        "./pi_3MtwBwLkdIwHu7ix28a3tqPa",
+        "%2e/pi_3MtwBwLkdIwHu7ix28a3tqPa",
+        "pi_3MtwBwLkdIwHu7ix28a3tqPa/.",
+        "pi_3MtwBwLkdIwHu7ix28a3tqPa?expand[]=customer",
+        "%70i_3MtwBwLkdIwHu7ix28a3tqPa",
+        "pi_3MtwBwLkdIwHu7ix28a3tqPa ",
+    ] {
+        let body = serde_json::json!({ "payment_intent_id": id }).to_string();
+        let resp = client
+            .post("/billing/auto_topup_resume/complete")
+            .header(ContentType::JSON)
+            .body(body)
+            .dispatch()
+            .await;
+        let status = resp.status();
+        let body: Value = resp.into_json().await.unwrap_or_default();
+        assert_eq!(
+            (status, body["error"].as_str()),
+            (Status::BadRequest, Some("invalid_pi_id")),
+            "{id:?} must be refused before Stripe is asked; got {body}"
+        );
+    }
+}
