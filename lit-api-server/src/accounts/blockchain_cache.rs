@@ -477,11 +477,6 @@ impl BlockchainCache {
         &self.wallet_derivation
     }
 
-    /// Reference to the grant-deadline cache.
-    pub fn grant_deadline_cache(&self) -> &Cache<String, DeadlineLookup> {
-        &self.grant_deadlines
-    }
-
     /// Run the on-chain permission `check` for `api_key_hash` and pair its
     /// result with the deadline that bounds caching it.
     ///
@@ -546,15 +541,6 @@ impl BlockchainCache {
             })
             .await
             .deadline()
-    }
-
-    /// Number of tracked per-account generation counters (grows monotonically;
-    /// entries are never evicted). Exposed via `/get_system_stats`.
-    pub fn generation_count(&self) -> u64 {
-        self.generations
-            .read()
-            .expect("generation lock poisoned")
-            .len() as u64
     }
 
     /// Bump the generation for a single api_key_hash, invalidating all cached

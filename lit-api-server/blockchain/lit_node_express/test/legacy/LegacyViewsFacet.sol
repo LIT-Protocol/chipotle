@@ -1,3 +1,11 @@
+// TEST FIXTURE: verbatim copy of contracts/AccountConfigFacets/ViewsFacet.sol at
+// chipotle-private main a06c130 (before wallet key namespacing, #140),
+// with only the contract name and import paths changed. Used by
+// WalletKeyNamespaceUpgrade.t.sol to write state with the pre-upgrade
+// facet code and then diamondCut in the current facets. Do not modify.
+/// @title AccountConfigViews
+/// @author Brendon Paul
+/// @notice View (read-only) functions for AccountConfig diamond.
 
 // SPDX-License-Identifier: MIT
 pragma solidity =0.8.28;
@@ -12,6 +20,7 @@ contract LegacyViewsFacet {
     using EnumerableSet for EnumerableSet.AddressSet;
     using EnumerableSet for EnumerableSet.StringSet;
 
+    // used for returning data from the listApiKeys function.
     struct UsageApiKeyReturn {
         AppStorage.Metadata metadata; // name and description of the usage api key
         uint256 apiKeyHash; // keccak256 of the base64 encoded api key
@@ -37,6 +46,7 @@ contract LegacyViewsFacet {
         string value;
     }
 
+    /// @notice Getters for public state (ABI compatibility with original AccountConfig).
     function adminApiPayerAccount() public view returns (address) {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         return s.adminApiPayerAccount;
@@ -116,6 +126,14 @@ contract LegacyViewsFacet {
         return AppStorage.accountExistsAndIsMutable(apiKeyHash, msg.sender);
     }
 
+    /// @notice Return the admin/owner wallet address for the account that owns the given API key.
+    /// @dev Works with both master and usage API key hashes (resolves via allApiKeyHashesToMaster).
+    ///      The admin wallet is set at account creation and is not necessarily the transaction creator.
+    /// @param apiKeyHash Account identity hash. Accepts either keccak256 of a master or usage
+    ///        API key (base64-encoded) — the API-key flow — or keccak256(walletAddress) for
+    ///        ChainSecured callers, whose on-chain identity is derived from their wallet rather
+    ///        than a secret API key.
+    /// @return The admin/owner wallet address stored on the resolved master account.
     function getAccountWalletAddress(
         uint256 apiKeyHash
     ) public view returns (address) {
@@ -123,11 +141,20 @@ contract LegacyViewsFacet {
         return account.adminWalletAddress;
     }
 
+    /// @notice Return the billing wallet address for the account that owns the given API key.
+    /// @dev Works with both master and usage API key hashes (resolves via allApiKeyHashesToMaster).
+    ///      The billing wallet is set at account creation and is not necessarily the transaction creator.
+    /// @param apiKeyHash Account identity hash. Accepts either keccak256 of a master or usage
+    ///        API key (base64-encoded) — the API-key flow — or keccak256(walletAddress) for
+    ///        ChainSecured callers, whose on-chain identity is derived from their wallet rather
+    ///        than a secret API key.
+    /// @return The billing wallet address stored on the resolved master account.
     function getBillingWalletAddress(
         uint256 apiKeyHash
     ) public view returns (address) {
         AppStorage.Account storage account = getReadOnlyAccount(apiKeyHash);
         if (account.billingWalletAddress == address(0)) {
+            // older accounts may not have a billing wallet address
             return account.adminWalletAddress;
         }
         return account.billingWalletAddress;
@@ -142,6 +169,15 @@ contract LegacyViewsFacet {
         if (derivation == 0) {
             return 0;
         }
+        // Cross-account hijack defense (#575). This view is the exact read the
+        // node uses to resolve a derivation path before signing/decrypting, so
+        // enforce the global first-owner binding HERE, not just at registration:
+        // if the wallet has an owner and the resolving (master) account is not
+        // that owner, the local pkpData entry is a stale pre-fix hijack
+        // registration — fail closed instead of leaking the victim's path.
+        // owner == 0 means a pre-migration wallet not yet backfilled: fall
+        // through for deployments that have not migrated. Completed bindings
+        // survive removal of the historical backfill entry point.
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         uint256 resolvedMaster = s.allApiKeyHashesToMaster[apiKeyHash];
         uint256 owner = s.pkpIdToOwnerMaster[walletAddress];
@@ -150,6 +186,13 @@ contract LegacyViewsFacet {
                 revert AppStorage.InvalidRequest("PKP owned by another account");
             }
         }
+        // Path-aliasing defense (companion to the pkpId binding above). The pkpId
+        // binding only protects the address label; the key is derived from the
+        // path. If a resolving account is not the path's first owner, this is a
+        // stale pre-fix aliasing registration pointing at someone else's key —
+        // fail closed instead of releasing it. owner == 0 means a pre-migration
+        // path not yet backfilled. Keep the legacy fallback for deployments that
+        // have not migrated; completed bindings survive removal of the backfill.
         uint256 pathOwner = s.pathToOwnerMaster[derivation];
         if (pathOwner != 0 && pathOwner != resolvedMaster) {
             revert AppStorage.InvalidRequest("derivation path owned by another account");
@@ -157,11 +200,21 @@ contract LegacyViewsFacet {
         return derivation;
     }
 
+    /// @notice Return the master apiKeyHash that first registered a pkpId, or 0 if
+    ///         the pkpId has never been bound (pre-migration wallet or never registered).
+    /// @dev The binding survives removeWalletDerivation by design; used to audit the
+    ///      global first-owner rule and the one-time backfill migration.
     function getPkpOwnerMaster(address pkpId) public view returns (uint256) {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         return s.pkpIdToOwnerMaster[pkpId];
     }
 
+    /// @notice Return the master apiKeyHash that first registered a derivationPath,
+    ///         or 0 if the path has never been bound (pre-migration wallet or never
+    ///         registered).
+    /// @dev Companion to getPkpOwnerMaster. The binding survives
+    ///      removeWalletDerivation by design; used to audit the path first-owner
+    ///      rule and the backfillPathOwners migration.
     function getPathOwnerMaster(
         uint256 derivationPath
     ) public view returns (uint256) {
@@ -383,6 +436,12 @@ contract LegacyViewsFacet {
         return (startIndex, endIndex - startIndex);
     }
 
+    // Internal function to get the account for a given api key hash and sender
+    // @notice Reverts if the account does not exist or the sender is not allowed to access it
+    // @notice The API Key, could be a usage or group API key
+    // @param accountApiKeyHash The keccak256 hash of the account api key
+    // @param sender The address of the sender
+    // @return The account
     function getReadOnlyAccount(
         uint256 apiKeyHash
     ) internal view returns (AppStorage.Account storage) {
@@ -397,6 +456,14 @@ contract LegacyViewsFacet {
         return account;
     }
 
+    /// @notice Returns true when a usage API key's on-chain expiration has passed.
+    /// @dev The `expiration` field is stored on-chain and surfaced to users as a
+    ///      real access-control deadline, so every authorization path must honor
+    ///      it. An expiration of 0 is the "never expires" sentinel (a key created
+    ///      without an explicit deadline); any non-zero value in the past
+    ///      de-authorizes the key. Reads `block.timestamp`, so this must only be
+    ///      called from view functions that already tolerate miner timestamp
+    ///      drift (seconds-level, irrelevant at day-scale expirations).
     function _isExpired(
         AppStorage.UsageApiKey storage usageApiKey
     ) internal view returns (bool) {
@@ -405,6 +472,8 @@ contract LegacyViewsFacet {
             block.timestamp >= usageApiKey.expiration;
     }
 
+    /// @notice Authorize code execution; wildcard usage keys need no registered action/group.
+    /// @dev PKP access is authorized separately by canUseWalletInAction.
     function canExecuteAction(
         uint256 apiKeyHash,
         uint256 cidHash
@@ -434,10 +503,13 @@ contract LegacyViewsFacet {
             apiKeyHash
         ];
 
+        // An expired usage key authorizes nothing, regardless of its scopes.
         if (_isExpired(usageApiKey)) {
             return false;
         }
 
+        // Group 0 skips per-group grants, never the resource match. Wallet
+        // callers resolve (CID, wallet) against this account's groups first.
         if (usageApiKey.executeInGroups.contains(0)) {
             return groupIds.length > 0;
         }
@@ -502,6 +574,7 @@ contract LegacyViewsFacet {
         return returnGroups;
     }
 
+    /// @notice Optimized single-pass canExecuteAction with early exit. No intermediate array.
     function canExecuteActionFast(
         uint256 apiKeyHash,
         uint256 cidHash
@@ -534,6 +607,7 @@ contract LegacyViewsFacet {
         return false;
     }
 
+    /// @notice Optimized single-pass canUseWalletInAction with early exit. No intermediate array.
     function canUseWalletInActionFast(
         uint256 apiKeyHash,
         uint256 cidHash,
@@ -548,6 +622,7 @@ contract LegacyViewsFacet {
             return false; // expired key authorizes nothing
         }
 
+        // A wildcard execution grant does not bypass (CID, wallet) scoping.
         bool isWildcard = usageApiKey.executeInGroups.contains(0);
 
         uint256 len = account.groupList.length();
@@ -567,6 +642,9 @@ contract LegacyViewsFacet {
         return false;
     }
 
+    /// @notice Combined check: returns (canExecute, canUseWallet) in a single pass.
+    ///         Use this from Rust to replace 2 sequential RPC calls with 1.
+    ///         Note: canUseWallet implies canExecute in this model.
     function canExecuteActionAndUseWallet(
         uint256 apiKeyHash,
         uint256 cidHash,
@@ -582,6 +660,8 @@ contract LegacyViewsFacet {
         }
 
         bool isWildcard = usageApiKey.executeInGroups.contains(0);
+        // Execution may succeed without a group, but wallet use still needs a
+        // matching (CID, wallet) group in the key's own account.
         canExecute = isWildcard;
 
         uint256 len = account.groupList.length();

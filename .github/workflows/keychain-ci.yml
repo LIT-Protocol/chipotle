@@ -13,7 +13,9 @@ concurrency:
   cancel-in-progress: true
 jobs:
   keychain:
-    runs-on: ubuntu-latest
+    # Playwright 1.58.2 supports Ubuntu 24.04, but not 26.04.
+    # Keep browser dependencies stable when ubuntu-latest moves forward.
+    runs-on: ubuntu-24.04
     env:
       # Both Rust workspaces remain on disk for the Deno fixture. Omit debug
       # symbols, not debug assertions, to fit the hosted runner's disk budget.
@@ -45,7 +47,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - run: npm ci
-      - run: npm audit --audit-level=low
+      - name: npm audit (exceptions in npm-audit-allowlist.json)
+        run: npx tsx scripts/npm-audit.ts
       - run: npm run format:check
       - run: npm test
       - name: SDK version bumped if packed contents changed (merge publishes)

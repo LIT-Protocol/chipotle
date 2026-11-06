@@ -514,6 +514,13 @@ contract AccountsTest is BaseTest {
         return keccak256(abi.encode(derivationPath, mapSlot));
     }
 
+    /// The core path-aliasing attack: the private key is a stateless function of
+    /// the derivationPath, and paths are public. The #575 pkpId binding only
+    /// protects the address label, so an attacker could register a FRESH,
+    /// self-owned pkpId carrying the victim's public path and drive the node to
+    /// release the victim's key. The path first-owner binding blocks that at
+    /// registration — note the attacker uses a DIFFERENT pkpId than the victim,
+    /// so it is the path binding, not the pkpId binding, doing the work.
     function test_registerWalletDerivation_pathAliasingAcrossAccountsReverts()
         public
     {
@@ -631,6 +638,8 @@ contract AccountsTest is BaseTest {
             attackerHash
         );
 
+        // Simulate post-backfill truth: the VICTIM was the real first owner of
+        // the path. (The attacker still owns the pkpId label locally.)
         uint256 victimHash = apiKeyHashOf(user);
         vm.store(address(views_), _pathOwnerSlot(path), bytes32(victimHash));
         assertEq(views_.getPathOwnerMaster(path), victimHash);
@@ -666,6 +675,7 @@ contract AccountsTest is BaseTest {
             attackerHash
         );
 
+        // Simulate the post-backfill truth: the VICTIM was the real first owner.
         uint256 victimHash = apiKeyHashOf(user);
         vm.store(address(views_), _pkpOwnerSlot(pkpAddr), bytes32(victimHash));
         assertEq(views_.getPkpOwnerMaster(pkpAddr), victimHash);
@@ -715,8 +725,13 @@ contract AccountsTest is BaseTest {
     }
 
     function test_getWalletDerivation_unboundPkpFailsClosed() public {
+        // A local pkpData entry with no pkpId owner binding cannot be produced
+        // by any supported path now that the one-time backfill is complete on
+        // every live deployment. Resolution must fail closed rather than fall
+        // through, so an un-backfilled stale record can never release a key.
         (uint256 hash, address pkpAddr) = _registerStrangerWallet();
 
+        // Clear the binding to reproduce a never-backfilled legacy state.
         vm.store(address(views_), _pkpOwnerSlot(pkpAddr), bytes32(uint256(0)));
         assertEq(views_.getPkpOwnerMaster(pkpAddr), 0);
 
@@ -730,6 +745,8 @@ contract AccountsTest is BaseTest {
     }
 
     function test_getWalletDerivation_unboundPathFailsClosed() public {
+        // Same rule for the derivation-path binding: pkpId bound to the caller
+        // but path owner cleared must not resolve.
         (uint256 hash, address pkpAddr) = _registerStrangerWallet();
         assertEq(views_.getPathOwnerMaster(wp(42)), hash);
 
@@ -746,6 +763,9 @@ contract AccountsTest is BaseTest {
     }
 
     function test_getWalletDerivation_unboundPkpFailsClosedViaUsageKey() public {
+        // The node resolves with whatever key hash the request carried, usually
+        // a usage key. allApiKeyHashesToMaster maps it to the master, so the
+        // fail-closed rule must bite identically through that indirection.
         (uint256 hash, address pkpAddr) = _registerStrangerWallet();
         uint256 usageHash = uint256(keccak256("stranger-usage"));
         _mintStrangerUsageKey(hash, usageHash);
@@ -780,6 +800,12 @@ contract AccountsTest is BaseTest {
     }
 
     function test_getWalletDerivation_resolvesThroughConvertedAlias() public {
+        // convertToChainSecuredAccount adds keccak256(newAdmin) as a second
+        // hash that resolves to the same master. Bindings are keyed by the
+        // master, so wallets registered before AND after conversion must keep
+        // resolving through the original hash and the new alias alike. This
+        // guards the fail-closed change against a conversion path that
+        // re-keyed ownership and left the alias comparing against 0.
         uint256 managedHash = uint256(keccak256("managed-wallet"));
         vm.prank(apiPayer);
         writes.newAccount(managedHash, true, "managed", "m", apiPayer);
@@ -792,11 +818,15 @@ contract AccountsTest is BaseTest {
         writes.convertToChainSecuredAccount(managedHash, user);
         uint256 aliasHash = apiKeyHashOf(user);
 
+        // Pre-conversion wallet: still bound to the master, visible via both hashes.
         assertEq(views_.getPkpOwnerMaster(preWallet), managedHash);
         assertEq(views_.getPathOwnerMaster(wp(7)), managedHash);
         assertEq(views_.getWalletDerivation(managedHash, preWallet), wp(7));
         assertEq(views_.getWalletDerivation(aliasHash, preWallet), wp(7));
 
+        // Post-conversion wallet registered by the new admin (writes always
+        // target the master hash; the alias is a read-side reference only):
+        // bindings land on the master and resolve via both hashes.
         address postWallet = address(0xA4);
         vm.prank(user);
         writes.registerWalletDerivation(managedHash, postWallet, wp(8), "post", "");

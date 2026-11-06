@@ -14,7 +14,14 @@ import {
   type Authority,
   type SecretBundle,
 } from "../sdk/src/index.ts";
-import { hex, randomBytes, digest, nowSeconds } from "../protocol/crypto.ts";
+import {
+  hex,
+  randomBytes,
+  digest,
+  nowSeconds,
+  signAgent,
+  unhex,
+} from "../protocol/crypto.ts";
 import { handleMessage } from "../sdk/mcp.mjs";
 const api = process.env.KEYCHAIN_TEST_API;
 const lit = process.env.KEYCHAIN_TEST_LIT || "http://127.0.0.1:55440";
@@ -96,6 +103,58 @@ test(
       await assert.rejects(agent.get("API_TEST"), /denied/i);
       bundle = await c.delegate(bundle, keys.publicKey, "Integration agent");
       assert.equal(await agent.get("API_TEST"), "local-only-secret-7f9ba");
+      // Exercise the real HTTP claim endpoint and its shared Postgres arbitration.
+      const request = {
+        v: 2,
+        domain: "lit-keychain/v2",
+        vaultId: c.vaultId,
+        secretId: bundle.manifest.document.manifest.secretId,
+        actionCid: bundle.manifest.document.actionCid,
+        version: bundle.envelope.document.metadata.version,
+        envelopeHash: digest(bundle.envelope.document),
+        policyHash: digest(bundle.policy.document),
+        agentPublicKey: keys.publicKey,
+        operation: "get",
+        responsePublicKey: hex(randomBytes()),
+        nonce: hex(randomBytes()),
+        issuedAt: nowSeconds(),
+        expiresAt: nowSeconds() + 90,
+      };
+      const consume = (
+        r: typeof request,
+        signature = signAgent(r, unhex(keys.privateKey)),
+      ) =>
+        original(`${api}/api/registry/requests/consume`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ request: r, signature }),
+        });
+      assert.equal((await consume(request, "00".repeat(64))).status, 403);
+      assert.equal(
+        (await consume({ ...request, policyHash: "00".repeat(32) })).status,
+        403,
+      );
+      const claims = await Promise.all(
+        Array.from({ length: 8 }, () => consume(request)),
+      );
+      assert.equal(claims.filter((r) => r.status === 200).length, 1);
+      assert.equal(claims.filter((r) => r.status === 409).length, 7);
+      assert.equal((await consume(request)).status, 409);
+      assert.equal(
+        (await consume({ ...request, nonce: hex(randomBytes()) })).status,
+        200,
+      );
+      assert.equal(
+        (
+          await consume({
+            ...request,
+            issuedAt: nowSeconds() - 120,
+            expiresAt: nowSeconds(),
+          })
+        ).status,
+        403,
+      );
+
       // Every API response must be strict JSON (RFC 8259): no raw control
       // characters inside strings, so jq and other strict parsers accept it.
       const rawBundle = await (

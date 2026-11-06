@@ -52,6 +52,7 @@ abstract contract BaseTest is Test {
         apiConfig.setAdminApiPayerAccount(adminApiPayer);
     }
 
+    /// Node-issued (tagged) wallet derivation path with low bits `n`.
     function wp(uint256 n) internal pure returns (uint256) {
         return
             (AppStorage.WALLET_PATH_TAG << AppStorage.WALLET_PATH_TAG_SHIFT) |

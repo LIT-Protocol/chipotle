@@ -129,6 +129,12 @@ export class LitApiClient {
   prepareWallet(): Promise<PrepareWalletResponse> {
     return this.request<PrepareWalletResponse>('POST', '/prepare_wallet');
   }
+  /** Mint and register a new wallet (PKP) in the account that owns `key`. */
+  createWallet(key: string): Promise<{ wallet_address: string }> {
+    return this.request<{ wallet_address: string }>('POST', '/create_wallet', {
+      headers: { 'x-api-key': key },
+    });
+  }
 
   addUsageApiKey(
     apiKey: string,

@@ -1,0 +1,27 @@
+name: Static JavaScript Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, next]
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-js-tests:
+    name: Static JavaScript tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test static SDK and dashboard
+        run: node --test lit-static/*.test.mjs lit-static/dapps/dashboard/*.test.mjs

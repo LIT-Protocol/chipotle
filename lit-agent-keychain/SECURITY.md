@@ -350,9 +350,16 @@ guarantee. The worker runs every minute and refreshes Stripe state every five mi
 webhooks and explicit refresh also update the DB. Login, owner revocation and encrypted
 backups remain available. Data is never automatically deleted on cancellation.
 
-No read-count/one-time-use guarantee exists against an operator who can roll back the
-database. Identical signed requests may execute repeatedly until expiry; integrations
-must account for external side effects. Stripe balance reads have no write side effects.
+Current secret actions consume signed request nonces in the registry before
+execution. Claims are scoped to vault, agent and operation and retained until
+request expiry. Failed executions also consume their nonce. A new nonce starts
+a new attempt; callers must account for external side effects when retrying.
+This is not an exactly-once upstream guarantee. The registry and its persistent
+database are trusted for this behavior. Stripe balance reads have no write
+side effects.
+
+Action behavior is versioned by the pinned catalog entry. Consult the action
+release associated with each secret when integrating with it.
 
 Management writes and their audit events share a transaction. The activity feed is
 not a complete execution ledger: an independent Lit payer can execute an action

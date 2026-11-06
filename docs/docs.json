@@ -16,6 +16,12 @@
           "quickstart",
           "glossary",
           {
+            "group": "Guides",
+            "pages": [
+              "guides/index"
+            ]
+          },
+          {
             "group": "Management",
             "pages": [
               "management/api_keys",
@@ -107,6 +113,25 @@
       }
     ]
   },
+  "redirects": [
+    { "source": "/v2/accessControl/intro", "destination": "/lit-actions/migration/encryption" },
+    { "source": "/v2/whatIsLit", "destination": "/" },
+    { "source": "/v2/:slug*", "destination": "/" },
+    { "source": "/sdk/serverless-signing/overview", "destination": "/lit-actions/index" },
+    { "source": "/sdk/serverless-signing/conditional-signing", "destination": "/lit-actions/patterns" },
+    { "source": "/sdk/serverless-signing/combining-decryption-shares", "destination": "/lit-actions/migration/encryption" },
+    { "source": "/sdk/serverless-signing/:slug*", "destination": "/lit-actions/index" },
+    { "source": "/sdk/access-control/intro", "destination": "/lit-actions/migration/encryption" },
+    { "source": "/sdk/access-control/quick-start", "destination": "/lit-actions/migration/encryption" },
+    { "source": "/sdk/access-control/:slug*", "destination": "/lit-actions/migration/encryption" },
+    { "source": "/learning-lit/how-it-works", "destination": "/architecture/index" },
+    { "source": "/resources/how-it-works", "destination": "/architecture/index" },
+    { "source": "/resources/pkpsAsWallet", "destination": "/architecture/groups" },
+    { "source": "/user-wallets/pkps/overview", "destination": "/architecture/groups" },
+    { "source": "/user-wallets/:slug*", "destination": "/architecture/groups" },
+    { "source": "/learningLab/:slug*", "destination": "/quickstart" },
+    { "source": "/concepts/programmable-signing-concept", "destination": "/lit-actions/index" }
+  ],
   "favicon": "/favicon.svg",
   "logo": {
     "light": "/logo/light.svg",

@@ -1301,6 +1301,253 @@ mod tests {
         assert_eq!(rpc.calls().len(), 2, "served from the cache");
     }
 
+    /// Answer the dstack agent's `/GetKey` on a Unix socket so the real KMS
+    /// client derives keys in-process. Each key is a fixed function of
+    /// (path, purpose), as with the real KMS. No TEE or simulator is involved.
+    fn serve_fake_dstack_get_key(socket: std::path::PathBuf) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let _ = std::fs::remove_file(&socket);
+        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+        tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                tokio::spawn(async move {
+                    let (mut request, mut chunk) = (Vec::new(), [0u8; 4096]);
+                    let (body_start, body_len) = loop {
+                        let n = stream.read(&mut chunk).await.unwrap();
+                        assert!(n > 0, "GetKey connection closed before its headers");
+                        request.extend_from_slice(&chunk[..n]);
+                        if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                            let headers = String::from_utf8_lossy(&request[..end]).to_lowercase();
+                            let len = headers
+                                .lines()
+                                .find_map(|line| line.strip_prefix("content-length:"))
+                                .map(|len| len.trim().parse::<usize>().unwrap())
+                                .expect("GetKey request has a content-length");
+                            break (end + 4, len);
+                        }
+                    };
+                    while request.len() < body_start + body_len {
+                        let n = stream.read(&mut chunk).await.unwrap();
+                        assert!(n > 0, "GetKey connection closed before its body");
+                        request.extend_from_slice(&chunk[..n]);
+                    }
+                    // hyper sends the absolute form: POST http://unix.socket/GetKey
+                    let line = String::from_utf8_lossy(&request[..body_start]);
+                    let line = line.lines().next().unwrap_or_default();
+                    assert!(
+                        line.starts_with("POST ") && line.contains("/GetKey "),
+                        "unexpected dstack call: {line}"
+                    );
+                    let body: serde_json::Value =
+                        serde_json::from_slice(&request[body_start..body_start + body_len])
+                            .unwrap();
+                    let key = alloy::primitives::keccak256(format!(
+                        "fake-kms|{}|{}",
+                        body["path"].as_str().unwrap(),
+                        body["purpose"].as_str().unwrap()
+                    ));
+                    let json = serde_json::json!({
+                        "key": alloy::primitives::hex::encode(key),
+                        "signature_chain": [],
+                    })
+                    .to_string();
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                         content-length: {}\r\nconnection: close\r\n\r\n{json}",
+                        json.len()
+                    );
+                    stream.write_all(response.as_bytes()).await.unwrap();
+                });
+            }
+        });
+    }
+
+    /// POST /new_account mints one wallet (listed as "Account Master Wallet")
+    /// and base64-encodes its secret as the account's master API key. Lit
+    /// Actions run only under usage keys, so a usage key that a group grants
+    /// this wallet (by address or through the all-wallets entry) must not get
+    /// its private key: that is the master key. That still holds after the
+    /// account converts to ChainSecured, when the wallet is no longer the admin
+    /// but is still the billing wallet. An ordinary wallet in the same grant
+    /// stays exportable until the owner makes it the admin, and an unresolved
+    /// lookup fails closed.
+    ///
+    /// `--features production` (CI runs `--all-features`) pins the KMS socket,
+    /// so there no fake KMS is served and the wallets are fixed addresses. The
+    /// refusals need no key, so they are checked in every build.
+    #[tokio::test]
+    async fn usage_key_cannot_export_the_master_key_wallet() {
+        const NAME: &str = "usage_key_cannot_export_the_master_key_wallet";
+        const CHILD_ENV: &str = "LIT_TEST_MASTER_KEY_WALLET_CHILD";
+        if std::env::var_os(CHILD_ENV).is_none() {
+            // Own process: the read-only client cannot be reset, and the KMS
+            // client reads its socket path from the environment.
+            let socket =
+                std::env::temp_dir().join(format!("lit-fake-dstack-{}.sock", std::process::id()));
+            let test = format!("accounts::signable_contract::tests::{NAME}");
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", test.as_str(), "--nocapture"])
+                .env(CHILD_ENV, "1")
+                .env("DSTACK_SOCKET", &socket)
+                .output()
+                .unwrap();
+            let _ = std::fs::remove_file(&socket);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                output.status.success() && stdout.contains("1 passed; 0 failed"),
+                "isolated {NAME} must run and pass: {stdout}\n{stderr}"
+            );
+            return;
+        }
+
+        use crate::accounts::blockchain_cache::{self, CachedPermission, GrantDeadline};
+        use crate::actions::client::ClientBuilder;
+        use crate::core::account_management::{create_new_wallet, encode_api_key_from_secret};
+        use crate::utils::parse_with_hash::{api_key_hash, ipfs_cid_to_u256};
+        use alloy::primitives::U256;
+        use alloy::sol_types::SolCall;
+        use lit_actions_grpc::proto::{
+            ExecuteJsRequest, GetPrivateKeyRequest, GetPrivateKeyResponse, UnionRequest,
+            UnionResponse,
+        };
+
+        // Mint as the API does: new_account takes the account wallet and the
+        // master key from one secret; create_wallet mints an ordinary wallet.
+        let mut minted = None;
+        let ((master_wallet, master_path), (other_wallet, other_path)) =
+            if cfg!(not(feature = "production")) {
+                serve_fake_dstack_get_key(std::env::var("DSTACK_SOCKET").unwrap().into());
+                let (_, master, master_secret, master_path) = create_new_wallet().await.unwrap();
+                let (_, other, other_secret, other_path) = create_new_wallet().await.unwrap();
+                minted = Some((
+                    encode_api_key_from_secret(&master_secret).unwrap(),
+                    other_secret,
+                ));
+                ((master, master_path), (other, other_path))
+            } else {
+                let wallet = |byte: u8| (Address::repeat_byte(byte), U256::from(byte));
+                (wallet(0xa1), wallet(0xb2))
+            };
+
+        // On chain, an API-mode account's admin and billing wallet are both the
+        // account wallet. convertToChainSecuredAccount makes the user's own
+        // wallet the admin but keeps the account wallet as the billing wallet,
+        // and its key is still the old master API key. Each export reads both
+        // wallets: two exports are answered per phase, one more after a PKP is
+        // made the admin, and the export after that finds nothing queued and
+        // fails.
+        let admin = AccountConfig::getAccountWalletAddressCall::SELECTOR;
+        let billing = AccountConfig::getBillingWalletAddressCall::SELECTOR;
+        let rpc = SelectorTransport::new(&[admin, billing]);
+        let chain_secured_owner = Address::repeat_byte(0xc3);
+        for admin_wallet in [
+            master_wallet,
+            master_wallet,
+            chain_secured_owner,
+            chain_secured_owner,
+        ] {
+            rpc.push(
+                admin,
+                AccountConfig::getAccountWalletAddressCall::abi_encode_returns(&admin_wallet),
+            );
+            rpc.push(
+                billing,
+                AccountConfig::getBillingWalletAddressCall::abi_encode_returns(&master_wallet),
+            );
+        }
+        // Then a ChainSecured owner makes one of the account's own PKPs the
+        // admin. Its key carries the admin rights, so it is refused as well.
+        rpc.push(
+            admin,
+            AccountConfig::getAccountWalletAddressCall::abi_encode_returns(&other_wallet),
+        );
+        rpc.push(
+            billing,
+            AccountConfig::getBillingWalletAddressCall::abi_encode_returns(&master_wallet),
+        );
+        rpc.install();
+
+        // A usage key that a group grants both wallets, e.g. a wildcard
+        // execution key plus a group with the dashboard's "All" wallets entry.
+        let usage_api_key = "usage key granted every wallet";
+        let cid = "QmYRKz97sdQ2DwG4w3uoTKSzycX2DDGQvuUQJuZN1UFdDR";
+        let (usage, cid_hash) = (api_key_hash(usage_api_key), ipfs_cid_to_u256(cid).unwrap());
+        let cache = blockchain_cache::get().unwrap();
+        for (wallet, path) in [(master_wallet, master_path), (other_wallet, other_path)] {
+            cache
+                .use_wallet_cache()
+                .insert(
+                    cache.use_wallet_key(usage, cid_hash, wallet),
+                    CachedPermission::new(true, GrantDeadline::Never),
+                )
+                .await;
+            cache
+                .wallet_derivation_cache()
+                .insert(cache.wallet_derivation_key(usage, wallet), path)
+                .await;
+        }
+        let mut action = ClientBuilder::default()
+            .api_key(usage_api_key)
+            .ipfs_id(cid)
+            .build()
+            .unwrap();
+        let get_private_key = |wallet: Address| {
+            UnionResponse::GetPrivateKey(GetPrivateKeyRequest {
+                pkp_id: wallet.to_string(),
+            })
+        };
+        let released = |response: ExecuteJsRequest| match response.union {
+            Some(UnionRequest::GetPrivateKey(GetPrivateKeyResponse { secret })) => secret,
+            _ => panic!("expected a GetPrivateKey response"),
+        };
+
+        for phase in ["API mode", "after conversion to ChainSecured"] {
+            match action.handle_op(get_private_key(master_wallet), 0).await {
+                Ok(response) => {
+                    let secret = hex_to_bytes(released(response)).unwrap();
+                    let master_api_key = minted.as_ref().map(|(key, _)| key.as_str());
+                    panic!(
+                        "{phase}: a usage key received the account wallet's private key; \
+                         base64 of it equals the master API key: {}",
+                        master_api_key == Some(base64_light::base64_encode_bytes(&secret).as_str())
+                    );
+                }
+                Err(e) => assert!(
+                    e.to_string().contains("Account Master Wallet"),
+                    "{phase}: expected the account-wallet refusal, got: {e}"
+                ),
+            }
+
+            match action.handle_op(get_private_key(other_wallet), 0).await {
+                Ok(response) => {
+                    if let Some((_, other_secret)) = &minted {
+                        let other = hex_to_bytes(released(response)).unwrap();
+                        assert!(other == *other_secret, "{phase}: exported the wrong key");
+                    }
+                }
+                // Without a KMS the request must still get past the refusal.
+                Err(e) => assert!(
+                    minted.is_none() && !e.to_string().contains("Account Master Wallet"),
+                    "{phase}: an ordinary wallet must stay exportable, got: {e}"
+                ),
+            }
+        }
+
+        let pkp_admin = action.handle_op(get_private_key(other_wallet), 0).await;
+        assert!(
+            pkp_admin.is_err_and(|e| e.to_string().contains("admin wallet or its billing wallet")),
+            "a PKP made the account's admin must not be exportable"
+        );
+
+        let unresolved = action.handle_op(get_private_key(other_wallet), 0).await;
+        assert!(
+            unresolved.is_err_and(|e| e.to_string().contains("resolve the account's admin")),
+            "an unresolved admin wallet must fail closed"
+        );
+    }
+
     #[test]
     fn nonce_cache_cold_reserve_misses_then_seeded_reserves_advance() {
         let cache = NonceCache::new();

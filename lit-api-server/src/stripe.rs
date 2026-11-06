@@ -530,23 +530,6 @@ impl StripeState {
     pub async fn invalidate_balance_cache(&self, customer_id: &str) {
         self.balance_cache.invalidate(customer_id).await;
     }
-
-    /// Entry counts of the billing caches, for `/get_system_stats`.
-    /// With `flush`, moka's internal buffers are flushed first so the counts
-    /// reflect completed inserts/evictions rather than lagging them — the
-    /// caller throttles flushes because the endpoint is public.
-    pub async fn cache_entry_counts(&self, flush: bool) -> [(&'static str, u64); 3] {
-        if flush {
-            self.customer_cache.run_pending_tasks().await;
-            self.wallet_cache.run_pending_tasks().await;
-            self.balance_cache.run_pending_tasks().await;
-        }
-        [
-            ("billing_customer", self.customer_cache.entry_count()),
-            ("billing_wallet", self.wallet_cache.entry_count()),
-            ("billing_balance", self.balance_cache.entry_count()),
-        ]
-    }
 }
 
 /// Resolve any account identity to its billing wallet address.
@@ -1172,10 +1155,19 @@ pub async fn confirm_payment_and_credit(
     wallet_address: &str,
     state: &StripeState,
 ) -> Result<()> {
+    // Every replay guard below keys on `payment_intent_id`, so refuse any
+    // spelling other than the canonical one (see `lit_billing_core::ids`).
+    if !lit_billing_core::ids::is_payment_intent_id(payment_intent_id) {
+        anyhow::bail!("payment_intent_id is not a canonical PaymentIntent id");
+    }
     let resp = state
         .client
         .get(&format!("payment_intents/{payment_intent_id}"), &[])
         .await?;
+
+    if resp.body.get("id").and_then(|v| v.as_str()) != Some(payment_intent_id) {
+        anyhow::bail!("PaymentIntent id in the Stripe response does not match the request");
+    }
 
     let pi_status = resp
         .body
@@ -1300,6 +1292,34 @@ pub async fn list_balance_transactions_in_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every replay guard in `confirm_payment_and_credit` (the `credited`
+    /// metadata flag and the balance-transaction idempotency key) is keyed on
+    /// the id it is given, so it must refuse a non-canonical spelling itself,
+    /// before asking Stripe, whatever its caller checked. The state is built
+    /// offline; on refusal nothing is sent.
+    #[tokio::test]
+    async fn confirm_payment_and_credit_refuses_non_canonical_pi_ids() {
+        let state = build_state("sk_test_unused".into(), "pk_test_unused".into()).unwrap();
+        for id in [
+            "x/../pi_3MtwBwLkdIwHu7ix28a3tqPa",
+            "pi_3MtwBwLkdIwHu7ix28a3tqPa/.",
+            "%70i_3MtwBwLkdIwHu7ix28a3tqPa",
+        ] {
+            let e = confirm_payment_and_credit(
+                id,
+                "0x0000000000000000000000000000000000000001",
+                &state,
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+            assert!(
+                e.contains("not a canonical PaymentIntent id"),
+                "{id:?} must be refused before Stripe is asked; got: {e}"
+            );
+        }
+    }
 
     #[test]
     fn billing_reason_labels_are_stable() {

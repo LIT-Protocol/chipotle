@@ -80,17 +80,21 @@ test.describe('lit action — encrypt/decrypt', () => {
     const stamp = Date.now();
     const victim = await apiClient.newAccount({ account_name: `e2e-victim-${stamp}` });
     const attacker = await apiClient.newAccount({ account_name: `e2e-attacker-${stamp}` });
+    // getPrivateKey never releases the wallet from /new_account (its private key
+    // is the master API key), so the export positive path uses a created wallet.
+    const victimWallet = (await apiClient.createWallet(victim.api_key)).wallet_address;
+    const attackerWallet = (await apiClient.createWallet(attacker.api_key)).wallet_address;
     // Return only the address, never private key material, on the positive path.
     const privateKeyAction = `async function main({ pkpId }) {
       return new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId })).address;
     }`;
     const codes = [ENCRYPT_ACTION.trim(), DECRYPT_ACTION.trim(), privateKeyAction];
     await apiClient.permitWalletActions(
-      victim.api_key, `victim-${stamp}`, [victim.wallet_address], codes,
+      victim.api_key, `victim-${stamp}`, [victim.wallet_address, victimWallet], codes,
     );
     await apiClient.permitWalletActions(
       attacker.api_key, `attacker-${stamp}`,
-      [attacker.wallet_address, victim.wallet_address], codes,
+      [attacker.wallet_address, attackerWallet, victim.wallet_address], codes,
     );
     const victimKey = (await apiClient.addUsageApiKey(victim.api_key, {
       name: 'victim execution', execute_in_groups: [0],
@@ -102,7 +106,9 @@ test.describe('lit action — encrypt/decrypt', () => {
     let victimCiphertext: unknown;
     // Positive controls exercise all operations with the same group/key setup.
     // Poll until the grants are usable, avoiding false denials from RPC lag.
-    for (const [account, key] of [[victim, victimKey], [attacker, attackerKey]] as const) {
+    for (const [account, key, wallet] of [
+      [victim, victimKey, victimWallet], [attacker, attackerKey, attackerWallet],
+    ] as const) {
       await expect(async () => {
         const encrypted = await apiClient.litAction(key, {
           code: ENCRYPT_ACTION.trim(), js_params: { pkpId: account.wallet_address, challenge },
@@ -116,12 +122,17 @@ test.describe('lit action — encrypt/decrypt', () => {
         expect(decrypted.has_error).toBe(false);
         expect(decrypted.response).toBe(challenge);
         const address = await apiClient.litAction(key, {
-          code: privateKeyAction, js_params: { pkpId: account.wallet_address },
+          code: privateKeyAction, js_params: { pkpId: wallet },
         });
         expect(address.has_error).toBe(false);
-        expect(String(address.response).toLowerCase()).toBe(account.wallet_address.toLowerCase());
+        expect(String(address.response).toLowerCase()).toBe(wallet.toLowerCase());
         if (account === victim) victimCiphertext = encrypted.response;
       }).toPass({ timeout: 45_000, intervals: [500, 1000, 2000] });
+      // The same group grants the account's own wallet, and Encrypt/Decrypt
+      // above used it, but its key is the master API key: never exported.
+      await expect(apiClient.litAction(key, {
+        code: privateKeyAction, js_params: { pkpId: account.wallet_address },
+      })).rejects.toThrow(/cannot export the account's admin wallet/);
     }
 
     for (const code of codes) {

@@ -5,6 +5,7 @@ use std::time::Duration;
 use anyhow::Result;
 
 use crate::http::{StripeResponse, parse_stripe_response, stripe_base};
+use crate::ids::is_plain_stripe_path;
 
 /// Stripe API version pinned for every request this client makes.
 ///
@@ -17,6 +18,17 @@ use crate::http::{StripeResponse, parse_stripe_response, stripe_base};
 /// will surface as deserialisation errors in tests against the newer API
 /// before it ever reaches production.
 const STRIPE_API_VERSION: &str = "2020-08-27";
+
+/// `<base>/<path>`, refusing any path that is not plain Stripe path segments.
+///
+/// Callers interpolate object ids into `path`; see [`crate::ids`] for why a
+/// dot segment or delimiter in an id must never reach URL parsing.
+fn stripe_url(path: &str) -> Result<String> {
+    if !is_plain_stripe_path(path) {
+        anyhow::bail!("stripe: refusing a request path that is not plain Stripe path segments");
+    }
+    Ok(format!("{}/{}", stripe_base(), path))
+}
 
 /// Stripe API client: secret key + reqwest client.
 ///
@@ -49,7 +61,7 @@ impl StripeClient {
 
     /// `GET /v1/<path>` with optional query params.
     pub async fn get(&self, path: &str, query: &[(&str, &str)]) -> Result<StripeResponse> {
-        let url = format!("{}/{}", stripe_base(), path);
+        let url = stripe_url(path)?;
         let resp = self
             .client
             .get(&url)
@@ -65,7 +77,7 @@ impl StripeClient {
 
     /// `POST /v1/<path>` with form-encoded body.
     pub async fn post(&self, path: &str, params: &[(&str, &str)]) -> Result<StripeResponse> {
-        let url = format!("{}/{}", stripe_base(), path);
+        let url = stripe_url(path)?;
         let resp = self
             .client
             .post(&url)
@@ -89,7 +101,7 @@ impl StripeClient {
         params: &[(&str, &str)],
         idempotency_key: &str,
     ) -> Result<StripeResponse> {
-        let url = format!("{}/{}", stripe_base(), path);
+        let url = stripe_url(path)?;
         let resp = self
             .client
             .post(&url)
@@ -102,5 +114,35 @@ impl StripeClient {
         let status = resp.status();
         let body_text = resp.text().await?;
         parse_stripe_response(status, &body_text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The client refuses before any request is built, so no test traffic
+    /// leaves the host.
+    #[tokio::test]
+    async fn aliasing_paths_are_refused_before_sending() {
+        let client = StripeClient::new("sk_test_unused".into()).unwrap();
+        for path in [
+            "payment_intents/x/../pi_123",
+            "payment_intents/pi_123?expand[]=customer",
+        ] {
+            let get = client.get(path, &[]).await.unwrap_err().to_string();
+            let post = client.post(path, &[]).await.unwrap_err().to_string();
+            let idem = client
+                .post_with_idempotency(path, &[], "k")
+                .await
+                .unwrap_err()
+                .to_string();
+            for e in [get, post, idem] {
+                assert!(
+                    e.contains("not plain Stripe path segments"),
+                    "{path:?}: {e}"
+                );
+            }
+        }
     }
 }

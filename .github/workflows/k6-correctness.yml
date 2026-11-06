@@ -43,6 +43,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: ./.github/actions/generate-k6-client
+        id: client
+
       - name: Install k6
         uses: grafana/setup-k6-action@v1
 
@@ -66,7 +69,7 @@ jobs:
         run: k6 run k6/correctness/billing.spec.ts
 
       - name: observability-headers.spec.ts
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.client.outcome == 'success' }}
         env:
           BASE_URL: ${{ inputs.api_root_url }}
           K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-observability-headers
@@ -75,7 +78,7 @@ jobs:
         run: k6 run k6/correctness/observability-headers.spec.ts
 
       - name: integration.spec.ts
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.client.outcome == 'success' }}
         env:
           BASE_URL: ${{ inputs.api_root_url }}
           K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-integration
@@ -84,7 +87,7 @@ jobs:
         run: k6 run k6/correctness/integration.spec.ts
 
       - name: new-account.spec.ts
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.client.outcome == 'success' }}
         env:
           BASE_URL: ${{ inputs.api_root_url }}
           K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-new-account
@@ -93,7 +96,7 @@ jobs:
         run: k6 run k6/correctness/new-account.spec.ts
 
       - name: lit-action-ecdsa-sign.spec.ts
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.client.outcome == 'success' }}
         env:
           BASE_URL: ${{ inputs.api_root_url }}
           K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-ecdsa-sign
@@ -102,7 +105,7 @@ jobs:
         run: k6 run k6/correctness/lit-action-ecdsa-sign.spec.ts
 
       - name: lit-action-encrypt-decrypt.spec.ts
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.client.outcome == 'success' }}
         env:
           BASE_URL: ${{ inputs.api_root_url }}
           K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-encrypt-decrypt

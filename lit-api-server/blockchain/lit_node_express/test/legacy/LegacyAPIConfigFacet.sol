@@ -1,3 +1,11 @@
+// TEST FIXTURE: verbatim copy of contracts/AccountConfigFacets/APIConfigFacet.sol at
+// chipotle-private main a06c130 (before wallet key namespacing, #140),
+// with only the contract name and import paths changed. Used by
+// WalletKeyNamespaceUpgrade.t.sol to write state with the pre-upgrade
+// facet code and then diamondCut in the current facets. Do not modify.
+/// @title AccountAPIProcess
+/// @author Brendon Paul
+/// @notice Process API calls for AccountConfig diamond.
 
 // SPDX-License-Identifier: MIT
 pragma solidity =0.8.28;
@@ -37,6 +45,12 @@ contract LegacyAPIConfigFacet {
         emit RequestedApiPayerCountUpdated(newRequestedApiPayerCount);
     }
 
+    // Owner-only: the admin api payer outranks every regular api_payer
+    // (it alone gates setApiPayers), so letting any api_payer set it would let
+    // a single api_payer self-promote to admin and seize the whole payer set.
+    // Deploy/rotation always sends this from the diamond owner, never an
+    // api_payer, so owner-only closes the self-promotion path with no
+    // legitimate caller affected.
     function setAdminApiPayerAccount(address newAdminApiPayerAccount) public {
         SecurityLib.revertIfNotOwner(msg.sender);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
@@ -44,6 +58,12 @@ contract LegacyAPIConfigFacet {
         emit AdminApiPayerUpdated(newAdminApiPayerAccount);
     }
 
+    // setApiPayers replaces the entire api_payer set (clear + rebuild), and api
+    // payers can create accounts, move balances, register PKPs, and convert
+    // accounts. Granting/revoking that role is therefore restricted to the
+    // diamond owner ONLY. It used to also allow the adminApiPayerAccount, but
+    // combined with a reachable setAdminApiPayerAccount that formed a privilege-
+    // escalation chain (any payer -> admin payer -> rewrite the whole payer set).
     function setApiPayers(address[] memory newApiPayers) public {
         SecurityLib.revertIfNotOwner(msg.sender);
 
@@ -64,6 +84,8 @@ contract LegacyAPIConfigFacet {
         emit RebalanceAmountUpdated(newRebalanceAmount);
     }
 
+    /// @notice Trigger a server restart signal. Only callable by the diamond owner.
+    /// @param value Arbitrary uint256 value stored on-chain and emitted in the event.
     function serverTrigger(uint256 value) public {
         LibDiamond.enforceIsContractOwner();
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();

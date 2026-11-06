@@ -61,6 +61,7 @@ pub fn build(cfg: Config, pool: PgPool, lit: Chipotle, stripe: Stripe) -> Rocket
                 registry::credentials,
                 registry::restore_credentials,
                 registry::policy,
+                crate::replay::consume,
                 registry::update_credentials,
                 registry::create,
                 registry::restore,

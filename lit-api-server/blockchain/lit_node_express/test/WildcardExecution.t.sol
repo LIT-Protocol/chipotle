@@ -122,6 +122,8 @@ contract WildcardExecutionTest is BaseTest {
         assertPermissions(USAGE, CID, WALLET, true, true);
         assertEq(views_.getWalletDerivation(USAGE, WALLET), wp(42));
 
+        // Simulate an old cross-account registration after the real owner's
+        // binding is backfilled, as in AccountsTest. Check slot layout first.
         bytes32 base = keccak256("com.litprotocol.accountconfig.storage");
         bytes32 ownerSlot = keccak256(abi.encode(WALLET, bytes32(uint256(base) + 18)));
         assertEq(uint256(vm.load(address(views_), ownerSlot)), master);

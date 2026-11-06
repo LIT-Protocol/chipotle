@@ -7,21 +7,41 @@ Auto-generated from the OpenAPI spec using [@grafana/openapi-to-k6](https://gith
 - [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/)
 - [Node.js](https://nodejs.org/) (for regenerating from OpenAPI)
 
-## Regenerating from OpenAPI
+## Client generation
+
+CI generates `litApiServer.ts` from the checked-out Rust sources before smoke,
+correctness, and load tests. The `k6-client-check` job verifies generation and test
+imports and uploads the generated client as an artifact. API changes no longer
+require a separate generated-file commit to pass CI.
+
+The committed client is a convenience for local runs. Refresh it from the repo root:
 
 ```bash
-npm install -g @grafana/openapi-to-k6
-openapi-to-k6 https://test.chipotle.litprotocol.com/openapi.json ./k6
-
-# Note: The OpenAPI spec paths omit the /core/v1 prefix. Set BASE_URL with /core/v1
-# when running against the Phala deployment, e.g. BASE_URL=.../core/v1
+bash k6/generate-client.sh
 ```
 
-Or use a local OpenAPI file:
+This needs Rust and protobuf-compiler as well as Node.js. The script pins the
+client generator and formatter, and only replaces `litApiServer.ts`.
+To generate from an existing spec instead of compiling Rust:
 
 ```bash
-openapi-to-k6 --include-sample-script ./path/to/openapi.json ./k6
+bash k6/generate-client.sh ./path/to/openapi.json
+# Optional second argument selects a separate output directory:
+bash k6/generate-client.sh https://api.chipotle.litprotocol.com/core/v1/openapi.json /tmp/k6-client
 ```
+
+### OpenAPI spec drift
+
+The deployment `openapi-spec-check` compares clients generated from the checked-out
+sources and the deployed `/openapi.json`. It deliberately keeps an independent
+source baseline: generating both sides from the deployed API would hide drift.
+If it fails, check that the deployed revision matches the workflow checkout and
+that rollout has completed. The diff includes documentation changes as well as
+API types and routes; regenerating the committed client cannot repair a deployment
+mismatch. This check retains its existing advisory (`continue-on-error`) behavior.
+
+The OpenAPI paths omit `/core/v1`; include that prefix in `BASE_URL` when targeting
+Phala deployments.
 
 ## Running Tests
 

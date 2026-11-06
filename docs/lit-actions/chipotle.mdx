@@ -63,7 +63,7 @@ Returns **[Promise](https://developer.mozilla.org/docs/Web/JavaScript/Reference/
 
 ## PKP Keys
 
-Key management functions for PKPs and for action identity keys. `getPrivateKey` returns a PKP's key and is checked against group membership. The three `getLitAction*` functions deal with the key every action derives from its own CID; see [Two kinds of keys](/lit-actions/index#two-kinds-of-keys). All key-returning calls share one limit of ten per execution ([Limits](/lit-actions/limits)).
+Key management functions for PKPs and for action identity keys. `getPrivateKey` returns a PKP's key and is checked against group membership. It never returns the key of the account's admin or billing wallet (the Account Master Wallet in API mode), whose key is the account key; see [The Account Master Wallet](/architecture/groups#the-account-master-wallet). The three `getLitAction*` functions deal with the key every action derives from its own CID; see [Two kinds of keys](/lit-actions/index#two-kinds-of-keys). All key-returning calls share one limit of ten per execution ([Limits](/lit-actions/limits)).
 
 ## Lit.Actions.getPrivateKey
 

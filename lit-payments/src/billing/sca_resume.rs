@@ -189,6 +189,17 @@ pub async fn post_auto_topup_resume_complete(
             "payment_intent_id is required.",
         ));
     }
+    // The id keys the credit row and the balance-transaction idempotency key,
+    // so it must be the canonical spelling: `x/../pi_123` also retrieves
+    // `pi_123` from Stripe (see `lit_billing_core::ids`) but would dedup as a
+    // different PaymentIntent and credit it again.
+    if !lit_billing_core::ids::is_payment_intent_id(&pi_id) {
+        return Err(err(
+            Status::BadRequest,
+            "invalid_pi_id",
+            "payment_intent_id is not a PaymentIntent id.",
+        ));
+    }
 
     let pi = stripe
         .get(&format!("payment_intents/{pi_id}"), &[])
@@ -202,6 +213,16 @@ pub async fn post_auto_topup_resume_complete(
             )
         })?
         .body;
+
+    // Defence in depth: dedup on the id Stripe returned, which must be the
+    // one we asked for.
+    if pi.get("id").and_then(|v| v.as_str()) != Some(pi_id.as_str()) {
+        return Err(err(
+            Status::BadRequest,
+            "pi_id_mismatch",
+            "PaymentIntent id does not match the request.",
+        ));
+    }
 
     let status_str = pi.get("status").and_then(|v| v.as_str()).unwrap_or("");
     if status_str != "succeeded" {

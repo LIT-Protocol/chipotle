@@ -121,6 +121,16 @@ contract ViewsFacet {
         return AppStorage.accountExistsAndIsMutable(apiKeyHash, msg.sender);
     }
 
+    /// @notice Return true for API-mode accounts, false for ChainSecured accounts.
+    /// @dev Caller-independent. Resolves master keys, usage keys (including expired keys),
+    ///      and registered admin-wallet aliases. Reverts with AccountDoesNotExist for
+    ///      unknown or removed key hashes. This is mode inspection, not authorization.
+    /// @param apiKeyHash The account, usage-key, or registered admin-wallet identity hash.
+    /// @return Whether the resolved account is managed by the API.
+    function isAccountManaged(uint256 apiKeyHash) public view returns (bool) {
+        return getReadOnlyAccount(apiKeyHash).managed;
+    }
+
     /// @notice Return the admin/owner wallet address for the account that owns the given API key.
     /// @dev Works with both master and usage API key hashes (resolves via allApiKeyHashesToMaster).
     ///      The admin wallet is set at account creation and is not necessarily the transaction creator.
@@ -164,12 +174,32 @@ contract ViewsFacet {
         if (derivation == 0) {
             return 0;
         }
+        // Cross-account hijack defense (#575). This view is the exact read the
+        // node uses to resolve a derivation path before signing/decrypting, so
+        // enforce the global first-owner binding HERE, not just at registration:
+        // if the resolving (master) account is not the wallet's first owner,
+        // the local pkpData entry is a stale pre-fix hijack registration —
+        // fail closed instead of leaking the victim's path.
+        //
+        // Fail closed on an unbound wallet (owner == 0) too. Every live
+        // deployment completed the one-time owner backfill (#575/#699) and
+        // registerWalletDerivation has bound every wallet since, so a local
+        // entry with no binding cannot be produced by any supported path. The
+        // pre-migration fall-through that used to live here was a fail-open
+        // branch; a deployment that never ran the backfill must redeploy
+        // rather than rely on it.
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         uint256 resolvedMaster = s.allApiKeyHashesToMaster[apiKeyHash];
         uint256 owner = s.pkpIdToOwnerMaster[walletAddress];
         if (owner != resolvedMaster) {
             revert AppStorage.InvalidRequest("PKP owned by another account");
         }
+        // Path-aliasing defense (companion to the pkpId binding above). The pkpId
+        // binding only protects the address label; the key is derived from the
+        // path. If the resolving account is not the path's first owner, this is a
+        // stale pre-fix aliasing registration pointing at someone else's key —
+        // fail closed instead of releasing it. Same fail-closed rule for an
+        // unbound path (owner == 0): the path backfill is complete everywhere.
         uint256 pathOwner = s.pathToOwnerMaster[derivation];
         if (pathOwner != resolvedMaster) {
             revert AppStorage.InvalidRequest("derivation path owned by another account");

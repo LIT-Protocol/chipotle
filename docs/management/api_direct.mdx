@@ -113,7 +113,7 @@ Create a usage API key with fine-grained permissions. The response includes the 
       canCreateGroups: false,
       canDeleteGroups: false,
       canCreatePkps: false,
-      manageIpfsIdsInGroups: [],   // group IDs; 0 = wildcard (all groups)
+      manageIpfsIdsInGroups: [],   // exact group IDs; no management wildcard
       addPkpToGroups: [],
       removePkpFromGroups: [],
       executeInGroups: [groupId]   // grant execute permission for specific groups
@@ -146,12 +146,12 @@ Create a usage API key with fine-grained permissions. The response includes the 
 
 | Field | Type | Description |
 |---|---|---|
-| `can_create_groups` | bool | Allow this key to create new groups |
+| `can_create_groups` | bool | Allow this key to create new groups. On its own the key creates only empty groups: listing wallets or actions in `add_group` also needs the new group's id in `add_pkp_to_groups` or `manage_ipfs_ids_in_groups`. |
 | `can_delete_groups` | bool | Allow this key to delete groups |
 | `can_create_pkps` | bool | Allow this key to create PKPs |
-| `manage_ipfs_ids_in_groups` | `u64[]` | Group IDs where this key can add/remove IPFS actions (any CID, including the all-actions wildcard `0`). Use `[0]` as a wildcard for all groups. See [Delegating group management](/architecture/groups#delegating-group-management). |
-| `add_pkp_to_groups` | `u64[]` | Group IDs where this key can add PKPs. Scoped by group, not by wallet: the key can add **any** wallet in the account to these groups, including the all-wallets wildcard (zero address). Use `[0]` for all groups. See [Delegating group management](/architecture/groups#delegating-group-management). |
-| `remove_pkp_from_groups` | `u64[]` | Group IDs where this key can remove PKPs. Use `[0]` for all groups. |
+| `manage_ipfs_ids_in_groups` | `u64[]` | Group IDs where this key can add/remove IPFS actions (any CID, including the all-actions wildcard `0`). Use explicit group IDs; `[0]` grants no management access. See [Delegating group management](/architecture/groups#delegating-group-management). |
+| `add_pkp_to_groups` | `u64[]` | Group IDs where this key can add PKPs. Scoped by group, not by wallet: the key can add **any** wallet in the account to these groups, including the all-wallets wildcard (zero address). Use explicit group IDs; `[0]` grants no management access. See [Delegating group management](/architecture/groups#delegating-group-management). |
+| `remove_pkp_from_groups` | `u64[]` | Group IDs where this key can remove PKPs. Use explicit group IDs; `[0]` grants no management access. |
 | `execute_in_groups` | `u64[]` | Group IDs where this key can execute lit-actions. Use `[0]` for all groups. |
 
 ### 4. Create a wallet (PKP)
@@ -503,7 +503,11 @@ curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/prepare_wallet"
 - **Retrying returns a different address.** If a call succeeds but your network drops the response, calling again does **not** recover the same wallet — it mints another one. Treat each response as throwaway until you've registered it on-chain, and register exactly once.
 - **Concurrent callers each get their own wallet.** There is no server-side dedup. If two systems both "ensure the account has a wallet," they will each get a different address and each fire a different bind UserOp, leaving the account with **two** wallets rather than one shared wallet. To converge on a single wallet, coordinate client-side (check the existing PKP registry via `list_wallets` first, or designate a single writer).
 
-There is no meaningful *collision* risk between concurrent callers: each gets an independent 256-bit random path, so deriving the same address is cryptographically negligible. If the same address somehow were registered twice **within one account**, the second call reverts (`"PKP already registered"`) — note that guard is per-account, so it does not prevent a *different* account from registering an address it observed elsewhere.
+There is no meaningful accidental *collision* risk between concurrent callers: each gets a 256-bit derivation path containing a fixed 96-bit wallet-path prefix and 160 bits of independently generated CSPRNG entropy.
+
+Registering an already-registered PKP within the same account reverts (`"PKP already registered"`). In addition to that per-account check, `registerWalletDerivation` globally binds both the PKP address and the derivation path to the first master account that successfully registers them. A different account cannot register the same address (`"PKP owned by another account"`) or reuse the same path with a different address (`"derivation path owned by another account"`). Both bindings survive `removeWalletDerivation`, so deletion does not make either available to another account; the original account can re-register the wallet.
+
+Preparing a wallet does not reserve either binding. These protections apply after successful on-chain registration; they do not guarantee that the account that prepared the wallet will be its first registrant.
 </Warning>
 
 #### `POST /convert_to_chain_secured_account`

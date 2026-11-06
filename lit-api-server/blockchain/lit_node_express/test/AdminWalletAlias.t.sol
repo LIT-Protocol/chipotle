@@ -439,7 +439,9 @@ contract AdminWalletAliasTest is BaseTest {
 ///         need no migration: the fix only reads the alias the old code
 ///         already wrote. State is written with the pre-upgrade facets, then
 ///         the facets are cut over the way the deployer does it.
-/// @dev LegacyWritesFacet supplies the previous conversion and transfer behavior.
+/// @dev LegacyWritesFacet (chipotle-private a06c130) has the same
+///      convert/transfer code and write guards as main before #147; it only
+///      lacks #140's path tag and the usage-key permission clearing.
 contract AdminWalletAliasUpgradeTest is Test {
     address internal owner = makeAddr("owner");
     address internal apiPayer = makeAddr("apiPayer");

@@ -1686,6 +1686,7 @@ interface AccountConfig {
     function groupIdsForAction(uint256 apiKeyHash, uint256 cidHash) external view returns (uint256[] memory);
     function groupIdsForActionAndWallet(uint256 apiKeyHash, uint256 cidHash, address walletAddress) external view returns (uint256[] memory);
     function indexToAccountHashAt(uint256 index) external view returns (uint256);
+    function isAccountManaged(uint256 apiKeyHash) external view returns (bool);
     function listActions(uint256 accountApiKeyHash, uint256 pageNumber, uint256 pageSize) external view returns (AppStorage.Metadata[] memory);
     function listActionsInGroup(uint256 accountApiKeyHash, uint256 groupId, uint256 pageNumber, uint256 pageSize) external view returns (AppStorage.Metadata[] memory);
     function listApiKeys(uint256 accountApiKeyHash, uint256 pageNumber, uint256 pageSize) external view returns (ViewsFacet.UsageApiKeyReturn[] memory);
@@ -2352,6 +2353,25 @@ interface AccountConfig {
         "name": "",
         "type": "uint256",
         "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isAccountManaged",
+    "inputs": [
+      {
+        "name": "apiKeyHash",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
@@ -13685,6 +13705,143 @@ pub mod AccountConfig {
         }
     };
     #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
+    /*Function with signature `isAccountManaged(uint256)` and selector `0xe8f27d79`.
+    ```solidity
+    function isAccountManaged(uint256 apiKeyHash) external view returns (bool);
+    ```*/
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
+    #[derive(Clone)]
+    pub struct isAccountManagedCall {
+        #[allow(missing_docs)]
+        pub apiKeyHash: alloy::sol_types::private::primitives::aliases::U256,
+    }
+    #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
+    //Container type for the return parameters of the [`isAccountManaged(uint256)`](isAccountManagedCall) function.
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
+    #[derive(Clone)]
+    pub struct isAccountManagedReturn {
+        #[allow(missing_docs)]
+        pub _0: bool,
+    }
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
+    const _: () = {
+        use alloy::sol_types as alloy_sol_types;
+        {
+            #[doc(hidden)]
+            #[allow(dead_code)]
+            type UnderlyingSolTuple<'a> = (alloy::sol_types::sol_data::Uint<256>,);
+            #[doc(hidden)]
+            type UnderlyingRustTuple<'a> = (alloy::sol_types::private::primitives::aliases::U256,);
+            #[cfg(test)]
+            #[allow(dead_code, unreachable_patterns)]
+            fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
+                match _t {
+                    alloy_sol_types::private::AssertTypeEq::<
+                        <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
+                    >(_) => {}
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<isAccountManagedCall> for UnderlyingRustTuple<'_> {
+                fn from(value: isAccountManagedCall) -> Self {
+                    (value.apiKeyHash,)
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<UnderlyingRustTuple<'_>> for isAccountManagedCall {
+                fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
+                    Self {
+                        apiKeyHash: tuple.0,
+                    }
+                }
+            }
+        }
+        {
+            #[doc(hidden)]
+            #[allow(dead_code)]
+            type UnderlyingSolTuple<'a> = (alloy::sol_types::sol_data::Bool,);
+            #[doc(hidden)]
+            type UnderlyingRustTuple<'a> = (bool,);
+            #[cfg(test)]
+            #[allow(dead_code, unreachable_patterns)]
+            fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
+                match _t {
+                    alloy_sol_types::private::AssertTypeEq::<
+                        <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
+                    >(_) => {}
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<isAccountManagedReturn> for UnderlyingRustTuple<'_> {
+                fn from(value: isAccountManagedReturn) -> Self {
+                    (value._0,)
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<UnderlyingRustTuple<'_>> for isAccountManagedReturn {
+                fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
+                    Self { _0: tuple.0 }
+                }
+            }
+        }
+        #[automatically_derived]
+        impl alloy_sol_types::SolCall for isAccountManagedCall {
+            type Parameters<'a> = (alloy::sol_types::sol_data::Uint<256>,);
+            type Token<'a> = <Self::Parameters<'a> as alloy_sol_types::SolType>::Token<'a>;
+            type Return = bool;
+            type ReturnTuple<'a> = (alloy::sol_types::sol_data::Bool,);
+            type ReturnToken<'a> = <Self::ReturnTuple<'a> as alloy_sol_types::SolType>::Token<'a>;
+            const SIGNATURE: &'static str = "isAccountManaged(uint256)";
+            const SELECTOR: [u8; 4] = [232u8, 242u8, 125u8, 121u8];
+            #[inline]
+            fn new<'a>(
+                tuple: <Self::Parameters<'a> as alloy_sol_types::SolType>::RustType,
+            ) -> Self {
+                tuple.into()
+            }
+            #[inline]
+            fn tokenize(&self) -> Self::Token<'_> {
+                (
+                    <alloy::sol_types::sol_data::Uint<256> as alloy_sol_types::SolType>::tokenize(
+                        &self.apiKeyHash,
+                    ),
+                )
+            }
+            #[inline]
+            fn tokenize_returns(ret: &Self::Return) -> Self::ReturnToken<'_> {
+                (<alloy::sol_types::sol_data::Bool as alloy_sol_types::SolType>::tokenize(ret),)
+            }
+            #[inline]
+            fn abi_decode_returns(data: &[u8]) -> alloy_sol_types::Result<Self::Return> {
+                <Self::ReturnTuple<'_> as alloy_sol_types::SolType>::abi_decode_sequence(data).map(
+                    |r| {
+                        let r: isAccountManagedReturn = r.into();
+                        r._0
+                    },
+                )
+            }
+            #[inline]
+            fn abi_decode_returns_validate(data: &[u8]) -> alloy_sol_types::Result<Self::Return> {
+                <Self::ReturnTuple<'_> as alloy_sol_types::SolType>::abi_decode_sequence_validate(
+                    data,
+                )
+                .map(|r| {
+                    let r: isAccountManagedReturn = r.into();
+                    r._0
+                })
+            }
+        }
+    };
+    #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
     /*Function with signature `listActions(uint256,uint256,uint256)` and selector `0xc9176804`.
     ```solidity
     function listActions(uint256 accountApiKeyHash, uint256 pageNumber, uint256 pageSize) external view returns (AppStorage.Metadata[] memory);
@@ -19830,6 +19987,8 @@ pub mod AccountConfig {
         #[allow(missing_docs)]
         indexToAccountHashAt(indexToAccountHashAtCall),
         #[allow(missing_docs)]
+        isAccountManaged(isAccountManagedCall),
+        #[allow(missing_docs)]
         listActions(listActionsCall),
         #[allow(missing_docs)]
         listActionsInGroup(listActionsInGroupCall),
@@ -19978,6 +20137,7 @@ pub mod AccountConfig {
             [203u8, 83u8, 173u8, 38u8],
             [228u8, 175u8, 41u8, 252u8],
             [230u8, 173u8, 41u8, 40u8],
+            [232u8, 242u8, 125u8, 121u8],
             [234u8, 121u8, 224u8, 149u8],
             [234u8, 202u8, 70u8, 20u8],
             [247u8, 92u8, 139u8, 45u8],
@@ -20049,6 +20209,7 @@ pub mod AccountConfig {
             ::core::stringify!(pricingOperator),
             ::core::stringify!(accountCount),
             ::core::stringify!(setPricingOperator),
+            ::core::stringify!(isAccountManaged),
             ::core::stringify!(listActionsInGroup),
             ::core::stringify!(setConfigOperator),
             ::core::stringify!(listGroups),
@@ -20120,6 +20281,7 @@ pub mod AccountConfig {
             <pricingOperatorCall as alloy_sol_types::SolCall>::SIGNATURE,
             <accountCountCall as alloy_sol_types::SolCall>::SIGNATURE,
             <setPricingOperatorCall as alloy_sol_types::SolCall>::SIGNATURE,
+            <isAccountManagedCall as alloy_sol_types::SolCall>::SIGNATURE,
             <listActionsInGroupCall as alloy_sol_types::SolCall>::SIGNATURE,
             <setConfigOperatorCall as alloy_sol_types::SolCall>::SIGNATURE,
             <listGroupsCall as alloy_sol_types::SolCall>::SIGNATURE,
@@ -20150,7 +20312,7 @@ pub mod AccountConfig {
     impl alloy_sol_types::SolInterface for AccountConfigCalls {
         const NAME: &'static str = "AccountConfigCalls";
         const MIN_DATA_LENGTH: usize = 0usize;
-        const COUNT: usize = 68usize;
+        const COUNT: usize = 69usize;
         #[inline]
         fn selector(&self) -> [u8; 4] {
             match self {
@@ -20220,6 +20382,9 @@ pub mod AccountConfig {
                 }
                 Self::indexToAccountHashAt(_) => {
                     <indexToAccountHashAtCall as alloy_sol_types::SolCall>::SELECTOR
+                }
+                Self::isAccountManaged(_) => {
+                    <isAccountManagedCall as alloy_sol_types::SolCall>::SELECTOR
                 }
                 Self::listActions(_) => <listActionsCall as alloy_sol_types::SolCall>::SELECTOR,
                 Self::listActionsInGroup(_) => {
@@ -20871,6 +21036,15 @@ pub mod AccountConfig {
                             .map(AccountConfigCalls::setPricingOperator)
                     }
                     setPricingOperator
+                },
+                {
+                    fn isAccountManaged(
+                        data: &[u8],
+                    ) -> alloy_sol_types::Result<AccountConfigCalls> {
+                        <isAccountManagedCall as alloy_sol_types::SolCall>::abi_decode_raw(data)
+                            .map(AccountConfigCalls::isAccountManaged)
+                    }
+                    isAccountManaged
                 },
                 {
                     fn listActionsInGroup(
@@ -21548,6 +21722,17 @@ pub mod AccountConfig {
                     setPricingOperator
                 },
                 {
+                    fn isAccountManaged(
+                        data: &[u8],
+                    ) -> alloy_sol_types::Result<AccountConfigCalls> {
+                        <isAccountManagedCall as alloy_sol_types::SolCall>::abi_decode_raw_validate(
+                            data,
+                        )
+                        .map(AccountConfigCalls::isAccountManaged)
+                    }
+                    isAccountManaged
+                },
+                {
                     fn listActionsInGroup(
                         data: &[u8],
                     ) -> alloy_sol_types::Result<AccountConfigCalls> {
@@ -21755,6 +21940,11 @@ pub mod AccountConfig {
                 }
                 Self::indexToAccountHashAt(inner) => {
                     <indexToAccountHashAtCall as alloy_sol_types::SolCall>::abi_encoded_size(
+                        inner,
+                    )
+                }
+                Self::isAccountManaged(inner) => {
+                    <isAccountManagedCall as alloy_sol_types::SolCall>::abi_encoded_size(
                         inner,
                     )
                 }
@@ -22116,6 +22306,12 @@ pub mod AccountConfig {
                 }
                 Self::indexToAccountHashAt(inner) => {
                     <indexToAccountHashAtCall as alloy_sol_types::SolCall>::abi_encode_raw(
+                        inner,
+                        out,
+                    )
+                }
+                Self::isAccountManaged(inner) => {
+                    <isAccountManagedCall as alloy_sol_types::SolCall>::abi_encode_raw(
                         inner,
                         out,
                     )
@@ -24346,6 +24542,13 @@ pub mod AccountConfig {
             index: alloy::sol_types::private::primitives::aliases::U256,
         ) -> alloy_contract::SolCallBuilder<&P, indexToAccountHashAtCall, N> {
             self.call_builder(&indexToAccountHashAtCall { index })
+        }
+        //Creates a new call builder for the [`isAccountManaged`] function.
+        pub fn isAccountManaged(
+            &self,
+            apiKeyHash: alloy::sol_types::private::primitives::aliases::U256,
+        ) -> alloy_contract::SolCallBuilder<&P, isAccountManagedCall, N> {
+            self.call_builder(&isAccountManagedCall { apiKeyHash })
         }
         //Creates a new call builder for the [`listActions`] function.
         pub fn listActions(

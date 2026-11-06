@@ -12,6 +12,12 @@ pub fn get_random_secret() -> [u8; 32] {
     secret
 }
 
+/// Required prefix (top 96 bits) of every new wallet derivation path
+/// (bytes12 "lit-wallet:1"). Must equal `AppStorage.WALLET_PATH_TAG`:
+/// `registerWalletDerivation` only accepts a never-bound path if it carries
+/// this prefix, so a Lit Action key path (`keccak256("lit_action_" + CID)`,
+/// which carries it with probability 2^-96) can never be registered as a
+/// wallet (#140). Not an authenticity proof.
 pub const WALLET_PATH_TAG: [u8; 12] = *b"lit-wallet:1";
 
 // Generate a unique derivation path for a new wallet: WALLET_PATH_TAG in the

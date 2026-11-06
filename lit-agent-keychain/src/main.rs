@@ -28,6 +28,7 @@ async fn main() -> anyhow::Result<()> {
             interval.tick().await;
             for query in [
                 "DELETE FROM kc_sessions WHERE expires_at<now()",
+                "DELETE FROM kc_used_requests WHERE expires_at<now()",
                 "DELETE FROM kc_challenges WHERE expires_at<now()",
                 "DELETE FROM kc_two_factor_logins WHERE expires_at<now()",
                 "DELETE FROM kc_two_factor_setup WHERE expires_at<now()",

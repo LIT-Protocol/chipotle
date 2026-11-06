@@ -108,6 +108,11 @@ async function bundle(entryPoint: string) {
     minify: true,
     legalComments: "none",
     charset: "ascii",
+    // Templates bundle the zod they were released with (the
+    // zod-action-templates devDependency, an npm alias), not the app's zod.
+    // Moving them to another zod changes every template's bytes, so it is a
+    // template release (--update-lock), not a dependency bump.
+    alias: { zod: "zod-action-templates" },
     plugins: [webcryptoPlugin],
   });
   const code = outputFiles[0].text;

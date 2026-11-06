@@ -62,6 +62,16 @@ jobs:
       - name: Install Phala CLI
         run: npm install -g phala
 
+      # PHALA_CVM_NAME names this replica in OTEL logs; cvm_id may be an ID.
+      - name: Resolve CVM name
+        id: cvm
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          CVM_ID: ${{ inputs.cvm_id }}
+        run: |
+          NAME=$(phala cvms get "$CVM_ID" --json 2>/dev/null | jq -r '.name // empty' 2>/dev/null || true)
+          echo "name=${NAME:-$CVM_ID}" >> "$GITHUB_OUTPUT"
+
       - name: Push sealed envs to CVM
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
@@ -75,6 +85,7 @@ jobs:
           CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
           CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
           LIT_INTERNAL_SHARED_SECRET: ${{ secrets.LIT_INTERNAL_SHARED_SECRET }}
+          PHALA_CVM_NAME: ${{ steps.cvm.outputs.name }}
         run: |
           # Shared gateway IP makes the per-IP new-account limit a global cap.
           phala envs update "${{ inputs.cvm_id }}" \
@@ -89,6 +100,7 @@ jobs:
             -e "CERTBOT_AWS_ROLE_ARN=$CERTBOT_AWS_ROLE_ARN" \
             -e "CERTBOT_AWS_REGION=${{ vars.CERTBOT_AWS_REGION }}" \
             -e "LIT_INTERNAL_SHARED_SECRET=$LIT_INTERNAL_SHARED_SECRET" \
+            -e "PHALA_CVM_NAME=$PHALA_CVM_NAME" \
             -e "NEW_ACCOUNT_RATE_LIMIT_ENABLED=false"
 
       - name: Start CVM

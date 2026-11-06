@@ -53,9 +53,23 @@ jobs:
         run: |
           version=$(node -p "require('./sdk/package.json').version")
           tag="keychain-sdk-v$version"
-          if ! npm view "@lit-protocol/keychain@$version" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then
-            echo "$version is not on the registry; no tag"; exit 0
-          fi
+          # The publish step exits 0 only when this version is on the registry,
+          # published just now or earlier. A fresh publish takes about 2.5
+          # minutes to show up in `npm view` (2.2.3 and 2.3.0 both appeared 158 s
+          # after `npm publish` returned), so an immediate check misses it. Wait
+          # up to 10 minutes, and fail instead of skipping the tag silently.
+          attempts=40
+          for attempt in $(seq 1 "$attempts"); do
+            if npm view "@lit-protocol/keychain@$version" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" -eq "$attempts" ]; then
+              echo "::error::@lit-protocol/keychain@$version is still not on the registry after 10 minutes, so $tag was not created. Re-run this job: the publish step will find the version already published and this step will tag it."
+              exit 1
+            fi
+            echo "$version is not on the registry yet (attempt $attempt of $attempts); retrying in 15 s"
+            sleep 15
+          done
           if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
             echo "$tag already exists"; exit 0
           fi

@@ -10,6 +10,7 @@ pub mod db;
 pub mod discovery;
 pub mod models;
 pub mod registry;
+pub mod replay;
 pub mod server;
 pub mod sponsorship;
 pub mod stripe;

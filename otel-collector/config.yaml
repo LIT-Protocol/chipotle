@@ -62,6 +62,15 @@ processors:
         value: gcp
         action: upsert
 
+  # Logs only: name the Phala CVM (replica) that produced each entry.
+  # PHALA_CVM_NAME is set per CVM by the deploy workflows. Cloud Logging maps
+  # host.name to resource.labels.node_id on the generic_node resource.
+  resource/replica:
+    attributes:
+      - key: host.name
+        value: ${env:PHALA_CVM_NAME}
+        action: upsert
+
 exporters:
   googlecloud:
     # GCP_PROJECT_ID is set in docker-compose.phala.yml (non-secret config).
@@ -96,5 +105,5 @@ service:
 
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, resource, batch]
+      processors: [memory_limiter, resource, resource/replica, batch]
       exporters: [googlecloud, debug]

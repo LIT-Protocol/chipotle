@@ -1,6 +1,6 @@
 {
   "name": "@lit-protocol/keychain",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "Owner-authorized, locally encrypted credentials for agents, with a local MCP server",
   "type": "module",
   "main": "./dist/node.js",
@@ -44,7 +44,7 @@
   "license": "Apache-2.0",
   "types": "./dist/index.d.ts",
   "dependencies": {
-    "zod": "4.3.6"
+    "zod": "4.6.7"
   },
   "keywords": [
     "lit-protocol",

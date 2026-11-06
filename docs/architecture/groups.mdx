@@ -55,7 +55,7 @@ Without groups, every usage key would have access to every wallet and every acti
 |---|---|
 | **Wallet (PKP)** | Added via `add_pkp_to_group`. A wallet can belong to multiple groups. |
 | **IPFS Action** | Added via `add_action_to_group` (raw CID, server hashes it). An action can belong to multiple groups. |
-| **Usage API Key** | Granted access at creation via permission arrays (e.g., `execute_in_groups: [1, 2]`). Use `[0]` as a wildcard for all groups. |
+| **Usage API Key** | Granted access at creation via permission arrays (e.g., `execute_in_groups: [1, 2]`). Only `execute_in_groups` supports `[0]` as a wildcard; management permissions require explicit group IDs. |
 | **Account Key** | Administers all groups; use a usage key for action execution. |
 
 ## Common Patterns
@@ -85,9 +85,30 @@ The group-management permissions on a usage key (`add_pkp_to_groups`, `remove_pk
 
 - `add_pkp_to_groups: [g]` lets the key add **any** wallet in the account to group `g`, including wallets that were never in `g` and the all-wallets wildcard (zero address), which also covers wallets created later. There is no per-wallet grant on a usage key.
 - `manage_ipfs_ids_in_groups: [g]` lets the key add any action CID to `g`, including the all-actions wildcard `0`.
-- Any key with `execute_in_groups` containing `g` (including a wildcard execution key) can then use those wallets with those actions, which includes signing, decryption and `getPrivateKey`.
+- Any key with `execute_in_groups` containing `g` (including a wildcard execution key) can then use those wallets with those actions, which includes signing, decryption and `getPrivateKey`. The one exception is the account's own wallet, whose key is never exported (see [The Account Master Wallet](#the-account-master-wallet)).
+- `can_create_groups` on its own creates **empty** groups. Listing wallets or actions in `add_group` writes the new group's membership, so a usage key needs the same grants on the new group that `add_pkp_to_group` and `add_action_to_group` need: the new group's id in `add_pkp_to_groups` for `pkp_ids_permitted`, and in `manage_ipfs_ids_in_groups` for `cid_hashes_permitted`. Otherwise the request is refused with 403. To delegate filling a group, create it first, then grant the key those permissions on its id.
 
 So add rights on `g` combined with execute rights in `g`, whether held by one key or by two, give effective access to every wallet in the account. This is by design. If some wallets must stay out of a delegate's reach, keep them in a separate account, or keep wallet membership changes on the account key and give delegates only `execute_in_groups`.
+
+### Updating keys with legacy management grants
+
+`[0]` is a wildcard only in `execute_in_groups`. It grants no access in `manage_ipfs_ids_in_groups`, `add_pkp_to_groups`, or `remove_pkp_from_groups`. The Dashboard offers **All Groups** only for execution and labels saved management entries of `0` as **no management access**. Editing a key preserves saved entries until you change them.
+
+To create and populate a group, use the account key, or:
+
+1. Create an empty group with both membership arrays empty.
+2. Have the account owner update the usage key with the returned group ID in the required management scopes.
+3. Use that key to add the wallets and actions to the group.
+
+The Dashboard's **All displayed options** selects the displayed group IDs for management; it does not grant access to future groups. Keep `execute_in_groups: [0]` only if wildcard execution is intended.
+
+### The Account Master Wallet
+
+`POST /new_account` creates one wallet for the account, listed as "Account Master Wallet". It is not an ordinary PKP: the account key is this wallet's private key, base64-encoded, and the wallet is the account's admin on chain. Lit Actions run under usage keys; the account key is used for account administration.
+
+`Lit.Actions.getPrivateKey` therefore never returns the private key of the account's admin wallet or its billing wallet, whatever the key and whatever the groups say: listing the wallet in a group, or the all-wallets entry (zero address), does not change this. The action gets an error instead. `Lit.Actions.Encrypt` and `Lit.Actions.Decrypt` still accept the wallet through groups like any other wallet, because they never reveal its key. To sign from an action, create a separate wallet with `POST /core/v1/create_wallet` and add it to the group. Existing keys, addresses and derivation paths are unchanged.
+
+In a ChainSecured account the admin wallet is the user's own wallet, which the TEE cannot derive, so the rule only matters if the admin or billing wallet is one of the account's PKPs. Converting an account to ChainSecured makes the user's wallet the admin but keeps the original Account Master Wallet as the billing wallet. The same key-export restriction applies to the billing wallet.
 
 ### Shared wallets across groups
 
@@ -95,7 +116,7 @@ A single wallet can belong to multiple groups. This is useful when multiple dApp
 
 ## Group Lifecycle
 
-1. **Create** — `POST /core/v1/add_group` with a name and optional pre-permitted PKPs and CID hashes.
+1. **Create** — `POST /core/v1/add_group` with a name and optional pre-permitted PKPs and CID hashes. A usage key can pre-permit them only with the matching grants on the new group (see [Delegating group management](#delegating-group-management)).
 2. **Configure** — Add wallets (`add_pkp_to_group`) and actions (`add_action_to_group`).
 3. **Grant access** — Create or update usage keys with the group ID in their permission arrays.
 4. **Update** — `POST /core/v1/update_group` to change name, description, or permission lists.

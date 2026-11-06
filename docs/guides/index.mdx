@@ -1,0 +1,98 @@
+---
+title: "Guides"
+description: "Step-by-step answers to common questions about building with Lit, with links to the full guides."
+---
+
+Each section on this page answers one question in a few sentences. The full guide on the Lit blog has the code and the details.
+
+Keeping wallet keys inside the enclave depends on the action code and permissions you choose. An authorized Lit Action can retrieve an ordinary PKP wallet key with `Lit.Actions.getPrivateKey` and return it. Review every permitted action to ensure it does not disclose keys, restrict wallet access to those actions, and control who can change the grants. Multisig approval of permission changes alone does not make keys non-exportable.
+
+## How can I program a crypto wallet?
+
+A crypto wallet is a private key and some code that uses the key to sign transactions. You can write one in a few lines of JavaScript with a library like ethers or viem. On Lit Protocol you can create a wallet with one API call. The key is generated inside a secure enclave and the code you permit can use it. With reviewed actions that do not disclose keys and restricted grants, your app can request signatures without holding the key.
+
+[Read the full guide](https://spark.litprotocol.com/program-a-crypto-wallet/)
+
+## How do I add crypto wallets to my app with an API?
+
+On Lit Protocol you can add a wallet to your app with six REST calls and no SDK. You create a wallet, create a group, write a signing rule, connect them, make an API key for your server, and sign. The key is created and stored inside a secure enclave. The rule that decides when it signs is a JavaScript function that runs in the same enclave.
+
+[Read the full guide](https://spark.litprotocol.com/wallet-api-for-developers/)
+
+## Where should I store private keys in my app?
+
+Store private keys using storage designed for secrets. On a phone, the iOS Keychain and Android Keystore restrict access to your app so other apps cannot read its keys, except where you explicitly authorize sharing. Your app can retrieve a private key stored as an ordinary iOS Keychain item; Keychain storage alone does not make it non-exportable. On a server, use a key management service, a hardware security module, or a hosted signer. For a crypto wallet that your app controls, Lit Protocol keeps the key inside a secure enclave and runs your signing rule in the same enclave.
+
+[Read the full guide](https://spark.litprotocol.com/where-to-store-private-keys/)
+
+## How do I sign blockchain transactions from my backend server without exposing the private key?
+
+Keep the private key out of your backend and put it in a signer your backend calls. On Lit Protocol the key lives inside a secure enclave, and the rule that decides each signature is a Lit Action, a JavaScript function that runs in that enclave before every signature. Give your backend a usage API key scoped to a group containing only the intended wallet and reviewed signing action, without management grants. If that action does not disclose keys or expose other operations, a compromised backend can only request signatures that pass its rules.
+
+[Read the full guide](https://spark.litprotocol.com/backend-signing-without-exposing-keys/)
+
+## How do I write wallet signing policies as code instead of a config dashboard?
+
+On Lit Protocol, a signing policy is a JavaScript function called a Lit Action. It runs inside the same secure enclave that holds the key. Before it signs, it can call any API, read any chain, and check any condition you want. You attach the function to a wallet by its content hash, and that permission is recorded on Base.
+
+[Read the full guide](https://spark.litprotocol.com/signing-policies-as-code/)
+
+## How do I verify that my hosted signer is running the code I deployed?
+
+You can verify a hosted signer with four checks. You verify the enclave's attestation against the hardware vendor and match the attested measurement to a public build. You confirm that your TLS connection ends inside that enclave and check who approved that build to hold keys. On Lit Protocol you can run all four yourself, and the last one is a smart contract on Base that anyone can read.
+
+[Read the full guide](https://spark.litprotocol.com/verify-your-hosted-signer/)
+
+## How do I build a crypto trading bot that signs its own transactions?
+
+A trading bot has code that decides when to trade, code that builds the transaction, and a key that signs it. On Lit Protocol you can run the whole bot as a Lit Action and have Lit Triggers run it on a schedule. The action checks the price, applies your limits, and signs with a key that only that exact code can use.
+
+[Read the full guide](https://spark.litprotocol.com/crypto-trading-bot-that-signs-its-own-transactions/)
+
+## How do I make a wallet that works on Ethereum and Solana?
+
+Ethereum uses secp256k1 keys, and Solana uses ed25519 keys. On Lit Protocol, every Lit Action has its own key, which lives inside a secure enclave. That key works as an Ethereum key as it is, and the same 32 bytes work as the seed for a Solana key. One action can sign for both chains. Keep the key inside the enclave by reviewing the action to ensure it returns only the intended results and never discloses key material.
+
+[Read the full guide](https://spark.litprotocol.com/wallet-for-ethereum-and-solana/)
+
+## How do I give my AI agent a crypto wallet?
+
+Give the agent a tool that asks for a payment, and keep the private key and the rules somewhere the agent cannot reach. On Lit Protocol the key lives inside a secure enclave, and the rules are a Lit Action that runs in the same enclave before every signature. Give the agent a usage API key scoped to the group containing that wallet and reviewed payment action, without management grants. If the action does not disclose keys, the agent can request payments that follow its rules without receiving the key or being able to change those rules.
+
+[Read the full guide](https://spark.litprotocol.com/give-your-ai-agent-a-crypto-wallet/)
+
+## How do I prove to auditors that no employee can access our customers' encryption keys?
+
+On Lit Protocol, keys are derived inside an attested hardware enclave. To establish that employees cannot retrieve them, an auditor must verify the enclave code, review every permitted Lit Action for key disclosure, and check the grants and who can change them. The rules for using wallets live in a contract on Base, and you can make your own multisig the only account the contract accepts rule changes from. The multisig controls permission changes; it does not prevent an already authorized action from returning a key.
+
+[Read the full guide](https://spark.litprotocol.com/prove-no-employee-can-access-customer-keys/)
+
+## How do fintechs manage signing keys so that no single employee or vendor can move funds?
+
+Make every payment pass reviewed rules that one person cannot skip or change. On Lit Protocol, the key is derived inside a hardware enclave and the payment rules are a JavaScript function called a Lit Action. Restrict wallet grants to reviewed payment actions that enforce those rules and do not disclose key material. The record of which actions may use each wallet lives in a contract on Base, and you can make your own Safe multisig the only account the contract accepts permission changes from. This arrangement depends on both the action code and restricted grants; multisig governance alone does not prevent key export.
+
+[Read the full guide](https://spark.litprotocol.com/no-single-employee-can-move-funds/)
+
+## How do I safely give an MCP server or Claude Code access to secrets and keys?
+
+[Agent Keychain](/keychain/index) is an open-source app built on Lit Protocol. You store a credential, encrypted in your browser, and you approve an agent to use it. When the agent needs it, either the credential is decrypted on the agent's machine and handed to a process, or Lit uses the credential inside a secure enclave and hands the agent only the result. In the second case the agent never sees the key at all.
+
+[Read the full guide](https://spark.litprotocol.com/secrets-for-mcp-servers-and-agents/)
+
+## How do I give an AI agent access to production credentials without employees or the vendor seeing them?
+
+With Lit's Agent Keychain, the agent never holds the production credential. You encrypt the credential in your browser to a key that only exists inside a Lit hardware enclave, and you approve a specific agent to use it. When the agent calls a connected service, such as reading a Stripe balance or a file from GitHub, Lit decrypts the credential inside the enclave, makes that one call, and returns only the result. The agent and the Keychain operator never receive the credential, as long as the web app and Lit's enclave code are honest.
+
+[Read the full guide](https://spark.litprotocol.com/ai-agent-production-credentials/)
+
+## How can I use an AI model on sensitive company data without the AI vendor being able to see it?
+
+Lit sets up the vendor's application on Google Cloud Confidential VMs, which use Intel TDX to keep the machine's memory encrypted while it works. The application runs as a Docker container. The list of services it can reach is part of the deployment, and any change to the code or that list waits for your organization to approve it on-chain. Before your team connects, a hardware attestation shows exactly which release is running.
+
+[Read the full guide](https://spark.litprotocol.com/ai-on-sensitive-data-without-vendor-access/)
+
+## How do I run an AI agent on customer data so that even the hosting provider can't read it?
+
+Lit sets up the agent on Google Cloud Confidential VMs, which use Intel TDX to keep the machine's memory encrypted so the host cannot look inside. The agent runs as a Docker container. Its deployment lists the exact hostnames it may reach, and a proxy inside the machine enforces that list. Any change to the agent or the list waits for your organization to approve it on-chain, and your team can check a hardware attestation of exactly what is running.
+
+[Read the full guide](https://spark.litprotocol.com/ai-agent-on-customer-data/)

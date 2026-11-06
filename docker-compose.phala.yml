@@ -101,6 +101,9 @@ services:
       # Phala CVM secrets in the deployment manifest.
       GCP_SERVICE_ACCOUNT_JSON: ${GCP_SERVICE_ACCOUNT_JSON}
       GCP_PROJECT_ID: ${GCP_PROJECT_ID}
+      # Name of this Phala CVM (replica), set per CVM by the deploy workflows;
+      # stamped on log entries as host.name (Cloud Logging node_id).
+      PHALA_CVM_NAME: ${PHALA_CVM_NAME}
     # Host pid namespace + /proc and /sys mounts for the hostmetrics receiver
     # to report accurate CVM-level CPU, memory, disk, and network metrics.
     # We avoid mounting the entire root filesystem to limit the read surface.

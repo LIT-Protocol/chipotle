@@ -18,6 +18,18 @@ library AppStorage {
     bytes32 constant ACCOUNT_CONFIG_STORAGE_POSITION =
         keccak256("com.litprotocol.accountconfig.storage");
 
+    /// @notice Required prefix (top 96 bits) of every newly registered wallet
+    ///         derivation path: `derivationPath >> 160 == WALLET_PATH_TAG`
+    ///         (bytes12 "lit-wallet:1"). Nodes fill the low 160 bits randomly.
+    ///         The tag is not an authenticity proof; it only separates wallet
+    ///         paths from Lit Action key paths.
+    /// @dev The node derives wallet keys and v1 Lit Action keys from the same
+    ///      KMS namespace (`v1/<path>`), and dstack derives from the path only,
+    ///      so registering derivationPath = keccak256("lit_action_" + CID) as a
+    ///      wallet would release that action's key (#140). A NEW path must
+    ///      carry this tag; a Lit Action path does only with probability 2^-96.
+    ///      Paths registered before the tag existed are already bound in
+    ///      pathToOwnerMaster and stay valid for their owner.
     uint256 internal constant WALLET_PATH_TAG =
         uint256(uint96(bytes12("lit-wallet:1")));
     uint256 internal constant WALLET_PATH_TAG_SHIFT = 160;
@@ -130,6 +142,18 @@ library AppStorage {
         // function of the public path). Deliberately NOT cleared by
         // removeWalletDerivation — only the first owner may ever (re-)register.
         mapping(address => uint256) pkpIdToOwnerMaster;
+        // derivationPath => master apiKeyHash that first registered it.
+        // Companion to pkpIdToOwnerMaster that closes the path-aliasing hole:
+        // pkpIdToOwnerMaster binds the *address label*, but the private key is a
+        // stateless function of the *derivationPath*, and paths are public
+        // (WalletDerivationRegistered data + getWalletDerivation). Without this,
+        // an attacker could register a fresh, self-owned pkpId carrying a victim's
+        // public path and drive the node to release the victim's key. Binding the
+        // path itself to its first owner makes that registration revert. The key is
+        // the uint256 derivationPath directly (already fixed-width; no hashing
+        // needed). Like pkpIdToOwnerMaster, it is deliberately NOT cleared by
+        // removeWalletDerivation — only the first owner may ever (re-)register a
+        // path, keeping the recovery flow intact.
         mapping(uint256 => uint256) pathToOwnerMaster;
     }
 
@@ -177,6 +201,8 @@ library AppStorage {
         uint256 accountApiKeyHash,
         uint256 groupId
     ) internal view returns (bool) {
+        // Group IDs start at 1; zero matches uninitialized storage.
+        if (groupId == 0) return false;
         AccountConfigStorage storage s = getStorage();
         Account storage account = s.accounts[accountApiKeyHash];
         Group storage group = account.groups[groupId];

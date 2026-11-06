@@ -63,7 +63,7 @@ fn map_contract_error(e: anyhow::Error, context: &str) -> ApiStatus {
 /// future format change (e.g. switching to 0x-prefixed hex) that would create a
 /// confused-deputy collision with `usage_api_key_to_hash`. `debug_assert!`
 /// fires in dev/test, the runtime branch returns 500 in release.
-fn encode_api_key_from_secret(secret: &[u8; 32]) -> Result<String, ApiStatus> {
+pub(crate) fn encode_api_key_from_secret(secret: &[u8; 32]) -> Result<String, ApiStatus> {
     let encoded = base64_light::base64_encode_bytes(secret);
     debug_assert!(
         !is_precomputed_hash_shape(&encoded),
@@ -80,7 +80,7 @@ fn encode_api_key_from_secret(secret: &[u8; 32]) -> Result<String, ApiStatus> {
 }
 
 // Create a new wallet and return the public key, wallet address, and secret.
-async fn create_new_wallet() -> Result<(String, Address, [u8; 32], U256), ApiStatus> {
+pub(crate) async fn create_new_wallet() -> Result<(String, Address, [u8; 32], U256), ApiStatus> {
     let (derivation_u256, derivation_path) = generate_unique_derivation_path();
     tracing::info!(
         "Creating new wallet with derivation path: {}",
@@ -1077,7 +1077,7 @@ mod tests {
 
     /// Every endpoint that writes to AccountConfig must send contract errors
     /// through `map_contract_error`, so a permission revert is a 403 and not a
-    /// 500. Pins the call sites so a new or edited write
+    /// 500 (chipotle-private#175). Pins the call sites so a new or edited write
     /// endpoint can't silently fall back to `internal_server_error`.
     #[test]
     fn contract_write_endpoints_use_map_contract_error() {
