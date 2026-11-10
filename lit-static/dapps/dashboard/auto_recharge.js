@@ -25,9 +25,10 @@
  * either — the `recovery_token` IS the credential.
  */
 
-import { getMode, getApiKey } from './auth.js';
+import { getMode, getApiKey, getChainSecuredWallet, isAuthenticated } from './auth.js';
 import { getLitPaymentsBaseUrl } from './auth.js';
-import { getWalletAuthHeader } from './billing.js';
+import { getWalletAuthHeader, onWalletAuthRejected } from './billing.js';
+import { hasSignedBillingSession } from './billing_session.js';
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -41,14 +42,52 @@ let _stagedPaymentMethodId = null; // freshly saved pm_xxx awaiting Save
 
 // ─── Public entrypoints ─────────────────────────────────────────────────────
 
-export async function initAutoRecharge() {
+/** Wire up the modals. Called once at page load, before anyone signs in. */
+export function initAutoRecharge() {
   attachModalEventHandlers();
   attachAddCardModalEventHandlers();
-  try {
-    _config = await fetchConfig();
-  } catch (e) {
-    logError('init-auto-recharge', e);
-    _config = null;
+}
+
+// Shared by status loads, modal loads and saves so older responses cannot
+// overwrite a newer operation. Check identity too: logout does not refresh.
+let _refreshGeneration = 0;
+
+function beginConfigUpdate() {
+  const generation = ++_refreshGeneration;
+  const mode = getMode();
+  const identity = mode === 'sovereign' ? getChainSecuredWallet() : getApiKey();
+  return () => generation === _refreshGeneration && isAuthenticated() &&
+    getMode() === mode &&
+    (mode === 'sovereign' ? getChainSecuredWallet() : getApiKey()) === identity;
+}
+
+// True when the banner shows real settings rather than a placeholder.
+let _configKnown = false;
+
+/**
+ * Load the signed-in account's settings into the status banner. Call after
+ * every sign-in. Never prompts a wallet: without a stored billing session the
+ * banner just invites the user to open the settings.
+ */
+export async function refreshAutoRechargeStatus() {
+  const isCurrent = beginConfigUpdate();
+  _config = null;
+  _configKnown = false;
+  const canLoad = isAuthenticated() && (
+    getMode() === 'sovereign'
+      ? hasSignedBillingSession(getChainSecuredWallet())
+      : !!getApiKey()
+  );
+  if (canLoad) {
+    try {
+      const config = await fetchConfig();
+      if (!isCurrent()) return;
+      _config = config;
+      _configKnown = true;
+    } catch (e) {
+      if (!isCurrent()) return;
+      logError('auto-recharge-status', e);
+    }
   }
   renderStatusBanner();
 }
@@ -81,13 +120,34 @@ async function authHeaders() {
   return headers;
 }
 
+// Stripe Search (used server-side to find the customer) can lag a freshly
+// created customer by several seconds, so right after a first top-up the
+// server may answer 400 no_stripe_customer (seen taking 10-20s in test
+// mode). Retry user actions for up to ~30s.
+const NO_CUSTOMER_RETRIES = 10;
+const NO_CUSTOMER_RETRY_MS = 3000;
+
+async function fetchRetryingNewCustomer(url, init) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, init);
+    if (res.status !== 400 || attempt >= NO_CUSTOMER_RETRIES) return res;
+    let code = null;
+    try { code = (await res.clone().json())?.error; } catch { /* not JSON */ }
+    if (code !== 'no_stripe_customer') return res;
+    await new Promise((r) => setTimeout(r, NO_CUSTOMER_RETRY_MS));
+  }
+}
+
 async function fetchConfig() {
   const base = getLitPaymentsBaseUrl();
   const res = await fetch(`${base}/billing/auto_topup_config`, {
     method: 'GET',
     headers: await authHeaders(),
   });
-  if (res.status === 401) throw new Error('Wallet signature failed.');
+  if (res.status === 401) {
+    onWalletAuthRejected();
+    throw new Error('Wallet signature failed.');
+  }
   if (res.status === 400) return null; // "no Stripe customer yet" — same UX as off
   if (res.status === 501) return null; // API-mode caller
   if (!res.ok) throw new Error(`GET /billing/auto_topup_config -> ${res.status}`);
@@ -96,11 +156,12 @@ async function fetchConfig() {
 
 async function saveConfig(body) {
   const base = getLitPaymentsBaseUrl();
-  const res = await fetch(`${base}/billing/auto_topup_config`, {
+  const res = await fetchRetryingNewCustomer(`${base}/billing/auto_topup_config`, {
     method: 'PUT',
     headers: await authHeaders(),
     body: JSON.stringify(body),
   });
+  if (res.status === 401) onWalletAuthRejected();
   const text = await res.text();
   let json;
   try { json = text ? JSON.parse(text) : null; } catch { json = null; }
@@ -113,10 +174,11 @@ async function saveConfig(body) {
 
 async function createSetupIntent() {
   const base = getLitPaymentsBaseUrl();
-  const res = await fetch(`${base}/billing/setup_intent`, {
+  const res = await fetchRetryingNewCustomer(`${base}/billing/setup_intent`, {
     method: 'POST',
     headers: await authHeaders(),
   });
+  if (res.status === 401) onWalletAuthRejected();
   const text = await res.text();
   let json;
   try { json = text ? JSON.parse(text) : null; } catch { json = null; }
@@ -133,6 +195,18 @@ function renderStatusBanner() {
   const host = document.getElementById('auto-recharge-banner');
   if (!host) return;
   host.innerHTML = '';
+  if (!_config && !_configKnown) {
+    // Settings not loaded (ChainSecured account without a billing session
+    // yet). Don't claim it's off; loading them may need a wallet signature.
+    host.appendChild(makeBanner({
+      tone: 'info',
+      title: 'Auto recharge',
+      body: 'Automatically add credits when your balance drops below a threshold. Open to view or change your settings.',
+      ctaLabel: 'View',
+      ctaAction: () => openAutoRechargeModal(),
+    }));
+    return;
+  }
   if (!_config) {
     host.appendChild(makeBanner({
       tone: 'info',
@@ -166,12 +240,14 @@ function renderStatusBanner() {
   if (_config.enabled) {
     const t = dollarsFromCents(_config.threshold_cents);
     const amt = dollarsFromCents(_config.topup_amount_cents);
-    const cap = dollarsFromCents(_config.monthly_cap_cents);
+    const capText = _config.monthly_cap_cents
+      ? `up to $${dollarsFromCents(_config.monthly_cap_cents)}/month`
+      : 'with no monthly limit';
     const cardSuffix = formatCardSuffix(_config.payment_method_id);
     host.appendChild(makeBanner({
       tone: 'success',
       title: 'Auto recharge is on',
-      body: `When your balance drops below $${t}, we'll charge $${amt} to ${cardSuffix}, up to $${cap}/month.`,
+      body: `When your balance drops below $${t}, we'll charge $${amt} to ${cardSuffix}, ${capText}.`,
       ctaLabel: 'Modify',
       ctaAction: () => openAutoRechargeModal(),
     }));
@@ -280,14 +356,20 @@ function attachModalEventHandlers() {
 export async function openAutoRechargeModal() {
   const overlay = document.getElementById('auto-recharge-modal-overlay');
   if (!overlay) return;
+  const isCurrent = beginConfigUpdate();
   // Re-fetch on each open so the modal reflects whatever may have
   // changed since page load (other tabs, dashboard webhook tick, etc.).
   setModalStatus('');
   try {
-    _config = await fetchConfig();
+    const config = await fetchConfig();
+    if (!isCurrent()) return;
+    _config = config;
+    _configKnown = true;
   } catch (e) {
+    if (!isCurrent()) return;
     setModalStatus(formatError(e), 'error');
   }
+  renderStatusBanner();
   populateModalFromConfig();
   overlay.classList.add('is-open');
   overlay.setAttribute('aria-hidden', 'false');
@@ -451,13 +533,24 @@ async function handleSave() {
       };
 
   const saveBtn = document.getElementById('auto-recharge-save-btn');
+  const isCurrent = beginConfigUpdate();
   if (saveBtn) saveBtn.disabled = true;
   try {
-    _config = await saveConfig(body);
+    const config = await saveConfig(body);
+    if (!isCurrent()) return;
+    _config = config;
+    _configKnown = true;
     _stagedPaymentMethodId = null;
     closeAutoRechargeModal();
     renderStatusBanner();
+    // The PUT response lacks the card brand/last4; re-read for the banner.
+    fetchConfig().then((c) => {
+      if (!isCurrent()) return;
+      _config = c;
+      renderStatusBanner();
+    }).catch(() => {});
   } catch (e) {
+    if (!isCurrent()) return;
     setModalStatus(formatError(e), 'error');
   } finally {
     if (saveBtn) saveBtn.disabled = false;

@@ -378,6 +378,15 @@ export const PRIMARY_TYPE_CREATE_WALLET = 'CreateWallet';
 export const PRIMARY_TYPE_CONVERT_ACCOUNT = 'ConvertAccount';
 export const PRIMARY_TYPE_ADD_USAGE_API_KEY = 'AddUsageApiKey';
 export const PRIMARY_TYPE_BILLING_AUTH = 'BillingAuth';
+/**
+ * Long-lived billing session (server: lit-billing-core/src/billing_session.rs).
+ * The wallet signs once to delegate to a throwaway session key; each request
+ * then carries a fresh `personal_sign` from that key. Valid for
+ * BILLING_SESSION_MAX_AGE_SECONDS from `issuedAt`, so a multisig has days to
+ * collect signatures.
+ */
+export const PRIMARY_TYPE_BILLING_SESSION = 'BillingSession';
+export const BILLING_SESSION_MAX_AGE_SECONDS = 14 * 24 * 60 * 60;
 
 /**
  * Build the canonical EIP-712 typed data the server expects for a
@@ -411,6 +420,47 @@ export function buildChainSecuredTypedData({ primaryType, address, chainId, issu
       issuedAt: String(issuedAt),
     },
   };
+}
+
+/**
+ * Canonical `BillingSession` typed data. Field order is part of the EIP-712
+ * type hash and must match the server's schema exactly.
+ */
+export function buildBillingSessionTypedData({ address, sessionKey, chainId, issuedAt }) {
+  return {
+    types: {
+      EIP712Domain: [
+        { name: 'name', type: 'string' },
+        { name: 'version', type: 'string' },
+        { name: 'chainId', type: 'uint256' },
+      ],
+      [PRIMARY_TYPE_BILLING_SESSION]: [
+        { name: 'address', type: 'address' },
+        { name: 'sessionKey', type: 'address' },
+        { name: 'issuedAt', type: 'uint256' },
+      ],
+    },
+    primaryType: PRIMARY_TYPE_BILLING_SESSION,
+    domain: {
+      name: CHAINSECURED_DOMAIN_NAME,
+      version: CHAINSECURED_DOMAIN_VERSION,
+      chainId: String(chainId),
+    },
+    message: {
+      address,
+      sessionKey,
+      issuedAt: String(issuedAt),
+    },
+  };
+}
+
+/**
+ * The text a session key signs for one billing request. Must match
+ * `session_proof_message` in lit-billing-core/src/billing_session.rs.
+ * `sessionKey` must be EIP-55 checksummed.
+ */
+export function billingSessionProofMessage(sessionKey, timestamp) {
+  return `Lit ChainSecured billing request\nSession key: ${sessionKey}\nTimestamp: ${timestamp}`;
 }
 
 /**

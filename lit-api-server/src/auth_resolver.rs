@@ -17,9 +17,33 @@ use lit_billing_core::billing_auth::{
     AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload,
 };
 
+use lit_billing_core::billing_session::verify_wallet_auth_payload;
+
 use crate::core::eip712::{
-    PRIMARY_TYPE_BILLING_AUTH, verify_eip712_signature_allow_contract_wallet,
+    NodeErc1271Verifier, PRIMARY_TYPE_BILLING_AUTH, node_chain_id,
+    verify_eip712_signature_allow_contract_wallet,
 };
+
+/// Whether an `X-Wallet-Auth` payload carries a `BillingSession` (object or
+/// stringified typed data).
+fn is_billing_session(typed_data: &serde_json::Value) -> bool {
+    let primary = |v: &serde_json::Value| {
+        v.get("primaryType").and_then(|p| p.as_str()) == Some("BillingSession")
+    };
+    match typed_data {
+        serde_json::Value::String(s) => serde_json::from_str::<serde_json::Value>(s)
+            .map(|v| primary(&v))
+            .unwrap_or(false),
+        other => primary(other),
+    }
+}
+
+fn identity_for_wallet(wallet: alloy::primitives::Address) -> ResolvedIdentity {
+    ResolvedIdentity {
+        wallet_address_hex: format!("0x{:x}", wallet),
+        api_key_hash_hex: format!("0x{}", hex::encode(keccak256(wallet.as_slice()))),
+    }
+}
 
 pub struct LocalAuthResolver;
 
@@ -48,6 +72,24 @@ impl AuthResolver for LocalAuthResolver {
         // use this verifier. The EIP-1271 path does an on-chain
         // `isValidSignature` call via the read-only client on the node's
         // configured chain; the EOA path short-circuits before any RPC.
+        if is_billing_session(&payload.typed_data) {
+            // Long-lived multisig session: verified by the shared
+            // implementation (also used by lit-payments), which requires a
+            // per-request proof from the session key.
+            let chain_id = node_chain_id().map_err(|e| {
+                AuthError::Transient(format!("eip712 verification infra error: {e:?}"))
+            })?;
+            let wallet = verify_wallet_auth_payload(payload, chain_id, &NodeErc1271Verifier)
+                .await
+                .map_err(|e| {
+                    if e.is_bad_request() {
+                        AuthError::BadCredentials(format!("billing session rejected: {e}"))
+                    } else {
+                        AuthError::Transient(format!("billing session infra error: {e}"))
+                    }
+                })?;
+            return Ok(identity_for_wallet(wallet));
+        }
         let wallet = verify_eip712_signature_allow_contract_wallet(
             &payload.typed_data,
             &payload.signature,
@@ -68,13 +110,7 @@ impl AuthResolver for LocalAuthResolver {
             }
         })?;
 
-        let wallet_address_hex = format!("0x{:x}", wallet);
-        let hash = keccak256(wallet.as_slice());
-        let api_key_hash_hex = format!("0x{}", hex::encode(hash));
-        Ok(ResolvedIdentity {
-            wallet_address_hex,
-            api_key_hash_hex,
-        })
+        Ok(identity_for_wallet(wallet))
     }
 
     async fn resolve_api_key(&self, api_key: &str) -> Result<ResolvedIdentity, AuthError> {

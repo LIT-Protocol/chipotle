@@ -621,6 +621,38 @@ async fn verify_erc1271_signature(
     }
 }
 
+/// Adapts this node's EIP-1271 check to the shared verifier in
+/// `lit-billing-core`, which `BillingSession` payloads go through. An `Err`
+/// from [`verify_erc1271_signature`] is always an infra failure (timeout, no
+/// chain client), so it maps to `Eip712Error::Internal` (503 at the guard).
+pub(crate) struct NodeErc1271Verifier;
+
+#[async_trait::async_trait]
+impl lit_billing_core::eip712::Erc1271Verifier for NodeErc1271Verifier {
+    async fn verify_erc1271(
+        &self,
+        address: Address,
+        digest: B256,
+        signature: &[u8],
+    ) -> Result<bool, lit_billing_core::eip712::Eip712Error> {
+        verify_erc1271_signature(address, digest, signature)
+            .await
+            .map_err(|e| lit_billing_core::eip712::Eip712Error::Internal {
+                summary: "EIP-1271 verification unavailable".to_string(),
+                detail: format!("{e:?}"),
+            })
+    }
+}
+
+/// The chain id this node's signatures must commit to.
+pub(crate) fn node_chain_id() -> Result<u64, ApiStatus> {
+    let node_config = GLOBAL_NODE_CONFIG
+        .get()
+        .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))
+        .map_err(|e| ApiStatus::internal_server_error(e, "GLOBAL_NODE_CONFIG missing"))?;
+    Ok(node_config.chain.info().chain_id)
+}
+
 fn validate_domain(domain: &DomainView) -> Result<(), ApiStatus> {
     if domain.name.as_deref() != Some(EIP712_DOMAIN_NAME) {
         return Err(ApiStatus::bad_request(

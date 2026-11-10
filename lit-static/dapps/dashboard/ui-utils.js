@@ -8,11 +8,17 @@
 /**
  * Classify an error into a user-friendly category.
  * @param {Error|string|*} e
- * @returns {{ type: 'auth'|'permission'|'network'|'server'|'unknown', message: string }}
+ * @returns {{ type: 'auth'|'permission'|'network'|'server'|'rejected'|'unknown', message: string }}
  */
 export function classifyError(e) {
   const raw = (e && e.message) ? e.message : String(e);
   const lower = raw.toLowerCase();
+
+  // The user declined in their wallet (ethers ACTION_REJECTED / EIP-1193 4001).
+  // ethers' message embeds the whole request payload, which is unreadable.
+  if (e?.code === 'ACTION_REJECTED' || e?.code === 4001 || e?.info?.error?.code === 4001) {
+    return { type: 'rejected', message: 'You declined the request in your wallet.' };
+  }
 
   // Permission failures do not mean the login session has expired. Preserve
   // the API's explanation so users can fix their key/group permissions.

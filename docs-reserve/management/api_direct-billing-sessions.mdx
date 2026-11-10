@@ -1,0 +1,35 @@
+{/* Reserved section, not a page. On release, paste into docs/management/api_direct.mdx
+    directly after the paragraph ending "substitute your contract wallet's signature
+    bytes for the ERC-1271 path." (before `#### POST /create_wallet_with_signature`). */}
+
+#### Long-lived billing sessions (`BillingSession`)
+
+A multisig such as a Safe can take days to collect signatures, which a 5-minute `BillingAuth` cannot accommodate. For billing, the `X-Wallet-Auth` header also accepts a `BillingSession`, valid for **14 days** from `issuedAt`. The wallet signs once to delegate to a session key: a throwaway key pair the client generates and keeps private. Each request then proves possession of that key, so the wallet signature alone is not a credential. This matters because Safe off-chain message signatures are published on the Safe Transaction Service.
+
+The typed data adds a `sessionKey` field between `address` and `issuedAt` (same domain, same ordering rules):
+
+```json
+"BillingSession": [
+  { "name": "address",    "type": "address" },
+  { "name": "sessionKey", "type": "address" },
+  { "name": "issuedAt",   "type": "uint256" }
+]
+```
+
+The decoded header carries a `session_proof` alongside `typed_data` and `signature`. Its `signature` is an EIP-191 `personal_sign` by the session key over the text below, where `<sessionKey>` is EIP-55 checksummed and `<timestamp>` is the current unix time (it must be within ±5 minutes of the server's clock):
+
+```text
+Lit ChainSecured billing request
+Session key: <sessionKey>
+Timestamp: <timestamp>
+```
+
+```json
+{
+  "typed_data": { "primaryType": "BillingSession", "...": "..." },
+  "signature": "0x<wallet signature>",
+  "session_proof": { "timestamp": 1794319086, "signature": "0x<65-byte session-key signature>" }
+}
+```
+
+The server re-checks the wallet signature (including ERC-1271 for contract wallets) on every request, so removing a Safe owner invalidates sessions that relied on that owner's signature.
