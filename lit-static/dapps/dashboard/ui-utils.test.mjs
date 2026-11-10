@@ -35,3 +35,10 @@ test('mentioning an API key alone does not imply an expired session', () => {
   assert.equal(classifyError(new Error('Failed to fetch')).type, 'network');
   assert.equal(classifyError(new Error('500 Internal Server Error')).type, 'server');
 });
+
+test('wallet rejections get a readable message instead of the ethers payload dump', () => {
+  const ethersReject = Object.assign(new Error('user rejected action (action="signTypedData", reason="rejected", info={ ... })'), { code: 'ACTION_REJECTED' });
+  assert.equal(classifyError(ethersReject).type, 'rejected');
+  assert.equal(formatError(ethersReject), 'You declined the request in your wallet.');
+  assert.equal(classifyError(Object.assign(new Error('User rejected the request.'), { code: 4001 })).type, 'rejected');
+});

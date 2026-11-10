@@ -184,6 +184,7 @@ yanked = "warn"
 #
 # Suggested triage order: vulnerabilities > unsound > unmaintained.
 ignore = [
+    { id = "RUSTSEC-2026-0459", reason = "Temporary transitive dependency exception pending compatible upstream SQLite updates; tracked in dependency maintenance." },
     # ── vulnerabilities ───────────────────────────────────────────────────────
     { id = "RUSTSEC-2023-0071", reason = "rsa Marvin timing sidechannel — NO upstream fix exists (constant-time RSA unimplemented). Present via deno_crypto/deno_node_crypto (rsa 0.9.9, lit-actions) and the dcap-qvl DEV dependency (rsa 0.9.10, lit-api-server). BLOCKER: no patched rsa release + deno transitive. Not removable." },
     { id = "RUSTSEC-2026-0009", reason = "time parsing DoS (stack exhaustion) — fixed in >=0.3.47. Fires only in lit-actions: time 0.3.44 held <0.3.47 by the deno chain (deno_ast =0.53.2 -> swc; 0.3.47 pulls serde 1.0.228 which breaks swc_config/swc_common). Cleared everywhere else (0.3.47). BLOCKER: deno_ast/swc serde pin. WAITING ON: deno bumping deno_ast/swc. Not removable without forking deno." },

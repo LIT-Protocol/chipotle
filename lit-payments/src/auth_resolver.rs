@@ -21,9 +21,8 @@ use async_trait::async_trait;
 use lit_billing_core::billing_auth::{
     AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload,
 };
-use lit_billing_core::eip712::{
-    Eip712Error, PRIMARY_TYPE_BILLING_AUTH, verify_eip712_signature_allow_contract_wallet,
-};
+use lit_billing_core::billing_session::verify_wallet_auth_payload;
+use lit_billing_core::eip712::Eip712Error;
 use lit_billing_core::on_chain::{OnChainBillingResolver, ResolveError};
 
 /// Resolver wiring: an on-chain resolver pre-built from env config and the
@@ -54,15 +53,13 @@ impl AuthResolver for LocalAuthResolver {
         // authenticate to billing too, not just mint wallets — `self.on_chain`
         // supplies the on-chain `isValidSignature` check, on the same chain the
         // EIP-712 domain pins.
-        let wallet = verify_eip712_signature_allow_contract_wallet(
-            &payload.typed_data,
-            &payload.signature,
-            PRIMARY_TYPE_BILLING_AUTH,
-            self.chain_id,
-            &self.on_chain,
-        )
-        .await
-        .map_err(map_eip712_error)?;
+        //
+        // `verify_wallet_auth_payload` also accepts long-lived `BillingSession`
+        // payloads (multisig wallets), which must carry a per-request proof
+        // from the session key.
+        let wallet = verify_wallet_auth_payload(payload, self.chain_id, &self.on_chain)
+            .await
+            .map_err(map_eip712_error)?;
 
         Ok(identity_for_wallet(wallet))
     }

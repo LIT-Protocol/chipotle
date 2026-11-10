@@ -14,6 +14,14 @@ the release: `git mv` the page back to its original path, re-add its
 `docs.json` navigation line, and delete its entry here. Then re-run the audit
 that produced this file (see "Audit method").
 
+## Reserved sections (paste into an existing page)
+
+- **Long-lived billing sessions (`BillingSession`)** —
+  `management/api_direct-billing-sessions.mdx`. Restore by pasting its body
+  into `docs/management/api_direct.mdx` after the ERC-1271 paragraph (the file
+  header says exactly where), then delete the file and this entry. Ships with
+  the release that includes `lit-billing-core/src/billing_session.rs`.
+
 ---
 
 ## Other post-v1.1.10 changes to revisit at the next release cut

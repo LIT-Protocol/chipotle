@@ -28,7 +28,7 @@ pub mod resolver;
 
 pub use guard::BillingAuth;
 pub use owner::BillingOwnerAuth;
-pub use resolver::{AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload};
+pub use resolver::{AuthError, AuthResolver, ResolvedIdentity, SessionProof, WalletAuthPayload};
 
 // Re-export the precomputed-hash-shape detector from the on-chain module —
 // it's the same function the original `lit-billing-auth` crate exposed at

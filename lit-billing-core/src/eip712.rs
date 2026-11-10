@@ -84,6 +84,22 @@ pub const PRIMARY_TYPE_CREATE_WALLET: &str = "CreateWallet";
 pub const PRIMARY_TYPE_CONVERT_ACCOUNT: &str = "ConvertAccount";
 pub const PRIMARY_TYPE_ADD_USAGE_API_KEY: &str = "AddUsageApiKey";
 pub const PRIMARY_TYPE_BILLING_AUTH: &str = "BillingAuth";
+/// Long-lived billing session for wallets that cannot re-sign every few
+/// minutes (multisigs such as a Safe, where collecting signatures can take
+/// days). Unlike `BillingAuth`, the signed struct names a `sessionKey`: an
+/// ephemeral key the dashboard generates and never sends anywhere. Each request
+/// must also carry a fresh signature from that key (see
+/// [`crate::billing_session`]), so the wallet signature alone is not a bearer
+/// credential. That matters because Safe off-chain messages are published on
+/// the Safe Transaction Service, where anyone can read them.
+pub const PRIMARY_TYPE_BILLING_SESSION: &str = "BillingSession";
+
+/// How long a `BillingSession` signature stays usable, measured from its
+/// `issuedAt`. Covers the time a multisig needs to collect signatures plus the
+/// time the session is then used. Every request re-runs the EIP-1271 check
+/// against the wallet's current owners, so removing a Safe owner revokes
+/// sessions that depended on that owner's signature.
+pub const BILLING_SESSION_MAX_AGE_SECONDS: i64 = 14 * 24 * 60 * 60;
 
 /// Failure modes from [`verify_eip712_signature`]. Two flavours:
 /// - [`Eip712Error::BadRequest`] — caller-side problem (bad payload,
@@ -202,15 +218,24 @@ struct DomainView {
     salt: Option<serde_json::Value>,
 }
 
-/// The four flows share an identical message struct: `(address, issuedAt)`.
+/// The four short-lived flows share an identical message struct:
+/// `(address, issuedAt)`. `BillingSession` adds the session key between them.
 /// Field declaration order is part of the EIP-712 type hash — clients must
 /// declare the fields in this order, and any reordering is rejected by
 /// `validate_type_schema`.
-fn payload_field_schema() -> [Eip712FieldDef; 2] {
-    [
-        Eip712FieldDef::new("address", "address"),
-        Eip712FieldDef::new("issuedAt", "uint256"),
-    ]
+fn payload_field_schema(primary_type: &str) -> Vec<Eip712FieldDef> {
+    if primary_type == PRIMARY_TYPE_BILLING_SESSION {
+        vec![
+            Eip712FieldDef::new("address", "address"),
+            Eip712FieldDef::new("sessionKey", "address"),
+            Eip712FieldDef::new("issuedAt", "uint256"),
+        ]
+    } else {
+        vec![
+            Eip712FieldDef::new("address", "address"),
+            Eip712FieldDef::new("issuedAt", "uint256"),
+        ]
+    }
 }
 
 /// Canonical `EIP712Domain` field declaration. We use the (name, version,
@@ -232,6 +257,7 @@ fn is_known_primary_type(s: &str) -> bool {
             | PRIMARY_TYPE_CONVERT_ACCOUNT
             | PRIMARY_TYPE_ADD_USAGE_API_KEY
             | PRIMARY_TYPE_BILLING_AUTH
+            | PRIMARY_TYPE_BILLING_SESSION
     )
 }
 
@@ -247,7 +273,7 @@ pub(crate) fn build_canonical_typed_data_json(
     issued_at: i64,
     chain_id: u64,
 ) -> serde_json::Value {
-    let payload_fields: Vec<serde_json::Value> = payload_field_schema()
+    let payload_fields: Vec<serde_json::Value> = payload_field_schema(primary_type)
         .iter()
         .map(|f| serde_json::json!({ "name": f.name, "type": f.ty }))
         .collect();
@@ -314,6 +340,10 @@ struct PreparedVerification {
     /// Address recovered via ECDSA, if the signature is a standard 65-byte EOA
     /// signature. `None` for smart-contract-wallet signatures.
     ecdsa_recovered: Option<Address>,
+    /// `message.sessionKey` for `BillingSession` payloads; `None` otherwise.
+    session_key: Option<Address>,
+    /// `message.issuedAt`, already validated against the type's window.
+    issued_at: i64,
 }
 
 /// Run the synchronous validation pipeline and parse the signature. Shared by
@@ -384,8 +414,13 @@ fn prepare_verification(
     validate_domain(&view.domain, expected_chain_id)?;
     validate_type_schema(&view)?;
     let address = extract_address(&view)?;
+    let session_key = if view.primary_type == PRIMARY_TYPE_BILLING_SESSION {
+        Some(extract_session_key(&view)?)
+    } else {
+        None
+    };
     let issued_at = extract_issued_at(&view)?;
-    validate_timestamp(issued_at)?;
+    validate_timestamp(issued_at, &view.primary_type)?;
 
     // Parse a second time into alloy's TypedData to compute the EIP-712
     // digest. Two parses of the same JSON yield the same logical value.
@@ -441,6 +476,8 @@ fn prepare_verification(
         digest,
         signature: sig_bytes,
         ecdsa_recovered,
+        session_key,
+        issued_at,
     })
 }
 
@@ -496,6 +533,58 @@ pub async fn verify_eip712_signature_allow_contract_wallet(
         expected_primary_type,
         expected_chain_id,
     )?;
+    verify_prepared_allow_contract_wallet(&prepared, verifier).await
+}
+
+/// Claims carried by a verified `BillingSession` signature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BillingSessionClaims {
+    /// The wallet (EOA or contract) that signed the session.
+    pub wallet: Address,
+    /// The ephemeral key the wallet delegated per-request signing to.
+    pub session_key: Address,
+    /// When the session was signed; it expires
+    /// [`BILLING_SESSION_MAX_AGE_SECONDS`] later.
+    pub issued_at: i64,
+}
+
+/// Verify a `BillingSession` typed-data signature from an EOA or an EIP-1271
+/// contract wallet and return its claims. This checks only the wallet's
+/// signature; callers must also check a per-request proof from
+/// `session_key` (see [`crate::billing_session::verify_wallet_auth_payload`]),
+/// because the wallet signature on its own may be public.
+pub async fn verify_billing_session_allow_contract_wallet(
+    typed_data_json: &serde_json::Value,
+    signature_hex: &str,
+    expected_chain_id: u64,
+    verifier: &dyn Erc1271Verifier,
+) -> Result<BillingSessionClaims, Eip712Error> {
+    let prepared = prepare_verification(
+        typed_data_json,
+        signature_hex,
+        PRIMARY_TYPE_BILLING_SESSION,
+        expected_chain_id,
+    )?;
+    let session_key = prepared.session_key.ok_or_else(|| {
+        Eip712Error::internal(
+            "BillingSession payload prepared without a session key",
+            "BillingSession payload missing sessionKey",
+        )
+    })?;
+    let wallet = verify_prepared_allow_contract_wallet(&prepared, verifier).await?;
+    Ok(BillingSessionClaims {
+        wallet,
+        session_key,
+        issued_at: prepared.issued_at,
+    })
+}
+
+/// Accept a prepared payload if it verifies as an EOA (ECDSA) signature or,
+/// failing that, as an EIP-1271 contract-wallet signature.
+async fn verify_prepared_allow_contract_wallet(
+    prepared: &PreparedVerification,
+    verifier: &dyn Erc1271Verifier,
+) -> Result<Address, Eip712Error> {
     if prepared.ecdsa_recovered == Some(prepared.claimed_address) {
         return Ok(prepared.claimed_address);
     }
@@ -616,7 +705,7 @@ fn normalize_typed_data_input(
 }
 
 fn validate_type_schema(view: &TypedDataSchemaView) -> Result<(), Eip712Error> {
-    let expected_payload = payload_field_schema();
+    let expected_payload = payload_field_schema(&view.primary_type);
     let primary_decl = view.types.get(&view.primary_type).ok_or_else(|| {
         Eip712Error::bad(
             format!("Missing types[{}]", view.primary_type),
@@ -664,14 +753,16 @@ fn validate_type_schema(view: &TypedDataSchemaView) -> Result<(), Eip712Error> {
     // decoy fields (e.g. `intent: "Subscribe to weekly briefing"`) that
     // some wallet UIs render alongside the canonical fields, fooling the
     // user into signing what looks like a different action. Pin the
-    // message to exactly the canonical (address, issuedAt) pair.
-    if view.message.len() != 2
-        || !view.message.contains_key("address")
-        || !view.message.contains_key("issuedAt")
+    // message to exactly the canonical fields for this type.
+    if view.message.len() != expected_payload.len()
+        || expected_payload
+            .iter()
+            .any(|field| !view.message.contains_key(&field.name))
     {
+        let expected: Vec<&str> = expected_payload.iter().map(|f| f.name.as_str()).collect();
         return Err(Eip712Error::bad(
             format!(
-                "message must contain exactly `address` and `issuedAt`, got {:?}",
+                "message must contain exactly {expected:?}, got {:?}",
                 view.message.keys().collect::<Vec<_>>()
             ),
             "message contains unexpected fields",
@@ -688,6 +779,21 @@ fn extract_address(view: &TypedDataSchemaView) -> Result<Address, Eip712Error> {
     let address: Address = serde_json::from_value(address_val.clone())
         .map_err(|e| Eip712Error::bad(e.to_string(), "Invalid message.address"))?;
     Ok(address)
+}
+
+fn extract_session_key(view: &TypedDataSchemaView) -> Result<Address, Eip712Error> {
+    let value = view.message.get("sessionKey").ok_or_else(|| {
+        Eip712Error::bad("Missing message.sessionKey", "Missing message.sessionKey")
+    })?;
+    let session_key: Address = serde_json::from_value(value.clone())
+        .map_err(|e| Eip712Error::bad(e.to_string(), "Invalid message.sessionKey"))?;
+    if session_key == Address::ZERO {
+        return Err(Eip712Error::bad(
+            "message.sessionKey is the zero address",
+            "Invalid message.sessionKey",
+        ));
+    }
+    Ok(session_key)
 }
 
 fn extract_issued_at(view: &TypedDataSchemaView) -> Result<i64, Eip712Error> {
@@ -716,11 +822,38 @@ fn extract_issued_at(view: &TypedDataSchemaView) -> Result<i64, Eip712Error> {
     Ok(as_u64 as i64)
 }
 
-fn validate_timestamp(issued_at: i64) -> Result<(), Eip712Error> {
-    let now = std::time::SystemTime::now()
+pub(crate) fn unix_now() -> Result<i64, Eip712Error> {
+    Ok(std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| Eip712Error::internal(e.to_string(), "System clock is before the Unix epoch"))?
-        .as_secs() as i64;
+        .as_secs() as i64)
+}
+
+fn validate_timestamp(issued_at: i64, primary_type: &str) -> Result<(), Eip712Error> {
+    let now = unix_now()?;
+    if primary_type == PRIMARY_TYPE_BILLING_SESSION {
+        // Sessions may be old (a multisig can take days to sign) but not from
+        // the future beyond normal clock skew. i128 for the same overflow
+        // reason as the short-window check below.
+        let age = (now as i128) - (issued_at as i128);
+        if age < -(TIMESTAMP_SKEW_SECONDS as i128) {
+            return Err(Eip712Error::bad(
+                format!(
+                    "Issued At {issued_at} is more than {TIMESTAMP_SKEW_SECONDS}s in the future (now {now})"
+                ),
+                "Signed message timestamp is too far in the future",
+            ));
+        }
+        if age > BILLING_SESSION_MAX_AGE_SECONDS as i128 {
+            return Err(Eip712Error::bad(
+                format!(
+                    "Billing session issued at {issued_at} is older than {BILLING_SESSION_MAX_AGE_SECONDS}s (now {now})"
+                ),
+                "Billing session expired; sign a new one",
+            ));
+        }
+        return Ok(());
+    }
     // i128 subtraction: two i64s can never overflow into i128, and i128::abs
     // is safe for any value produced by an i64 subtraction. Without this, a
     // crafted issuedAt of i64::MIN would wrap `(now - issued_at).abs()` back
