@@ -1,0 +1,15 @@
+{
+  "name": "chipotle-relay-benchmark",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "test": "node --test *.test.mjs",
+    "report": "node report.mjs",
+    "traces": "node traces.mjs"
+  },
+  "dependencies": {
+    "ethers": "6.17.0",
+    "google-auth-library": "11.3.1"
+  }
+}
