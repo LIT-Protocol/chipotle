@@ -5,6 +5,7 @@ on:
       - 'lit-agent-keychain/**'
       - 'lit-actions/**'
       - 'vendor/ipfs-hasher/**'
+      - 'vendor/hickory-proto/**'
       - '.github/workflows/keychain-ci.yml'
 permissions:
   contents: read
