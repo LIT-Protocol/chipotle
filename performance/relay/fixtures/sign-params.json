@@ -1,0 +1,28 @@
+{
+  "action": "sign",
+  "withdrawRequest": {
+    "chainId": "eip155:8453",
+    "depository": "0xabababababababababababababababababababab",
+    "currency": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    "amount": "1000000000000000000",
+    "spenderChainId": "eip155:8453",
+    "spender": "0xefefefefefefefefefefefefefefefefefefefef",
+    "receiver": "0x1212121212121212121212121212121212121212",
+    "data": "0x",
+    "nonce": "0x3434343434343434343434343434343434343434343434343434343434343434"
+  },
+  "attestation": {
+    "chainId": 8453,
+    "allocator": "0x1563915e194D8CfBA1943570603F7606A3115508",
+    "withdrawRequestHash": "0x5d054d92f04a40023f341a59d2d679b206d158a936016be2ff4ad12927bf957a",
+    "hashesToSign": [
+      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "signatures": [
+      {
+        "oracleSigner": "0x19E7E376E7C213B7E7e7e46cc70A5dD086DAff2A",
+        "signature": "0x2d3f3875be4d56a1a7b11d44be9839790f682927c4c41dd92e1b9c0575918d124c95fe1c727be1d620c2000dd1f9bd853bc351c4916abeba33004698fedee30b1b"
+      }
+    ]
+  }
+}

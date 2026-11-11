@@ -270,6 +270,31 @@ jobs:
           set -o pipefail
           k6 run "${{ steps.spec.outputs.path }}" 2>&1 | tee "k6-loadtest-${{ inputs.test }}.log"
 
+      # Keep the soak workload/baseline unchanged. These five sequential probes
+      # isolate PKP/Relay overhead on the same runner and exact deployment URL.
+      - uses: pnpm/action-setup@v4
+        if: ${{ inputs.test == 'soak' && inputs.env == 'staging' }}
+        with:
+          version: '9.15.9'
+
+      - name: Install benchmark verifier
+        if: ${{ inputs.test == 'soak' && inputs.env == 'staging' }}
+        working-directory: performance/relay
+        run: pnpm install --frozen-lockfile
+
+      - name: Run sequential action benchmark
+        if: ${{ inputs.test == 'soak' && inputs.env == 'staging' }}
+        env:
+          BASE_URL: ${{ inputs.api_root_url }}
+          K6_ENV: staging
+          K6_CORRELATION_ID: relay-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          k6 run --log-format raw --console-output relay-samples.log k6/loadtest/relay.spec.ts
+
+      - name: Validate signatures and record benchmark timings
+        if: ${{ always() && inputs.test == 'soak' && inputs.env == 'staging' }}
+        run: node performance/relay/report.mjs relay-samples.log relay-performance.json
+
       - name: Post k6 load test summary
         if: ${{ always() }}
         continue-on-error: true
@@ -283,6 +308,7 @@ jobs:
           path: |
             k6-loadtest-${{ inputs.test }}.log
             soak-summary.json
+            relay-performance.json
           if-no-files-found: ignore
 
       - name: Clean up accounts file
