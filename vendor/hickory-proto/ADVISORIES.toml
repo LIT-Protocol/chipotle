@@ -1,0 +1,42 @@
+# This ledger is checked against a fresh RustSec database in CI.
+version = "0.25.2"
+
+[[advisories]]
+id = "RUSTSEC-2025-0006"
+status = "not-affected"
+note = "Reviewed in dependency maintenance."
+
+[[advisories]]
+id = "RUSTSEC-2026-0118"
+status = "accepted"
+note = "Reviewed in dependency maintenance."
+
+[[advisories]]
+id = "RUSTSEC-2026-0119"
+status = "accepted"
+note = "Reviewed in dependency maintenance."
+
+[[advisories]]
+id = "RUSTSEC-2026-0487"
+status = "fixed"
+note = "Reviewed in dependency maintenance."
+
+[[advisories]]
+id = "RUSTSEC-2026-0488"
+status = "not-affected"
+note = "Reviewed in dependency maintenance."
+
+[[advisories]]
+id = "RUSTSEC-2026-0489"
+status = "fixed"
+note = "Reviewed in dependency maintenance."
+
+[[advisories]]
+id = "RUSTSEC-2026-0490"
+status = "fixed"
+note = "Reviewed in dependency maintenance."
+
+[[advisories]]
+id = "RUSTSEC-2026-0491"
+status = "fixed"
+note = "Reviewed in dependency maintenance."
