@@ -287,6 +287,8 @@ jobs:
             lit-api-server/
             lit-billing-core/
             lit-core/
+            vendor/ipfs-hasher/
+            vendor/hickory-proto/
             otel-collector/
             Dockerfile.lit-actions
             Dockerfile.lit-api-server

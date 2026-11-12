@@ -90,6 +90,19 @@ jobs:
         working-directory: ${{ matrix.crate }}
         run: cargo fmt --all -- --check
 
+      - name: Check vendored Hickory advisory coverage
+        if: matrix.crate == 'lit-actions'
+        run: |
+          # Debian 12 runners provide Python 3.11 with stdlib tomllib.
+          # setup-python has no prebuilt Python distribution for these runners.
+          python3 -c 'import tomllib'
+          python3 scripts/test-hickory-advisories.py
+          python3 scripts/check-hickory-advisories.py
+
+      - name: Test Hickory security backports
+        if: matrix.crate == 'lit-actions'
+        run: cargo test --manifest-path vendor/hickory-proto/Cargo.toml --locked --features text-parsing --test security_backports
+
       - name: clippy
         working-directory: ${{ matrix.crate }}
         run: cargo clippy --locked --all-features -- -D warnings

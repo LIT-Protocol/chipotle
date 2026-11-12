@@ -99,3 +99,4 @@ rand_core = "0.6"
 # Keep action CIDs consistent at exact UnixFS chunk boundaries.
 [patch.crates-io]
 ipfs-hasher = { path = "../vendor/ipfs-hasher" }
+hickory-proto = { path = "../vendor/hickory-proto" }
