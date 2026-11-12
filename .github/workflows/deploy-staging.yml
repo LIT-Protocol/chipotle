@@ -441,6 +441,32 @@ jobs:
             -e "PHALA_CVM_NAME=${{ needs.determine-target.outputs.phala_app_name }}" \
             -e "NEW_ACCOUNT_RATE_LIMIT_ENABLED=false"
 
+      - name: Start updated CVM if stopped
+        shell: bash
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          PHALA_APP_NAME: ${{ needs.determine-target.outputs.phala_app_name }}
+        run: |
+          # Updates preserve the VM's power state. Wait for the update to settle
+          # before starting a stopped target; leave running instances alone.
+          for attempt in {1..60}; do
+            STATUS=$(phala cvms get "$PHALA_APP_NAME" --json | jq -er '.status')
+            case "$STATUS" in
+              stopped)
+                phala cvms start "$PHALA_APP_NAME"
+                exit 0
+                ;;
+              running) exit 0 ;;
+              starting|stopping|updating|restarting) sleep 5 ;;
+              *)
+                echo "::error::Unexpected CVM status '$STATUS' for '$PHALA_APP_NAME'"
+                exit 1
+                ;;
+            esac
+          done
+          echo "::error::Timed out waiting for '$PHALA_APP_NAME' to settle after update"
+          exit 1
+
   wait-for-api-available:
     needs: [deploy, determine-target, detect-changes]
     # Only verify when a deploy actually happened. The cold instance is normally
