@@ -2,7 +2,7 @@
 //!
 //! Caches the results of on-chain permission checks (`canExecuteAction`,
 //! `canUseWalletInAction`, `canExecuteActionAndUseWallet`), wallet derivation
-//! lookups (`getWalletDerivation`) and calling usage keys' expirations
+//! lookups (`getWalletDerivation`), private-key export protected wallets, and calling usage keys' expirations
 //! (`listApiKeys`), so that repeated calls for the same API key and relevant
 //! parameters avoid redundant contract calls.
 //!
@@ -14,7 +14,7 @@
 //! capped at the deadline on insert and on every read, and [`get_or_fetch`]
 //! re-checks the deadline on every hit. Denials expire 30 seconds after
 //! insertion/update and reads do not extend them. Wallet derivations retain a
-//! fixed 5-minute TTL. `try_get_with` coalesces concurrent misses per key.
+//! fixed 5-minute TTL. Protected-wallet pairs also have a fixed 5-minute TTL. `try_get_with` coalesces concurrent misses per key.
 //!
 //! A key's deadline is read with `listApiKeys`, concurrently with the
 //! permission check it bounds ([`BlockchainCache::with_deadline`]), and is
@@ -355,6 +355,8 @@ pub struct BlockchainCache {
     execute_and_wallet: Cache<String, CachedPermission<(bool, bool)>>,
     /// `get_wallet_derivation` results.
     wallet_derivation: Cache<String, U256>,
+    /// Admin and effective billing wallets for the private-key export guard.
+    protected_wallets: Cache<String, (Address, Address)>,
     /// Calling keys' grant deadlines, from their on-chain expirations.
     grant_deadlines: Cache<String, DeadlineLookup>,
     /// Per-account generation counter keyed by the string representation of
@@ -400,6 +402,10 @@ impl BlockchainCache {
             use_wallet,
             execute_and_wallet,
             wallet_derivation,
+            protected_wallets: Cache::builder()
+                .max_capacity(MAX_CAPACITY)
+                .time_to_live(ttl)
+                .build(),
             grant_deadlines,
             generations: RwLock::new(HashMap::new()),
             bumps: AtomicU64::new(0),
@@ -447,6 +453,23 @@ impl BlockchainCache {
         let h = api_key_hash.to_string();
         let g = self.generation(&h);
         format!("{h}:g{g}:wd:{wallet:#x}")
+    }
+
+    /// Resolve protected wallets at the calling key's current generation.
+    /// Role changes propagate through the existing mutation/event invalidations.
+    /// A fixed TTL bounds staleness even for hot entries if an event is missed.
+    /// Failed/partial reads are not cached; concurrent misses share one fetch.
+    pub async fn protected_wallets(
+        &self,
+        api_key_hash: U256,
+        fetch: impl std::future::Future<Output = anyhow::Result<(Address, Address)>>,
+    ) -> anyhow::Result<(Address, Address)> {
+        let h = api_key_hash.to_string();
+        let g = self.generation(&h);
+        self.protected_wallets
+            .try_get_with(format!("{h}:g{g}:pw"), fetch)
+            .await
+            .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{e:#}"))
     }
 
     /// Build a cache key for a calling key's grant deadline. The generation
@@ -667,7 +690,7 @@ pub fn invalidate_for_hash(api_key_hash: U256) {
 /// **Limitation:** Only the first 1000 usage keys are invalidated, matching
 /// [`invalidate_for_account`]. Grants to keys beyond that are never cached:
 /// their expiration lookup scans the same first 1000 keys and fails closed.
-/// Their denials and wallet derivations still rely on expiration.
+/// Their denials, wallet derivations, and protected-wallet pairs still rely on expiration.
 pub async fn invalidate_for_account_hash(account_api_key_hash: U256, changed: &HashSet<U256>) {
     let Some(cache) = get() else { return };
     cache.bump_generation(&account_api_key_hash.to_string());
@@ -800,6 +823,80 @@ mod tests {
     }
 
     // ── Generation counter ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn protected_wallets_hit_invalidation_and_failed_fill() {
+        let cache = BlockchainCache::new();
+        let hash = U256::from(42);
+        let original = (Address::repeat_byte(1), Address::repeat_byte(2));
+        let updated = (Address::repeat_byte(3), original.1);
+        assert_eq!(
+            cache
+                .protected_wallets(hash, async { Ok(original) })
+                .await
+                .unwrap(),
+            original
+        );
+        assert_eq!(
+            cache
+                .protected_wallets(hash, async {
+                    panic!("warm protected-wallet lookup must not fetch")
+                })
+                .await
+                .unwrap(),
+            original
+        );
+
+        cache.bump_generation(&hash.to_string());
+        assert!(
+            cache
+                .protected_wallets(hash, async { anyhow::bail!("billing RPC failed") })
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            cache
+                .protected_wallets(hash, async { Ok(updated) })
+                .await
+                .unwrap(),
+            updated
+        );
+        assert!(
+            cache
+                .protected_wallets(U256::from(43), async {
+                    anyhow::bail!("another account must not reuse the pair")
+                })
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn protected_wallets_invalidation_during_fill_does_not_repopulate_new_generation() {
+        let cache = BlockchainCache::new();
+        let hash = U256::from(42);
+        let original = (Address::repeat_byte(1), Address::repeat_byte(2));
+        let updated = (Address::repeat_byte(3), original.1);
+        // A request already in flight can finish against the old generation,
+        // but subsequent requests must fetch the new roles.
+        assert_eq!(
+            cache
+                .protected_wallets(hash, async {
+                    cache.bump_generation(&hash.to_string());
+                    Ok(original)
+                })
+                .await
+                .unwrap(),
+            original
+        );
+        assert_eq!(
+            cache
+                .protected_wallets(hash, async { Ok(updated) })
+                .await
+                .unwrap(),
+            updated
+        );
+    }
 
     #[test]
     fn generation_starts_at_zero() {

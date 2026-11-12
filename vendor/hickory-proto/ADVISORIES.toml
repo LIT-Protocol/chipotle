@@ -40,3 +40,13 @@ note = "Reviewed in dependency maintenance."
 id = "RUSTSEC-2026-0491"
 status = "fixed"
 note = "Reviewed in dependency maintenance."
+
+[[advisories]]
+id = "RUSTSEC-0000-0000.nsec3-name-checks"
+status = "not-affected"
+note = "Reviewed in dependency maintenance."
+
+[[advisories]]
+id = "RUSTSEC-0000-0000.nsec3-wraparound-inverted"
+status = "not-affected"
+note = "Reviewed in dependency maintenance."

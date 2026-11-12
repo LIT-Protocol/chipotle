@@ -25,7 +25,7 @@ pub async fn get_private_key(api_key: &str, pkp_id: &str) -> Result<String> {
     Ok(secret)
 }
 
-/// Never release the key of the account's admin or billing wallet to an action.
+/// Refuse export of the account's cached admin or billing wallet.
 ///
 /// `POST /new_account` base64-encodes the new account wallet's secret as the
 /// master API key, makes that wallet the account's admin and billing wallet,
@@ -48,22 +48,38 @@ pub async fn get_private_key(api_key: &str, pkp_id: &str) -> Result<String> {
 /// admin is normally the user's own wallet, which has no derivation here, so
 /// only the error changes; if the user made one of the account's PKPs the
 /// admin or billing wallet, that PKP is refused too, as its key carries the
-/// same rights. A failed lookup refuses the export.
+/// same rights. Role changes take effect after mutation/event invalidation or
+/// the fixed cache TTL; this guard accepts that propagation delay. A failed
+/// cache fill refuses the export. Key/address verification remains uncached.
 async fn refuse_account_admin_wallet(api_key: &str, pkp_id: &str) -> Result<()> {
     let requested = wallet_string_to_h160(pkp_id)
         .map_err(|e| anyhow::anyhow!("Unable to parse pkpId: {e:?}"))?;
-    // Two independent reads; neither feeds a cache initializer.
-    let (admin, billing) = tokio::join!(
-        crate::accounts::get_account_wallet_address(api_key),
-        crate::accounts::get_billing_wallet_address(api_key),
-    );
-    let admin =
-        admin.map_err(|e| anyhow::anyhow!("Unable to resolve the account's admin wallet: {e}"))?;
-    let billing = billing
-        .map_err(|e| anyhow::anyhow!("Unable to resolve the account's billing wallet: {e}"))?;
-    for (role, wallet) in [("admin", admin), ("billing", billing)] {
-        let wallet = wallet_string_to_h160(&wallet)
-            .map_err(|e| anyhow::anyhow!("Unable to parse the account's {role} wallet: {e:?}"))?;
+    let fetch = async {
+        let (admin, billing) = tokio::join!(
+            crate::accounts::get_account_wallet_address(api_key),
+            crate::accounts::get_billing_wallet_address(api_key),
+        );
+        let admin = admin
+            .map_err(|e| anyhow::anyhow!("Unable to resolve the account's admin wallet: {e}"))?;
+        let billing = billing
+            .map_err(|e| anyhow::anyhow!("Unable to resolve the account's billing wallet: {e}"))?;
+        let admin = wallet_string_to_h160(&admin)
+            .map_err(|e| anyhow::anyhow!("Unable to parse the account's admin wallet: {e:?}"))?;
+        let billing = wallet_string_to_h160(&billing)
+            .map_err(|e| anyhow::anyhow!("Unable to parse the account's billing wallet: {e:?}"))?;
+        Ok((admin, billing))
+    };
+    let (admin, billing) = if let Some(cache) = crate::accounts::blockchain_cache::get() {
+        cache
+            .protected_wallets(
+                crate::utils::parse_with_hash::usage_api_key_to_hash(api_key),
+                fetch,
+            )
+            .await?
+    } else {
+        fetch.await?
+    };
+    for wallet in [admin, billing] {
         if requested == wallet {
             anyhow::bail!(ADMIN_WALLET_EXPORT_REFUSED);
         }
