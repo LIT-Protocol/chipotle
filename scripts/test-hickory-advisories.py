@@ -5,6 +5,8 @@ import runpy
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
 MODULE = runpy.run_path(str(Path(__file__).with_name('check-hickory-advisories.py')))
 CHECK = MODULE['check']
@@ -32,6 +34,36 @@ class AdvisoryGuardTests(unittest.TestCase):
 
     def check(self):
         CHECK(self.root, self.db)
+
+    def test_dnssec_disabled(self):
+        with patch.object(MODULE['subprocess'], 'run', return_value=SimpleNamespace(stdout='std,tokio\n')) as run:
+            MODULE['check_dnssec_disabled'](self.root)
+        self.assertEqual(run.call_count, 2)
+        for call in run.call_args_list:
+            self.assertIn('--all-features', call.args[0])
+            self.assertIn('all', call.args[0])
+            self.assertIn('--locked', call.args[0])
+
+    def test_dnssec_enabled_in_either_workspace(self):
+        for feature in ['__dnssec', 'dnssec-ring', 'dnssec-aws-lc-rs']:
+            for workspace in range(2):
+                results = [SimpleNamespace(stdout='std,tokio\n') for _ in range(2)]
+                results[workspace] = SimpleNamespace(stdout=f'std,{feature}\n')
+                with self.subTest(feature=feature, workspace=workspace):
+                    with patch.object(MODULE['subprocess'], 'run', side_effect=results):
+                        with self.assertRaisesRegex(ValueError, 'DNSSEC enabled'):
+                            MODULE['check_dnssec_disabled'](self.root)
+
+    def test_missing_or_ambiguous_feature_list(self):
+        for output in ['', 'std\ntokio\n']:
+            with patch.object(MODULE['subprocess'], 'run', return_value=SimpleNamespace(stdout=output)):
+                with self.assertRaisesRegex(ValueError, 'expected one resolved'):
+                    MODULE['check_dnssec_disabled'](self.root)
+
+    def test_feature_resolution_failure(self):
+        with patch.object(MODULE['subprocess'], 'run', side_effect=MODULE['subprocess'].CalledProcessError(1, 'cargo')):
+            with self.assertRaises(MODULE['subprocess'].CalledProcessError):
+                MODULE['check_dnssec_disabled'](self.root)
 
     def test_reviewed(self):
         self.check()

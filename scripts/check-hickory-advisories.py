@@ -44,10 +44,30 @@ def check(root, database):
     print(f'Reviewed {len(advisories)} Hickory advisories; both workspaces use the backport')
 
 
+
+def check_dnssec_disabled(root):
+    """The NSEC3 ledger exclusions require DNSSEC to stay uncompiled."""
+    for crate in ['lit-actions', 'lit-api-server']:
+        result = subprocess.run([
+            'cargo', 'tree', '--manifest-path', str(root / crate / 'Cargo.toml'),
+            '--locked', '--all-features', '--target', 'all',
+            '--invert', 'hickory-proto', '--depth', '0', '--prefix', 'none',
+            '--format', '{f}',
+        ], check=True, capture_output=True, text=True)
+        lines = result.stdout.strip().splitlines()
+        if len(lines) != 1 or not lines[0].strip():
+            raise ValueError(f'{crate}: expected one resolved Hickory feature list')
+        features = set(lines[0].split(','))
+        if features & {'__dnssec', 'dnssec-ring', 'dnssec-aws-lc-rs'}:
+            raise ValueError(f'{crate}: DNSSEC enabled; review the NSEC3 advisory exclusions')
+    print('DNSSEC disabled in both workspaces across all targets and application features')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--database', type=Path, help='Existing RustSec checkout (offline tests)')
     args = parser.parse_args()
+    check_dnssec_disabled(ROOT)
     if args.database:
         check(ROOT, args.database)
     else:
