@@ -240,6 +240,9 @@ pub struct VersionResponse {
     pub name: String,
     pub version: String,
     pub commit_version: String,
+    /// Deployment replica name; absent outside Phala deployments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cvm_name: Option<String>,
     pub submodule_versions: Vec<(String, String)>,
 }
 

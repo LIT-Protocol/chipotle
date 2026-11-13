@@ -62,6 +62,8 @@ services:
       LIT_TELEMETRY_ENDPOINT: http://otel-collector:4317
       ROCKET_ADDRESS: "0.0.0.0"
       ROCKET_PORT: "8000"
+      # Exposed by /core/v1/version for deployment identity checks.
+      PHALA_CVM_NAME: "${PHALA_CVM_NAME:-}"
       # BASE_CHAIN_RPC is populated via an encrypted secret passed in through the Phala CLI/UI
       BASE_CHAIN_RPC: ${BASE_CHAIN_RPC}
       # Stripe billing keys — resolved by Phala CVM at container startup from encrypted env vars.
