@@ -69,6 +69,8 @@ Key management functions for PKPs and for action identity keys. `getPrivateKey` 
 
 Get the private key for a PKP wallet
 
+For a wallet-backed usage API key, this secret is also the usage credential. Group access can therefore expose that credential if the permitted action discloses the secret. See [Usage-key wallets](/architecture/groups#usage-key-wallets) before granting all-wallets access.
+
 ### Parameters
 
 *   `params` **[Object](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object)**&#x20;

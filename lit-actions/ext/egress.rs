@@ -138,16 +138,7 @@ fn is_link_local_ipv6(ip: Ipv6Addr) -> bool {
 /// IP address — hostnames resolve through the DNS resolver, which filters them.
 fn connect_target_literal_ip(url: &str, proxy: Option<&str>) -> Option<IpAddr> {
     let connect_str = proxy.unwrap_or(url);
-    // A proxy string may omit the scheme (reqwest treats it as http); add one so
-    // URL parsing can extract the host either way.
-    let normalized;
-    let to_parse = if connect_str.contains("://") {
-        connect_str
-    } else {
-        normalized = format!("http://{connect_str}");
-        &normalized
-    };
-    let parsed = reqwest::Url::parse(to_parse).ok()?;
+    let parsed = parse_connect_url(connect_str, proxy.is_some()).ok()?;
     let host = parsed.host_str()?;
     // Some URL encodings bracket IPv6 hosts; strip them before parsing.
     let host = host
@@ -157,12 +148,35 @@ fn connect_target_literal_ip(url: &str, proxy: Option<&str>) -> Option<IpAddr> {
     host.parse::<IpAddr>().ok()
 }
 
+/// Canonicalize before either guarding or constructing a client. Only HTTP(S)
+/// proxies are supported; never let reqwest reinterpret an unknown scheme.
+pub fn parse_connect_url(input: &str, is_proxy: bool) -> Result<reqwest::Url, &'static str> {
+    let input = input.trim();
+    let normalized;
+    let input = if is_proxy
+        && !input.contains("://")
+        && !input.starts_with("http:")
+        && !input.starts_with("https:")
+    {
+        normalized = format!("http://{input}");
+        &normalized
+    } else {
+        input
+    };
+    let url = reqwest::Url::parse(input).map_err(|_| "invalid connection URL")?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err("connection URL must use HTTP or HTTPS and have a host");
+    }
+    Ok(url)
+}
+
 /// True if a `proxiedFetch` for `url` (optionally via `proxy`) would connect
 /// directly to a forbidden internal literal IP. This is the reqwest counterpart
 /// to the `fetch()` path's `deny_net`: it closes the literal-IP hole that
 /// bypasses DNS resolution.
 pub fn connect_target_forbidden_ip(url: &str, proxy: Option<&str>) -> bool {
-    connect_target_literal_ip(url, proxy).is_some_and(is_forbidden_ip)
+    parse_connect_url(proxy.unwrap_or(url), proxy.is_some()).is_err()
+        || connect_target_literal_ip(url, proxy).is_some_and(is_forbidden_ip)
 }
 
 /// A `reqwest` DNS resolver that resolves via the system resolver and strips any
@@ -257,6 +271,36 @@ mod tests {
         ] {
             assert!(!forbidden(ip), "{ip} should be allowed");
         }
+    }
+
+    #[test]
+    fn rejects_parser_divergences() {
+        for target in [
+            "ftp://127.0.0.1:8080",
+            "socks5://127.0.0.1:8080",
+            "127.0.0.1:8080",
+            "http:127.0.0.1:8080",
+            "http:/127.0.0.1:8080",
+            "http:///127.0.0.1:8080",
+            "http://2130706433:8080",
+            "http://[::ffff:127.0.0.1]:8080",
+        ] {
+            assert!(
+                connect_target_forbidden_ip("https://example.com", Some(target)),
+                "{target}"
+            );
+        }
+        for target in ["http:127.0.0.1", "http:/127.0.0.1", "ftp://example.com"] {
+            assert!(connect_target_forbidden_ip(target, None), "{target}");
+        }
+        let canonical = parse_connect_url("user:pass@proxy.example:8080", true).unwrap();
+        assert_eq!(canonical.host_str(), Some("proxy.example"));
+        assert_eq!(canonical.username(), "user");
+        assert_eq!(canonical.password(), Some("pass"));
+        assert!(!connect_target_forbidden_ip(
+            "https://example.com",
+            Some(canonical.as_str())
+        ));
     }
 
     #[test]

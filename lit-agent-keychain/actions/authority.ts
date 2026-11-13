@@ -89,14 +89,11 @@ export async function run(
     );
     let owners = [authority.owner];
     let credentialExpiresAt: number | null = null;
-    // Authority releases are versioned: each vault may have credentials receipts
-    // signed by an earlier or later release of this action, whose key this
-    // release cannot verify. Such a receipt is treated exactly like a null state
-    // (root owner only). The operator can already serve null for any vault, so
-    // this grants nothing beyond the documented rollback trust; it never accepts
-    // an unverifiable owner set.
-    if (state.policy !== null && signedByThisRelease(state.policy)) {
+    // Only an explicit null state permits bootstrap with the original owner.
+    // A foreign or malformed receipt must never restore a removed root.
+    if (state.policy !== null) {
       const signed = signedSchema(credentialsSchema).parse(state.policy);
+      verifyReceipt(signed, publicKey, vaultId);
       requireThat(signed.document.notBefore <= now);
       if (signed.document.expiresAt !== null)
         verifyWindow(
@@ -157,19 +154,6 @@ export async function run(
     return { ok: false, error: "authorization_denied" };
   } finally {
     privateKey?.fill(0);
-  }
-  function signedByThisRelease(policy: unknown) {
-    try {
-      const signed = signedSchema(credentialsSchema).parse(policy);
-      verifyReceipt(
-        signed,
-        publicKey!,
-        digest(authoritySchema.parse(rawAuthority)),
-      );
-      return true;
-    } catch {
-      return false;
-    }
   }
 }
 /** Per-kind invariants; identical whether the document arrived alone or in a batch. */

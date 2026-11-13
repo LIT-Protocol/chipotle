@@ -254,8 +254,7 @@ test("credential replacement is owner-receipted; forged registry owners fail", a
     false,
   );
   // Tampering with the signed document breaks its receipt. An unverifiable
-  // receipt is treated exactly like a null credential state (the operator could
-  // serve null anyway): the root owner is accepted again, nothing else is.
+  // receipt fails closed and cannot restore the original root owner.
   signed.document.owners = [f.authority.owner as any];
   assert.equal(
     (
@@ -264,7 +263,7 @@ test("credential replacement is owner-receipted; forged registry owners fail", a
         proof: await f.ownerProof(f.policy),
       })
     ).ok,
-    true,
+    false,
   );
   const forged = await f.ownerProof(f.policy);
   forged.owner = { kind: "wallet", address: "0x" + "1".repeat(40) };

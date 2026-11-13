@@ -445,10 +445,9 @@ fn default_proxied_fetch_method() -> String {
 /// path, query, and fragment and rebuild `scheme://host[:port]` from the parsed
 /// authority so the connect target cannot drift from the guarded one.
 ///
-/// Scheme-less proxies (no `://`) are passed through unchanged: the guard and
-/// reqwest both prepend `http://` before parsing, so that path has no divergence
-/// to close. A string that fails to parse is likewise returned unchanged so
-/// `reqwest::Proxy::all` surfaces the error itself.
+/// Production callers canonicalize inputs through `resolve_proxy` first,
+/// including scheme-less proxies, and reject malformed or unsupported URLs
+/// before this function. The pass-through cases below are defensive fallbacks.
 ///
 /// User and pass are percent-decoded: per RFC 3986 the userinfo component is
 /// percent-encoded, and proxy providers (Webshare, Bright Data, ...) hand out
@@ -570,19 +569,21 @@ lazy_static::lazy_static! {
 /// Resolve the request's `proxy` field into the value handed to the client pool.
 ///
 /// Fail closed on a supplied-but-empty proxy. `None` (field absent / `null`) is a
-/// deliberate direct request. `Some(non-empty)` is proxied (trimmed). But a proxy
+/// deliberate direct request. `Some(non-empty)` is proxied (canonicalized). But a proxy
 /// that is present yet blank/whitespace is a misconfiguration (empty env var, bad
 /// string interpolation in an action), NOT a request for direct egress — silently
 /// degrading it to a direct request would send the signed request + API keys +
 /// HMAC out the enclave's own (geo-blocked) IP, precisely what this op exists to
 /// prevent. So that case is an error, not a fallback.
-fn resolve_proxy(proxy: Option<&str>) -> Result<Option<&str>, JsErrorBox> {
+fn resolve_proxy(proxy: Option<&str>) -> Result<Option<String>, JsErrorBox> {
     match proxy {
         Some(p) if p.trim().is_empty() => Err(JsErrorBox::generic(
             "op_lit_proxied_fetch: proxy was supplied but is empty/whitespace; \
              omit the field (or pass null) for a deliberate direct request",
         )),
-        Some(p) => Ok(Some(p.trim())),
+        Some(p) => crate::egress::parse_connect_url(p, true)
+            .map(|url| Some(url.to_string()))
+            .map_err(|e| JsErrorBox::generic(format!("op_lit_proxied_fetch: invalid proxy: {e}"))),
         None => Ok(None),
     }
 }
@@ -598,6 +599,7 @@ fn proxied_fetch_client(proxy: Option<&str>) -> Result<reqwest::Client, JsErrorB
     }
 
     let mut builder = reqwest::Client::builder()
+        .no_proxy()
         .timeout(std::time::Duration::from_secs(PROXIED_FETCH_TIMEOUT_SECS))
         // No automatic redirect following (parity with the CDN module loader). A
         // venue/proxy/attacker-controlled endpoint could otherwise 30x-redirect a
@@ -670,13 +672,16 @@ async fn op_lit_proxied_fetch(
     ensure_not_blank!(req.url, "url");
 
     let proxy = resolve_proxy(req.proxy.as_deref())?;
+    let proxy = proxy.as_deref();
+    let url = crate::egress::parse_connect_url(req.url.trim(), false)
+        .map_err(|e| JsErrorBox::generic(format!("op_lit_proxied_fetch: invalid url: {e}")))?;
 
     // Egress filter (CPL-295): reject a request that would connect directly to
     // an internal literal IP. When proxied, the connect target is the proxy
     // host; otherwise it is the destination URL host. Hostname targets are
     // caught later by the client's egress DNS resolver. Checked before taking a
     // limiter permit so a blocked request fails fast without holding one.
-    if crate::egress::connect_target_forbidden_ip(req.url.trim(), proxy) {
+    if crate::egress::connect_target_forbidden_ip(url.as_str(), proxy) {
         return Err(JsErrorBox::generic(
             "op_lit_proxied_fetch: destination blocked: connecting to internal \
              address space (loopback / RFC1918 / link-local) is not permitted",
@@ -706,7 +711,7 @@ async fn op_lit_proxied_fetch(
 
     let method = reqwest::Method::from_bytes(req.method.trim().to_ascii_uppercase().as_bytes())
         .map_err(|e| JsErrorBox::generic(format!("op_lit_proxied_fetch: invalid method: {e}")))?;
-    let mut rb = client.request(method, req.url.trim());
+    let mut rb = client.request(method, url);
     for (name, value) in &req.headers {
         rb = rb.header(name.as_str(), value.as_str());
     }
@@ -967,7 +972,21 @@ mod proxied_fetch_tests {
     fn resolve_proxy_present_is_trimmed() {
         assert_eq!(
             resolve_proxy(Some("  http://proxy.example:8080  ")).unwrap(),
-            Some("http://proxy.example:8080")
+            Some("http://proxy.example:8080/".to_string())
+        );
+    }
+
+    #[test]
+    fn scheme_less_proxy_credentials_survive_canonicalization() {
+        let proxy = resolve_proxy(Some("user:p%40ss@proxy.example:8080"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            split_proxy_credentials(&proxy),
+            (
+                "http://proxy.example:8080".to_string(),
+                Some(("user".to_string(), "p@ss".to_string()))
+            )
         );
     }
 

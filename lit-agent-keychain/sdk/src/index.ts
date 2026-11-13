@@ -648,8 +648,8 @@ export class OwnerClient {
   }
   /**
    * Authority releases are versioned. Secrets pin the release that approved them,
-   * so approvals for an existing secret run that exact release; everything else
-   * (sign-in, new secrets, credentials) uses the newest release this client knows.
+   * so approvals for an existing secret run that exact release. New objects use
+   * the credentials signing release, or the client default for a fresh vault.
    */
   private async authorityTemplate(authorityCid?: string): Promise<Template> {
     if (authorityCid !== undefined)
@@ -662,7 +662,7 @@ export class OwnerClient {
           this.authority.registry,
         );
   }
-  /** CID of the authority release this client signs in and approves new objects with. */
+  /** CID of this client's default authority release (before credential selection). */
   async currentAuthorityCid() {
     return actionCid(this.authority, (await this.authorityTemplate()).code);
   }
@@ -784,15 +784,25 @@ export class OwnerClient {
     );
     requireThat(document.kind === "login" && document.vaultId === this.vaultId);
     this.progress?.("Verifying owner authorization…");
-    // Sign in with the newest release, which moves the vault forward. If that
-    // release cannot verify this owner (its owner set was approved under the
-    // release the vault currently uses), fall back to that release.
-    let template = await this.authorityTemplate();
+    // Existing credentials select the release that can verify current owners.
+    // Select the release associated with the current credentials.
+    const credentials = await this.credentialsPolicy();
+    // Bootstrap has no execution key for direct Lit discovery yet. Use only a
+    // locally trusted template selected by the challenge, then authenticate both
+    // receipts directly once the execution key is available.
+    const credentialCid = credentials
+      ? this.lit.usageApiKey
+        ? await this.verifyByAnyAuthority(credentials)
+        : recorded
+      : undefined;
+    if (credentials) requireThat(typeof credentialCid === "string");
+    let template = await this.authorityTemplate(credentialCid);
     let authorization: Signed<Document>;
     try {
       authorization = await this.approve(document, template);
     } catch (error) {
       if (
+        credentialCid !== undefined ||
         typeof recorded !== "string" ||
         recorded === (await actionCid(this.authority, template.code))
       )
@@ -852,6 +862,15 @@ export class OwnerClient {
         ),
         this.vaultId,
       );
+      if (credentials) {
+        verifyReceipt(
+          credentials,
+          await this.lit.publicKey(
+            await actionCid(this.authority, template.code),
+          ),
+          this.vaultId,
+        );
+      }
       if (this.googleApproval) {
         const { approval } = this.googleApproval;
         requireThat(approval.payload.vaultId === this.vaultId);
@@ -882,12 +901,15 @@ export class OwnerClient {
         new RegExp(definition.credentialPattern).test(plaintext),
         `The value does not look like a credential for ${definition.name}`,
       );
+    if (!this.lit.usageApiKey) await this.login();
     const manifest: Manifest = {
       v: V,
       network: this.authority.network,
       registry: this.authority.registry,
       vaultId: this.vaultId,
-      authorityCid: await this.currentAuthorityCid(),
+      authorityCid:
+        (await this.credentialState())?.cid ??
+        (await this.currentAuthorityCid()),
       secretId: randomId(),
       release,
     };
@@ -937,11 +959,10 @@ export class OwnerClient {
       grants: [],
     };
     this.progress?.("Approving the secret with one signature…");
-    const [signedManifest, signedEnvelope, policy] = (await this.authorizeAll([
-      manifestDocument,
-      envelope,
-      policyDocument,
-    ])) as [Signed<typeof manifestDocument>, Signed<Envelope>, Signed<Policy>];
+    const [signedManifest, signedEnvelope, policy] = (await this.authorizeAll(
+      [manifestDocument, envelope, policyDocument],
+      manifest.authorityCid,
+    )) as [Signed<typeof manifestDocument>, Signed<Envelope>, Signed<Policy>];
     const bundle: SecretBundle = {
       manifest: signedManifest,
       envelope: signedEnvelope,
@@ -1122,7 +1143,10 @@ export class OwnerClient {
       post({ operation }),
     );
     requireThat(document.kind === "login" && document.vaultId === this.vaultId);
-    return this.authorize(document, authorityCid);
+    return this.authorize(
+      document,
+      (await this.credentialState())?.cid ?? authorityCid,
+    );
   }
   async setupTwoFactor(): Promise<{ secret: string; uri: string }> {
     return this.api(
@@ -1148,12 +1172,19 @@ export class OwnerClient {
     );
   }
   async getCredentials(): Promise<Signed<Credentials> | null> {
+    return (await this.credentialState())?.signed ?? null;
+  }
+  private async credentialsPolicy() {
     const state = await this.api(`/api/registry/credentials/${this.vaultId}`);
     requireThat(Object.hasOwn(state, "policy"));
     if (state.policy === null) return null;
-    const signed = signedSchema(credentialsSchema).parse(state.policy);
-    await this.verifyByAnyAuthority(signed);
-    return signed;
+    return signedSchema(credentialsSchema).parse(state.policy);
+  }
+  private async credentialState() {
+    const signed = await this.credentialsPolicy();
+    if (!signed) return null;
+    const cid = await this.verifyByAnyAuthority(signed);
+    return { signed, cid };
   }
   /** Verifies a receipt against every authority release this client knows for the vault. */
   private async verifyByAnyAuthority(signed: Signed<unknown>) {
@@ -1169,25 +1200,30 @@ export class OwnerClient {
           await this.lit.publicKey(await actionCid(this.authority, code)),
           this.vaultId,
         );
-        return;
+        return await actionCid(this.authority, code);
       } catch {}
     }
     throw new Error("Receipt was not issued by a known authority release");
   }
   async updateCredentials(owners: Authority["owner"][]) {
-    const previous = (await this.getCredentials())?.document;
+    const credentials = await this.credentialState();
+    const previous = credentials?.signed.document;
+    const cid = credentials?.cid;
     const now = nowSeconds();
-    const signed = await this.authorize({
-      v: V,
-      domain: DOMAIN,
-      kind: "credentials",
-      vaultId: this.vaultId,
-      epoch: (previous?.epoch ?? 0) + 1,
-      previousHash: previous ? digest(previous) : null,
-      owners,
-      notBefore: now,
-      expiresAt: null,
-    });
+    const signed = await this.authorize(
+      {
+        v: V,
+        domain: DOMAIN,
+        kind: "credentials",
+        vaultId: this.vaultId,
+        epoch: (previous?.epoch ?? 0) + 1,
+        previousHash: previous ? digest(previous) : null,
+        owners,
+        notBefore: now,
+        expiresAt: null,
+      },
+      cid,
+    );
     await this.api("/api/credentials", { ...post(signed), method: "PUT" });
   }
   async backup() {

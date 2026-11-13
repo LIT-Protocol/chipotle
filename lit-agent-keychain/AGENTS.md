@@ -53,8 +53,10 @@ See README.md and SECURITY.md for the protocol and its explicit trust boundary.
 - Preserve deployed action releases byte for byte: `actions/archive/` is append-only
   and every version is compiled into the server. Source/dependency changes alter
   CIDs/keys and are an explicit `--update-lock` release; the archive, per-vault
-  authority records and the authority action's root-owner fallback (SECURITY.md,
-  "Authority releases") are what let existing vaults and secrets keep working. Never
+  authority records and selection of the credentials signing release keep existing
+  vaults working. Validate current-owner authorization for every release.
+  Secret mutations require sessions issued through credentials-gated login; preserve
+  this invariant in every session issuance path (including 2FA). Never
   delete or edit an archived template.
 
 ## Required validation

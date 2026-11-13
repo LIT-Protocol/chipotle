@@ -157,12 +157,12 @@ pub async fn update_credentials(
     pool: &State<PgPool>,
     lit: &State<Chipotle>,
 ) -> ApiResult<Value> {
-    // Credentials may be approved by any authority release of the vault. Each
-    // release reads the owner set it can verify itself (see actions/authority.ts).
+    // A replacement must be approved by the release verifying the current owners.
     let (cid, key) = authority::verify_any(pool, lit, &session.vault_id, &body).await?;
     validate_policy(&body, &session.vault_id, &key, None, false).map_err(api::denied)?;
     let mut tx = pool.begin().await.map_err(api::internal)?;
     lock_vault(&mut tx, &session.vault_id).await?;
+    authority::require_current_credentials(&mut tx, &session.vault_id, &key).await?;
     authority::ensure_granted(&mut tx, lit, &session.vault_id, &cid).await?;
     commit_policy(
         &mut tx,
@@ -174,6 +174,13 @@ pub async fn update_credentials(
     .await?;
     // Session cookies are not owner authority, but end existing metadata sessions after recovery changes.
     sqlx::query("DELETE FROM kc_sessions WHERE vault_id=$1")
+        .bind(&session.vault_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(api::internal)?;
+    // Invalidate outstanding owner approvals too: a receipt minted before this
+    // replacement must not create a session after the old sessions were deleted.
+    sqlx::query("DELETE FROM kc_challenges WHERE vault_id=$1")
         .bind(&session.vault_id)
         .execute(&mut *tx)
         .await

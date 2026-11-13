@@ -89,6 +89,7 @@ pub async fn challenge(
     authority: Json<Authority>,
     cfg: &State<Config>,
     pool: &State<PgPool>,
+    lit: &State<Chipotle>,
 ) -> ApiResult<Value> {
     authority.validate(cfg).map_err(api::invalid)?;
     billing::reserve(pool, "challenge-global", 3600, 10000).await?;
@@ -103,12 +104,22 @@ pub async fn challenge(
         .execute(pool.inner())
         .await
         .map_err(api::internal)?;
-    let current: Option<String> =
+    let mut current: Option<String> =
         sqlx::query_scalar("SELECT authority_cid FROM kc_vaults WHERE id=$1")
             .bind(&vault_id)
             .fetch_optional(pool.inner())
             .await
             .map_err(api::internal)?;
+    if let Some(policy) =
+        crate::registry::selected(pool, &format!("credentials:{vault_id}")).await?
+    {
+        let signed: Signed = serde_json::from_value(policy).map_err(api::internal)?;
+        current = Some(
+            crate::authority::verify_with(lit, &authority, &vault_id, &signed)
+                .await?
+                .0,
+        );
+    }
     Ok(Json(
         json!({"v":2,"domain":"lit-keychain/v2","kind":"login","vaultId":vault_id,"challenge":nonce,"expiresAt":expires.unix_timestamp(),"authorityCid":current}),
     ))
@@ -126,7 +137,7 @@ pub async fn login(
     let vault_id = body.authority.vault_id().map_err(api::invalid)?;
     // Any released authority version may sign a login; the one that verifies is
     // recorded for the vault and granted to its execution group on first use.
-    let (cid, _key) =
+    let (cid, key) =
         crate::authority::verify_with(lit, &body.authority, &vault_id, &body.authorization).await?;
     let doc = &body.authorization.document;
     if field(doc, "kind").map_err(api::invalid)? != "login"
@@ -141,6 +152,7 @@ pub async fn login(
     sqlx::query("INSERT INTO kc_vaults(id,authority,authority_cid) VALUES($1,$2,$3) ON CONFLICT(id) DO NOTHING")
         .bind(&vault_id).bind(serde_json::to_value(&body.authority).map_err(api::invalid)?).bind(&cid).execute(&mut *tx).await.map_err(api::internal)?;
     crate::registry::lock_vault(&mut tx, &vault_id).await?;
+    crate::authority::require_current_credentials(&mut tx, &vault_id, &key).await?;
     let deleted = sqlx::query(
         "DELETE FROM kc_challenges WHERE challenge=$1 AND vault_id=$2 AND expires_at>now() AND purpose='login'",
     )

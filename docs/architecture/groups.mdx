@@ -94,7 +94,7 @@ So add rights on `g` combined with execute rights in `g`, whether held by one ke
 
 `[0]` is a wildcard only in `execute_in_groups`. It grants no access in `manage_ipfs_ids_in_groups`, `add_pkp_to_groups`, or `remove_pkp_from_groups`. The Dashboard offers **All Groups** only for execution and labels saved management entries of `0` as **no management access**. Editing a key preserves saved entries until you change them.
 
-To create and populate a group, use the account key, or:
+For a key that previously created populated groups using `can_create_groups` and `[0]` management grants, use the account key to create and fill the group, or:
 
 1. Create an empty group with both membership arrays empty.
 2. Have the account owner update the usage key with the returned group ID in the required management scopes.
@@ -104,11 +104,28 @@ The Dashboard's **All displayed options** selects the displayed group IDs for ma
 
 ### The Account Master Wallet
 
-`POST /new_account` creates one wallet for the account, listed as "Account Master Wallet". It is not an ordinary PKP: the account key is this wallet's private key, base64-encoded, and the wallet is the account's admin on chain. Lit Actions run under usage keys; the account key is used for account administration.
+`POST /new_account` creates one wallet for the account, listed as "Account Master Wallet". It is not an ordinary PKP: the account key is this wallet's private key, base64-encoded, and the wallet is the account's admin on chain. Lit Actions run only under usage keys (the account key cannot run actions), so any usage key that could export this wallet's key would hold the account key.
 
 `Lit.Actions.getPrivateKey` therefore never returns the private key of the account's admin wallet or its billing wallet, whatever the key and whatever the groups say: listing the wallet in a group, or the all-wallets entry (zero address), does not change this. The action gets an error instead. `Lit.Actions.Encrypt` and `Lit.Actions.Decrypt` still accept the wallet through groups like any other wallet, because they never reveal its key. To sign from an action, create a separate wallet with `POST /core/v1/create_wallet` and add it to the group. Existing keys, addresses and derivation paths are unchanged.
 
-In a ChainSecured account the admin wallet is the user's own wallet, which the TEE cannot derive, so the rule only matters if the admin or billing wallet is one of the account's PKPs. Converting an account to ChainSecured makes the user's wallet the admin but keeps the original Account Master Wallet as the billing wallet. The same key-export restriction applies to the billing wallet.
+In a ChainSecured account the admin wallet is the user's own wallet, which the TEE cannot derive, so the rule only matters if the admin or billing wallet is one of the account's PKPs. Converting an account to ChainSecured makes the user's wallet the admin but keeps the original Account Master Wallet as the billing wallet. Its key is still the old account key, which still passes billing-owner checks, so the rule keeps covering it.
+
+### Usage-key wallets
+
+Usage keys created through the API-mode `add_usage_api_key` endpoint also have a backing wallet, initially listed as "API Key Wallet" with description "Usage API Key Wallet". That wallet's private key is the usage API credential, base64-encoded. Unlike the account's admin and billing wallets, usage-key wallets are subject to the ordinary group rules for `getPrivateKey`.
+
+<Warning>
+Granting access to a usage-key wallet can grant access to the credential itself. The all-wallets wildcard includes these wallets, including ones created later. Wallet names and descriptions are labels, not security boundaries.
+</Warning>
+
+
+To keep usage credentials separate:
+
+- Create dedicated application wallets and list their addresses explicitly in production groups. Keep usage-key wallets out of those groups instead of selecting all wallets.
+- Permit reviewed action CIDs that do not disclose secrets, and give callers execution access without group-management permissions. A delegate who can change wallet or action membership may broaden that access; see [Delegating group management](#delegating-group-management).
+- Treat disclosure of a usage-key wallet's secret as disclosure of that usage credential. Removing group access or deleting key A does not revoke a recovered key B; revoke and replace B as well.
+
+Usage keys generated as independent random tokens in ChainSecured mode have no backing wallet. Converting an existing account to ChainSecured preserves existing keys and wallets, so review any wallet-backed keys that remain.
 
 ### Shared wallets across groups
 
