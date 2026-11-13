@@ -46,6 +46,20 @@ pub enum AuthError {
 pub struct WalletAuthPayload {
     pub typed_data: serde_json::Value,
     pub signature: String,
+    /// Required when `typed_data` is a `BillingSession`: a fresh signature
+    /// from the session key named in the typed data. Ignored otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_proof: Option<SessionProof>,
+}
+
+/// Per-request proof that the caller holds a `BillingSession`'s session key.
+/// `signature` is an EIP-191 `personal_sign` by the session key over
+/// [`crate::billing_session::session_proof_message`] for `timestamp`.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SessionProof {
+    /// Unix seconds; must be within the short skew window of server time.
+    pub timestamp: i64,
+    pub signature: String,
 }
 
 /// Identity returned by a successful verification — used by the Rocket guard

@@ -1,6 +1,7 @@
 import { analytics, endDashboardSession, trackDashboardOperation } from './analytics.js';
 import { initPasswordLogin, resetPasswordIdentity } from './password-login.js';
 import { enabled as passwordLoginEnabled } from './password-client.js';
+import { forgetBillingSession } from './billing_session.js';
 /**
  * Authentication — session state, API client, theme, stat cards.
  */
@@ -120,8 +121,18 @@ export function isAuthenticated() {
   return false;
 }
 
-/** Full sign-out: clears api-key, ChainSecured session, and the client cache. */
-export function logOut() {
+/**
+ * Full sign-out: clears api-key, ChainSecured session, and the client cache.
+ * `forgetWalletSessions` also deletes the wallet's stored billing sessions
+ * (billing_session.js). Pass it for a deliberate sign-out; the automatic
+ * logout on a dropped wallet connection leaves them, so a WalletConnect relay
+ * hiccup doesn't throw away a multisig session the owners already signed.
+ */
+export function logOut({ forgetWalletSessions = false } = {}) {
+  const wallet = getChainSecuredWallet();
+  if (forgetWalletSessions && wallet) {
+    forgetBillingSession(wallet);
+  }
   endDashboardSession();
   hideStatus('login-status');
   resetPasswordIdentity();
@@ -139,21 +150,18 @@ export function logOut() {
 }
 
 /**
- * Disconnect the connected browser wallet, then sign out. In ChainSecured mode
- * the wallet IS the session, so tearing down the EIP-1193 / WalletConnect
- * connection and clearing the session are the same user intent. The
- * `onWalletChange` watcher also fires `logOut()` on disconnect, but we call it
- * directly too so sign-out is synchronous (and correct if no live wallet
- * connection is attached, e.g. after a page reload).
+ * Sign out before disconnecting the browser wallet. disconnect() synchronously
+ * notifies the wallet watcher, whose automatic logout clears the wallet address.
+ * Explicit sign-out must delete its billing sessions before that happens.
  */
-async function disconnectWallet() {
+export async function disconnectWallet() {
+  logOut({ forgetWalletSessions: true });
   try {
     const { disconnect } = await import('../../wallet_connect.js');
     disconnect();
   } catch (e) {
     console.warn('[auth] wallet disconnect failed:', e);
   }
-  logOut();
 }
 
 /** Invalidate the cached SDK client; next getClient() rebuilds fresh. */
@@ -1169,7 +1177,7 @@ export async function changeChainSecuredOwnership() {
       'success',
     );
     setTimeout(() => {
-      logOut();
+      logOut({ forgetWalletSessions: true });
       location.reload();
     }, 1500);
   } catch (e) {

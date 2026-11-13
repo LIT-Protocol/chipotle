@@ -5,6 +5,11 @@ User-facing changes to the Chipotle API and stack. For the full history, see
 Release verification (image digests, attestation, governance) is covered in the
 [upgrade governance docs](https://developer.litprotocol.com/architecture/verification/upgrade-governance).
 
+## November 10, 2026 maintenance release
+
+Billing-session support for smart-contract wallets and dashboard auto-recharge
+reliability improvements.
+
 ## November 2026 maintenance release
 
 Bundled service, SDK, dashboard, documentation, and dependency updates, with

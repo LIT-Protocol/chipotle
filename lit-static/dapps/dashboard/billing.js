@@ -8,12 +8,12 @@ import { analytics } from './analytics.js';
  * additional action is required.
  *
  * ChainSecured callers (CPL-285, CPL-286) authenticate to /billing/* with an
- * EIP-712 typed-data signature proving they hold the wallet's private key.
- * The wallet UI surfaces `primaryType: BillingAuth` and labelled fields so a
- * phishing dApp can't disguise the request as a generic message and replay
- * it against the secret-emitting endpoints. The signed payload is cached
- * for ~4 minutes (server allows ±5min skew, we leave a buffer) so the user
- * only sees one wallet popup per billing session.
+ * EIP-712 `BillingSession` signature (billing_session.js): the wallet signs
+ * once to delegate to a session key held in this browser, valid for 14 days,
+ * and every request carries a fresh proof from that key. The wallet UI
+ * surfaces the labelled `BillingSession` struct so a phishing dApp can't
+ * disguise the request as a generic message. One wallet popup (or one Safe
+ * multisig round) covers two weeks of billing.
  *
  * All in-flight billing requests are tied to a module AbortController and a
  * captured-credential snapshot — `clearBillingSession()` is called on logout
@@ -23,10 +23,10 @@ import { analytics } from './analytics.js';
  */
 
 import {
-  PRIMARY_TYPE_BILLING_AUTH,
-  buildChainSecuredTypedData,
-  signChainSecuredTypedData,
-} from '../../core_sdk.js';
+  forgetRejectedBillingSession,
+  getBillingSessionHeader,
+  hasSignedBillingSession,
+} from './billing_session.js';
 import {
   getApiKey,
   getChainSecuredHash,
@@ -56,9 +56,8 @@ const LITKEY_PAYMENT_URL = 'https://payments.litprotocol.com/payWithLitkey';
 // session change via clearBillingSession().
 let _abortController = null;
 
-// Cached wallet-auth payload. Re-used across billing requests within the
-// timestamp window. { headerValue, expiresAtMs, walletAddress }
-let _walletAuthCache = null;
+// Wallet-auth for ChainSecured accounts is a long-lived billing session
+// (billing_session.js), stored per wallet in localStorage.
 
 function isAddress(value) {
   return /^0x[0-9a-fA-F]{40}$/.test(value || '');
@@ -138,16 +137,9 @@ async function openLitkeyPaymentPage() {
  * render the topbar balance (CPL-285 review feedback).
  */
 function hasValidWalletAuthCache() {
-  if (!_walletAuthCache) return false;
   const wallet = getChainSecuredWallet();
-  if (!wallet || _walletAuthCache.walletAddress.toLowerCase() !== wallet.toLowerCase()) return false;
-  return _walletAuthCache.expiresAtMs > Date.now() + 10_000;
+  return !!wallet && hasSignedBillingSession(wallet);
 }
-
-// Server's TIMESTAMP_SKEW_SECONDS is 300 (lit-api-server/src/core/eip712.rs);
-// we cache for 4 min to leave a 1-min safety buffer against clock skew +
-// in-flight latency.
-const WALLET_AUTH_TTL_MS = 4 * 60 * 1000;
 
 /**
  * Mode-branched (NOT a `||` fallback): a stale `STORAGE_KEY_API` left over
@@ -174,7 +166,6 @@ export function clearBillingSession() {
     _abortController.abort();
     _abortController = null;
   }
-  _walletAuthCache = null;
   if (_balanceRefreshDebounceTimer) {
     clearTimeout(_balanceRefreshDebounceTimer);
     _balanceRefreshDebounceTimer = null;
@@ -182,23 +173,29 @@ export function clearBillingSession() {
 }
 
 /**
- * Evict the cached wallet-auth payload so the next billing request prompts a
- * fresh signature. Only call from error handlers when the failure was an auth
- * rejection — never on transient network/5xx, where evicting would force the
- * user through a wallet popup on every retry (signature-prompt fatigue,
- * phishing-overlay surface).
+ * Forget the stored billing session so the next billing request prompts a
+ * fresh signature. Only call from error handlers when the server rejected the
+ * credential — never on transient network/5xx or request validation errors:
+ * for a multisig, a new session means collecting every owner's signature
+ * again.
  */
 function evictWalletAuthCache() {
-  _walletAuthCache = null;
+  forgetRejectedBillingSession(getChainSecuredWallet());
+}
+
+/** For other modules: the server answered 401 to our wallet-auth header. */
+export function onWalletAuthRejected() {
+  if (getMode() === 'sovereign') evictWalletAuthCache();
 }
 
 /**
- * True when an SDK error came from the server actually rejecting the
- * credential — not a network blip, 5xx, or a Stripe.js failure. The SDK
- * stamps `err.status` on Error objects from `parseResponse` (CPL-285).
+ * True when an SDK error came from the server rejecting the credential. The
+ * billing guards answer 401 for that; a 400 is request validation (e.g. an
+ * amount below the minimum) and must not discard the session. The SDK stamps
+ * `err.status` on Error objects from `parseResponse` (CPL-285).
  */
 function isAuthError(e) {
-  return !!(e && (e.status === 401 || e.status === 400));
+  return !!(e && e.status === 401);
 }
 
 export async function checkBillingAvailable() {
@@ -225,45 +222,30 @@ export function resetBillingAvailability() {
 }
 
 /**
- * Get a cached wallet-auth header, or prompt the wallet to sign a fresh one.
- * Returns base64(JSON{typed_data, signature}) for the X-Wallet-Auth header.
- * Server validates `primaryType: "BillingAuth"` against the canonical schema
- * in `lit-api-server/src/core/eip712.rs` (CPL-286).
+ * X-Wallet-Auth header for the connected ChainSecured wallet. Uses the stored
+ * billing session when one is valid (no popup); otherwise asks the wallet to
+ * sign a new `BillingSession`. For a Safe, waits for the other owners via the
+ * Safe Transaction Service. `onStatus` receives progress text for the UI.
  */
-export async function getWalletAuthHeader() {
+export async function getWalletAuthHeader({ onStatus } = {}) {
   const wallet = getChainSecuredWallet();
   if (!wallet) {
     throw new Error('No connected ChainSecured wallet — sign in first.');
   }
-  const cachedFor = _walletAuthCache && _walletAuthCache.walletAddress;
-  if (cachedFor && cachedFor.toLowerCase() === wallet.toLowerCase()
-      && _walletAuthCache.expiresAtMs > Date.now() + 10_000) {
-    return _walletAuthCache.headerValue;
-  }
-
   const client = await getClient();
-  const chainIdNum = client.chainId != null
+  const chainId = client.chainId != null
     ? Number(client.chainId)
     : Number((await client.getNodeChainConfig()).chain_id);
-  const issuedAt = Math.floor(Date.now() / 1000);
-  const typedData = buildChainSecuredTypedData({
-    primaryType: PRIMARY_TYPE_BILLING_AUTH,
-    address: wallet,
-    chainId: chainIdNum,
-    issuedAt,
+  return getBillingSessionHeader({
+    wallet,
+    chainId,
+    rpcUrl: client.rpcUrl,
+    onStatus,
+    connect: async () => {
+      const { connectWallet } = await import('../../wallet_connect.js');
+      return connectWallet({ chainId, rpcUrl: client.rpcUrl });
+    },
   });
-
-  const { connectWallet } = await import('../../wallet_connect.js');
-  const { signer } = await connectWallet({ chainId: chainIdNum, rpcUrl: client.rpcUrl });
-  const { typed_data, signature } = await signChainSecuredTypedData(signer, typedData);
-
-  const headerValue = btoa(JSON.stringify({ typed_data, signature }));
-  _walletAuthCache = {
-    headerValue,
-    expiresAtMs: Date.now() + WALLET_AUTH_TTL_MS,
-    walletAddress: wallet,
-  };
-  return headerValue;
 }
 
 /**
@@ -422,11 +404,11 @@ async function loadBillingBalance(force = false) {
  * increases, so only an explicit cache bypass picks a top-up up.
  *
  * In sovereign/ChainSecured mode the topbar balance is only loaded silently
- * while a valid wallet-auth cache exists — we never auto-prompt a wallet popup
- * just to render it (CPL-285). Once that ~4-min cache expires the balance falls
- * back to "—" and, without this, would only reappear via Add Funds. Here the
- * user explicitly opts into the single EIP-712 BillingAuth signature needed to
- * re-fetch: `getWalletAuthHeader()` pops the wallet on a cache miss. Managed
+ * while a signed billing session exists — we never auto-prompt a wallet popup
+ * just to render it (CPL-285). Without a session the balance shows "—" and,
+ * without this, would only reappear via Add Funds. Here the user explicitly
+ * opts into the EIP-712 BillingSession signature needed to re-fetch:
+ * `getWalletAuthHeader()` pops the wallet when no session exists. Managed
  * (API-key) accounts skip the signature and just force the read.
  */
 export async function refreshBalanceManually() {
@@ -439,8 +421,8 @@ export async function refreshBalanceManually() {
     btn.classList.add('is-refreshing');
   }
   try {
-    // Sovereign mode: prompt the wallet for a BillingAuth signature when the
-    // cache is empty/expired (returns the cached header otherwise, no popup).
+    // Sovereign mode: prompt the wallet for a BillingSession signature when
+    // none is stored (uses the stored session otherwise, no popup).
     if (getMode() === 'sovereign') {
       await getWalletAuthHeader();
     }
@@ -543,9 +525,9 @@ async function openAddFundsModal() {
   // that follows — flow without a second prompt. If they cancel the signature,
   // surface that in the modal status and leave the modal open so they can retry.
   if (getMode() === 'sovereign' && !hasValidWalletAuthCache()) {
-    setStatus('Approve the wallet signature to enable billing for this session…', 'info');
+    setStatus('Approve the wallet signature to enable billing…', 'info');
     try {
-      await getWalletAuthHeader();
+      await getWalletAuthHeader({ onStatus: (msg) => setStatus(msg, 'info') });
       setStatus('');
     } catch (e) {
       logError('wallet-auth-prime', e);

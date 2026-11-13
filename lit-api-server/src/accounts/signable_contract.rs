@@ -1434,20 +1434,14 @@ mod tests {
         // On chain, an API-mode account's admin and billing wallet are both the
         // account wallet. convertToChainSecuredAccount makes the user's own
         // wallet the admin but keeps the account wallet as the billing wallet,
-        // and its key is still the old master API key. Each export reads both
-        // wallets: two exports are answered per phase, one more after a PKP is
-        // made the admin, and the export after that finds nothing queued and
-        // fails.
+        // and its key is still the old master API key. Each phase fills the
+        // protected-wallet cache once; subsequent exports reuse the pair.
+        // Invalidation simulates delivery of the role-change event.
         let admin = AccountConfig::getAccountWalletAddressCall::SELECTOR;
         let billing = AccountConfig::getBillingWalletAddressCall::SELECTOR;
         let rpc = SelectorTransport::new(&[admin, billing]);
         let chain_secured_owner = Address::repeat_byte(0xc3);
-        for admin_wallet in [
-            master_wallet,
-            master_wallet,
-            chain_secured_owner,
-            chain_secured_owner,
-        ] {
+        for admin_wallet in [master_wallet, chain_secured_owner] {
             rpc.push(
                 admin,
                 AccountConfig::getAccountWalletAddressCall::abi_encode_returns(&admin_wallet),
@@ -1475,19 +1469,21 @@ mod tests {
         let cid = "QmYRKz97sdQ2DwG4w3uoTKSzycX2DDGQvuUQJuZN1UFdDR";
         let (usage, cid_hash) = (api_key_hash(usage_api_key), ipfs_cid_to_u256(cid).unwrap());
         let cache = blockchain_cache::get().unwrap();
-        for (wallet, path) in [(master_wallet, master_path), (other_wallet, other_path)] {
-            cache
-                .use_wallet_cache()
-                .insert(
-                    cache.use_wallet_key(usage, cid_hash, wallet),
-                    CachedPermission::new(true, GrantDeadline::Never),
-                )
-                .await;
-            cache
-                .wallet_derivation_cache()
-                .insert(cache.wallet_derivation_key(usage, wallet), path)
-                .await;
-        }
+        let seed_grants = async || {
+            for (wallet, path) in [(master_wallet, master_path), (other_wallet, other_path)] {
+                cache
+                    .use_wallet_cache()
+                    .insert(
+                        cache.use_wallet_key(usage, cid_hash, wallet),
+                        CachedPermission::new(true, GrantDeadline::Never),
+                    )
+                    .await;
+                cache
+                    .wallet_derivation_cache()
+                    .insert(cache.wallet_derivation_key(usage, wallet), path)
+                    .await;
+            }
+        };
         let mut action = ClientBuilder::default()
             .api_key(usage_api_key)
             .ipfs_id(cid)
@@ -1504,6 +1500,8 @@ mod tests {
         };
 
         for phase in ["API mode", "after conversion to ChainSecured"] {
+            blockchain_cache::invalidate_for_hash(usage);
+            seed_grants().await;
             match action.handle_op(get_private_key(master_wallet), 0).await {
                 Ok(response) => {
                     let secret = hex_to_bytes(released(response)).unwrap();
@@ -1535,12 +1533,16 @@ mod tests {
             }
         }
 
+        blockchain_cache::invalidate_for_hash(usage);
+        seed_grants().await;
         let pkp_admin = action.handle_op(get_private_key(other_wallet), 0).await;
         assert!(
             pkp_admin.is_err_and(|e| e.to_string().contains("admin wallet or its billing wallet")),
             "a PKP made the account's admin must not be exportable"
         );
 
+        blockchain_cache::invalidate_for_hash(usage);
+        seed_grants().await;
         let unresolved = action.handle_op(get_private_key(other_wallet), 0).await;
         assert!(
             unresolved.is_err_and(|e| e.to_string().contains("resolve the account's admin")),

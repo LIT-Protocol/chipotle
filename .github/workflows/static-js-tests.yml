@@ -25,3 +25,11 @@ jobs:
           node-version: '22'
       - name: Test static SDK and dashboard
         run: node --test lit-static/*.test.mjs lit-static/dapps/dashboard/*.test.mjs
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '9.15.9'
+      - name: Install benchmark verifier
+        working-directory: performance/relay
+        run: pnpm install --frozen-lockfile
+      - name: Test benchmark results and trace matching
+        run: node --test performance/relay/*.test.mjs
