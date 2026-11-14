@@ -117,3 +117,27 @@ pub async fn ensure_granted(
     }
     Ok(())
 }
+
+/// The caller holds the vault lock. Archived actions cannot verify other releases'
+/// credentials and may fall back to root ownership. Require the receipt's key to
+/// verify the selected credentials too, before accepting that authority.
+pub async fn require_current_credentials(
+    tx: &mut Transaction<'_, Postgres>,
+    vault: &str,
+    key: &str,
+) -> Result<(), ApiError> {
+    let policy: Option<serde_json::Value> = sqlx::query_scalar(
+        "SELECT p.signed FROM kc_registry r JOIN kc_policies p ON p.hash=r.policy_hash WHERE r.scope=$1",
+    )
+    .bind(format!("credentials:{vault}"))
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(api::internal)?;
+    if let Some(policy) = policy {
+        let signed: crate::models::Signed =
+            serde_json::from_value(policy).map_err(api::internal)?;
+        crate::crypto::verify_signed(&signed, key, vault)
+            .map_err(|_| api::err(Status::Forbidden, "credentials_release_mismatch"))?;
+    }
+    Ok(())
+}

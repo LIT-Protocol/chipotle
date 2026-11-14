@@ -46,7 +46,7 @@ def check(root, database):
 
 
 def check_dnssec_disabled(root):
-    """The NSEC3 ledger exclusions require DNSSEC to stay uncompiled."""
+    """The DNSSEC ledger and resolver advisory exclusions require DNSSEC to stay uncompiled."""
     for crate in ['lit-actions', 'lit-api-server']:
         result = subprocess.run([
             'cargo', 'tree', '--manifest-path', str(root / crate / 'Cargo.toml'),
@@ -59,7 +59,7 @@ def check_dnssec_disabled(root):
             raise ValueError(f'{crate}: expected one resolved Hickory feature list')
         features = set(lines[0].split(','))
         if features & {'__dnssec', 'dnssec-ring', 'dnssec-aws-lc-rs'}:
-            raise ValueError(f'{crate}: DNSSEC enabled; review the NSEC3 advisory exclusions')
+            raise ValueError(f'{crate}: DNSSEC enabled; review the DNSSEC advisory exclusions')
     print('DNSSEC disabled in both workspaces across all targets and application features')
 
 

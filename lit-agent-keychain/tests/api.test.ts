@@ -22,6 +22,7 @@ import {
   signAgent,
   unhex,
 } from "../protocol/crypto.ts";
+import { authenticatorCode } from "./totp-fixture.ts";
 import { handleMessage } from "../sdk/mcp.mjs";
 const api = process.env.KEYCHAIN_TEST_API;
 const lit = process.env.KEYCHAIN_TEST_LIT || "http://127.0.0.1:55440";
@@ -684,6 +685,217 @@ test(
         404,
       );
       void newest;
+    } finally {
+      globalThis.fetch = original;
+    }
+  },
+);
+
+test(
+  "credential release selection and owner lifecycle",
+  { skip: !api },
+  async () => {
+    const { default: archiveIndex } =
+      await import("../generated/archive-index.ts");
+    const { actionCid, templateStore } = await import("../protocol/actions.ts");
+    // Pin actual pre-fix templates: archive order is by hash, not release age.
+    const fallbackRelease =
+      "409e3ba6eae721c8e2a0a654b846eb8df33986f1fcc869595020f63725f1f4a2";
+    const credentialRelease =
+      "4ca83f7cd984356d56c8bdd455f8ee358cb3dfaa423d7693b34212a0c1b0f3e6";
+    assert.ok(archiveIndex.authority.includes(fallbackRelease));
+    assert.ok(archiveIndex.authority.includes(credentialRelease));
+    const original = globalThis.fetch;
+    const jars = new Map<string, string>();
+    let active = "root";
+    const post = (body: unknown): RequestInit => ({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    globalThis.fetch = async (input, init) => {
+      if (!String(input).startsWith(api!)) return original(input, init);
+      const headers = new Headers(init?.headers);
+      const cookie = jars.get(active);
+      if (cookie) headers.set("Cookie", cookie);
+      const res = await original(input, { ...init, headers });
+      const set = res.headers.get("set-cookie");
+      if (set) jars.set(active, set.split(";")[0]);
+      return res;
+    };
+    try {
+      const root = privateKeyToAccount(`0x${hex(randomBytes())}`);
+      const current = privateKeyToAccount(`0x${hex(randomBytes())}`);
+      const ownerFor = (account: typeof root) => ({
+        kind: "wallet" as const,
+        address: account.address.toLowerCase(),
+      });
+      const signer = (account: typeof root) => async (challenge: any) => ({
+        kind: "wallet" as const,
+        owner: ownerFor(account),
+        challenge,
+        signature: await account.signTypedData(
+          authorizationTypedData(challenge),
+        ),
+      });
+      const authority: Authority = {
+        v: 2,
+        network: "test",
+        registry: api!,
+        owner: ownerFor(root),
+      };
+      const rootClient = new OwnerClient(
+        authority,
+        signer(root),
+        new LitConnection(lit),
+      );
+      // Enroll the historical releases while the vault still uses its root.
+      for (const authorityRelease of [credentialRelease, fallbackRelease]) {
+        await new OwnerClient(
+          authority,
+          signer(root),
+          new LitConnection(lit),
+          120000,
+          { authorityRelease },
+        ).login();
+      }
+      // Record the newest authority before committing credentials under an older one.
+      await rootClient.login();
+      const defaultCid = await rootClient.currentAuthorityCid();
+      const credentialCid = await actionCid(
+        authority,
+        (await templateStore.byHash("authority", credentialRelease, api!)).code,
+      );
+      const fallbackCid = await actionCid(
+        authority,
+        (await templateStore.byHash("authority", fallbackRelease, api!)).code,
+      );
+      const loginDocument = async () => {
+        const { authorityCid, ...doc } = await rootClient.api(
+          "/auth/challenge",
+          post(authority),
+        );
+        return doc;
+      };
+      // A genuine same-release receipt issued before owner replacement cannot
+      // reopen a session after the replacement invalidates existing sessions.
+      const staleLogin = await rootClient.authorize(
+        await loginDocument(),
+        credentialCid,
+      );
+      const credentials = await rootClient.authorize(
+        {
+          v: 2,
+          domain: "lit-keychain/v2",
+          kind: "credentials",
+          vaultId: digest(authority),
+          epoch: 1,
+          previousHash: null,
+          owners: [ownerFor(current)],
+          notBefore: nowSeconds() - 1,
+          expiresAt: null,
+        },
+        credentialCid,
+      );
+      await rootClient.api("/api/credentials", {
+        ...post(credentials),
+        method: "PUT",
+      });
+      await assert.rejects(
+        rootClient.api(
+          "/auth/login",
+          post({ authority, authorization: staleLogin }),
+        ),
+        /challenge_used_or_expired/,
+      );
+      const fallbackLogin = await rootClient.authorize(
+        await loginDocument(),
+        fallbackCid,
+      );
+      await assert.rejects(
+        rootClient.api(
+          "/auth/login",
+          post({ authority, authorization: fallbackLogin }),
+        ),
+        /credentials_release_mismatch/,
+      );
+      await assert.rejects(
+        rootClient.authorize(await loginDocument(), credentialCid),
+      );
+      active = "current";
+      const client = new OwnerClient(
+        authority,
+        signer(current),
+        new LitConnection(lit),
+      );
+      await client.login();
+      const { authorityCid: recorded } = await client.api(
+        "/api/security/challenge",
+        post({ operation: "setup" }),
+      );
+      assert.equal(recorded, defaultCid);
+      assert.notEqual(recorded, credentialCid);
+      // New SDK creation pins both the manifest and its approvals to credentials.
+      const secret = await client.create(
+        "AFTER_RECOVERY",
+        "current-owner-secret",
+      );
+      assert.equal(
+        secret.manifest.document.manifest.authorityCid,
+        credentialCid,
+      );
+      assert.equal((await client.listSecrets()).length, 1);
+      active = "root";
+      await assert.rejects(rootClient.listSecrets(), /401/);
+      await assert.rejects(
+        rootClient.api(
+          `/api/secrets/${secret.manifest.document.manifest.secretId}`,
+          { method: "DELETE" },
+        ),
+        /401/,
+      );
+      active = "current";
+
+      const replacement = {
+        ...credentials.document,
+        epoch: 2,
+        previousHash: digest(credentials.document),
+        owners: [ownerFor(root)],
+      };
+      const takeover = await rootClient.authorize(replacement, fallbackCid);
+      await assert.rejects(
+        client.api("/api/credentials", { ...post(takeover), method: "PUT" }),
+        /credentials_release_mismatch/,
+      );
+      assert.deepEqual(
+        (await client.getCredentials())?.document,
+        credentials.document,
+      );
+      const { authorityCid: ignored, ...securityDocument } = await client.api(
+        "/api/security/challenge",
+        post({ operation: "setup" }),
+      );
+      const foreignSecurityApproval = await rootClient.authorize(
+        securityDocument,
+        fallbackCid,
+      );
+      await assert.rejects(
+        client.api("/api/security/totp/setup", post(foreignSecurityApproval)),
+        /credentials_release_mismatch/,
+      );
+      const setup = await client.setupTwoFactor();
+      const confirmed = await client.confirmTwoFactor(
+        authenticatorCode(setup.secret),
+      );
+      const regenerated = await client.regenerateRecoveryCodes(
+        confirmed.recoveryCodes[0],
+      );
+      await client.disableTwoFactor(regenerated.recoveryCodes[0]);
+      assert.equal((await client.securityStatus()).enabled, false);
+      // Owner changes also stay on the credentials release with the newest SDK.
+      await client.updateCredentials([ownerFor(current)]);
+      await client.login();
+      assert.equal((await client.getCredentials())?.document.epoch, 2);
     } finally {
       globalThis.fetch = original;
     }

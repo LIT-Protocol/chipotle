@@ -295,15 +295,15 @@ async fn verify_approval(
     lit: &Chipotle,
     session: &Session,
     signed: &Signed,
-) -> Result<(), ApiError> {
-    authority::verify_any(pool, lit, &session.vault_id, signed).await?;
+) -> Result<String, ApiError> {
+    let (_, key) = authority::verify_any(pool, lit, &session.vault_id, signed).await?;
     if field(&signed.document, "kind").map_err(api::invalid)? != "login"
         || number(&signed.document, "expiresAt").map_err(api::invalid)?
             <= time::OffsetDateTime::now_utc().unix_timestamp()
     {
         return Err(api::err(Status::Forbidden, "approval_expired"));
     }
-    Ok(())
+    Ok(key)
 }
 async fn consume_approval(
     tx: &mut Tx<'_>,
@@ -328,9 +328,10 @@ pub async fn setup(
     lit: &State<Chipotle>,
     cfg: &State<Config>,
 ) -> ApiResult<Value> {
-    verify_approval(pool, lit, &session, &body).await?;
+    let key = verify_approval(pool, lit, &session, &body).await?;
     let mut tx = pool.begin().await.map_err(api::internal)?;
     lock_session(&mut tx, &session).await?;
+    authority::require_current_credentials(&mut tx, &session.vault_id, &key).await?;
     consume_approval(&mut tx, &session, &body, Operation::Setup).await?;
     if enabled(&mut tx, &session.vault_id).await? {
         return Err(api::err(Status::Conflict, "two_factor_already_enabled"));
@@ -414,10 +415,11 @@ async fn change(
     operation: Operation,
 ) -> ApiResult<Value> {
     attempts(pool, &session.vault_id).await?;
-    verify_approval(pool, lit, &session, &body.authorization).await?;
+    let key = verify_approval(pool, lit, &session, &body.authorization).await?;
     let mut tx = pool.begin().await.map_err(api::internal)?;
     lock_session(&mut tx, &session).await?;
     let removing = matches!(operation, Operation::Disable);
+    authority::require_current_credentials(&mut tx, &session.vault_id, &key).await?;
     consume_approval(&mut tx, &session, &body.authorization, operation).await?;
     verify_code(&mut tx, cfg, &session.vault_id, &body.code).await?;
     let result = if removing {

@@ -47,19 +47,12 @@ Goal: stop the bad version from obtaining keys and serving.
    `DstackApp` (`0x3F91…05FfC`). 2-of-4 approval required.
 2. **Stop the running CVM.** Revocation prevents *future* key issuance and prevents
    the version from booting again — but a CVM that already holds its keys keeps
-   running until restarted. The Phala account owner must explicitly **stop/redeploy**
-   the affected CVM via the Phala CLI/dashboard to take it out of service.
-    The redeploy/restart command is:
-
-    ```bash
-    phala deploy -c docker-compose.deploy.yml --cvm-id <app> --private-key "$PHALA_PRIVATE_KEY"
-    ```
-
-    (See `justfile.deploy` and [deployment.md](deployment.md)); it re-applies the compose and restarts the CVM in
-   place. **TODO/DECIDE (still open, verified 2026-06-25):** whether the built-in Phala
-   gateway can drain in-flight traffic before the restart is not documented anywhere in
-   the repo.
-3. **Re-deploy a known-good version** whose compose hash is still whitelisted.
+   running until stopped. The Phala account owner must explicitly **stop** the
+   affected CVM via the Phala CLI/dashboard to take it out of service.
+3. **Re-deploy a known-good version** using the GitHub Actions workflows in
+   [deployment.md](deployment.md#deployment-workflows). For production, complete
+   the Phase 1 proposal and Safe approval/execution, then dispatch Phase 2 with
+   its deployment context. Do not reapply a locally rendered compose file.
 4. **Assess data exposure.** Any data the bad version could decrypt with its derived
    keys must be considered exposed.
 

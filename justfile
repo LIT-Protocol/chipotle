@@ -1,19 +1,13 @@
 # Conventions: https://github.com/casey/just
 
 image_base := env('DOCKER_IMAGE', 'litptcl/chipotle')
-# Tag used only to satisfy the registry push requirement; the deploy step uses
-# the @sha256: digest captured after push, never this tag. Override with
-# DOCKER_TAG to reuse a previously-pushed image (digest files must then exist).
+# Tag for local Docker builds; override with DOCKER_TAG.
 image_tag := env('DOCKER_TAG', `uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '\n'`)
 image_lit_actions        := image_base + '-lit-actions:'        + image_tag
 image_lit_api_server     := image_base + '-lit-api-server:'     + image_tag
 image_otel_collector     := image_base + '-otel-collector:'     + image_tag
-# main → chipotle-dev; any other branch → chipotle-next (override with PHALA_APP_NAME)
-app_name       := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo chipotle-dev || echo chipotle-next'`
-instance_type  := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo tdx.small || echo tdx.small'`
 gcp_project_id := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo chipotle-dev || echo chipotle-next'`
 node_config    := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo NodeConfig.main.toml || echo NodeConfig.next.toml'`
-domain         := 'test.chipotle.litprotocol.com'
 
 import "justfile.deploy"
 import "justfile.sim"

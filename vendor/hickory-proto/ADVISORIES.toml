@@ -42,11 +42,36 @@ status = "fixed"
 note = "Reviewed in dependency maintenance."
 
 [[advisories]]
-id = "RUSTSEC-0000-0000.nsec3-name-checks"
+id = "RUSTSEC-2026-0505"
 status = "not-affected"
 note = "Reviewed in dependency maintenance."
 
 [[advisories]]
-id = "RUSTSEC-0000-0000.nsec3-wraparound-inverted"
+id = "RUSTSEC-2026-0504"
+status = "not-affected"
+note = "Reviewed in dependency maintenance."
+
+[[advisories]]
+id = "RUSTSEC-2026-0511"
+status = "not-affected"
+note = "Reviewed in dependency maintenance."
+
+[[advisories]]
+id = "RUSTSEC-2026-0512"
+status = "not-affected"
+note = "Reviewed in dependency maintenance."
+
+[[advisories]]
+id = "RUSTSEC-2026-0530"
+status = "not-affected"
+note = "Reviewed in dependency maintenance."
+
+[[advisories]]
+id = "RUSTSEC-2026-0531"
+status = "not-affected"
+note = "Reviewed in dependency maintenance."
+
+[[advisories]]
+id = "RUSTSEC-2026-0532"
 status = "not-affected"
 note = "Reviewed in dependency maintenance."
