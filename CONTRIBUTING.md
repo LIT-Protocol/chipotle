@@ -77,7 +77,7 @@ cd lit-api-server && cargo run --bin openapi_spec > ../spec.json && cd ..
 npx @grafana/openapi-to-k6 spec.json ./k6
 ```
 
-**Deploy** (Phala Cloud): see `justfile.deploy` (`just deploy <app>`) and
+**Deploy** (Phala Cloud): use the GitHub Actions workflows described in
 [architectureDocs/deployment/deployment.md](architectureDocs/deployment/deployment.md).
 
 ## PR conventions

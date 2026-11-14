@@ -24,7 +24,7 @@ flowchart TB
         E -->|rejected| X["Upgrade blocked"]
     end
 
-    subgraph CI["CI/CD (GitHub Actions / just deploy)"]
+    subgraph CI["CI/CD (GitHub Actions)"]
         G["Substitute @sha256: digest\nin docker-compose"] --> H["phala deploy\n(or DeRoT deploy)"]
         H --> I["New CVM starts with new image"]
     end
@@ -107,6 +107,6 @@ To block a rolled-back version, the owner removes its compose-hash from DstackAp
 ## References
 
 - [derot-key-issuance.md](derot-key-issuance.md) — how keys are issued after deploy
-- [deployment.md](deployment.md) — deploy workflow (`just deploy`, GitHub Actions)
+- [deployment.md](deployment.md) — deploy workflow (GitHub Actions)
 - [requirements.md DR-1, FR-2.6](planning/requirements.md)
 - [Phala: Cloud vs Onchain KMS](https://docs.phala.com/phala-cloud/key-management/cloud-vs-onchain-kms)

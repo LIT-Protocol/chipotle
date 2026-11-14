@@ -58,7 +58,7 @@ flowchart TB
 | [requirements.md](requirements.md) | One-time CVM verification — requirements |
 | [PLAN.md](PLAN.md) | Implementation plan (traceability to requirements) |
 | [PLAN-phase-1.md](PLAN-phase-1.md) through [PLAN-phase-4.md](PLAN-phase-4.md) | Per-phase plans with parallelizable workflows |
-| `.github/workflows/deploy-phala.yml` | GitHub Actions workflow |
+| `.github/workflows/deploy-staging.yml`, `deploy-prod-1-propose.yml`, `deploy-prod-2-execute-manual.yml` | Staging and production deployment workflows |
 | `Dockerfile.phala` | Multi-stage build for both binaries |
 | `docker-compose.phala.yml` | Service definitions and shared socket volume |
 | `.dockerignore` | Excludes build artifacts from Docker context |
@@ -88,52 +88,44 @@ Configure these in **Settings → Secrets and variables → Actions**:
 | `PHALA_APP_NAME` (variable) | CVM name, e.g. `lit-api-server` |
 | `DOCKERHUB_TOKEN` (secret) | Docker Hub PAT (Account Settings > Security > Access Tokens) |
 
-## Workflow Steps
+## Deployment workflows
 
-1. **Checkout** — Clone the repository
-2. **Log in to registry** — Authenticate with Docker Hub or GHCR
-3. **Build and push** — Build the image, tag with a unique UUID, and push
-4. **Prepare compose** — Substitute `${DOCKER_IMAGE}` with the built image tag
-5. **Deploy** — Run `phala deploy` with `--instance-type tdx.large`
+Routine cloud deployments run through GitHub Actions. Configure credentials in the repository's
+Actions secrets and variables as documented in the workflow files. Keep credential values
+out of compose documents: compose is public attestation material. The workflows deliver
+secrets separately as encrypted CVM environment data.
 
-## Manual Deployment
+- **Staging:** [Deploy Staging](../../.github/workflows/deploy-staging.yml) runs on
+  pushes to `main` and supports manual dispatch. Its optional `phala_cvm_name` input
+  selects a target CVM, including a freshly provisioned replica.
+- **Production:** [Deploy Prod 1: Propose Compose Hash](../../.github/workflows/deploy-prod-1-propose.yml)
+  builds and signs images, provisions the compose update, encrypts environment values,
+  and proposes the compose hash to the Safe. It runs on version tags or manual dispatch.
+  After Safe signers approve and execute the transaction, manually dispatch
+  [Deploy Prod 2: Execute and Verify](../../.github/workflows/deploy-prod-2-execute-manual.yml)
+  with the Phase 1 `version_tag` and `safe_tx_hash`.
 
-Using [just](https://github.com/casey/just) (recommended):
+Production releases require release-owner authorization. See
+[Upgrading VM Code](vm-code-upgrade.md) for governance and release ordering.
+For recovery, select a known-good revision through these workflows. Dispatching an
+older ref runs that ref's workflow code: verify that it includes the current
+live/cold target checks before using it. Production Phase 1 rebuilds images, so a
+previously released revision can produce a new compose hash requiring Safe approval.
+Newly provisioned replicas require the appropriate Phala device allowlisting before
+deployment (see the workflow comments).
 
-```bash
-just setup       # optional: install Phala CLI (requires npm)
-just deploy      # builds with UUID tag, pushes to registry, and deploys that image
-```
+Fresh-contract bootstrap has a separate manual procedure in
+[the API deployment runbook](../../lit-api-server/deploy.md#step-3--bring-up-the-phala-tee-manually-and-keep-it-live)
+to keep the CVM running while payers are registered. That procedure passes secrets
+separately using encrypted environment delivery. Never substitute credential values
+into compose content, whether using CI or that bootstrap procedure.
 
-**Prerequisites:** Log in to Docker Hub (`docker login`) and ensure you have push access to `litptcl/chipotle`. The deploy command updates an existing CVM by name; for first-time deploy when no CVM exists, use `just deploy-new`.
+## Local Docker development
 
-Override with `DOCKER_IMAGE` (repo path without tag) or `DOCKER_TAG` (to pin a specific build):
-
-```bash
-DOCKER_IMAGE=ghcr.io/owner/chipotle just deploy
-DOCKER_TAG=abc123-def456 just deploy   # deploy a specific tag
-```
-
-Or run the commands directly (after `docker login` and `phala login`):
-
-```bash
-# Build with UUID tag, push, and deploy
-TAG=$(uuidgen | tr '[:upper:]' '[:lower:]')
-docker build -f Dockerfile.phala -t litptcl/chipotle:$TAG .
-docker push litptcl/chipotle:$TAG
-sed "s|\${DOCKER_IMAGE}|litptcl/chipotle:$TAG|g" docker-compose.phala.yml > docker-compose.deploy.yml
-phala deploy -c docker-compose.deploy.yml -n lit-api-server --instance-type tdx.large
-```
-
-Environment variables: `DOCKER_IMAGE` (default: `litptcl/chipotle`, repo path without tag), `DOCKER_TAG` (default: auto-generated UUID), `PHALA_APP_NAME` (default: `lit-api-server`), `PHALA_INSTANCE_TYPE` (default: `tdx.large`).
-
-## Instance Type
-
-The workflow uses `tdx.large`. For custom sizing:
-
-```bash
-phala deploy --vcpu 1 --memory 2048MB --disk-size 40GB ...
-```
+`just docker-build` builds the three service images; `just docker-run-local` builds
+and starts them with Docker Compose. `DOCKER_IMAGE` overrides the image repository
+base and `DOCKER_TAG` overrides the local image tag. These commands do not deploy
+to Phala Cloud. `just setup` installs the Phala CLI for debugging, such as `just ssh`.
 
 ## Integration Testing
 

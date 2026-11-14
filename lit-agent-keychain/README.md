@@ -34,13 +34,21 @@ The requester still needs an authorized agent key. See [SECURITY.md](SECURITY.md
 
 ## SDK release coordination
 
-This source includes SDK **2.3.1** with updated dependencies. The API, CLI and
-MCP interfaces remain compatible with 2.3.0. Client string limits use Unicode
-code points; action templates use UTF-16 units, so some input accepted by the
-client may be rejected during action execution.
+This source prepares SDK **2.3.1**, a dependency patch. The SDK's zod goes
+from 4.3.6 to 4.6.7, both bundled and declared, for GHSA-mrhx-c7xc-m3w5: an
+oversized array could exhaust memory during validation before its length
+check ran. The API, CLI, MCP and checks are unchanged from 2.3.0, with one
+validation difference. zod 4.5+ counts string length in code points, not
+UTF-16 units, so the client now accepts emoji-heavy text up to the limit in
+code points: a grant label of 65 to 128 emoji, say, or a Slack message over
+4,000 UTF-16 units. The actions still count UTF-16 units and reject such
+text; the request now fails there instead of in the client.
 
-Action releases are pinned by the catalog lock. Existing secrets keep their
-pinned action release; clients must support the catalog entries they use.
+It is not a template release: the catalog lock and archived templates do not
+change. Templates still bundle zod 4.3.6 through the `zod-action-templates`
+alias (see `scripts/build-actions.ts`). Moving them to a new zod would be a
+template release (see 2.2.1), and agents would need a new SDK to read secrets
+created after it.
 
 SDK 2.3.0 added an opt-in `verifyLitEndpoint()` that reads `/attestation/v2`:
 the OS image is tied to the hardware measurement through the dstack KMS
@@ -107,7 +115,7 @@ Consequences, all handled by the release mechanism described in
   release still takes one signature per document (`PRE_BATCH_AUTHORITY_HASHES`).
 
 Release checks: run `npm test` and `npm run build`, publish through the normal
-maintainer release process, verify `npm view @lit-protocol/keychain@2.3.1 version`,
+maintainer release process, verify `npm view @lit-protocol/keychain@2.4.0 version`,
 then repeat the strict external TypeScript consumer and attestation-enabled Node
 smoke test from the registry artifact. Only then deploy the owner UI/API and create,
 rotate and read a secret against production. See the QA reports under `docs/` for

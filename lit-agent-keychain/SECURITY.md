@@ -270,7 +270,7 @@ the hash of its owner document, not of any code, so a vault keeps working across
 releases:
 
 - The API accepts a sign-in receipt from any released authority version bound to the
-  vault's owner document. The version that verifies is recorded for the vault
+  vault's owner document and able to verify its selected credentials. The version that verifies is recorded for the vault
   (`kc_vault_authorities`) and granted to its execution group the first time it is
   used. The vault's current authority only ever moves to a newer release.
 - Each secret pins the authority release that approved it. Policy updates, rotations
@@ -279,19 +279,25 @@ releases:
   fetched by hash from `/api/templates/<sha256>` and checked against the hash list
   compiled into the client, so the registry cannot introduce a release the client was
   not built to trust.
-- New secrets pin the newest release the client knows. Sign-in tries the newest
-  release first and falls back to the vault's recorded release if the newest denies
-  the owner.
+- New secrets pin the release that verifies the selected credentials (the client's
+  default release for a fresh vault). Sign-in and owner-set
+  changes use the release that verifies the selected credentials. Without a
+  credentials policy, sign-in tries the newest release first.
 
-Credentials (the vault's owner set) are receipted by whichever release approved
-them, and a release can only verify its own receipts. A release that cannot verify
-the current credentials receipt treats the vault as having no credentials policy:
-the root owner from the vault document is accepted and nothing else is. This grants
-no capability beyond the documented operator trust, since the operator can already
-serve a null credentials state for any vault, and it never accepts an unverifiable
-owner set. Consequence: a vault whose root owner was replaced under release A keeps
-operating under A (its recorded release) until the root owner, or an owner approved
-under a newer release, re-approves the owner set there.
+Credentials (the vault's owner set) remain bound to the release that approved
+them. A non-null credentials policy that the current action cannot verify denies
+authorization; only an explicit null state permits root bootstrap. The API also
+requires login and credential-replacement receipts to use a key that verifies the
+currently selected credentials, under the vault transaction lock.
+
+Existing owners continue using the release that signed their credentials.
+Cross-release credential migration is deliberately disabled until a protocol can
+verify predecessor receipts and preserve current-owner authorization.
+Secret mutations also require a session issued through credentials-gated login,
+including completion of a pending 2FA login. Credential replacement invalidates
+existing sessions, pending 2FA logins, and outstanding owner challenges, preventing
+a previously minted login receipt from reopening a session after replacement.
+Operator rollback of registry state remains within the documented trust boundary.
 
 ## "Use inside Lit" actions
 

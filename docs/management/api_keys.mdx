@@ -33,6 +33,10 @@ Usage keys are scoped, rotatable keys intended for day-to-day operations — for
 - **Authentication:** Pass the usage key in the `X-Api-Key` (or `Authorization: Bearer`) header just as you would the account key.
 - **Security model:** Usage keys enforce least-privilege access. By scoping each key to specific groups (and therefore specific IPFS actions and PKPs), you can give a key to a client or service without granting it access to your full account. If a key is compromised or no longer needed, delete it — this has no impact on other keys or your account.
 
+<Warning>
+API-mode usage keys also have backing wallets whose private keys are the API credentials. Allowing another key to use one of these wallets with code that discloses its secret grants that credential's permissions too. An **all-wallets** group includes usage-key wallets. Use dedicated application wallets and explicit wallet membership to keep credentials separate; see [Usage-key wallets](/architecture/groups#usage-key-wallets). Deleting the original calling key does not revoke another credential it has recovered.
+</Warning>
+
 #### Wildcard execution and wallet access
 
 Set `execute_in_groups: [0]` (`executeInGroups: [0]` in the SDK) to run arbitrary Lit Action code without registering an action or creating a group. Paste this usage key into the Dashboard Action Runner to try code such as `console.log("hello")`. An account master key is an administrative credential; it does not automatically grant action execution.

@@ -401,9 +401,9 @@ test("Stripe redirects, upstream errors and reflected strings never expose a cre
     });
   }
 });
-test("authority treats a credentials receipt from another release like the original credential", async () => {
+test("authority rejects foreign credentials instead of restoring the original owner", async () => {
   // A vault whose owner set was approved under a different authority release:
-  // this release cannot verify that receipt, so it sees only the root owner.
+  // this release cannot verify that receipt and must deny authorization.
   const f = await fixture();
   const otherOwner = {
     kind: "wallet" as const,
@@ -428,10 +428,10 @@ test("authority treats a credentials receipt from another release like the origi
       receipt: makeReceipt(credentials, foreignKey, f.now),
     },
   );
-  // Root owner still authorizes (equivalent to the operator serving null)…
+  // A removed root cannot authorize under a different release.
   const proof = await f.ownerProof(f.policy);
   const out = await f.h.run(f.authority, { document: f.policy, proof });
-  assert.equal(out.ok, true);
+  assert.equal(out.ok, false);
   // …but the unverifiable owner set grants nothing: a forged owner is denied.
   const forged = structuredClone(proof);
   forged.owner = otherOwner;
