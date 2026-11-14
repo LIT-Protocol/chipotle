@@ -86,6 +86,9 @@ pub(super) async fn get_version() -> OpenApiResponse<VersionResponse, ErrMessage
         response: ApiResult(Ok(VersionResponse {
             version: crate::version::CARGO_PKG_VERSION.to_string(),
             commit_version: crate::version::GIT_VERSION.to_string(),
+            cvm_name: std::env::var("PHALA_CVM_NAME")
+                .ok()
+                .filter(|name| !name.trim().is_empty()),
             name: crate::version::CARGO_PKG_NAME.to_string(),
             submodule_versions: crate::version::GIT_SUBMODULE_VERSIONS
                 .iter()
