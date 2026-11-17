@@ -195,7 +195,7 @@ pub async fn get_cache_metadata(
         .collect();
 
     // Most recently executed first.
-    entries.sort_by(|a, b| b.last_run_at_ms.cmp(&a.last_run_at_ms));
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.last_run_at_ms));
 
     let total_size_bytes = entries.iter().map(|e| e.size_bytes).sum();
 
