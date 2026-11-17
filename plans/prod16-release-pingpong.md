@@ -89,3 +89,32 @@ Offline tests cover tag-scoped bootstrap, pair membership, production app checks
 manual override conflicts and stale/replaced target snapshots. Shared selector and
 recovery tests cover health retry and rollback behaviour. Workflow syntax is checked
 with actionlint. Live production execution remains an operational acceptance step.
+
+## Next validation completed — 2026-11-17
+
+Validated public implementation commit `f408c107` on both prod16 replicas:
+
+- [Bootstrap run 44165328314](https://github.com/LIT-Protocol/chipotle/actions/runs/44165328314)
+  passed direct identity/readiness, unified AMD attestation, OpenAPI, smoke,
+  correctness and soak. Bootstrap intentionally skipped automatic public cutover
+  and retirement. After verifying A directly, stopped B and the old prod4 replica,
+  then verified the public endpoint served healthy A with the expected commit.
+- [Normal run 44170929654](https://github.com/LIT-Protocol/chipotle/actions/runs/44170929654)
+  was dispatched without bootstrap or target overrides. It selected stopped B,
+  passed all verification gates and public cutover, and automatically stopped A.
+  The run completed successfully; rollback was not needed.
+- After completion, both B's direct endpoint and the public next endpoint returned
+  B's `cvm_name`, commit `v1.1.20-8-gf408c1070`, and passing health fields. A and
+  the old prod4 replica were stopped with no operation in progress.
+
+The configured pair remains `NEXT_CVM_A=chipotle-next-rep-sa6xj-rep-adnb3-rep-r1su8`
+(B, currently serving) and `NEXT_CVM_B=chipotle-next-rep-sa6xj-rep-adnb3`
+(A, stopped). Automatic next deployments remain enabled. The next normal deployment
+should select A and retire B. The completed normal test proves A-to-B cutover;
+B-to-A normal cutover has not yet been exercised.
+
+These were feature-branch dispatches, so `mark-perf-gate` was intentionally skipped.
+Merge public PR #760, then #761 (retargeting to main after its prerequisite merges),
+and get a successful main deployment before using its perf gate for production.
+This production draft remains based on #761 until that PR merges. Production
+infrastructure and Safe state have not changed.
