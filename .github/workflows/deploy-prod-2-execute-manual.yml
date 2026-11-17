@@ -26,11 +26,12 @@ on:
         type: string
 
 concurrency:
-  group: deploy-phala-execute
+  group: deploy-phala-prod
   cancel-in-progress: false
 
 jobs:
   trigger-static-deploy:
+    needs: [publish-release]
     runs-on: self-hosted
     steps:
       - name: Trigger static site deploy
@@ -55,6 +56,9 @@ jobs:
       encrypted_env: ${{ steps.read.outputs.encrypted_env }}
       app_auth_address: ${{ steps.read.outputs.app_auth_address }}
       provision_hash: ${{ steps.read.outputs.provision_hash }}
+      previous_cvm: ${{ steps.read.outputs.previous_cvm }}
+      bootstrap: ${{ steps.read.outputs.bootstrap }}
+      context_sha: ${{ steps.read.outputs.context_sha }}
     steps:
       - name: Install GitHub CLI
         run: |
@@ -79,7 +83,10 @@ jobs:
       - name: Read deployment context
         id: read
         run: |
-          cat deploy-context.json
+          echo "context_sha=$(sha256sum deploy-context.json | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          jq -e '.selection | (.previous | type == "string") and (.target | type == "string") and (.bootstrap | type == "boolean")' deploy-context.json
+          echo "previous_cvm=$(jq -r .selection.previous deploy-context.json)" >> "$GITHUB_OUTPUT"
+          echo "bootstrap=$(jq -r .selection.bootstrap deploy-context.json)" >> "$GITHUB_OUTPUT"
           for key in compose_hash provision_hash safe_tx_hash phala_app_name base_url api_root_url safe_address app_auth_address version_tag source_sha encrypted_env; do
             val=$(jq -r ".$key" deploy-context.json)
             echo "$key=$val" >> "$GITHUB_OUTPUT"
@@ -156,6 +163,9 @@ jobs:
             --compose-hash "${{ needs.download-context.outputs.compose_hash }}"
 
   commit-deploy:
+    outputs:
+      mutation_started: ${{ steps.mutation.outputs.started }}
+    environment: production
     needs: [download-context, verify-compose-hash-onchain]
     runs-on: self-hosted
     steps:
@@ -167,7 +177,32 @@ jobs:
           node-version: "20"
 
       - name: Install Phala CLI
-        run: npm install -g phala
+        run: npm install -g phala@1.2.4
+
+      - name: Verify system Python
+        run: python3 -c 'import sys; assert sys.version_info >= (3, 9)'
+
+      - name: Revalidate the approved target snapshot before committing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.version_tag }}
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          PROD_APP_ID: ${{ vars.APP_AUTH_ADDRESS_CHIPOTLE_PROD }}
+          EXPECTED_TARGET: ${{ needs.download-context.outputs.phala_app_name }}
+          EXPECTED_HASH: ${{ needs.download-context.outputs.provision_hash }}
+          EXPECTED_SAFE_TX: ${{ needs.download-context.outputs.safe_tx_hash }}
+          EXPECTED_CONTEXT_SHA: ${{ needs.download-context.outputs.context_sha }}
+        run: |
+          gh release download "$RELEASE_TAG" --pattern deploy-context.json --clobber
+          test "$(sha256sum deploy-context.json | cut -d' ' -f1)" = "$EXPECTED_CONTEXT_SHA"
+          jq -e --arg target "$EXPECTED_TARGET" --arg hash "$EXPECTED_HASH" --arg safe "$EXPECTED_SAFE_TX" \
+            '.phala_app_name == $target and .provision_hash == $hash and .safe_tx_hash == $safe' deploy-context.json
+          python3 scripts/phala-prod-target.py validate deploy-context.json
+
+      - name: Record mutation boundary
+        id: mutation
+        run: echo "started=true" >> "$GITHUB_OUTPUT"
 
       - name: Commit deployment to Phala (phase 2)
         env:
@@ -222,7 +257,7 @@ jobs:
                 exit 0
                 ;;
               running) exit 0 ;;
-              starting|stopping|updating|restarting) sleep 5 ;;
+              starting|stopping|updating|restarting|processing) sleep 5 ;;
               *)
                 echo "::error::Unexpected CVM status '$STATUS' for '$PHALA_APP_NAME'"
                 exit 1
@@ -236,29 +271,32 @@ jobs:
     needs: [commit-deploy, download-context]
     uses: ./.github/workflows/wait-for-api-restart.yml
     with:
-      api_root_url: https://${{ vars.DOMAIN_PROD }}/core/v1
+      phala_app_name: ${{ needs.download-context.outputs.phala_app_name }}
+      expected_cvm_name: ${{ needs.download-context.outputs.phala_app_name }}
       expected_sha: ${{ needs.download-context.outputs.source_sha }}
       runner: '["self-hosted"]'
+    secrets:
+      PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
 
   verify-attestation:
     needs: [wait-for-api-available, download-context]
     uses: ./.github/workflows/verify-attestation.yml
     with:
-      base_url: https://${{ vars.DOMAIN_PROD }}
+      base_url: ${{ needs.wait-for-api-available.outputs.base_url }}
       runner: '["self-hosted"]'
 
   openapi-spec-check:
     needs: [wait-for-api-available]
     uses: ./.github/workflows/openapi-spec-check.yml
     with:
-      api_root_url: https://${{ vars.DOMAIN_PROD }}/core/v1
+      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
       runner: '["self-hosted"]'
 
   k6-smoke:
     needs: [wait-for-api-available, openapi-spec-check]
     uses: ./.github/workflows/k6-smoke.yml
     with:
-      api_root_url: https://${{ vars.DOMAIN_PROD }}/core/v1
+      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
       env: prod
     secrets:
       accounts_json: ${{ secrets.K6_ACCOUNTS_PROD_JSON }}
@@ -267,7 +305,7 @@ jobs:
     needs: [wait-for-api-available, k6-smoke]
     uses: ./.github/workflows/k6-correctness.yml
     with:
-      api_root_url: https://${{ vars.DOMAIN_PROD }}/core/v1
+      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
       env: prod
     secrets:
       accounts_json: ${{ secrets.K6_ACCOUNTS_PROD_JSON }}
@@ -275,7 +313,7 @@ jobs:
   # Publish the draft GitHub release created by Phase 1 after all verification passes.
   publish-release:
     if: needs.download-context.outputs.version_tag != ''
-    needs: [download-context, k6-correctness, verify-attestation]
+    needs: [download-context, retire-previous]
     runs-on: self-hosted
     permissions:
       contents: write
@@ -296,3 +334,76 @@ jobs:
         run: |
           gh release delete-asset "${{ needs.download-context.outputs.version_tag }}" deploy-context.json --yes || true
           gh release edit "${{ needs.download-context.outputs.version_tag }}" --draft=false
+
+  confirm-cutover:
+    needs: [download-context, wait-for-api-available, verify-attestation, openapi-spec-check, k6-smoke, k6-correctness]
+    uses: ./.github/workflows/wait-for-api-restart.yml
+    with:
+      api_root_url: ${{ needs.download-context.outputs.api_root_url }}
+      expected_sha: ${{ needs.download-context.outputs.source_sha }}
+      expected_cvm_name: ${{ needs.download-context.outputs.phala_app_name }}
+      timeout: 300
+
+  retire-previous:
+    needs: [download-context, confirm-cutover]
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install -g phala@1.2.4
+      - name: Retire verified previous replica
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          OLD: ${{ needs.download-context.outputs.previous_cvm }}
+          NEW: ${{ needs.download-context.outputs.phala_app_name }}
+          PUBLIC_URL: ${{ needs.download-context.outputs.base_url }}
+        run: python3 scripts/phala-pingpong.py retire "$OLD" "$NEW" "$PUBLIC_URL"
+
+  rollback-on-failure:
+    needs: [download-context, commit-deploy, wait-for-api-available, verify-attestation, openapi-spec-check, k6-smoke, k6-correctness, confirm-cutover, retire-previous]
+    if: >-
+      ${{ always() && needs.download-context.result == 'success'
+          && needs.commit-deploy.outputs.mutation_started == 'true'
+          && (needs.commit-deploy.result == 'failure'
+              || needs.wait-for-api-available.result == 'failure'
+              || needs.verify-attestation.result == 'failure'
+              || needs.openapi-spec-check.result == 'failure'
+              || needs.k6-smoke.result == 'failure'
+              || needs.k6-correctness.result == 'failure'
+              || needs.confirm-cutover.result == 'failure'
+              || needs.retire-previous.result == 'failure') }}
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install -g phala@1.2.4
+      - name: Require recovery tools
+        run: |
+          python3 -c 'import sys; assert sys.version_info >= (3, 9)'
+          if ! command -v aws >/dev/null 2>&1; then
+            tmp=$(mktemp -d)
+            trap 'rm -rf "$tmp"' EXIT
+            curl -fsSL --retry 3 "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "$tmp/awscliv2.zip"
+            unzip -q "$tmp/awscliv2.zip" -d "$tmp"
+            "$tmp/aws/install" --update --install-dir "$HOME/.local/aws-cli" --bin-dir "$HOME/.local/bin"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Recover previous authorized deployment
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
+          CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
+          AWS_DEFAULT_REGION: ${{ vars.CERTBOT_AWS_REGION }}
+          OLD: ${{ needs.download-context.outputs.previous_cvm }}
+          NEW: ${{ needs.download-context.outputs.phala_app_name }}
+          PUBLIC_URL: ${{ needs.download-context.outputs.base_url }}
+          BOOTSTRAP: ${{ needs.download-context.outputs.bootstrap }}
+        run: |
+          ACTION=rollback
+          if [ "$BOOTSTRAP" = "true" ]; then ACTION=rollback-bootstrap; fi
+          python3 scripts/phala-pingpong.py "$ACTION" "$OLD" "$NEW" "$PUBLIC_URL"
