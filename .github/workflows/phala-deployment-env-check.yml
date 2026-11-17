@@ -40,3 +40,6 @@ jobs:
           python3 -m venv "$VENV"
           "$VENV/bin/python" -m pip install PyYAML==6.0.2
           "$VENV/bin/python" scripts/test-phala-deployment-env.py
+
+      - name: Check replica selection and recovery guards
+        run: python3 -B scripts/test-phala-pingpong.py

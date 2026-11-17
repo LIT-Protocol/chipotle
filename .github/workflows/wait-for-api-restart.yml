@@ -30,6 +30,11 @@ on:
         description: "Site base URL without the /core/v1 suffix (e.g. https://example.com)"
         value: ${{ jobs.wait.outputs.base_url }}
     inputs:
+      expected_cvm_name:
+        description: "Expected replica name returned with the version (optional)"
+        required: false
+        type: string
+        default: ''
       expected_sha:
         description: "Expected git commit SHA for the new deployment (omit to skip version check)"
         required: false
@@ -79,7 +84,7 @@ jobs:
 
       - name: Install Phala CLI
         if: inputs.phala_app_name != ''
-        run: npm install -g phala
+        run: npm install -g phala@1.2.4
 
       - name: Resolve API base URL
         id: resolve-url
@@ -88,14 +93,8 @@ jobs:
         run: |
           if [ -n "${{ inputs.phala_app_name }}" ]; then
             CVM_JSON=$(phala cvms get "${{ inputs.phala_app_name }}" --json)
-            # Try multiple patterns: endpoints (prod), public_urls (Phala docs), prefer -8000. (app port)
-            APP_URL=$(echo "$CVM_JSON" | jq -r '.endpoints[]? | select(.app != null and (.app | tostring | test("-8000\\."))) | .app' | head -1)
-            if [ -z "$APP_URL" ]; then
-              APP_URL=$(echo "$CVM_JSON" | jq -r '.public_urls[0].app // empty')
-            fi
-            if [ -z "$APP_URL" ]; then
-              APP_URL=$(echo "$CVM_JSON" | jq -r '(.endpoints // [])[0].app // empty')
-            fi
+            # Shared app URLs may hit another replica on the same gateway.
+            APP_URL=$(echo "$CVM_JSON" | jq -er '[.endpoints[]? | .instance // empty | select(test("^https://[^/]+-8000\\."))] | if length == 1 then .[0] else error("Expected one instance API URL") end')
             if [ -z "$APP_URL" ]; then
               echo "Could not get public URL from phala cvms get"
               exit 1
@@ -113,8 +112,11 @@ jobs:
           echo "base_url=${BASE_URL%/core/v1}" >> "$GITHUB_OUTPUT"
           echo "API base URL: $BASE_URL"
 
-      - name: Wait for expected version
-        if: inputs.expected_sha != ''
+      - name: Wait for expected version and replica
+        if: inputs.expected_sha != '' || inputs.expected_cvm_name != ''
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_CVM: ${{ inputs.expected_cvm_name }}
         run: |
           BASE_URL="${{ steps.resolve-url.outputs.api_root_url }}"
           TIMEOUT="${{ inputs.timeout }}"
@@ -130,16 +132,19 @@ jobs:
           # differ by a character (e.g. g615bf66 vs g615bf664), so we accept
           # any pair where one side is a prefix of the other — the shorter
           # SHA is always a prefix of the longer one.
-          EXPECTED_VERSION=$(git describe --always "${{ inputs.expected_sha }}")
+          EXPECTED_VERSION=""
+          if [ -n "$EXPECTED_SHA" ]; then EXPECTED_VERSION=$(git describe --always "$EXPECTED_SHA"); fi
 
           echo "Polling $VERSION_URL for commit_version == $EXPECTED_VERSION (timeout: ${TIMEOUT}s)..."
           deadline=$(( $(date +%s) + TIMEOUT ))
 
           while true; do
-            CURRENT_VERSION=$(curl -sf "$VERSION_URL" 2>/dev/null | jq -r '.commit_version // empty' 2>/dev/null || true)
+            RESPONSE=$(curl -fsS --max-time 10 -H 'Cache-Control: no-cache' "$VERSION_URL" 2>/dev/null || true)
+            CURRENT_VERSION=$(printf '%s' "$RESPONSE" | jq -r '.commit_version // empty' 2>/dev/null || true)
+            CURRENT_CVM=$(printf '%s' "$RESPONSE" | jq -r '.cvm_name // empty' 2>/dev/null || true)
             case "$EXPECTED_VERSION" in "$CURRENT_VERSION"*) PREFIX_MATCH=1 ;; *) PREFIX_MATCH=0 ;; esac
             case "$CURRENT_VERSION" in "$EXPECTED_VERSION"*) REVERSE_MATCH=1 ;; *) REVERSE_MATCH=0 ;; esac
-            if [ -n "$CURRENT_VERSION" ] && { [ "$PREFIX_MATCH" = 1 ] || [ "$REVERSE_MATCH" = 1 ]; }; then
+            if { [ -z "$EXPECTED_CVM" ] || [ "$CURRENT_CVM" = "$EXPECTED_CVM" ]; } && [ -n "$CURRENT_VERSION" ] && { [ -z "$EXPECTED_VERSION" ] || [ "$PREFIX_MATCH" = 1 ] || [ "$REVERSE_MATCH" = 1 ]; }; then
               echo "Version matched: $CURRENT_VERSION (expected: $EXPECTED_VERSION)"
               break
             fi

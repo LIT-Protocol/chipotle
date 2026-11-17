@@ -18,6 +18,15 @@
       "package": "zod",
       "paths": ["node_modules/zod-action-templates"],
       "reason": "zod 4.3.6 bundled into the Lit Action templates, whose bytes are pinned in actions/catalog.lock.json. Moving them to zod 4.6.7 changes every template, which is a template release: agents on older SDKs could not read secrets created after it. Each execution runs under the Lit Action memory limit, so oversized input fails only that execution. Remove at the next template release."
+    },
+    {
+      "advisory": "GHSA-fc5q-39xc-vjpf",
+      "package": "picomatch",
+      "paths": [
+        "node_modules/picomatch",
+        "node_modules/anymatch/node_modules/picomatch"
+      ],
+      "reason": "No patched release is published as of 2026-11-17. The top-level copy is used by Vite/fdir/tinyglobby for repository-controlled build globs. The nested copy comes from unstorage through WalletConnect; anymatch is imported by its fs driver, whereas WalletConnect uses fs-lite and the browser uses browser storage. No application code imports picomatch or exposes user-supplied glob compilation. Remove when a patched release is available; re-review if build glob inputs or storage drivers change. This exception applies only to these two installation paths and this advisory."
     }
   ]
 }

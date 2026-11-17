@@ -75,3 +75,18 @@ note = "Reviewed in dependency maintenance."
 id = "RUSTSEC-2026-0532"
 status = "not-affected"
 note = "Reviewed in dependency maintenance."
+
+[[advisories]]
+id = "RUSTSEC-2026-0549"
+status = "not-affected"
+note = "Reviewed in dependency maintenance; covered by the enforced DNSSEC-disabled feature check."
+
+[[advisories]]
+id = "RUSTSEC-2026-0550"
+status = "not-affected"
+note = "Reviewed in dependency maintenance; covered by the enforced DNSSEC-disabled feature check."
+
+[[advisories]]
+id = "RUSTSEC-2026-0551"
+status = "not-affected"
+note = "Reviewed in dependency maintenance; covered by the enforced DNSSEC-disabled feature check."
