@@ -369,7 +369,11 @@ mod unified_rpc_tests {
         let evidence = attest_at(&socket).await.unwrap();
         assert_eq!(evidence.attestation, "01020304");
         let request = worker.join().unwrap();
-        assert!(request.starts_with("POST /Attest "));
+        assert!(
+            request.starts_with("POST http://unix.socket/Attest "),
+            "{}",
+            request.lines().next().unwrap()
+        );
         let body: serde_json::Value =
             serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
         assert_eq!(body["report_data"], "00".repeat(64));
