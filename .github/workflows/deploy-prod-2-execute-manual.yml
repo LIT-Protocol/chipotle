@@ -177,7 +177,7 @@ jobs:
           node-version: "20"
 
       - name: Install Phala CLI
-        run: npm install -g phala@1.2.4
+        run: npm install -g phala@1.2.8
 
       - name: Verify system Python
         run: python3 -c 'import sys; assert sys.version_info >= (3, 9)'
@@ -352,7 +352,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: npm install -g phala@1.2.4
+      - run: npm install -g phala@1.2.8
       - name: Retire verified previous replica
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
@@ -380,7 +380,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: npm install -g phala@1.2.4
+      - run: npm install -g phala@1.2.8
       - name: Require recovery tools
         run: |
           python3 -c 'import sys; assert sys.version_info >= (3, 9)'

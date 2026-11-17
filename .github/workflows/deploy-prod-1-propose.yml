@@ -270,7 +270,7 @@ jobs:
           node-version: "20"
 
       - name: Install Phala CLI
-        run: npm install -g phala@1.2.4
+        run: npm install -g phala@1.2.8
 
       - name: Verify system Python
         run: python3 -c 'import sys; assert sys.version_info >= (3, 9)'
