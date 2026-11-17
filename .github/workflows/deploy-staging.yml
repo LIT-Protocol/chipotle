@@ -137,7 +137,7 @@ jobs:
         with:
           node-version: "20"
       - name: Install Phala CLI
-        run: npm install -g phala@1.2.4
+        run: npm install -g phala@1.2.8
       - name: Set deployment target
         id: set
         env:
@@ -375,7 +375,7 @@ jobs:
           node-version: "20"
 
       - name: Install Phala CLI
-        run: npm install -g phala@1.2.4
+        run: npm install -g phala@1.2.8
 
       - name: Deploy to Phala Cloud
         env:
@@ -571,7 +571,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: npm install -g phala@1.2.4
+      - run: npm install -g phala@1.2.8
       - name: Verify target identity, retire previous instance, verify public health
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
@@ -607,7 +607,7 @@ jobs:
           node-version: "20"
       - name: Install Phala CLI + AWS CLI
         run: |
-          npm install -g phala@1.2.4
+          npm install -g phala@1.2.8
           # AWS CLI v2 via the official installer (no Python dependency). The old
           # `pip install --user awscli` fails on the runner's externally-managed
           # Python (PEP 668: "externally-managed-environment"). Guarded so a
