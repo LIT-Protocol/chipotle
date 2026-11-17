@@ -1,9 +1,9 @@
 # Verify attestation from a deployed Phala CVM
 #
-# Fetches /attestation from the live API, runs Phala's dstack-verifier image
+# Fetches /attestation/unified from the live API, runs Phala's dstack-verifier image
 # (pinned by digest in .github/dstack-verifier/Dockerfile), and asserts
 # is_valid=true. Unlike the simulator CI job (which can only check
-# quote_verified), a real TDX deployment must produce a fully valid attestation.
+# quote_verified), a real TEE deployment must produce a fully valid attestation.
 #
 # Called from Deploy to Phala CVM after the API is available, or manually
 # via workflow_dispatch.
@@ -17,7 +17,7 @@ on:
   workflow_call:
     inputs:
       base_url:
-        description: "Base URL of the deployed CVM (e.g. https://host — /attestation is appended)"
+        description: "Base URL of the deployed CVM (e.g. https://host — /attestation/unified is appended)"
         required: true
         type: string
       runner:
@@ -60,17 +60,16 @@ jobs:
           ATTESTATION_URL="${{ inputs.base_url }}"
           TMP_DIR=$(mktemp -d /tmp/verify-remote-XXXXXX)
 
-          echo "Fetching attestation from $ATTESTATION_URL/attestation..."
-          curl -sf "$ATTESTATION_URL/attestation" > "$TMP_DIR/attestation.json" || {
-            echo "::error::Failed to fetch $ATTESTATION_URL/attestation"
+          echo "Fetching attestation from $ATTESTATION_URL/attestation/unified..."
+          curl -sf "$ATTESTATION_URL/attestation/unified" > "$TMP_DIR/attestation.json" || {
+            echo "::error::Failed to fetch $ATTESTATION_URL/attestation/unified"
             rm -rf "$TMP_DIR"
             exit 1
           }
 
-          # Fix empty digests in runtime events (dstack guest-agent strips them;
-          # the Docker verifier's parser rejects digest=""). See script docstring.
-          python3 scripts/fix-attestation-event-log.py "$TMP_DIR/attestation.json" \
-            > "$TMP_DIR/verify-request.json"
+          # The unified bundle carries platform-specific evidence and event logs.
+          # Pass it unchanged; dstack-verifier validates the complete bundle.
+          cp "$TMP_DIR/attestation.json" "$TMP_DIR/verify-request.json"
 
           echo "Running dstack-verifier (oneshot) via Docker..."
           docker run --rm \

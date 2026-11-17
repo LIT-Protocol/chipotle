@@ -13,6 +13,10 @@ on:
         description: "API base URL (e.g. https://example.com/core/v1)"
         required: true
         type: string
+      accounts_file:
+        description: "Account pool for the deployment environment, independent of branch"
+        required: false
+        type: string
       env:
         description: "Target environment: 'prod' or 'staging'"
         required: false
