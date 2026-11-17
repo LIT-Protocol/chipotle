@@ -15,7 +15,7 @@ def instance(name, status):
 
 class Guards(unittest.TestCase):
     def selection(self, a='running', b='stopped', override='', public_name='a', direct_name='a'):
-        with patch.object(p, 'cvm', side_effect=[instance('a', a), instance('b', b)]), patch.object(p, 'healthy') as health:
+        with patch.object(p, 'cvm', side_effect=[instance('a', a), instance('b', b)]), patch.object(p, 'wait_health') as health:
             def verify(url, name):
                 actual = public_name if url == 'https://public' else direct_name
                 if actual != name:
@@ -49,7 +49,7 @@ class Guards(unittest.TestCase):
         for status in ['running', 'processing']:
             with patch.object(p, 'cvm', side_effect=[instance('b', status), instance('a', 'running')]), self.assertRaises(ValueError):
                 p.bootstrap('b', 'a')
-        with patch.object(p, 'cvm', side_effect=[instance('b', 'stopped'), instance('a', 'running')]):
+        with patch.object(p, 'cvm', side_effect=[instance('b', 'stopped'), instance('a', 'running')]), patch.object(p, 'wait_health'):
             p.bootstrap('b', 'a')
         with self.assertRaises(ValueError):
             p.bootstrap('', 'a')
@@ -80,17 +80,17 @@ class Guards(unittest.TestCase):
         calls = Mock()
         with patch.object(p, 'pair', return_value=(instance('a', 'running'), instance('b', 'running'))), patch.object(p, 'healthy', calls.direct), patch.object(p, 'wait_health', calls.public), patch.object(p, 'stop', calls.stop):
             p.retire('a', 'b', 'https://public')
-        self.assertEqual([c[0] for c in calls.mock_calls], ['direct', 'public', 'stop', 'public'])
+        self.assertEqual([c[0] for c in calls.mock_calls], ['public', 'public', 'stop', 'public'])
 
     def test_unhealthy_target_never_stops_old(self):
-        with patch.object(p, 'pair', return_value=(instance('a', 'running'), instance('b', 'running'))), patch.object(p, 'healthy', side_effect=ValueError()), patch.object(p, 'stop') as stop:
+        with patch.object(p, 'pair', return_value=(instance('a', 'running'), instance('b', 'running'))), patch.object(p, 'wait_health', side_effect=ValueError()), patch.object(p, 'stop') as stop:
             with self.assertRaises(ValueError):
                 p.retire('a', 'b', 'https://public')
             stop.assert_not_called()
 
     def test_rollback_recovers_old_before_stopping_new(self):
         calls = Mock()
-        with patch.object(p, 'cvm', return_value=instance('a', 'stopped')), patch.object(p, 'run', calls.start), patch.object(p, 'wait_health', calls.health), patch.object(p, 'stop', calls.stop), patch.object(p, 'restore_dns', calls.dns):
+        with patch.object(p, 'cvm', return_value=instance('a', 'stopped')), patch.object(p, 'run', calls.start), patch.object(p, 'wait_state', return_value=instance('a', 'running')), patch.object(p, 'wait_health', calls.health), patch.object(p, 'stop', calls.stop), patch.object(p, 'restore_dns', calls.dns):
             p.rollback('a', 'b', 'https://public')
         self.assertEqual([c[0] for c in calls.mock_calls], ['start', 'health', 'stop', 'dns', 'health'])
 
@@ -99,6 +99,64 @@ class Guards(unittest.TestCase):
             with self.assertRaises(ValueError):
                 p.rollback('a', 'b', 'https://public')
             stop.assert_not_called()
+
+    def test_in_progress_without_progress_rejected(self):
+        import json
+        for data in [dict(instance('a', 'running'), in_progress=True), instance('a', 'processing')]:
+            with patch.object(p, 'run', return_value=json.dumps(data)), self.assertRaises(p.Busy):
+                p.cvm('a')
+
+    def test_billing_keys_informational(self):
+        with patch.object(p, 'get', side_effect=[{'cvm_name': 'a'},
+                {'lit_actions_reachable': True, 'cpu_available': True, 'billing_keys_present': False}]):
+            p.healthy('https://a', 'a')
+
+    def test_health_retries_transient_failure(self):
+        with patch.object(p, 'healthy', side_effect=[ValueError('busy'), None]) as health, patch.object(p.time, 'sleep'):
+            p.wait_health('https://a', 'a')
+            self.assertEqual(health.call_count, 2)
+
+    def test_stop_waits_for_busy_then_retries_command(self):
+        import subprocess
+        with patch.object(p, 'cvm', side_effect=[p.Busy(), instance('b', 'running'), instance('b', 'running'), instance('b', 'stopped')]), patch.object(p, 'run', side_effect=[subprocess.CalledProcessError(1, 'stop'), '']) as run, patch.object(p.time, 'sleep'):
+            p.stop('b')
+            self.assertEqual(run.call_count, 2)
+
+    def test_stop_times_out(self):
+        with patch.object(p.time, 'monotonic', side_effect=[0, 301]), self.assertRaisesRegex(ValueError, 'manual intervention'):
+            p.stop('b')
+
+    def test_rollback_restores_dns_even_when_stop_fails(self):
+        with patch.object(p, 'cvm', return_value=instance('a', 'running')), patch.object(p, 'wait_state', return_value=instance('a', 'running')), patch.object(p, 'wait_health'), patch.object(p, 'stop', side_effect=ValueError('busy')), patch.object(p, 'restore_dns') as dns:
+            with self.assertRaisesRegex(ValueError, 'Recovery incomplete'):
+                p.rollback('a', 'b', 'https://public')
+            dns.assert_called_once()
+
+    def test_bootstrap_rollback_uses_fresh_endpoint_without_name(self):
+        source = instance('a', 'stopped')
+        source['endpoints'] = []
+        with patch.object(p, 'cvm', return_value=source), patch.object(p, 'wait_state', return_value=instance('a', 'running')), patch.object(p, 'run'), patch.object(p, 'wait_health') as health, patch.object(p, 'stop'), patch.object(p, 'restore_dns'):
+            p.rollback('a', 'b', 'https://public', bootstrap_mode=True)
+            self.assertEqual(health.call_args_list[0].args, ('https://a-8000.gateway', None))
+
+    def test_dns_exact_zone_and_wildcard_record(self):
+        import json
+        credentials = {'Credentials': {'AccessKeyId': 'test', 'SecretAccessKey': 'test', 'SessionToken': 'test'}}
+        zones = {'HostedZones': [{'Name': 'chipotle.litprotocol.com.', 'Id': 'zone', 'Config': {'PrivateZone': False}}]}
+        with patch.dict(p.os.environ, {'CERTBOT_AWS_ROLE_ARN': 'test'}), patch.object(p, 'run', side_effect=[json.dumps(credentials), json.dumps(zones), '']) as run:
+            p.restore_dns({'gateway': {'cname': 'gateway.dstack-base-prod16.phala.network'}}, 'https://test.chipotle.litprotocol.com')
+            batch = json.loads(run.call_args.args[-1])
+            record = batch['Changes'][0]['ResourceRecordSet']
+            self.assertEqual(record['ResourceRecords'], [{'Value': '_.dstack-base-prod16.phala.network'}])
+            self.assertEqual(record['Name'], 'test.chipotle.litprotocol.com')
+
+    def test_main_selection_outputs(self):
+        import io
+        from contextlib import redirect_stdout
+        out = io.StringIO()
+        with patch.object(p.sys, 'argv', ['script', 'select', 'a', 'b', 'https://public']), patch.object(p, 'select', return_value=('a', 'b')), redirect_stdout(out):
+            p.main()
+        self.assertEqual(out.getvalue(), 'prev_live_cvm=a\ntarget_cvm=b\npingpong=true\n')
 
 
 if __name__ == '__main__':

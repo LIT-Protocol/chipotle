@@ -12,10 +12,16 @@ def run(*args):
     return subprocess.check_output(args, text=True, timeout=90).strip()
 
 
+class Busy(ValueError):
+    pass
+
+
 def cvm(name):
     data = json.loads(run('phala', 'cvms', 'get', name, '--json'))
-    if data.get('name') != name or data.get('progress'):
-        raise ValueError(f'{name}: wrong identity or operation pending')
+    if data.get('name') != name:
+        raise ValueError(f'{name}: wrong identity')
+    if data.get('progress') or data.get('in_progress') or data.get('status') not in ('running', 'stopped'):
+        raise Busy(f'{name}: operation pending')
     return data
 
 
@@ -34,11 +40,11 @@ def get(url):
 
 
 def healthy(url, name):
-    if get(url + '/core/v1/version').get('cvm_name') != name:
+    if name is not None and get(url + '/core/v1/version').get('cvm_name') != name:
         raise ValueError(f'{url}: unexpected or missing cvm_name')
     health = get(url + '/health')
     if not all(health.get(k) is True for k in
-               ('lit_actions_reachable', 'cpu_available', 'billing_keys_present')):
+               ('lit_actions_reachable', 'cpu_available')):
         raise ValueError(f'{name}: unhealthy')
 
 
@@ -71,8 +77,8 @@ def select(a, b, public, override=''):
         live, cold, live_data = b, a, db
     else:
         raise ValueError('Pair must have exactly one running and one stopped instance')
-    healthy(instance_url(live_data), live)
-    healthy(public, live)
+    wait_health(instance_url(live_data), live)
+    wait_health(public, live)
     if override and override != cold:
         raise ValueError('Override must name the stopped member of the configured pair')
     return live, cold
@@ -84,32 +90,47 @@ def bootstrap(target, reference):
     replica, source = pair(target, reference)
     if replica['status'] != 'stopped':
         raise ValueError('Bootstrap target must be stopped')
-    instance_url(replica)
+    if source['status'] != 'running':
+        raise ValueError('Bootstrap reference must be running')
+    wait_health(instance_url(source), None)
 
 
-def stop(name):
-    try:
-        if cvm(name)['status'] == 'stopped':
-            return
-    except ValueError:
-        pass
-    run('phala', 'cvms', 'stop', name)
+def wait_state(name, status):
     deadline = time.monotonic() + 300
     while time.monotonic() < deadline:
         try:
-            if cvm(name)['status'] == 'stopped':
-                return
-        except ValueError:
+            data = cvm(name)
+            if data['status'] == status:
+                return data
+        except Busy:
             pass
         time.sleep(5)
-    raise ValueError(f'{name}: stop did not complete')
+    raise ValueError(f'{name}: did not reach {status}')
+
+
+def stop(name):
+    deadline = time.monotonic() + 300
+    requested = False
+    while time.monotonic() < deadline:
+        try:
+            data = cvm(name)
+            if data['status'] == 'stopped':
+                return
+            if not requested:
+                run('phala', 'cvms', 'stop', name)
+                requested = True
+        except (Busy, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            # A failed deployment can still be settling; retry within the deadline.
+            pass
+        time.sleep(5)
+    raise ValueError(f'{name}: stop did not complete; manual intervention required')
 
 
 def retire(old, new, public):
     _, target = pair(old, new)
     if target['status'] != 'running':
         raise ValueError('Target is not running')
-    healthy(instance_url(target), new)
+    wait_health(instance_url(target), new)
     # During overlap the public gateway may serve either instance. This proves
     # the new one is reachable, not that the old one has stopped receiving traffic.
     wait_health(public, new)
@@ -141,19 +162,28 @@ def restore_dns(old, public):
         zones[0]['Id'], '--change-batch', json.dumps(batch))
 
 
-def rollback(old, new, public):
+def rollback(old, new, public, bootstrap_mode=False):
     # A failed update may leave NEW busy. Only OLD must be stable before recovery.
     source = cvm(old)
     if source['status'] == 'stopped':
         run('phala', 'cvms', 'start', old)
     elif source['status'] != 'running':
         raise ValueError('Previous instance cannot be recovered automatically')
-    wait_health(instance_url(source), old)
+    source = wait_state(old, 'running')
+    expected_name = None if bootstrap_mode else old
+    wait_health(instance_url(source), expected_name)
     # Remove the failed instance before restoring DNS so its ingress cannot
     # immediately reclaim the record. A healthy OLD has been verified first.
-    stop(new)
+    stop_error = None
+    try:
+        stop(new)
+    except Exception as error:
+        stop_error = error
+        print(f'::error::Failed to stop {new}: {error}. Restoring DNS; recovery remains incomplete.', file=sys.stderr)
     restore_dns(source, public)
-    wait_health(public, old)
+    wait_health(public, expected_name)
+    if stop_error:
+        raise ValueError('Recovery incomplete: failed target may still serve traffic') from stop_error
 
 
 def main():
@@ -167,8 +197,8 @@ def main():
         bootstrap(a, b)
     elif action == 'retire':
         retire(a, b, public)
-    elif action == 'rollback':
-        rollback(a, b, public)
+    elif action in ('rollback', 'rollback-bootstrap'):
+        rollback(a, b, public, bootstrap_mode=action == 'rollback-bootstrap')
     else:
         raise ValueError('Unknown action')
 

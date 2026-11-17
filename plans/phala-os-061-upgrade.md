@@ -153,25 +153,29 @@ cutover or retirement invokes recovery: verify/start the previous instance,
 stop the failed target, restore the gateway CNAME, and verify public identity.
 Automatic recovery does not run on cancellation; reconcile state before retrying.
 
-Before merging/activating against a configured pair, both images must contain
+Before activating ordinary deployments against a configured pair, both images must contain
 PR #757 and each sealed environment must contain that instance's actual name.
-Bootstrap using the prior deployment workflow/manual deployment while holding
-the deployment queue; the new selector intentionally rejects missing names and
+Set NEXT_DEPLOY_PAUSED=true before merging, then use this workflow's manual
+bootstrap_replica dispatch; the new selector intentionally rejects missing names and
 both-running pairs. Check the currently configured pair first: this requirement
 also applies to the old pair during the migration. Do not merge assuming that
 the API source merge alone upgraded every deployed instance.
 
 Activation checklist (not performed by this PR):
 
-1. Pause automatic staging triggers/hold the deployment queue and record existing
-   NEXT_CVM_A/B values and public routing. Ensure no staging run is active.
+1. Set the repository variable NEXT_DEPLOY_PAUSED=true BEFORE merging this PR.
+   The new workflow skips push-triggered entry jobs while still allowing manual
+   dispatch. Do not disable the workflow: that also disables bootstrap dispatch.
+   Existing workflow versions do not honor the new variable: wait for any active
+   old run to finish and inspect queued runs before merge. Record NEXT_CVM_A/B
+   and public routing. Keep the pause enabled throughout bootstrap.
 2. Deploy identity-capable images with correct per-instance names to the prod16
    pair and verify each INSTANCE URL independently. Verify health, version and
    attestation. During bootstrap both may run and receive shared-gateway traffic.
 3. Ensure the public domain routes to prod16; select A as initial live instance,
    stop B, and require public `/core/v1/version.cvm_name` == A plus healthy checks.
 4. Set NEXT_CVM_A and NEXT_CVM_B to the names recorded above while triggers remain
-   held. Resume only after the updated workflow is installed and all guards pass.
+   held. Set NEXT_DEPLOY_PAUSED=false only after all guards pass.
 5. Run a controlled deploy A→B, another B→A (including a same-SHA redeploy), and
    a verification-failure recovery. Confirm the expected public name and exactly
    one running instance after every operation. Only then retire old-node CVMs.
@@ -191,8 +195,12 @@ This workflow provides a manual `bootstrap_replica: true` dispatch with an
 explicit `phala_cvm_name`. It validates that the target is stopped and shares
 the reference app ID, deploys the identity-capable image with its own env name,
 and verifies it through its instance URL. Bootstrap deliberately does not retire
-other instances or automatically roll back: the operator must reconcile routing
-and select the steady-state pair after verifying the target. It cannot be
+other instances after success: the operator reconciles routing and selects the
+steady-state pair. A failed bootstrap now recovers its reference, stops the failed
+target and restores DNS. The reference must be running and pass direct health
+checks, but may lack cvm_name; legacy bootstrap recovery therefore checks its
+health without requiring that field. When targeting A, B is the reference;
+otherwise A (or the default legacy CVM) is used. It cannot be
 activated by an automatic push. Use only while the deployment queue is held.
 After bootstrap, stop the intended standby and verify the public name before
 setting the pair variables/resuming ordinary deployments.
@@ -201,11 +209,33 @@ For production's first deployment, cvm_name will be absent. Do not require it
 before permitting the bootstrap release. The existing production workflow has a
 manual workflow_dispatch `phala_cvm_name` override, but automatic tag releases
 cannot supply that input. In the future production workflow PR, add an explicit
-temporary repository variable, e.g. PROD_BOOTSTRAP_CVM, read by the tag-triggered
-proposal job. Snapshot the selected target into proposal artifacts so execution
+temporary environment-scoped variable, e.g. PROD_BOOTSTRAP_CVM, read by the
+production proposal job behind environment required-reviewer protection.
+Bind the override to one expected release tag/SHA and fail closed on a mismatch;
+do not let a stale variable retarget every subsequent tag. Snapshot the selected target into proposal artifacts so execution
 cannot retarget if the variable changes. Require the target be a stopped replica
 of the production app, preserve all staging/Safe gates, and expose the target in
 the Safe review record. The override must never bypass Safe approvals. Clear the
 variable after the first successful release and pair initialization; subsequent
 releases must use identity-aware selection. Do not hardcode the target in CI.
 This staging PR documents that production change but does not implement it.
+
+
+### Queue and recovery limitations
+
+GitHub concurrency preserves at most one pending run. A later dispatch or push
+can supersede a pending main deployment. Paused push runs use separate groups
+so they cannot displace bootstrap dispatches. While active, avoid submitting
+unrelated manual runs during a release deployment; inspect run status and
+manually dispatch the exact required SHA/ref if its run was superseded. A skipped
+or cancelled main run does not produce the required perf-gate/soak status.
+Cancellation does not automatically recover traffic; inspect both instances and
+routing before retrying. The selector intentionally rejects ambiguous states.
+
+Health retries allow transient CPU pressure to settle. Billing key availability
+is informational, matching the server's health policy. Busy-state checks use
+both progress and in_progress plus the status. Recovery re-reads a started
+instance before resolving its endpoint. A failed target stop retries for five
+minutes; even on failure recovery attempts DNS restoration and public health,
+then explicitly fails because that target may still be serving. Inspect the
+workflow error and reconcile the remaining instance manually.

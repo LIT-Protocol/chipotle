@@ -61,7 +61,7 @@ name: "Deploy Staging"
 # leave the old instance running / un-stopped. Let an in-flight deploy finish; a
 # newer push queues behind it.
 concurrency:
-  group: deploy-phala-next
+  group: ${{ github.event_name == 'push' && vars.NEXT_DEPLOY_PAUSED == 'true' && format('deploy-phala-next-paused-{0}', github.run_id) || 'deploy-phala-next' }}
   cancel-in-progress: false
 
 on:
@@ -70,7 +70,7 @@ on:
   workflow_dispatch:
     inputs:
       bootstrap_replica:
-        description: "One-time identity bootstrap: require an explicit stopped replica; verify it directly without automatic retirement or rollback. Reconcile public routing and the pair manually afterward."
+        description: "One-time identity bootstrap: require an explicit stopped replica; verify it directly without automatic retirement; failed bootstrap recovers the reference. Reconcile public routing and the pair manually afterward."
         required: false
         type: boolean
         default: false
@@ -82,6 +82,7 @@ on:
 
 jobs:
   validate-secrets:
+    if: github.event_name != 'push' || vars.NEXT_DEPLOY_PAUSED != 'true'
     runs-on: self-hosted
     steps:
       - name: Validate required secrets
@@ -108,6 +109,7 @@ jobs:
           fi
 
   determine-target:
+    if: github.event_name != 'push' || vars.NEXT_DEPLOY_PAUSED != 'true'
     runs-on: self-hosted
     outputs:
       # target_cvm = the CVM this run deploys to (the COLD one in ping-pong mode).
@@ -120,6 +122,7 @@ jobs:
       prev_live_cvm: ${{ steps.set.outputs.prev_live_cvm }}
       # pingpong = "true" when the instance-pair vars are configured.
       pingpong: ${{ steps.set.outputs.pingpong }}
+      bootstrap: ${{ steps.set.outputs.bootstrap }}
       base_url: ${{ steps.set.outputs.base_url }}
       api_root_url: ${{ steps.set.outputs.api_root_url }}
       instance_type: ${{ steps.set.outputs.instance_type }}
@@ -128,6 +131,9 @@ jobs:
       domain: ${{ steps.set.outputs.domain }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -170,7 +176,10 @@ jobs:
           if [ "$BOOTSTRAP" = "true" ]; then
             # Explicit, dispatch-only bootstrap for images predating cvm_name.
             # The reference establishes app identity; target must be stopped.
-            python3 scripts/phala-pingpong.py bootstrap "$INPUT_CVM" "${CVM_A:-$DEFAULT_APP_NAME}" "https://$DOMAIN"
+            REFERENCE="${CVM_A:-$DEFAULT_APP_NAME}"
+            if [ "$INPUT_CVM" = "$REFERENCE" ]; then REFERENCE="$CVM_B"; fi
+            python3 scripts/phala-pingpong.py bootstrap "$INPUT_CVM" "$REFERENCE" "https://$DOMAIN"
+            PREV="$REFERENCE"
             TARGET="$INPUT_CVM"
           elif [ -n "$CVM_A" ] || [ -n "$CVM_B" ]; then
             # Fail closed for missing identity, a stale copied replica name,
@@ -187,6 +196,7 @@ jobs:
           echo "target_cvm=${TARGET}" >> "$GITHUB_OUTPUT"
           echo "prev_live_cvm=${PREV}" >> "$GITHUB_OUTPUT"
           echo "pingpong=${PINGPONG}" >> "$GITHUB_OUTPUT"
+          echo "bootstrap=${BOOTSTRAP:-false}" >> "$GITHUB_OUTPUT"
 
           echo "domain=${DOMAIN}" >> "$GITHUB_OUTPUT"
           echo "base_url=https://${DOMAIN}" >> "$GITHUB_OUTPUT"
@@ -557,6 +567,9 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -574,7 +587,7 @@ jobs:
     needs: [determine-target, detect-changes, deploy, wait-for-api-available, verify-attestation, openapi-spec-check, k6-smoke, k6-correctness, k6-loadtest, confirm-cutover, stop-old-cvm]
     if: >-
       ${{ always()
-          && needs.determine-target.outputs.pingpong == 'true'
+          && (needs.determine-target.outputs.pingpong == 'true' || needs.determine-target.outputs.bootstrap == 'true')
           && needs.detect-changes.outputs.deploy_needed == 'true'
           && needs.determine-target.outputs.prev_live_cvm != ''
           && (needs.deploy.result == 'failure'
@@ -589,6 +602,9 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -618,4 +634,8 @@ jobs:
           OLD: ${{ needs.determine-target.outputs.prev_live_cvm }}
           NEW: ${{ needs.determine-target.outputs.target_cvm }}
           PUBLIC_URL: ${{ needs.determine-target.outputs.base_url }}
-        run: python3 scripts/phala-pingpong.py rollback "$OLD" "$NEW" "$PUBLIC_URL"
+          BOOTSTRAP: ${{ needs.determine-target.outputs.bootstrap }}
+        run: |
+          ACTION=rollback
+          if [ "$BOOTSTRAP" = "true" ]; then ACTION=rollback-bootstrap; fi
+          python3 scripts/phala-pingpong.py "$ACTION" "$OLD" "$NEW" "$PUBLIC_URL"
