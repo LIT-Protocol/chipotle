@@ -16,9 +16,14 @@ import {
 } from "../scripts/npm-audit-policy.ts";
 
 const root = path.resolve(import.meta.dirname, "..");
-const allowlist: Allowlist = JSON.parse(
+const fullAllowlist: Allowlist = JSON.parse(
   await readFile(path.join(root, "npm-audit-allowlist.json"), "utf8"),
 );
+
+// Zod-only fixtures exercise the existing policy independently of other entries.
+const allowlist: Allowlist = {
+  accepted: fullAllowlist.accepted.filter((entry) => entry.package === "zod"),
+};
 
 const advisory = (over: Partial<Advisory> = {}): Advisory => ({
   source: 1243066,
@@ -407,4 +412,43 @@ test("report text cannot start a workflow command", async () => {
     );
     assert.match(r.out, /^npm: ::error::forged$/m);
   });
+});
+
+test("picomatch exception is limited to the reviewed advisory and copies", () => {
+  const entry = fullAllowlist.accepted.find((e) => e.package === "picomatch");
+  assert.ok(entry);
+  const via = advisory({
+    name: "picomatch",
+    url: "https://github.com/advisories/GHSA-fc5q-39xc-vjpf",
+    range: "<=4.0.7",
+  });
+  const make = (nodes: string[], item = via) =>
+    audit({ picomatch: vulnerability("picomatch", [item], nodes) });
+  assert.deepEqual(
+    evaluateAudit(make(entry.paths), fullAllowlist).failures,
+    [],
+  );
+  assert.ok(
+    evaluateAudit(
+      make([
+        ...entry.paths,
+        "node_modules/new-consumer/node_modules/picomatch",
+      ]),
+      fullAllowlist,
+    ).failures.length,
+  );
+  assert.ok(
+    evaluateAudit(
+      make(entry.paths, {
+        ...via,
+        url: "https://github.com/advisories/GHSA-xxxx-yyyy-zzzz",
+      }),
+      fullAllowlist,
+    ).failures.length,
+  );
+  assert.ok(
+    evaluateAudit(audit({}), fullAllowlist).unused.some((s) =>
+      s.includes("picomatch"),
+    ),
+  );
 });
