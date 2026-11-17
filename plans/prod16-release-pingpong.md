@@ -1,7 +1,7 @@
 # Production prod16 migration and alternating releases
 
 Status: implementation proposal; no production CVMs or contract permissions have
-been changed by this work. Keep this operational plan in the private repository.
+been changed by this work.
 See `phala-os-061-upgrade.md` for the tested next OS/KMS migration sequence.
 
 ## Before the first production release
@@ -9,8 +9,10 @@ See `phala-os-061-upgrade.md` for the tested next OS/KMS migration sequence.
 1. Finish next bootstrap, its direct-instance verification, attestation, OpenAPI,
    smoke, correctness and soak gates. Retire the other prod16 instance only after
    the replacement is verified. Then test a normal alternating deployment and
-   restore automatic next deployments. A feature-branch dispatch does not replace
+   retain automatic next deployments. A feature-branch dispatch does not replace
    the main commit's `perf-gate/soak` status required by production preparation.
+   Before production, review consumers of the TDX-only `/attestation/v2` API;
+   AMD verification uses `/attestation/unified`. See `amd-attestation-migration.md`.
 2. Inventory production's app identity, current healthy replica, OS/compose hashes,
    gateway and DNS. Confirm Base KMS availability on prod16. Retain the existing
    healthy production replica as the first deployment's recovery source.
