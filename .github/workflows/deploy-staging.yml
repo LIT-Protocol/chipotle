@@ -475,12 +475,14 @@ jobs:
     uses: ./.github/workflows/k6-smoke.yml
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+      accounts_file: ./data/accounts.next.json
 
   k6-correctness:
     needs: [wait-for-api-available, k6-smoke]
     uses: ./.github/workflows/k6-correctness.yml
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+      accounts_file: ./data/accounts.next.json
 
   # Latency regression gate. Runs a low-VU soak against the freshly-deployed
   # (cold) instance on its OWN direct URL (not the public domain). Note the cold

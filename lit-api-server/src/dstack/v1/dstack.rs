@@ -92,11 +92,54 @@ pub async fn get_quote(
     Ok(quote)
 }
 
+/// Fetch a platform-neutral attestation bundle (Intel TDX or AMD SEV-SNP).
+/// Uses the legacy key API unchanged; this does not migrate key derivation.
+pub async fn attest() -> Result<dstack_client::AttestResponse, String> {
+    attest_at(&get_socket_path()?).await
+}
+
+async fn attest_at(socket_path: &str) -> Result<dstack_client::AttestResponse, String> {
+    dstack_client::DstackClient::new(Some(socket_path))
+        .attest(vec![0u8; 64])
+        .await
+        .map_err(|e| format!("failed to attest: {e}"))
+}
+
+/// Preserve platform-specific Info fields, including null TDX measurements on AMD.
+/// The SDK's typed InfoResponse still requires TDX measurement strings.
+pub async fn get_info_document() -> Result<serde_json::Value, String> {
+    info_document_at(&get_socket_path()?).await
+}
+
+async fn info_document_at(socket_path: &str) -> Result<serde_json::Value, String> {
+    let client = reqwest::Client::builder()
+        .unix_socket(socket_path.to_owned())
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("failed to create info client: {e}"))?;
+    let mut document: serde_json::Value = client
+        .post("http://localhost/Info")
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status)
+        .map_err(|e| format!("failed to get info: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("invalid info response: {e}"))?;
+    if let Some(tcb) = document.get("tcb_info").and_then(serde_json::Value::as_str) {
+        document["tcb_info"] =
+            serde_json::from_str(tcb).map_err(|e| format!("invalid TCB info: {e}"))?;
+    }
+    Ok(document)
+}
+
 /// Fetch worker info from the dstack agent.
 ///
 /// Connects via the dstack Unix socket. Returns app_id, instance_id, tcb_info,
 /// compose_hash, etc. per [dstack HTTP API](https://github.com/Dstack-TEE/dstack/blob/master/sdk/curl/api.md).
 /// Verifiers use `tcb_info.app_compose` and `compose_hash` for compose-hash verification.
+#[cfg(test)]
 pub async fn get_info() -> Result<dstack_client::InfoResponse, String> {
     let socket_path = get_socket_path()?;
     let endpoint = Some(socket_path.as_str());
@@ -267,5 +310,92 @@ mod tests {
             "report_data must contain embedded 0xdeadbeef; got {:02x?}",
             &report_data[..8]
         );
+    }
+}
+
+#[cfg(test)]
+mod unified_rpc_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixListener;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NEXT_SOCKET: AtomicUsize = AtomicUsize::new(0);
+
+    fn agent(response: serde_json::Value) -> (String, std::thread::JoinHandle<String>) {
+        let path = format!(
+            "/tmp/chipotle-rpc-{}-{}.sock",
+            std::process::id(),
+            NEXT_SOCKET.fetch_add(1, Ordering::Relaxed)
+        );
+        let listener = UnixListener::bind(&path).expect("test socket");
+        let cleanup = path.clone();
+        let worker = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("client connected");
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 1024];
+            loop {
+                let n = stream.read(&mut buffer).expect("request bytes");
+                assert!(n > 0, "incomplete request");
+                request.extend_from_slice(&buffer[..n]);
+                if let Some(end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&request[..end]).to_lowercase();
+                    let length: usize = headers
+                        .lines()
+                        .find_map(|line| line.strip_prefix("content-length:"))
+                        .unwrap()
+                        .trim()
+                        .parse()
+                        .unwrap();
+                    if request.len() >= end + 4 + length {
+                        break;
+                    }
+                }
+            }
+            let body = response.to_string();
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+            std::fs::remove_file(cleanup).unwrap();
+            String::from_utf8(request).unwrap()
+        });
+        (path, worker)
+    }
+
+    #[tokio::test]
+    async fn unified_attestation_uses_attest_and_preserves_bundle() {
+        let (socket, worker) = agent(serde_json::json!({"attestation": "01020304"}));
+        let evidence = attest_at(&socket).await.unwrap();
+        assert_eq!(evidence.attestation, "01020304");
+        let request = worker.join().unwrap();
+        assert!(request.starts_with("POST /Attest "));
+        let body: serde_json::Value =
+            serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(body["report_data"], "00".repeat(64));
+    }
+
+    #[tokio::test]
+    async fn info_preserves_null_tdx_fields_and_unknown_platform_fields() {
+        let (socket, worker) = agent(serde_json::json!({
+            "app_id": "abc", "tcb_info": "{\"mrtd\":null,\"platform\":\"sev-snp\"}"
+        }));
+        let info = info_document_at(&socket).await.unwrap();
+        assert_eq!(info["app_id"], "abc");
+        assert!(info["tcb_info"]["mrtd"].is_null());
+        assert_eq!(info["tcb_info"]["platform"], "sev-snp");
+        assert!(worker.join().unwrap().starts_with("POST /Info "));
+    }
+
+    #[tokio::test]
+    async fn info_rejects_invalid_nested_json() {
+        let (socket, worker) = agent(serde_json::json!({"tcb_info": "not json"}));
+        assert!(
+            info_document_at(&socket)
+                .await
+                .unwrap_err()
+                .contains("invalid TCB info")
+        );
+        worker.join().unwrap();
     }
 }
