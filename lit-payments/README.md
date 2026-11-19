@@ -199,6 +199,10 @@ LIT_ACCOUNTS_CONTRACT_ADDRESS=0x...  # same value as lit-api-server NodeConfig.t
 # cache-invalidation callback to lit-api-server (no longer carries
 # wallet-sig or API-key verification).
 # LIT_API_SERVER_BASE_URL=http://localhost:8000
+# Optional — comma-separated base URLs of any other lit-api-server instances
+# serving traffic at the same time (one per hostname). Each instance caches
+# balances in its own process, so each needs the invalidation callback.
+# LIT_API_SERVER_EXTRA_BASE_URLS=https://api2.example.com
 # LIT_INTERNAL_SHARED_SECRET=$(openssl rand -base64 32)
 
 # Optional — gas funder (see "Gas funder" section below). Off entirely

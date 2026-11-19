@@ -1,0 +1,63 @@
+  # dstack-ingress 2.x — attestation-bound TLS termination inside the TEE.
+  # Replaces the 1.x block in docker-compose.phala.yml for lanes that select it
+  # (scripts/phala-compose.py). Differences that matter here:
+  #   - It publishes /evidences/attestation.json: platform evidence (Intel or
+  #     AMD) whose report data commits to the served certificates. Clients use
+  #     it to bind their TLS connection to the attested VM. 1.x can only do
+  #     this on Intel.
+  #   - HAProxy in TCP mode instead of nginx. Its client and server timeouts
+  #     default to 24h, so the 15-minute action budget needs no setting.
+  #   - /evidences is routed by the first bytes of a connection, so an evidence
+  #     request must be the first request on its connection.
+  dstack-ingress:
+    image: ghcr.io/dstack-tee/dstack-ingress:2.8@sha256:60e682449534715a2f2e5b72326ca4229209c8e26c931c6f34d27e02200ac086
+    # eMudhra intermediate CA compromise (2026-10-20, CVE-2026-111943): this image
+    # ships ca-certificates 20250419, which still trusts "emSign ECC Root CA - G3"
+    # and "AAA Certificate Services", the roots the compromised intermediates chain
+    # to. Distrust both in the OS store, refuse to start if either is still
+    # trusted, then run the image's own entrypoint with its default command
+    # (overriding entrypoint drops the image CMD). The image's Python tools
+    # (certbot, boto3) run from a virtualenv with their own certifi bundle, so
+    # the *_CA_BUNDLE settings below point them at the patched OS store too.
+    # Keep dollar signs out of this script: compose would interpolate them.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        sed -i -E 's@^mozilla/(emSign_ECC_Root_CA_-_G3|Comodo_AAA_Services_root)[.]crt@!&@' /etc/ca-certificates.conf
+        && update-ca-certificates --fresh >/dev/null
+        && openssl crl2pkcs7 -nocrl -certfile /etc/ssl/certs/ca-certificates.crt | openssl pkcs7 -print_certs -noout >/tmp/ca-subjects
+        && grep -q 'ISRG Root X1' /tmp/ca-subjects
+        && ! grep -E 'emSign ECC Root CA - G3|AAA Certificate Services' /tmp/ca-subjects
+        && ! find /etc/ssl/certs -lname '*emSign_ECC_Root_CA_-_G3*' -o -lname '*Comodo_AAA_Services_root*' | grep .
+        && rm /tmp/ca-subjects
+        && exec /scripts/entrypoint.sh haproxy -W -f /etc/haproxy/haproxy.cfg
+    ports:
+      - "443:443"
+    environment:
+      DOMAIN: "${CERTBOT_DOMAIN}"
+      # DSTACK_GATEWAY_DOMAIN is auto-populated by Phala Cloud into the CVM.
+      # This becomes the hostname's CNAME target. Not the older "_." form:
+      # Android's resolver refuses a CNAME target that starts with an underscore.
+      GATEWAY_DOMAIN: "gateway.${DSTACK_GATEWAY_DOMAIN}"
+      DNS_PROVIDER: "route53"
+      TARGET_ENDPOINT: "http://lit-api-server:8000"
+      ACME_EMAIL: "admin@litprotocol.com"
+      # With SET_CAA this image publishes an A record instead of a CNAME on
+      # Route 53. The deploy rollback and production's cold-replica selection
+      # both work on the hostname's CNAME, so leave the CAA unset.
+      SET_CAA: "false"
+      AWS_ACCESS_KEY_ID: "${CERTBOT_AWS_ACCESS_KEY_ID}"
+      AWS_SECRET_ACCESS_KEY: "${CERTBOT_AWS_SECRET_ACCESS_KEY}"
+      AWS_ROLE_ARN: "${CERTBOT_AWS_ROLE_ARN}"
+      AWS_REGION: "${CERTBOT_AWS_REGION}"
+      REQUESTS_CA_BUNDLE: "/etc/ssl/certs/ca-certificates.crt"
+      AWS_CA_BUNDLE: "/etc/ssl/certs/ca-certificates.crt"
+      SSL_CERT_FILE: "/etc/ssl/certs/ca-certificates.crt"
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+      - cert-data:/etc/letsencrypt
+    depends_on:
+      lit-api-server:
+        condition: service_started
+    restart: unless-stopped

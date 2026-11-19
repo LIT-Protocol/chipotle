@@ -1,0 +1,515 @@
+# One staging "lane": a hostname and the pair of CVM instances that serve it.
+#
+# Called by deploy-staging.yml once per lane with images that are already built.
+# A lane deploys to its stopped (cold) instance, verifies it on its own Phala
+# URL, lets it claim the lane's hostname, confirms the public cutover and stops
+# the previous instance; any failure flips the hostname back. Lanes never share
+# a hostname or an instance, so they cut over independently.
+#
+# During a platform migration there are two lanes for one app: the original
+# hostname stays on the original platform and a new hostname is served from the
+# new one. Both run the same images
+# and derive the same keys; the per-lane settings below keep them from
+# colliding while both serve traffic.
+
+name: "Deploy Staging Lane"
+
+on:
+  workflow_call:
+    inputs:
+      lane:
+        description: "Lane name, for logs (legacy or v2)"
+        required: true
+        type: string
+      domain:
+        description: "Public hostname this lane serves"
+        required: true
+        type: string
+      cvm_a:
+        description: "First instance of the ping-pong pair (empty with cvm_b for single-instance in-place deploys)"
+        required: false
+        type: string
+        default: ""
+      cvm_b:
+        description: "Second instance of the ping-pong pair"
+        required: false
+        type: string
+        default: ""
+      default_cvm:
+        description: "Instance to deploy to in place when no pair is configured"
+        required: false
+        type: string
+        default: ""
+      input_cvm:
+        description: "Explicit target instance (manual override)"
+        required: false
+        type: string
+        default: ""
+      bootstrap:
+        description: "One-time identity bootstrap of an explicit stopped replica"
+        required: false
+        type: boolean
+        default: false
+      gcp_project_id:
+        required: true
+        type: string
+      payer_shard:
+        description: "LIT_PAYER_SHARD for this lane's instances, e.g. 0/2 (empty: whole pool)"
+        required: false
+        type: string
+        default: ""
+      peer_base_urls:
+        description: "LIT_PEER_BASE_URLS: origins of the other lanes"
+        required: false
+        type: string
+        default: ""
+      origin_sunset:
+        description: "LIT_ORIGIN_SUNSET: HTTP-date after which this hostname is retired"
+        required: false
+        type: string
+        default: ""
+      origin_successor_url:
+        description: "LIT_ORIGIN_SUCCESSOR_URL: origin that replaces this hostname"
+        required: false
+        type: string
+        default: ""
+      soak:
+        description: "Run the k6 soak perf gate on this lane"
+        required: false
+        type: boolean
+        default: true
+      ingress:
+        description: "dstack-ingress generation for this lane: 1 (1.x, TDX-only TLS evidence) or 2 (2.x, TLS evidence on any platform)"
+        required: false
+        type: string
+        default: "1"
+      expect_platform:
+        description: "Platform this lane's instances must attest as (for example sev-snp); empty accepts any"
+        required: false
+        type: string
+        default: ""
+      attestation_evidence:
+        description: "Evidence the deployment gate verifies: v3, or tdx-quote for an Intel box whose guest agent predates Attest"
+        required: false
+        type: string
+        default: v3
+      accounts_file:
+        description: "k6 accounts fixture for smoke and correctness"
+        required: false
+        type: string
+        default: ./data/accounts.next.json
+
+jobs:
+  determine-target:
+    runs-on: self-hosted
+    outputs:
+      # target_cvm = the CVM this run deploys to (the COLD one in ping-pong mode).
+      # phala_app_name is kept as an alias of target_cvm for backward compat.
+      phala_app_name: ${{ steps.set.outputs.target_cvm }}
+      target_cvm: ${{ steps.set.outputs.target_cvm }}
+      # prev_live_cvm = the instance that was live before this deploy; stopped
+      # after the new one is confirmed serving the public domain. Empty in
+      # legacy single-CVM mode (nothing to retire).
+      prev_live_cvm: ${{ steps.set.outputs.prev_live_cvm }}
+      # pingpong = "true" when the instance-pair vars are configured.
+      pingpong: ${{ steps.set.outputs.pingpong }}
+      bootstrap: ${{ steps.set.outputs.bootstrap }}
+      base_url: ${{ steps.set.outputs.base_url }}
+      api_root_url: ${{ steps.set.outputs.api_root_url }}
+      domain: ${{ steps.set.outputs.domain }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify system Python
+        run: python3 -c 'import sys; assert sys.version_info >= (3, 9)'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Phala CLI
+        run: npm install -g phala@1.2.8
+      - name: Set deployment target
+        id: set
+        env:
+          INPUT_CVM: ${{ inputs.input_cvm }}
+          BOOTSTRAP: ${{ inputs.bootstrap }}
+          # The lane's two long-lived instance names (leave both empty for a
+          # single-instance in-place deploy). Which one is LIVE is derived at
+          # runtime from instance state and the public hostname, not stored.
+          CVM_A: ${{ inputs.cvm_a }}
+          CVM_B: ${{ inputs.cvm_b }}
+          DEFAULT_APP_NAME: ${{ inputs.default_cvm }}
+          DOMAIN: ${{ inputs.domain }}
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+        run: |
+          set -euo pipefail
+          PINGPONG="false"; PREV=""; TARGET="$DEFAULT_APP_NAME"
+          if [ "$BOOTSTRAP" = "true" ]; then
+            # Explicit, dispatch-only bootstrap for images predating cvm_name.
+            # The reference establishes app identity; target must be stopped.
+            REFERENCE="${CVM_A:-$DEFAULT_APP_NAME}"
+            if [ "$INPUT_CVM" = "$REFERENCE" ]; then REFERENCE="$CVM_B"; fi
+            python3 scripts/phala-pingpong.py bootstrap "$INPUT_CVM" "$REFERENCE" "https://$DOMAIN"
+            PREV="$REFERENCE"
+            TARGET="$INPUT_CVM"
+          elif [ -n "$CVM_A" ] || [ -n "$CVM_B" ]; then
+            # Fail closed for missing identity, a stale copied replica name,
+            # both-running/both-stopped pairs, or a domain outside this pair.
+            SELECTION=$(python3 scripts/phala-pingpong.py select \
+              "$CVM_A" "$CVM_B" "https://$DOMAIN" "$INPUT_CVM")
+            TARGET=$(printf '%s\n' "$SELECTION" | sed -n 's/^target_cvm=//p')
+            PREV=$(printf '%s\n' "$SELECTION" | sed -n 's/^prev_live_cvm=//p')
+            PINGPONG="true"
+          elif [ -n "$INPUT_CVM" ]; then
+            TARGET="$INPUT_CVM"
+          fi
+          if [ -z "$TARGET" ]; then
+            echo "::error::Lane '${{ inputs.lane }}' has no instance to deploy to: configure its instance pair or pass a target."
+            exit 1
+          fi
+
+          echo "target_cvm=${TARGET}" >> "$GITHUB_OUTPUT"
+          echo "prev_live_cvm=${PREV}" >> "$GITHUB_OUTPUT"
+          echo "pingpong=${PINGPONG}" >> "$GITHUB_OUTPUT"
+          echo "bootstrap=${BOOTSTRAP:-false}" >> "$GITHUB_OUTPUT"
+
+          echo "domain=${DOMAIN}" >> "$GITHUB_OUTPUT"
+          echo "base_url=https://${DOMAIN}" >> "$GITHUB_OUTPUT"
+          echo "api_root_url=https://${DOMAIN}/core/v1" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: [determine-target]
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download image digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          merge-multiple: true
+
+      - name: Prepare docker-compose for deployment (digest-pinned)
+        run: |
+          DIGEST_LIT_ACTIONS=$(cat digest-lit-actions.txt | tr -d '\n' | sed 's/}[}]*$//')
+          DIGEST_LIT_API_SERVER=$(cat digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
+          DIGEST_OTEL_COLLECTOR=$(cat digest-otel-collector.txt | tr -d '\n' | sed 's/}[}]*$//')
+          DOMAIN="${{ needs.determine-target.outputs.domain }}"
+          python3 scripts/phala-compose.py "${{ inputs.ingress }}" > docker-compose.lane.yml
+          sed \
+            -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|${{ vars.DOCKER_IMAGE }}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
+            -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|${{ vars.DOCKER_IMAGE }}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
+            -e "s|\${DOCKER_IMAGE_OTEL_COLLECTOR}|${{ vars.DOCKER_IMAGE }}-otel-collector@${DIGEST_OTEL_COLLECTOR}|g" \
+            -e "s|\${GCP_PROJECT_ID}|${{ inputs.gcp_project_id }}|g" \
+            -e "s|\${CERTBOT_DOMAIN}|${DOMAIN}|g" \
+            -e "s|\${CERTBOT_AWS_REGION}|${{ vars.CERTBOT_AWS_REGION }}|g" \
+            docker-compose.lane.yml > docker-compose.deploy.yml
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Phala CLI
+        run: npm install -g phala@1.2.8
+
+      - name: Deploy to Phala Cloud
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          PHALA_PRIVATE_KEY: ${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SANDBOX_SECRET_KEY }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_SANDBOX_PUBLISHABLE_KEY }}
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+          BASE_CHAIN_RPC: ${{ secrets.BASE_CHAIN_RPC }}
+          CERTBOT_AWS_ACCESS_KEY_ID: ${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}
+          CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
+          CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
+          LIT_INTERNAL_SHARED_SECRET: ${{ secrets.LIT_INTERNAL_SHARED_SECRET }}
+          TARGET_CVM: ${{ needs.determine-target.outputs.phala_app_name }}
+          GCP_PROJECT_ID: ${{ inputs.gcp_project_id }}
+          DOMAIN: ${{ needs.determine-target.outputs.domain }}
+          CERTBOT_AWS_REGION: ${{ vars.CERTBOT_AWS_REGION }}
+          LIT_PAYER_SHARD: ${{ inputs.payer_shard }}
+          LIT_PEER_BASE_URLS: ${{ inputs.peer_base_urls }}
+          LIT_ORIGIN_SUNSET: ${{ inputs.origin_sunset }}
+          LIT_ORIGIN_SUCCESSOR_URL: ${{ inputs.origin_successor_url }}
+        run: |
+          set -euo pipefail
+          # Per-lane settings are passed only when set: the compose file
+          # defaults each to empty, which is right for a single lane.
+          LANE_ENV=()
+          for key in LIT_PAYER_SHARD LIT_PEER_BASE_URLS LIT_ORIGIN_SUNSET LIT_ORIGIN_SUCCESSOR_URL; do
+            if [ -n "${!key}" ]; then LANE_ENV+=(-e "$key=${!key}"); fi
+          done
+          # Shared gateway IP makes the per-IP new-account limit a global cap.
+          # PHALA_CVM_NAME (the CVM deployed to) names this replica in OTEL logs.
+          phala deploy \
+            -c docker-compose.deploy.yml \
+            --cvm-id "$TARGET_CVM" \
+            --private-key "$PHALA_PRIVATE_KEY" \
+            -e "STRIPE_SECRET_KEY=$STRIPE_SECRET_KEY" \
+            -e "STRIPE_PUBLISHABLE_KEY=$STRIPE_PUBLISHABLE_KEY" \
+            -e "GCP_SERVICE_ACCOUNT_JSON=$GCP_SERVICE_ACCOUNT_JSON" \
+            -e "GCP_PROJECT_ID=$GCP_PROJECT_ID" \
+            -e "BASE_CHAIN_RPC=$BASE_CHAIN_RPC" \
+            -e "CERTBOT_DOMAIN=$DOMAIN" \
+            -e "CERTBOT_AWS_ACCESS_KEY_ID=$CERTBOT_AWS_ACCESS_KEY_ID" \
+            -e "CERTBOT_AWS_SECRET_ACCESS_KEY=$CERTBOT_AWS_SECRET_ACCESS_KEY" \
+            -e "CERTBOT_AWS_ROLE_ARN=$CERTBOT_AWS_ROLE_ARN" \
+            -e "CERTBOT_AWS_REGION=$CERTBOT_AWS_REGION" \
+            -e "LIT_INTERNAL_SHARED_SECRET=$LIT_INTERNAL_SHARED_SECRET" \
+            -e "PHALA_CVM_NAME=$TARGET_CVM" \
+            -e "NEW_ACCOUNT_RATE_LIMIT_ENABLED=false" \
+            ${LANE_ENV[@]+"${LANE_ENV[@]}"}
+
+      - name: Start updated CVM if stopped
+        shell: bash
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          PHALA_APP_NAME: ${{ needs.determine-target.outputs.phala_app_name }}
+        run: |
+          # Updates preserve the VM's power state. Wait for the update to settle
+          # before starting a stopped target; leave running instances alone.
+          for attempt in {1..60}; do
+            STATUS=$(phala cvms get "$PHALA_APP_NAME" --json | jq -er '.status')
+            case "$STATUS" in
+              stopped)
+                phala cvms start "$PHALA_APP_NAME"
+                exit 0
+                ;;
+              running) exit 0 ;;
+              starting|stopping|updating|restarting|processing) sleep 5 ;;
+              *)
+                echo "::error::Unexpected CVM status '$STATUS' for '$PHALA_APP_NAME'"
+                exit 1
+                ;;
+            esac
+          done
+          echo "::error::Timed out waiting for '$PHALA_APP_NAME' to settle after update"
+          exit 1
+
+  wait-for-api-available:
+    needs: [deploy, determine-target]
+    uses: ./.github/workflows/wait-for-api-restart.yml
+    with:
+      # Verify the freshly-deployed (cold) CVM on its OWN default Phala URL
+      # (*-8000.*.phala.network), not the shared public domain — which the old
+      # instance still owns until cutover. wait-for-api-restart resolves the
+      # direct URL from the CVM name via `phala cvms get`.
+      phala_app_name: ${{ needs.determine-target.outputs.target_cvm }}
+      expected_cvm_name: ${{ needs.determine-target.outputs.target_cvm }}
+      expected_sha: ${{ github.sha }}
+      runner: '["self-hosted"]'
+    secrets:
+      PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+
+  verify-attestation:
+    needs: [wait-for-api-available, determine-target]
+    uses: ./.github/workflows/verify-attestation.yml
+    with:
+      # Attest the cold box directly (its resolved default URL), pre-cutover.
+      base_url: ${{ needs.wait-for-api-available.outputs.base_url }}
+      runner: '["self-hosted"]'
+      sdk_policy: staging
+      sdk_expect_platform: ${{ inputs.expect_platform }}
+      evidence: ${{ inputs.attestation_evidence }}
+
+  openapi-spec-check:
+    needs: [wait-for-api-available]
+    uses: ./.github/workflows/openapi-spec-check.yml
+    with:
+      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+      runner: '["self-hosted"]'
+
+  k6-smoke:
+    needs: [wait-for-api-available, openapi-spec-check]
+    uses: ./.github/workflows/k6-smoke.yml
+    with:
+      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+      accounts_file: ${{ inputs.accounts_file }}
+
+  k6-correctness:
+    needs: [wait-for-api-available, k6-smoke]
+    uses: ./.github/workflows/k6-correctness.yml
+    with:
+      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+      accounts_file: ${{ inputs.accounts_file }}
+
+  # Latency regression gate. Runs a low-VU soak against the freshly-deployed
+  # (cold) instance on its OWN direct URL (not the public domain). Note the cold
+  # box auto-claims the public domain at boot — before this gate runs — so a bad
+  # build may already be serving public traffic by now; this gate does NOT
+  # prevent that. What it does: a load-test failure blocks confirm-cutover and
+  # triggers rollback-on-failure below, which flips the public domain back to the
+  # still-running old instance. So it's detect-and-roll-back, not prevent-go-live.
+  #
+  # Why soak (low VU) and not spike: spike (25 VUs of real crypto) saturates the
+  # small staging box and trips lit-api-server's CPU load-shedding guard (429s),
+  # which measures the failure cliff, not latency — and the fast 429s actually
+  # mask "got slower" regressions. A low-VU soak stays under the shed threshold
+  # so per-endpoint p95 reflects the code path. SCENARIO=soak drops the spec's
+  # ramp_* scenarios. The p95 ceilings live in soak.spec.ts (interim absolute
+  # bounds; Phase 2 swaps them for run-over-run deltas vs a baseline).
+  k6-loadtest:
+    needs: [wait-for-api-available, k6-correctness]
+    # One lane carries the perf gate; the other still gets smoke and correctness.
+    if: ${{ inputs.soak }}
+    uses: ./.github/workflows/k6-loadtest.yml
+    with:
+      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+      test: soak
+      vus: '2'
+      duration: 3m
+      scenario: soak
+      # Create ephemeral accounts against the freshly-deployed box rather than
+      # relying on the pre-seeded pool, which may not exist on this instance and
+      # would 401 → false rollback.
+      create_accounts: ${{ 'true' }}
+      # Phase 2: fail on a p95 regression vs the committed baseline (delta gate)
+      # rather than the staging-tuned absolute ceilings. Path is relative to
+      # k6/loadtest/ (where the spec's open() resolves from). Refresh the
+      # baseline with k6/update-soak-baseline.sh.
+      baseline_file: ../baselines/soak.next.json
+
+  # Both replicas can serve during overlap. Verify the expected identity/build
+  # publicly before retirement, then verify public health again after OLD stops.
+  confirm-cutover:
+    needs: [determine-target, wait-for-api-available, verify-attestation, openapi-spec-check, k6-smoke, k6-correctness, k6-loadtest]
+    # always(): the soak is skipped on purpose for a lane without the perf gate.
+    if: >-
+      ${{ always()
+          && needs.determine-target.outputs.pingpong == 'true'
+          && needs.wait-for-api-available.result == 'success'
+          && needs.verify-attestation.result == 'success'
+          && needs.openapi-spec-check.result == 'success'
+          && needs.k6-smoke.result == 'success'
+          && needs.k6-correctness.result == 'success'
+          && (needs.k6-loadtest.result == 'success' || (needs.k6-loadtest.result == 'skipped' && !inputs.soak)) }}
+    uses: ./.github/workflows/wait-for-api-restart.yml
+    with:
+      api_root_url: ${{ needs.determine-target.outputs.api_root_url }}
+      expected_sha: ${{ github.sha }}
+      expected_cvm_name: ${{ needs.determine-target.outputs.target_cvm }}
+      timeout: 300
+      runner: '["self-hosted"]'
+
+  # The gates above verified the new instance on its own Phala URL, where TLS
+  # is the gateway's. This verifies the public hostname the way a customer's
+  # SDK does, including that its TLS certificate is bound to the attested VM,
+  # before the previous instance is stopped. Only the newer ingress publishes
+  # the evidence for that.
+  verify-public-binding:
+    needs: [determine-target, wait-for-api-available, confirm-cutover]
+    if: >-
+      ${{ always()
+          && inputs.ingress == '2'
+          && needs.wait-for-api-available.result == 'success'
+          && (needs.confirm-cutover.result == 'success'
+              || (needs.confirm-cutover.result == 'skipped' && needs.determine-target.outputs.pingpong != 'true')) }}
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Phala CLI
+        run: npm install -g phala@1.2.8
+      - name: Verify the public hostname with the Core SDK verifier
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          PUBLIC_URL: ${{ needs.determine-target.outputs.base_url }}
+          TARGET_CVM: ${{ needs.determine-target.outputs.target_cvm }}
+        run: |
+          set -euo pipefail
+          # While the old and new instances overlap, the public hostname can be
+          # answered by either. Passing because the OLD one verified would let
+          # it be stopped with the new one unchecked, so require the VM that
+          # answers to be the instance this run deployed.
+          INSTANCE_ID=$(phala cvms get "$TARGET_CVM" --json | jq -er '.instance_id | select(type == "string" and length > 0)')
+          # A first deploy to a new hostname also needs its DNS record and
+          # certificate to appear. Retry for a while before failing.
+          for attempt in $(seq 1 20); do
+            if node lit-static/sdk/scripts/verify-live.mjs "$PUBLIC_URL" staging \
+                --require-binding --expect-instance "$INSTANCE_ID"; then
+              exit 0
+            fi
+            echo "Attempt $attempt failed; retrying in 30s"
+            sleep 30
+          done
+          echo "::error::The public hostname did not pass SDK verification on instance $INSTANCE_ID"
+          exit 1
+
+  stop-old-cvm:
+    needs: [determine-target, confirm-cutover, verify-public-binding]
+    if: ${{ always() && needs.confirm-cutover.result == 'success' && (needs.verify-public-binding.result == 'success' || needs.verify-public-binding.result == 'skipped') && needs.determine-target.outputs.pingpong == 'true' && needs.determine-target.outputs.prev_live_cvm != '' }}
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify system Python
+        run: python3 -c 'import sys; assert sys.version_info >= (3, 9)'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install -g phala@1.2.8
+      - name: Verify target identity, retire previous instance, verify public health
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          OLD: ${{ needs.determine-target.outputs.prev_live_cvm }}
+          NEW: ${{ needs.determine-target.outputs.target_cvm }}
+          PUBLIC_URL: ${{ needs.determine-target.outputs.base_url }}
+        run: python3 scripts/phala-pingpong.py retire "$OLD" "$NEW" "$PUBLIC_URL"
+
+  # Recovery also covers deployment/readiness and retirement failures.
+  rollback-on-failure:
+    needs: [determine-target, deploy, wait-for-api-available, verify-attestation, openapi-spec-check, k6-smoke, k6-correctness, k6-loadtest, confirm-cutover, verify-public-binding, stop-old-cvm]
+    if: >-
+      ${{ always()
+          && (needs.determine-target.outputs.pingpong == 'true' || needs.determine-target.outputs.bootstrap == 'true')
+          && needs.determine-target.outputs.prev_live_cvm != ''
+          && (needs.deploy.result == 'failure'
+              || needs.wait-for-api-available.result == 'failure'
+              || needs.confirm-cutover.result == 'failure'
+              || needs.verify-public-binding.result == 'failure'
+              || needs.stop-old-cvm.result == 'failure'
+              || needs.verify-attestation.result == 'failure'
+              || needs.openapi-spec-check.result == 'failure'
+              || needs.k6-smoke.result == 'failure'
+              || needs.k6-correctness.result == 'failure'
+              || needs.k6-loadtest.result == 'failure') }}
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify system Python
+        run: python3 -c 'import sys; assert sys.version_info >= (3, 9)'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Phala CLI + AWS CLI
+        run: |
+          npm install -g phala@1.2.8
+          # AWS CLI v2 via the official installer (no Python dependency). The old
+          # `pip install --user awscli` fails on the runner's externally-managed
+          # Python (PEP 668: "externally-managed-environment"). Guarded so a
+          # pre-installed aws is reused; --update keeps it idempotent across reruns
+          # on a persistent self-hosted $HOME.
+          if ! command -v aws >/dev/null 2>&1; then
+            tmp=$(mktemp -d)
+            trap 'rm -rf "$tmp"' EXIT
+            curl -fsSL --retry 3 "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "$tmp/awscliv2.zip"
+            unzip -q "$tmp/awscliv2.zip" -d "$tmp"
+            "$tmp/aws/install" --update --install-dir "$HOME/.local/aws-cli" --bin-dir "$HOME/.local/bin"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Recover previous instance and remove failed target
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
+          CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
+          AWS_DEFAULT_REGION: ${{ vars.CERTBOT_AWS_REGION }}
+          OLD: ${{ needs.determine-target.outputs.prev_live_cvm }}
+          NEW: ${{ needs.determine-target.outputs.target_cvm }}
+          PUBLIC_URL: ${{ needs.determine-target.outputs.base_url }}
+          BOOTSTRAP: ${{ needs.determine-target.outputs.bootstrap }}
+        run: |
+          ACTION=rollback
+          if [ "$BOOTSTRAP" = "true" ]; then ACTION=rollback-bootstrap; fi
+          python3 scripts/phala-pingpong.py "$ACTION" "$OLD" "$NEW" "$PUBLIC_URL"

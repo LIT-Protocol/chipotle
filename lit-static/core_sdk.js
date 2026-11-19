@@ -27,6 +27,22 @@ import {
   isAbiDriftDevOverrideEnabled,
 } from './account_config_full_abi.js';
 import { runContractWrite, TX_STATES } from './tx_lifecycle.js';
+import { verifyAttestation, createPinnedFetch, TLS_PIN_MISMATCH, ATTESTED_ORIGINS, LEGACY_ORIGINS, LIT_API_URL } from './attestation.js';
+
+export {
+  verifyAttestation,
+  AttestationError,
+  ATTESTED_ORIGINS,
+  LEGACY_ORIGINS,
+  LIT_API_URL,
+  LIT_STAGING_API_URL,
+} from './attestation.js';
+
+/** How long a successful attestation is used before a request refreshes it in the background. */
+export const DEFAULT_ATTESTATION_TTL_MS = 10 * 60 * 1000;
+/** Age past which a request waits for a new attestation instead of using the old one. */
+export const DEFAULT_ATTESTATION_MAX_AGE_MS = 60 * 60 * 1000;
+const warnedLegacyOrigins = new Set();
 
 // Required prefix (top 96 bits, bytes12 "lit-wallet:1") of every new wallet
 // derivation path. `registerWalletDerivation` rejects a never-registered path
@@ -520,22 +536,63 @@ function usageApiKeyHash(ethers, usageApiKey) {
 export class LitNodeSimpleApiClient {
   /**
    * @param {Object} options
-   * @param {string} [options.baseUrl='http://localhost:8000'] - Base URL of the API
+   * @param {string} [options.baseUrl=LIT_API_URL] - Base URL of the API. Defaults to the production Lit API, which is attested before use; pass `http://localhost:8000` for a local server
    * @param {'api'|'sovereign'} [options.mode='api'] - Read-path mode. See module docblock.
    * @param {string} [options.rpcUrl] - RPC URL fallback for sovereign reads when no signer-with-provider is attached. Required for sovereign mode unless `signer` (or a later `connectSigner()` call) supplies a provider.
    * @param {string} [options.contractAddress] - AccountConfig contract address. Required when mode === 'sovereign'.
    * @param {number} [options.chainId] - Expected chain ID. Used for drift pinning + wallet chain guard. Optional; auto-detected from RPC when omitted.
    * @param {Object} [options.deployments] - Optional override map `{ "<chainId>:<address>": { runtimeBytecodeKeccak } }` for drift pinning.
    * @param {import('ethers').Signer} [options.signer] - Pre-connected signer for sovereign writes. May be set later via connectSigner(). When the signer carries its own provider (e.g. ethers.BrowserProvider), reads use it instead of `rpcUrl` (CPL-283).
+   * @param {boolean|Object} [options.attestation] - TEE attestation of the API origin before any request is sent to it.
+   *   Omitted: verified when `baseUrl` is one of `ATTESTED_ORIGINS`, not otherwise.
+   *   `false`: never verified. `true` or an object: always verified; the object takes the
+   *   `verifyAttestation` options (`appId`, `kmsContract`, `rpcUrls`, `tlsBinding`, ...) plus
+   *   `ttlMs` (default `DEFAULT_ATTESTATION_TTL_MS`), `maxAgeMs` (default
+   *   `DEFAULT_ATTESTATION_MAX_AGE_MS`) and `onVerified(result)`. Only the first
+   *   request waits for verification; later ones refresh it in the background.
+   *   A failed verification rejects the request with an `AttestationError`; nothing is sent.
    */
-  constructor({ baseUrl = 'http://localhost:8000', mode = 'api', rpcUrl, contractAddress, chainId, deployments, signer, adminHashOverride } = {}) {
+  constructor({ baseUrl = LIT_API_URL, mode = 'api', rpcUrl, contractAddress, chainId, deployments, signer, adminHashOverride, attestation } = {}) {
     if (typeof baseUrl !== 'string') {
       throw new Error(
         `LitNodeSimpleApiClient: baseUrl must be a string, got ${typeof baseUrl} (${JSON.stringify(baseUrl)})`,
       );
     }
     const base = baseUrl.replace(/\/$/, '');
-    this.baseUrl = `${base}/core/v1`;
+    // In a browser a relative or scheme-relative base ("//host") still names a
+    // real origin, and it must be attested like any other. Resolve it once,
+    // against the same base the platform's `fetch` uses (the document's, which
+    // a <base> element can point at another origin), and send requests to that
+    // absolute URL, so the origin attested is the origin that gets the request.
+    let origin = null;
+    let apiBase = `${base}/core/v1`;
+    try {
+      let resolved;
+      try {
+        resolved = new URL(apiBase);
+      } catch {
+        resolved = new URL(apiBase, globalThis.document?.baseURI ?? globalThis.location?.href);
+        apiBase = resolved.href;
+      }
+      if (resolved.protocol === 'https:' || resolved.protocol === 'http:') origin = resolved.origin;
+    } catch {
+      // Not a URL this runtime can resolve; requests to it will fail anyway.
+    }
+    this.baseUrl = apiBase;
+    this.origin = origin;
+    if (attestation !== undefined && typeof attestation !== 'boolean' && (attestation === null || typeof attestation !== 'object')) {
+      throw new Error('LitNodeSimpleApiClient: attestation must be a boolean or an options object');
+    }
+    const attest = attestation === undefined ? Boolean(origin && ATTESTED_ORIGINS[origin]) : attestation !== false;
+    const { ttlMs = DEFAULT_ATTESTATION_TTL_MS, maxAgeMs = DEFAULT_ATTESTATION_MAX_AGE_MS, onVerified, ...attestationOptions } =
+      attestation && typeof attestation === 'object' ? attestation : {};
+    this._attestation = attest ? { options: attestationOptions, ttlMs, maxAgeMs, onVerified, result: null, pending: null } : null;
+    if (origin && LEGACY_ORIGINS[origin] && !warnedLegacyOrigins.has(origin)) {
+      warnedLegacyOrigins.add(origin);
+      console.warn(
+        `[lit] ${origin} is being retired. Switch baseUrl to ${LEGACY_ORIGINS[origin]}, which this SDK verifies by TEE attestation. See https://developer.litprotocol.com/management/api_direct`,
+      );
+    }
     this.mode = mode;
     this.rpcUrl = rpcUrl ?? null;
     this.contractAddress = contractAddress ?? null;
@@ -563,6 +620,113 @@ export class LitNodeSimpleApiClient {
       throw new Error(
         'LitNodeSimpleApiClient: sovereign mode requires rpcUrl, or a signer whose provider can be used for reads',
       );
+    }
+  }
+
+  /**
+   * The last successful attestation of the API origin, or null when none has
+   * run yet or attestation is off.
+   * @returns {import('./attestation.js').AttestationResult|null}
+   */
+  get attestation() {
+    return this._attestation?.result ?? null;
+  }
+
+  /**
+   * Verify the API origin now, replacing any cached result. Requests do this
+   * themselves when needed; call it to verify eagerly or to read the result.
+   * @param {Object} [options] - `verifyAttestation` options for this call.
+   * @returns {Promise<import('./attestation.js').AttestationResult>}
+   */
+  async verifyAttestation(options = {}) {
+    if (!this.origin) throw new Error('LitNodeSimpleApiClient: baseUrl has no origin to attest');
+    const state = this._attestation;
+    // Only a verification under the client's own policy may stand in for it. A
+    // one-off check with other options (say, TLS binding off for a diagnostic)
+    // returns its result and leaves the client's attestation alone.
+    const ownPolicy = Object.keys(options).length === 0;
+    try {
+      const result = await verifyAttestation(this.origin, { ...(state?.options ?? {}), ...options });
+      if (state && ownPolicy) {
+        state.result = result;
+        state.onVerified?.(result);
+      }
+      return result;
+    } catch (error) {
+      // The origin no longer verifies under the client's policy: stop using
+      // what was learned before.
+      if (state && ownPolicy) state.result = null;
+      throw error;
+    }
+  }
+
+  /**
+   * Resolves with a usable attestation of the API origin (null when
+   * attestation is off). The caller sends its request on the result returned
+   * here, never on whatever the client holds a moment later: a refresh that
+   * fails in between must not downgrade a request already under way. Only a client
+   * with none (its first request, or after a failed or long-overdue refresh)
+   * waits here; concurrent callers share one verification.
+   *
+   * Past `ttlMs` the attestation is refreshed in the background and requests
+   * keep going on the existing one, so verification adds nothing to the
+   * request path. If that refresh fails the attestation is dropped, and the
+   * next request verifies first and fails if it cannot.
+   */
+  async _ensureAttested() {
+    const state = this._attestation;
+    if (!state) return null;
+    const current = state.result;
+    const age = current ? Date.now() - current.verifiedAt : Infinity;
+    if (age < state.ttlMs) return current;
+    if (!state.pending) {
+      state.pending = this.verifyAttestation()
+        .catch((error) => {
+          state.result = null;
+          throw error;
+        })
+        .finally(() => {
+          state.pending = null;
+        });
+      // A background refresh has no caller to report to; the failure surfaces
+      // on the next request, which finds no attestation and verifies again.
+      state.pending.catch(() => {});
+    }
+    if (age < state.maxAgeMs) return current;
+    return state.pending;
+  }
+
+  /**
+   * The transport for an attestation from `_ensureAttested`. When TLS binding
+   * was verified (Node.js), every connection is pinned to the attested key, so
+   * a request can only reach the VM that was verified. Otherwise the platform
+   * `fetch`.
+   */
+  async _transport(result) {
+    const state = this._attestation;
+    if (!state) return (url, init) => globalThis.fetch(url, init);
+    if (!result) throw new Error('LitNodeSimpleApiClient: no attestation for this request');
+    const key = result.tlsKeySha256;
+    // A redirect would carry the API key to an origin nobody verified.
+    if (!key) return (url, init) => globalThis.fetch(url, { ...init, redirect: 'error' });
+    if (state.pinned?.key !== key) {
+      state.pinned = { key, fetch: await createPinnedFetch(key, { tls: state.options.tls }) };
+    }
+    return state.pinned.fetch;
+  }
+
+  /** Every HTTP API call goes through here so nothing reaches an unverified origin. */
+  async _fetch(url, init) {
+    const attested = await this._ensureAttested();
+    try {
+      return await (await this._transport(attested))(url, init);
+    } catch (error) {
+      // The VM renewed its certificate with a new key, or a new instance took
+      // over the hostname. Nothing was sent. Verify the origin again and retry
+      // once on the key that verification attests.
+      if (error?.code !== TLS_PIN_MISMATCH) throw error;
+      if (this._attestation.result === attested) this._attestation.result = null;
+      return (await this._transport(await this._ensureAttested()))(url, init);
     }
   }
 
@@ -735,7 +899,7 @@ export class LitNodeSimpleApiClient {
       account_description: accountDescription ?? '',
     };
     if (email) body.email = email;
-    const res = await fetch(`${this.baseUrl}/new_account`, {
+    const res = await this._fetch(`${this.baseUrl}/new_account`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -865,7 +1029,7 @@ export class LitNodeSimpleApiClient {
       issuedAt,
     });
     const { typed_data, signature } = await signChainSecuredTypedData(signer, typedData);
-    const res = await fetch(`${this.baseUrl}/convert_to_chain_secured_account`, {
+    const res = await this._fetch(`${this.baseUrl}/convert_to_chain_secured_account`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify({
@@ -908,7 +1072,7 @@ export class LitNodeSimpleApiClient {
       }
       return await contract.accountExistsAndIsMutable.staticCall(hash, { from });
     }
-    const res = await fetch(`${this.baseUrl}/account_exists`, {
+    const res = await this._fetch(`${this.baseUrl}/account_exists`, {
       headers: headersWithApiKey(apiKey),
     });
     return parseResponse(res, 'account_exists');
@@ -1027,7 +1191,7 @@ export class LitNodeSimpleApiClient {
           issuedAt,
         });
         const { typed_data, signature } = await signChainSecuredTypedData(this.signer, typedData);
-        const res = await fetch(`${this.baseUrl}/create_wallet_with_signature`, {
+        const res = await this._fetch(`${this.baseUrl}/create_wallet_with_signature`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ typed_data, signature }),
@@ -1047,7 +1211,7 @@ export class LitNodeSimpleApiClient {
       return { wallet_address: minted.wallet_address, transaction_hash: txHash };
     }
 
-    const res = await fetch(`${this.baseUrl}/create_wallet`, {
+    const res = await this._fetch(`${this.baseUrl}/create_wallet`, {
       headers: headersWithApiKey(apiKey),
     });
     return parseResponse(res, 'create_wallet');
@@ -1060,7 +1224,7 @@ export class LitNodeSimpleApiClient {
    * @returns {Promise<string>} IPFS CID (e.g. derived hash of code)
    */
   async getLitActionIpfsId(code) {
-    const res = await fetch(`${this.baseUrl}/get_lit_action_ipfs_id`, {
+    const res = await this._fetch(`${this.baseUrl}/get_lit_action_ipfs_id`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(code),
@@ -1079,7 +1243,7 @@ export class LitNodeSimpleApiClient {
       code,
       js_params: jsParams ?? null,
     };
-    const res = await fetch(`${this.baseUrl}/lit_action`, {
+    const res = await this._fetch(`${this.baseUrl}/lit_action`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
@@ -1115,7 +1279,7 @@ export class LitNodeSimpleApiClient {
       pkp_ids_permitted: pkpIdsPermitted,
       cid_hashes_permitted: cidHashesPermitted,
     };
-    const res = await fetch(`${this.baseUrl}/add_group`, {
+    const res = await this._fetch(`${this.baseUrl}/add_group`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
@@ -1142,7 +1306,7 @@ export class LitNodeSimpleApiClient {
       return { success: true, action_hash: actionHash, transaction_hash: txHash };
     }
     const body = { action_ipfs_cid: actionIpfsCid, name: name ?? '', description: description ?? '' };
-    const res = await fetch(`${this.baseUrl}/add_action`, {
+    const res = await this._fetch(`${this.baseUrl}/add_action`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
@@ -1172,7 +1336,7 @@ export class LitNodeSimpleApiClient {
       group_id: Number(groupId),
       action_ipfs_cid: actionIpfsCid,
     };
-    const res = await fetch(`${this.baseUrl}/add_action_to_group`, {
+    const res = await this._fetch(`${this.baseUrl}/add_action_to_group`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
@@ -1201,7 +1365,7 @@ export class LitNodeSimpleApiClient {
       group_id: Number(groupId),
       pkp_id: pkpId,
     };
-    const res = await fetch(`${this.baseUrl}/add_pkp_to_group`, {
+    const res = await this._fetch(`${this.baseUrl}/add_pkp_to_group`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
@@ -1230,7 +1394,7 @@ export class LitNodeSimpleApiClient {
       group_id: Number(groupId),
       pkp_id: pkpId,
     };
-    const res = await fetch(`${this.baseUrl}/remove_pkp_from_group`, {
+    const res = await this._fetch(`${this.baseUrl}/remove_pkp_from_group`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
@@ -1267,7 +1431,7 @@ export class LitNodeSimpleApiClient {
     const body = {
       wallet_address: walletAddress,
     };
-    const res = await fetch(`${this.baseUrl}/delete_wallet`, {
+    const res = await this._fetch(`${this.baseUrl}/delete_wallet`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
@@ -1364,7 +1528,7 @@ export class LitNodeSimpleApiClient {
       remove_pkp_from_groups: removePkpFromGroups,
       execute_in_groups: executeInGroups,
     };
-    const res = await fetch(`${this.baseUrl}/add_usage_api_key`, {
+    const res = await this._fetch(`${this.baseUrl}/add_usage_api_key`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
@@ -1437,7 +1601,7 @@ export class LitNodeSimpleApiClient {
       remove_pkp_from_groups: removePkpFromGroups,
       execute_in_groups: executeInGroups,
     };
-    const res = await fetch(`${this.baseUrl}/update_usage_api_key`, {
+    const res = await this._fetch(`${this.baseUrl}/update_usage_api_key`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
@@ -1467,7 +1631,7 @@ export class LitNodeSimpleApiClient {
     const body = {
       usage_api_key: usageApiKey,
     };
-    const res = await fetch(`${this.baseUrl}/remove_usage_api_key`, {
+    const res = await this._fetch(`${this.baseUrl}/remove_usage_api_key`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
@@ -1487,7 +1651,7 @@ export class LitNodeSimpleApiClient {
       return { success: true, transaction_hash: txHash };
     }
     const body = { group_id: String(groupId) };
-    const res = await fetch(`${this.baseUrl}/remove_group`, {
+    const res = await this._fetch(`${this.baseUrl}/remove_group`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
@@ -1519,7 +1683,7 @@ export class LitNodeSimpleApiClient {
       pkp_ids_permitted: pkpIdsPermitted,
       cid_hashes_permitted: cidHashesPermitted,
     };
-    const res = await fetch(`${this.baseUrl}/update_group`, {
+    const res = await this._fetch(`${this.baseUrl}/update_group`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
@@ -1545,7 +1709,7 @@ export class LitNodeSimpleApiClient {
       return { success: true, transaction_hash: txHash };
     }
     const body = { hashed_cid: hashedCid };
-    const res = await fetch(`${this.baseUrl}/delete_action`, {
+    const res = await this._fetch(`${this.baseUrl}/delete_action`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
@@ -1574,7 +1738,7 @@ export class LitNodeSimpleApiClient {
       group_id: Number(groupId),
       hashed_cid: hashedCid,
     };
-    const res = await fetch(`${this.baseUrl}/remove_action_from_group`, {
+    const res = await this._fetch(`${this.baseUrl}/remove_action_from_group`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
@@ -1605,7 +1769,7 @@ export class LitNodeSimpleApiClient {
       name: name ?? '',
       description: description ?? '',
     };
-    const res = await fetch(`${this.baseUrl}/update_action_metadata`, {
+    const res = await this._fetch(`${this.baseUrl}/update_action_metadata`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
@@ -1637,7 +1801,7 @@ export class LitNodeSimpleApiClient {
       name: name ?? '',
       description: description ?? '',
     };
-    const res = await fetch(`${this.baseUrl}/update_usage_api_key_metadata`, {
+    const res = await this._fetch(`${this.baseUrl}/update_usage_api_key_metadata`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
@@ -1678,7 +1842,7 @@ export class LitNodeSimpleApiClient {
       page_number: String(pageNumber),
       page_size: String(pageSize),
     });
-    const res = await fetch(`${this.baseUrl}/list_api_keys?${params}`, {
+    const res = await this._fetch(`${this.baseUrl}/list_api_keys?${params}`, {
       headers: headersWithApiKey(apiKey),
     });
     return parseResponse(res, 'list_api_keys');
@@ -1705,7 +1869,7 @@ export class LitNodeSimpleApiClient {
       page_number: String(pageNumber),
       page_size: String(pageSize),
     });
-    const res = await fetch(`${this.baseUrl}/list_groups?${params}`, {
+    const res = await this._fetch(`${this.baseUrl}/list_groups?${params}`, {
       headers: headersWithApiKey(apiKey),
     });
     return parseResponse(res, 'list_groups');
@@ -1733,7 +1897,7 @@ export class LitNodeSimpleApiClient {
       page_number: String(pageNumber),
       page_size: String(pageSize),
     });
-    const res = await fetch(`${this.baseUrl}/list_wallets?${params}`, {
+    const res = await this._fetch(`${this.baseUrl}/list_wallets?${params}`, {
       headers: headersWithApiKey(apiKey),
     });
     return parseResponse(res, 'list_wallets');
@@ -1790,7 +1954,7 @@ export class LitNodeSimpleApiClient {
       page_number: String(pageNumber),
       page_size: String(pageSize),
     });
-    const res = await fetch(`${this.baseUrl}/list_wallets_in_group?${params}`, {
+    const res = await this._fetch(`${this.baseUrl}/list_wallets_in_group?${params}`, {
       headers: headersWithApiKey(apiKey),
     });
     return parseResponse(res, 'list_wallets_in_group');
@@ -1832,7 +1996,7 @@ export class LitNodeSimpleApiClient {
       entries.group_id = groupId;
     }
     const params = new URLSearchParams(entries);
-    const res = await fetch(`${this.baseUrl}/list_actions?${params}`, {
+    const res = await this._fetch(`${this.baseUrl}/list_actions?${params}`, {
       headers: headersWithApiKey(apiKey),
     });
     return parseResponse(res, 'list_actions');
@@ -1846,7 +2010,7 @@ export class LitNodeSimpleApiClient {
    * @returns {Promise<NodeChainConfigResponse>}
    */
   async getNodeChainConfig() {
-    const res = await fetch(`${this.baseUrl}/get_node_chain_config`);
+    const res = await this._fetch(`${this.baseUrl}/get_node_chain_config`);
     const cfg = await parseResponse(res, 'get_node_chain_config');
     if (!cfg.rpc_url && cfg.chain_id != null && cfg.is_evm) {
       const rpcUrl = rpcUrlForChainId(cfg.chain_id);
@@ -1864,7 +2028,7 @@ export class LitNodeSimpleApiClient {
    * @returns {Promise<{ languages: Array<{ name: string, display_name: string, execution_model: string, runtimes: object[], methods: string[] }> }>}
    */
   async getSupportedLanguages() {
-    const res = await fetch(`${this.baseUrl}/get_supported_languages`);
+    const res = await this._fetch(`${this.baseUrl}/get_supported_languages`);
     return parseResponse(res, 'get_supported_languages');
   }
 
@@ -1878,7 +2042,7 @@ export class LitNodeSimpleApiClient {
       const contract = await this._getViewContract();
       return await contract.api_payers();
     }
-    const res = await fetch(`${this.baseUrl}/get_api_payers`);
+    const res = await this._fetch(`${this.baseUrl}/get_api_payers`);
     return parseResponse(res, 'get_api_payers');
   }
 
@@ -1888,7 +2052,7 @@ export class LitNodeSimpleApiClient {
    * @returns {Promise<string>}
    */
   async getAdminApiPayer() {
-    const res = await fetch(`${this.baseUrl}/get_admin_api_payer`);
+    const res = await this._fetch(`${this.baseUrl}/get_admin_api_payer`);
     return parseResponse(res, 'get_admin_api_payer');
   }
 
@@ -1900,7 +2064,7 @@ export class LitNodeSimpleApiClient {
    * @returns {Promise<{publishable_key: string}>}
    */
   async getStripeConfig() {
-    const res = await fetch(`${this.baseUrl}/billing/stripe_config`);
+    const res = await this._fetch(`${this.baseUrl}/billing/stripe_config`);
     return parseResponse(res, 'billing/stripe_config');
   }
 
@@ -1920,7 +2084,7 @@ export class LitNodeSimpleApiClient {
     const url = options.force
       ? `${this.baseUrl}/billing/balance?force=true`
       : `${this.baseUrl}/billing/balance`;
-    const res = await fetch(url, {
+    const res = await this._fetch(url, {
       headers: billingHeaders(apiKey, options.walletAuthHeader),
       signal: options.signal,
     });
@@ -1936,7 +2100,7 @@ export class LitNodeSimpleApiClient {
    * @returns {Promise<{client_secret: string, payment_intent_id: string}>}
    */
   async createPaymentIntent(apiKey, amountCents, options = {}) {
-    const res = await fetch(`${this.baseUrl}/billing/create_payment_intent`, {
+    const res = await this._fetch(`${this.baseUrl}/billing/create_payment_intent`, {
       method: 'POST',
       headers: billingHeaders(apiKey, options.walletAuthHeader, { 'Content-Type': 'application/json' }),
       body: JSON.stringify({ amount_cents: amountCents }),
@@ -1954,7 +2118,7 @@ export class LitNodeSimpleApiClient {
    * @returns {Promise<void>}
    */
   async confirmPayment(apiKey, paymentIntentId, options = {}) {
-    const res = await fetch(`${this.baseUrl}/billing/confirm_payment`, {
+    const res = await this._fetch(`${this.baseUrl}/billing/confirm_payment`, {
       method: 'POST',
       headers: billingHeaders(apiKey, options.walletAuthHeader, { 'Content-Type': 'application/json' }),
       body: JSON.stringify({ payment_intent_id: paymentIntentId }),
@@ -1980,10 +2144,10 @@ function billingHeaders(apiKey, walletAuthHeader, extra = {}) {
 /**
  * Factory for a default client (e.g. for script usage).
  * Accepts either a string baseUrl or a full options object.
- * @param {string|Object} [options='http://localhost:8000']
+ * @param {string|Object} [options=LIT_API_URL]
  * @returns {LitNodeSimpleApiClient}
  */
-export function createClient(options = 'http://localhost:8000') {
+export function createClient(options = LIT_API_URL) {
   const opts = typeof options === 'string' ? { baseUrl: options } : options;
   return new LitNodeSimpleApiClient(opts);
 }

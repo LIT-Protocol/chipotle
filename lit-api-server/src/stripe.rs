@@ -1241,6 +1241,8 @@ pub async fn confirm_payment_and_credit(
 
     // Invalidate the cached balance so the customer sees updated credits immediately.
     state.balance_cache.invalidate(&customer_id).await;
+    // Other instances of this app cache the balance too.
+    crate::internal::peers::notify_balance_invalidated(&customer_id);
 
     Ok(())
 }

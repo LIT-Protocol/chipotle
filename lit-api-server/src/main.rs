@@ -316,6 +316,9 @@ async fn main() -> Result<(), rocket::Error> {
     // so there is no peer to drain to).
     supervisor::spawn_watchdog(task_health.clone(), WatchdogConfig::default());
 
+    // Best effort and self-terminating, so it is not a supervised actor.
+    tokio::spawn(dstack::v1::attestation_v3::prewarm_collateral());
+
     // Restart loop protection: track timestamps of recent restarts.
     let mut restart_timestamps: Vec<std::time::Instant> = Vec::new();
 
@@ -540,6 +543,12 @@ fn build_rocket(
     r = r
         .mount("/", dstack::v1::endpoints::attestation_routes())
         .mount("/dstack/v1/", dstack::v1::endpoints::routes());
+
+    // Announces an origin's retirement in-band; off unless configured.
+    if let Some(notice) = lit_api_server::sunset::SunsetFairing::from_env() {
+        tracing::info!("origin sunset notice enabled: {notice:?}");
+        r = r.attach(notice);
+    }
 
     r
 }

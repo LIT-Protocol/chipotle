@@ -157,7 +157,9 @@ def restore_dns(old, public):
         raise ValueError('Expected exactly one public hosted zone')
     batch = {'Changes': [{'Action': 'UPSERT', 'ResourceRecordSet': {
         'Name': domain, 'Type': 'CNAME', 'TTL': 30,
-        'ResourceRecords': [{'Value': '_.' + gateway.split('.', 1)[1]}]}}]}
+        # The instance's own gateway name, which every resolver accepts; the
+        # older "_." form is refused by Android as a CNAME target.
+        'ResourceRecords': [{'Value': gateway}]}}]}
     run('aws', 'route53', 'change-resource-record-sets', '--hosted-zone-id',
         zones[0]['Id'], '--change-batch', json.dumps(batch))
 

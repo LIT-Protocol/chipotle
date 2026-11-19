@@ -77,6 +77,20 @@ services:
       # Shared gateway IPs turn the per-IP new-account limit into a global cap.
       # Next/prod opt out via encrypted envs; other deployments stay enabled.
       NEW_ACCOUNT_RATE_LIMIT_ENABLED: "${NEW_ACCOUNT_RATE_LIMIT_ENABLED:-true}"
+      # The four below matter only while more than one instance of this app
+      # serves traffic at once (one hostname per platform during a migration).
+      # They are per-instance settings, empty by default, so a single compose
+      # file serves every instance.
+      # Share of the payer pool this instance signs with, "<index>/<count>".
+      # Instances derive the same payer keys; disjoint shares keep them from
+      # reusing each other's transaction nonces.
+      LIT_PAYER_SHARD: "${LIT_PAYER_SHARD:-}"
+      # Origins of the other instances, told to drop a cached balance after a top-up.
+      LIT_PEER_BASE_URLS: "${LIT_PEER_BASE_URLS:-}"
+      # Retirement notice for this instance's hostname: an HTTP-date for the
+      # Sunset header and the origin that replaces it.
+      LIT_ORIGIN_SUNSET: "${LIT_ORIGIN_SUNSET:-}"
+      LIT_ORIGIN_SUCCESSOR_URL: "${LIT_ORIGIN_SUCCESSOR_URL:-}"
     volumes:
       - lit-socket:/tmp
       - /var/run/dstack.sock:/var/run/dstack.sock
@@ -115,6 +129,7 @@ services:
       - '/sys:/host/sys:ro'
     restart: unless-stopped
 
+  # BEGIN dstack-ingress (scripts/phala-compose.py swaps this block per lane)
   # dstack-ingress — attestation-bound TLS termination inside the TEE.
   # Obtains a Let's Encrypt cert for DOMAIN via DNS-01 (Route 53), then
   # reverse-proxies HTTPS :443 → lit-api-server :8000.
@@ -180,6 +195,7 @@ services:
       lit-api-server:
         condition: service_started
     restart: unless-stopped
+  # END dstack-ingress
 
 volumes:
   lit-socket:

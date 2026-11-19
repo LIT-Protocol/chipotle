@@ -96,3 +96,57 @@ Lit sets up the vendor's application on Google Cloud Confidential VMs, which use
 Lit sets up the agent on Google Cloud Confidential VMs, which use Intel TDX to keep the machine's memory encrypted so the host cannot look inside. The agent runs as a Docker container. Its deployment lists the exact hostnames it may reach, and a proxy inside the machine enforces that list. Any change to the agent or the list waits for your organization to approve it on-chain, and your team can check a hardware attestation of exactly what is running.
 
 [Read the full guide](https://spark.litprotocol.com/ai-agent-on-customer-data/)
+
+## How can I run code that handles regulated data in a secure enclave and show regulators exactly which code ran?
+
+Run the code in an attested hardware enclave and have it sign every result with a key that belongs to that exact code. On Lit Protocol, a Lit Action is identified by a hash of its source, and the enclave derives a signing key for each action from that hash. If the code changes by one character, the hash and the key change too. A signed result therefore names the code that produced it, and anyone can check the signature later against the published source.
+
+[Read the full guide](https://spark.litprotocol.com/show-regulators-which-code-ran/)
+
+## What is the difference between customer-managed keys and true zero operator access?
+
+With customer-managed keys, you control the key's policy: who can use it, when it rotates, and when it is revoked. The provider's service still decrypts your data with that key while it works, so the provider's systems see plaintext. Zero operator access means the provider's staff have no technical path to your keys or data. That usually takes hardware isolation and attestation, so the enclave proves which code it runs before it receives keys. On Lit Protocol, keys are derived inside an attested enclave and only the actions you authorize can use them, so review that those actions do not disclose keys. Lit's runtime governance still approves releases and the operator can pause signing, and the full guide covers what to check.
+
+[Read the full guide](https://spark.litprotocol.com/customer-managed-keys-vs-zero-operator-access/)
+
+## What signing latency do wallet APIs like Turnkey and Fireblocks have?
+
+On Lit Protocol's staging environment, signing a Hyperliquid order inside a secure enclave, in Hyperliquid's testnet signing formats, took a median of 135 to 140 milliseconds. We measured 600 requests from an office on an ordinary cable connection, so the number includes the network round trip a real client sees. Every signature verified with Hyperliquid's official Python SDK. The benchmark action only checked its inputs, and policy checks that fetch data add time.
+
+[Read the full guide](https://spark.litprotocol.com/tee-signing-latency-hyperliquid/)
+
+## How do I build a Hyperliquid trading bot without keeping my private key on the server?
+
+Have a Lit Action sign the bot's orders with a Lit wallet whose key is created inside a secure enclave. Your main Hyperliquid account approves the wallet's address as an API wallet, so it can trade without holding funds. The action checks every order against limits written into its code before it signs. Your server holds a usage key scoped to that action and wallet, so a compromised server can only request orders that pass the action's limits.
+
+[Read the full guide](https://spark.litprotocol.com/hyperliquid-trading-bot-without-private-key/)
+
+## How do I send email from a TEE or serverless function without exposing my email provider API key?
+
+Keep the API key encrypted and decrypt it only inside the code that sends the email. On Lit Protocol, you encrypt the key once to a Lit wallet in your account. A Lit Action decrypts it inside the enclave when it sends a message and calls the provider directly. Your application never holds the key, and the action's code decides what each email can say.
+
+[Read the full guide](https://spark.litprotocol.com/send-email-without-exposing-api-key/)
+
+## How do I store email addresses in an on-chain registry without making them public or guessable?
+
+Store a keyed hash of each address instead of the address or a plain hash. Anyone can hash a list of likely addresses and compare them against a plain hash, so a plain hash does not keep an email private. A keyed hash (HMAC) needs a secret key to compute. On Lit Protocol, that key is derived from a Lit wallet inside the enclave, so identifiers can only be computed by the code you authorize. The chain stores only the identifier and the wallet it belongs to.
+
+[Read the full guide](https://spark.litprotocol.com/store-email-addresses-onchain-privately/)
+
+## How do I verify a user's email address and link it to their crypto wallet?
+
+Require two proofs: the user can read the mailbox, and the wallet agrees to the link. On Lit Protocol, a Lit Action checks a request signed by the wallet, signs a verification link, and emails it to the address. When the user opens the link, they sign again with the same wallet, and the action checks both signatures before it authorizes the link in your registry contract. The contract stores an opaque identifier for the email instead of the address.
+
+[Read the full guide](https://spark.litprotocol.com/verify-email-link-wallet/)
+
+## How do I run a scheduled job that signs and sends blockchain transactions without running a server?
+
+Write the job as a Lit Action and run it on a schedule with [Lit Triggers](/lit-triggers/index). Triggers calls the action on a cron schedule, as often as every 30 seconds. The action signs with a Lit wallet whose key stays in the enclave, and the limits on what it can send are written into its code. You do not run a server. Lit runs the Triggers service, which stores your usage key encrypted and can only run the actions that key permits.
+
+[Read the full guide](https://spark.litprotocol.com/scheduled-job-signs-blockchain-transactions/)
+
+## How do I turn a webhook into a signed blockchain transaction?
+
+Point the webhook at [Lit Triggers](/lit-triggers/index), which runs a Lit Action for each delivery. The action checks the sender's signature over the raw body it received, then signs and sends the transaction with a Lit wallet whose key stays inside the enclave. The webhook secret is decrypted only inside the action. Because anyone can replay a captured request, the destination contract should reject events it has already processed.
+
+[Read the full guide](https://spark.litprotocol.com/webhook-to-signed-blockchain-transaction/)

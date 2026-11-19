@@ -1,0 +1,608 @@
+# One production "lane" of a release: a hostname and the replicas that serve it.
+#
+# Called by deploy-prod-1-propose.yml once per lane with images that are already
+# built. Provisions the lane's compose file on its cold replica, proposes that
+# compose hash to the Safe, and attaches the lane's deployment context to the
+# draft release for Phase 2.
+#
+# The hostname is written into the compose file, so each lane has its own
+# compose hash and its own Safe transaction. Both lanes are replicas of the same
+# app (one app_id, same derived keys).
+
+name: "Deploy Prod 1: Propose Lane"
+
+on:
+  workflow_call:
+    inputs:
+      lane:
+        description: "Lane name (legacy or v2)"
+        required: true
+        type: string
+      domain:
+        description: "Public hostname this lane serves"
+        required: true
+        type: string
+      replicas:
+        description: "Space-separated CVM names of this lane's replicas (one, or two for cold-replica selection)"
+        required: true
+        type: string
+      context_asset:
+        description: "Release asset name for this lane's deployment context"
+        required: true
+        type: string
+      ingress:
+        description: "dstack-ingress generation for this lane: 1 (1.x, TDX-only TLS evidence) or 2 (2.x, TLS evidence on any platform)"
+        required: false
+        type: string
+        default: "1"
+      input_cvm:
+        description: "Explicit target CVM (manual override)"
+        required: false
+        type: string
+        default: ""
+      payer_shard:
+        description: "LIT_PAYER_SHARD for this lane's replicas, e.g. 0/2 (empty: whole pool)"
+        required: false
+        type: string
+        default: ""
+      peer_base_urls:
+        description: "LIT_PEER_BASE_URLS: origins of the other lanes"
+        required: false
+        type: string
+        default: ""
+      origin_sunset:
+        description: "LIT_ORIGIN_SUNSET: HTTP-date after which this hostname is retired"
+        required: false
+        type: string
+        default: ""
+      origin_successor_url:
+        description: "LIT_ORIGIN_SUCCESSOR_URL: origin that replaces this hostname"
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  prepare-deploy:
+    runs-on: self-hosted
+    outputs:
+      compose_hash: ${{ steps.prepare.outputs.compose_hash }}
+      provision_hash: ${{ steps.prepare.outputs.provision_hash }}
+      app_auth_address: ${{ steps.prepare.outputs.app_auth_address }}
+      encrypted_env: ${{ steps.encrypt-env.outputs.encrypted_env }}
+      cvm_name: ${{ steps.prepare.outputs.cvm_name }}
+      env_keys: ${{ steps.prepare.outputs.env_keys }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download image digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          merge-multiple: true
+
+      - name: Prepare docker-compose for deployment (digest-pinned)
+        env:
+          DOMAIN: ${{ inputs.domain }}
+          INGRESS: ${{ inputs.ingress }}
+          DOCKER_IMAGE: ${{ vars.DOCKER_IMAGE }}
+          AWS_REGION_VALUE: ${{ vars.CERTBOT_AWS_REGION }}
+        run: |
+          set -euo pipefail
+          # These land in a sed program and in the compose file the Safe
+          # approves. Accept only the shapes they must have.
+          if ! [[ "$DOMAIN" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]]; then
+            echo "::error::domain must be a lowercase hostname"; exit 1
+          fi
+          if ! [[ "$DOCKER_IMAGE" =~ ^[A-Za-z0-9._:/-]+$ ]] || ! [[ "$AWS_REGION_VALUE" =~ ^[a-z0-9-]+$ ]]; then
+            echo "::error::DOCKER_IMAGE or CERTBOT_AWS_REGION has unexpected characters"; exit 1
+          fi
+          DIGEST_LIT_ACTIONS=$(cat digest-lit-actions.txt | tr -d '\n' | sed 's/}[}]*$//')
+          DIGEST_LIT_API_SERVER=$(cat digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
+          DIGEST_OTEL_COLLECTOR=$(cat digest-otel-collector.txt | tr -d '\n' | sed 's/}[}]*$//')
+          python3 scripts/phala-compose.py "$INGRESS" > docker-compose.lane.yml
+          sed \
+            -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|${DOCKER_IMAGE}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
+            -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|${DOCKER_IMAGE}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
+            -e "s|\${DOCKER_IMAGE_OTEL_COLLECTOR}|${DOCKER_IMAGE}-otel-collector@${DIGEST_OTEL_COLLECTOR}|g" \
+            -e "s|\${GCP_PROJECT_ID}|chipotle-prod|g" \
+            -e "s|\${CERTBOT_DOMAIN}|${DOMAIN}|g" \
+            -e "s|\${CERTBOT_AWS_REGION}|${AWS_REGION_VALUE}|g" \
+            docker-compose.lane.yml > docker-compose.deploy.yml
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Phala CLI
+        run: npm install -g phala
+
+      - name: Provision compose file update (get compose hash)
+        id: prepare
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          DEFAULT_APP_AUTH: ${{ vars.APP_AUTH_ADDRESS_CHIPOTLE_PROD }}
+          INPUT_CVM: ${{ inputs.input_cvm }}
+          LANE_REPLICAS: ${{ inputs.replicas }}
+          PUBLIC_DOMAIN: ${{ inputs.domain }}
+          LANE_NAME: ${{ inputs.lane }}
+        run: |
+          set -euo pipefail
+
+          # Resolve the target CVM. A manual workflow_dispatch run may override
+          # it via the phala_cvm_name input (break-glass / to provision + propose
+          # against a freshly-added replica on a new Phala node). Empty on tag
+          # pushes, so tagged prod releases auto-select the COLD replica below.
+          CVM_NAME="$INPUT_CVM"
+          # The lane's replica set (PROD_REPLICAS for the legacy lane in
+          # deploy-prod-1-propose.yml, the PROD_V2_REPLICAS var for v2).
+          read -r -a PROD_REPLICAS <<< "$LANE_REPLICAS"
+          if [ -z "$CVM_NAME" ] && [ "${#PROD_REPLICAS[@]}" -eq 1 ]; then
+            # A lane with a single replica has no cold box: update it in place.
+            CVM_NAME="${PROD_REPLICAS[0]}"
+            echo "Lane '$LANE_NAME' has one replica; proposing against it in place: $CVM_NAME"
+          fi
+          if [ -z "$CVM_NAME" ]; then
+            if [ "${#PROD_REPLICAS[@]}" -ne 2 ]; then
+              echo "::error::Lane '$LANE_NAME' needs one or two replicas to choose a target, got ${#PROD_REPLICAS[@]}. Re-run with phala_cvm_name."
+              exit 1
+            fi
+            # Auto-select the COLD prod replica: of the two long-lived prod
+            # replicas, propose against whichever one is NOT currently serving
+            # the public domain, so the Safe-approved compose hash lands on the
+            # standby box for a zero-downtime ping-pong cutover (see
+            # plans/zero-downtime-pingpong-deploy.md).
+            #
+            # Both replicas share one app_id, so the _dstack-app-address TXT
+            # can't tell them apart. The join key is the Phala node token
+            # (dstack-base-prodN): it appears both in the public domain's CNAME
+            # target (_.dstack-base-prodN.phala.network — written by the live
+            # replica's dstack-ingress when it claims the domain) and in each
+            # replica's own default Phala app URL. Match them: the replica on
+            # the live node is serving; the other is the cold deploy target.
+            #
+            # PUBLIC_DOMAIN is the lane's hostname: the same value as
+            # CERTBOT_DOMAIN in the compose preparation above and the public
+            # URLs written into the deployment context below.
+
+            # Consume all matches: never silently choose one of several nodes.
+            # Match the Phala hostname suffix, not a token in an arbitrary URL.
+            unique_node() {
+              local nodes
+              nodes=$(grep -oE 'dstack-base-prod[0-9]+\.phala\.network\.?([/:[:space:]]|$)' \
+                | sed -E 's/\.phala\.network.*$//' | sort -u) || return 1
+              [ -n "$nodes" ] && [[ "$nodes" != *$'\n'* ]] || return 1
+              printf '%s\n' "$nodes"
+            }
+
+            # Query the routing CNAME explicitly rather than address records.
+            node_of_dns() {
+              local host="$1" out=""
+              if command -v dig >/dev/null 2>&1; then
+                out=$(dig +short CNAME "$host" 2>/dev/null) || return 1
+              elif command -v host >/dev/null 2>&1; then
+                out=$(host -t CNAME "$host" 2>/dev/null) || return 1
+              elif command -v nslookup >/dev/null 2>&1; then
+                out=$(nslookup -type=CNAME "$host" 2>/dev/null) || return 1
+              else
+                return 1
+              fi
+              printf '%s\n' "$out" | unique_node
+            }
+
+            # Accept either CLI endpoint layout, including gateway metadata for
+            # stopped replicas with no app endpoints. Reject conflicting nodes.
+            node_of_cvm() {
+              local cvm="$1" json addresses
+              json=$(phala cvms get "$cvm" --json 2>/dev/null) || return 1
+              addresses=$(printf '%s\n' "$json" | jq -r '
+                [.gateway.cname, .endpoints[]?.app, .public_urls[]?.app]
+                | .[] | select(type == "string")') || return 1
+              printf '%s\n' "$addresses" | unique_node
+            }
+
+            if ! LIVE_NODE=$(node_of_dns "$PUBLIC_DOMAIN"); then
+              # A lane's first deploy: nothing serves its hostname yet, so there
+              # is no DNS record to read, and no live replica to protect. That
+              # is only the case if every replica is known to be stopped.
+              ALL_STOPPED=true
+              for rep in "${PROD_REPLICAS[@]}"; do
+                status=$(phala cvms get "$rep" --json 2>/dev/null | jq -r '.status // empty') || status=""
+                [ "$status" = "stopped" ] || ALL_STOPPED=false
+              done
+              if [ "$ALL_STOPPED" != "true" ]; then
+                echo "::error::Could not determine the live prod node from DNS for $PUBLIC_DOMAIN. Re-run with the phala_cvm_name input to target a replica explicitly."
+                exit 1
+              fi
+              CVM_NAME="${PROD_REPLICAS[0]}"
+              echo "No DNS record for $PUBLIC_DOMAIN and every replica is stopped: first deploy of lane '$LANE_NAME' targets $CVM_NAME"
+            fi
+          fi
+          # Not a first deploy: tell the live replica from the cold one.
+          if [ -z "$CVM_NAME" ]; then
+            echo "Live node currently serving $PUBLIC_DOMAIN: $LIVE_NODE"
+
+            COLD_CVM=""; LIVE_CVM=""
+            for rep in "${PROD_REPLICAS[@]}"; do
+              if ! n=$(node_of_cvm "$rep"); then
+                echo "::error::Could not resolve the node for replica '$rep' via 'phala cvms get'. Cannot safely auto-select the cold box; re-run with phala_cvm_name."
+                exit 1
+              fi
+              echo "  replica $rep is on node $n"
+              if [ "$n" = "$LIVE_NODE" ]; then LIVE_CVM="$rep"; else COLD_CVM="$rep"; fi
+            done
+
+            if [ -z "$LIVE_CVM" ]; then
+              echo "::error::Neither prod replica (${PROD_REPLICAS[*]}) is on the live node $LIVE_NODE. Refusing to guess the cold box; re-run with phala_cvm_name."
+              exit 1
+            fi
+            if [ -z "$COLD_CVM" ]; then
+              # Both replicas share the live node, so the node cannot tell them
+              # apart. Their power state can: a same-node pair keeps exactly one
+              # replica running (serving) and the other stopped.
+              STOPPED=(); RUNNING=()
+              for rep in "${PROD_REPLICAS[@]}"; do
+                status=$(phala cvms get "$rep" --json 2>/dev/null | jq -r '.status // empty') || status=""
+                case "$status" in
+                  stopped) STOPPED+=("$rep") ;;
+                  running) RUNNING+=("$rep") ;;
+                esac
+              done
+              if [ "${#STOPPED[@]}" -ne 1 ] || [ "${#RUNNING[@]}" -ne 1 ]; then
+                echo "::error::Both prod replicas resolve to the live node $LIVE_NODE and are not one running, one stopped — cannot pick a distinct cold box. Re-run with phala_cvm_name."
+                exit 1
+              fi
+              LIVE_CVM="${RUNNING[0]}"; COLD_CVM="${STOPPED[0]}"
+              echo "Same-node pair on $LIVE_NODE: $LIVE_CVM is running, $COLD_CVM is stopped"
+            fi
+            echo "Live replica: $LIVE_CVM ($LIVE_NODE) → proposing against COLD replica: $COLD_CVM"
+            CVM_NAME="$COLD_CVM"
+          fi
+          echo "Target prod CVM: $CVM_NAME"
+          echo "cvm_name=$CVM_NAME" >> "$GITHUB_OUTPUT"
+
+          # Build the API request payload with the docker-compose content and
+          # the list of allowed environment variable keys. The actual secret
+          # values are encrypted client-side in a separate step and sent
+          # during the Phase 2 commit call.
+          # Provision must update allowed_envs too, matching Phase 2's
+          # update_env_vars=true. Otherwise Phala hashes the old key list
+          # here, then changes the manifest (and hash) when committing.
+          COMPOSE_CONTENT=$(cat docker-compose.deploy.yml)
+          PROVISION_FILE=$(mktemp)
+          trap 'rm -f "$PROVISION_FILE"' EXIT
+          jq -n \
+            --arg dc "$COMPOSE_CONTENT" \
+            '{
+              name: "",
+              docker_compose_file: $dc,
+              update_env_vars: true,
+              allowed_envs: [
+                "STRIPE_SECRET_KEY",
+                "STRIPE_PUBLISHABLE_KEY",
+                "GCP_SERVICE_ACCOUNT_JSON",
+                "GCP_PROJECT_ID",
+                "BASE_CHAIN_RPC",
+                "CERTBOT_DOMAIN",
+                "CERTBOT_AWS_ACCESS_KEY_ID",
+                "CERTBOT_AWS_SECRET_ACCESS_KEY",
+                "CERTBOT_AWS_ROLE_ARN",
+                "CERTBOT_AWS_REGION",
+                "LIT_INTERNAL_SHARED_SECRET",
+                "PHALA_CVM_NAME",
+                "NEW_ACCOUNT_RATE_LIMIT_ENABLED",
+                "LIT_PAYER_SHARD",
+                "LIT_PEER_BASE_URLS",
+                "LIT_ORIGIN_SUNSET",
+                "LIT_ORIGIN_SUCCESSOR_URL"
+              ]
+            }' > "$PROVISION_FILE"
+          echo "Request payload size: $(wc -c < "$PROVISION_FILE") bytes"
+
+          echo "Calling POST /cvms/$CVM_NAME/compose_file/provision ..."
+          OUTPUT=$(phala api "/cvms/$CVM_NAME/compose_file/provision" \
+            -X POST \
+            --input "$PROVISION_FILE" \
+            2>&1) || {
+            echo "::error::phala api call failed with exit code $?"
+            echo "Output: $OUTPUT"
+            exit 1
+          }
+          echo "API response: $OUTPUT"
+          PROVISION_HASH=$(echo "$OUTPUT" | jq -r '.compose_hash')
+          if [ -z "$PROVISION_HASH" ] || [ "$PROVISION_HASH" = "null" ]; then
+            echo "::error::Failed to extract compose_hash from provision response"
+            exit 1
+          fi
+          echo "provision_hash=$PROVISION_HASH" >> "$GITHUB_OUTPUT"
+          # The exact key list this compose was provisioned with. Phase 2 must
+          # commit the same list, or the manifest (and its hash) changes after
+          # the Safe has approved it.
+          echo "env_keys=$(jq -c '.allowed_envs' "$PROVISION_FILE")" >> "$GITHUB_OUTPUT"
+
+          # Extract the KMS slug from the provision response. The provision
+          # endpoint returns a richer kms_info (with slug/id) than the CVM
+          # info endpoint. We need this slug to fetch the encryption pubkey.
+          KMS_SLUG=$(echo "$OUTPUT" | jq -r '.kms_info.slug // empty')
+          if [ -z "$KMS_SLUG" ]; then
+            KMS_SLUG=$(echo "$OUTPUT" | jq -r '.kms_info.id // empty')
+          fi
+          APP_ID=$(echo "$OUTPUT" | jq -r '.app_id // empty')
+          echo "KMS slug: $KMS_SLUG, app_id: $APP_ID"
+          echo "kms_slug=$KMS_SLUG" >> "$GITHUB_OUTPUT"
+          echo "app_id=$APP_ID" >> "$GITHUB_OUTPUT"
+
+          # Extract the AppAuth (dstack_app) address from the CVM's KMS info.
+          # This is the per-app contract that controls compose-hash whitelisting.
+          CVM_INFO=$(phala api "/cvms/$CVM_NAME" --json 2>&1) || true
+          echo "CVM info (kms): $(echo "$CVM_INFO" | jq '.kms_info // .detail' 2>/dev/null)"
+          APP_AUTH=$(echo "$CVM_INFO" | jq -r '.kms_info.dstack_app_address // empty')
+          if [ -z "$APP_AUTH" ]; then
+            echo "::warning::Could not extract dstack_app_address from CVM info, falling back to APP_AUTH_ADDRESS_CHIPOTLE_PROD variable"
+            APP_AUTH="$DEFAULT_APP_AUTH"
+          fi
+          if [ -z "$APP_AUTH" ]; then
+            echo "::error::No AppAuth address available (neither from CVM info nor APP_AUTH_ADDRESS_CHIPOTLE_PROD variable)"
+            exit 1
+          fi
+          echo "app_auth_address=$APP_AUTH" >> "$GITHUB_OUTPUT"
+
+          # The on-chain whitelist hash MUST equal the hash the CVM commits
+          # and recomputes at boot — otherwise the KMS refuses to issue keys
+          # ("Compose hash not allowed") and the CVM cannot start.
+          #
+          # Phala's provision API already returns exactly that value: it is
+          # getComposeHash() over the full app_compose the server will store,
+          # and Phase 2 (commit-deploy) commits the deployment by referencing
+          # this same provision_hash. So the provision_hash IS the deploy and
+          # on-chain hash — we whitelist it directly.
+          #
+          # Do NOT recompute the hash client-side from a locally-assembled
+          # app_compose. The post-provision GET often hasn't caught up yet
+          # (the docker_compose_file won't byte-match what we sent), so any
+          # client-side reconstruction hashes a different object than the one
+          # that actually boots. That divergence is what whitelisted the wrong
+          # hash and broke the v1.1.4 prod boot: proposed
+          # c9b51bbf0a11bdff4f47aa2bbaf61b6bd5603d4775b1697d9b99afe1dd59427a
+          # but the CVM booted (and was committed with)
+          # c40639829920a7ab202492e182d6c5e9d439fd7fa742f50e9a2248226af5ee8b.
+          # See architectureDocs/deployment/vm-code-upgrade.md.
+          echo "Compose hash (provision = deploy = on-chain): $PROVISION_HASH"
+          echo "compose_hash=$PROVISION_HASH" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch CVM encryption public key
+        id: fetch-pubkey
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          KMS_SLUG: ${{ steps.prepare.outputs.kms_slug }}
+          APP_ID: ${{ steps.prepare.outputs.app_id }}
+        run: |
+          set -euo pipefail
+
+          # Workaround: `phala envs encrypt` passes kms_type ("base") to the
+          # /kms/{kms}/pubkey/{app_id} API, but the API expects a KMS slug
+          # (e.g. "kms-base-prod5"). We fetch the pubkey using the correct
+          # slug from the provision response.
+          if [ -z "$KMS_SLUG" ] || [ -z "$APP_ID" ]; then
+            echo "::error::KMS_SLUG or APP_ID not set from provision step"
+            exit 1
+          fi
+
+          echo "Fetching encryption pubkey via /kms/$KMS_SLUG/pubkey/$APP_ID ..."
+          PUBKEY_RESPONSE=$(phala api "/kms/$KMS_SLUG/pubkey/$APP_ID" --json 2>&1) || {
+            echo "::error::Failed to fetch encryption pubkey: $PUBKEY_RESPONSE"
+            exit 1
+          }
+          PUBKEY=$(echo "$PUBKEY_RESPONSE" | jq -r '.public_key')
+          if [ -z "$PUBKEY" ] || [ "$PUBKEY" = "null" ]; then
+            echo "::error::Failed to extract public_key from KMS response"
+            exit 1
+          fi
+          echo "Got encryption pubkey: ${PUBKEY:0:16}..."
+          echo "encrypt_pubkey=$PUBKEY" >> "$GITHUB_OUTPUT"
+
+      - name: Encrypt environment variables for CVM
+        id: encrypt-env
+        env:
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+          BASE_CHAIN_RPC: ${{ secrets.BASE_CHAIN_RPC }}
+          CERTBOT_AWS_ACCESS_KEY_ID: ${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}
+          CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
+          CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
+          CERTBOT_AWS_REGION: ${{ vars.CERTBOT_AWS_REGION }}
+          LIT_INTERNAL_SHARED_SECRET: ${{ secrets.LIT_INTERNAL_SHARED_SECRET }}
+          ENCRYPT_PUBKEY: ${{ steps.fetch-pubkey.outputs.encrypt_pubkey }}
+          # The CVM this proposal targets; names the replica in OTEL logs.
+          PHALA_CVM_NAME: ${{ steps.prepare.outputs.cvm_name }}
+          CERTBOT_DOMAIN: ${{ inputs.domain }}
+          LIT_PAYER_SHARD: ${{ inputs.payer_shard }}
+          LIT_PEER_BASE_URLS: ${{ inputs.peer_base_urls }}
+          LIT_ORIGIN_SUNSET: ${{ inputs.origin_sunset }}
+          LIT_ORIGIN_SUCCESSOR_URL: ${{ inputs.origin_successor_url }}
+        run: |
+          set -euo pipefail
+
+          # Encrypt env vars client-side using the @phala/cloud SDK's
+          # encryptEnvVars function (X25519 + AES-256-GCM). We resolve the
+          # SDK from the globally-installed phala package.
+          ENCRYPTED_ENV=$(node -e '
+            const path = require("path");
+            const prefix = require("child_process").execSync("npm prefix -g").toString().trim();
+            const { encryptEnvVars } = require(
+              require.resolve("@phala/cloud", { paths: [path.join(prefix, "lib/node_modules/phala")] })
+            );
+            const envs = [
+              { key: "STRIPE_SECRET_KEY", value: process.env.STRIPE_SECRET_KEY },
+              { key: "STRIPE_PUBLISHABLE_KEY", value: process.env.STRIPE_PUBLISHABLE_KEY },
+              { key: "GCP_SERVICE_ACCOUNT_JSON", value: process.env.GCP_SERVICE_ACCOUNT_JSON },
+              { key: "GCP_PROJECT_ID", value: "chipotle-prod" },
+              { key: "BASE_CHAIN_RPC", value: process.env.BASE_CHAIN_RPC },
+              { key: "CERTBOT_DOMAIN", value: process.env.CERTBOT_DOMAIN },
+              { key: "CERTBOT_AWS_ACCESS_KEY_ID", value: process.env.CERTBOT_AWS_ACCESS_KEY_ID },
+              { key: "CERTBOT_AWS_SECRET_ACCESS_KEY", value: process.env.CERTBOT_AWS_SECRET_ACCESS_KEY },
+              { key: "CERTBOT_AWS_ROLE_ARN", value: process.env.CERTBOT_AWS_ROLE_ARN },
+              { key: "CERTBOT_AWS_REGION", value: process.env.CERTBOT_AWS_REGION },
+              { key: "LIT_INTERNAL_SHARED_SECRET", value: process.env.LIT_INTERNAL_SHARED_SECRET },
+              { key: "PHALA_CVM_NAME", value: process.env.PHALA_CVM_NAME },
+              // Shared gateway IP makes the per-IP new-account limit a global cap.
+              { key: "NEW_ACCOUNT_RATE_LIMIT_ENABLED", value: "false" },
+              // Per-lane settings; empty (the compose default) for a single lane.
+              { key: "LIT_PAYER_SHARD", value: process.env.LIT_PAYER_SHARD || "" },
+              { key: "LIT_PEER_BASE_URLS", value: process.env.LIT_PEER_BASE_URLS || "" },
+              { key: "LIT_ORIGIN_SUNSET", value: process.env.LIT_ORIGIN_SUNSET || "" },
+              { key: "LIT_ORIGIN_SUCCESSOR_URL", value: process.env.LIT_ORIGIN_SUCCESSOR_URL || "" },
+            ];
+            const pubkey = process.env.ENCRYPT_PUBKEY;
+            encryptEnvVars(envs, pubkey).then(hex => process.stdout.write(hex));
+          ')
+
+          if [ -z "$ENCRYPTED_ENV" ]; then
+            echo "::error::encryptEnvVars returned empty output"
+            exit 1
+          fi
+          echo "Encrypted env length: ${#ENCRYPTED_ENV} chars"
+          echo "encrypted_env=$ENCRYPTED_ENV" >> "$GITHUB_OUTPUT"
+
+  propose-compose-hash:
+    needs: [prepare-deploy]
+    runs-on: self-hosted
+    outputs:
+      safe_tx_hash: ${{ steps.propose.outputs.safe_tx_hash }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install contract dependencies
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: npm ci
+
+      - name: Compile contracts
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: npx hardhat compile
+
+      - name: Propose addComposeHash to Safe
+        id: propose
+        working-directory: lit-api-server/blockchain/lit_node_express
+        env:
+          PROPOSER_PRIVATE_KEY: ${{ secrets.SAFE_PROPOSER_PRIVATE_KEY }}
+          SAFE_ADDRESS: ${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}
+          APP_AUTH: ${{ needs.prepare-deploy.outputs.app_auth_address }}
+          COMPOSE_HASH: ${{ needs.prepare-deploy.outputs.compose_hash }}
+        run: |
+          set -euo pipefail
+          # This step holds the Safe proposer key: its arguments arrive as
+          # environment variables and must look like what they are.
+          for address in "$SAFE_ADDRESS" "$APP_AUTH"; do
+            if ! [[ "$address" =~ ^0x[0-9a-fA-F]{40}$ ]]; then
+              echo "::error::Safe and AppAuth must be 0x followed by 40 hex characters"; exit 1
+            fi
+          done
+          if ! [[ "$COMPOSE_HASH" =~ ^(0x)?[0-9a-fA-F]{64}$ ]]; then
+            echo "::error::compose hash must be 64 hex characters"; exit 1
+          fi
+          OUTPUT=$(npx hardhat propose-dstack-app \
+            --network base \
+            --safe "$SAFE_ADDRESS" \
+            --app-auth "$APP_AUTH" \
+            --compose-hash "$COMPOSE_HASH" \
+            2>&1 | tee /dev/stderr)
+          SAFE_TX_HASH=$(echo "$OUTPUT" | grep '^SAFE_TX_HASH=' | cut -d= -f2)
+          if [ -z "$SAFE_TX_HASH" ]; then
+            echo "::error::Failed to extract SAFE_TX_HASH from propose-dstack-app output"
+            exit 1
+          fi
+          echo "safe_tx_hash=$SAFE_TX_HASH" >> "$GITHUB_OUTPUT"
+
+  create-draft-release:
+    needs: [prepare-deploy, propose-compose-hash]
+    runs-on: self-hosted
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Create deployment context file
+        env:
+          DOMAIN: ${{ inputs.domain }}
+          LANE: ${{ inputs.lane }}
+          CONTEXT_ASSET: ${{ inputs.context_asset }}
+          REPLICAS: ${{ inputs.replicas }}
+          ENV_KEYS: ${{ needs.prepare-deploy.outputs.env_keys }}
+          INGRESS: ${{ inputs.ingress }}
+          COMPOSE_HASH: ${{ needs.prepare-deploy.outputs.compose_hash }}
+          SAFE_TX_HASH: ${{ needs.propose-compose-hash.outputs.safe_tx_hash }}
+          CVM_NAME: ${{ needs.prepare-deploy.outputs.cvm_name }}
+          SAFE_ADDRESS: ${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}
+          APP_AUTH: ${{ needs.prepare-deploy.outputs.app_auth_address }}
+          VERSION_TAG: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+          ENCRYPTED_ENV: ${{ needs.prepare-deploy.outputs.encrypted_env }}
+          PROVISION_HASH: ${{ needs.prepare-deploy.outputs.provision_hash }}
+        run: |
+          set -euo pipefail
+          # The ingress generation is recorded so Phase 2 gates the deployment
+          # the Safe approved, whatever the repo variable says by then.
+          jq -n \
+            --arg replicas "$REPLICAS" \
+            --argjson env_keys "$ENV_KEYS" \
+            --arg ingress "$INGRESS" \
+            --arg compose_hash "$COMPOSE_HASH" \
+            --arg safe_tx_hash "$SAFE_TX_HASH" \
+            --arg phala_app_name "$CVM_NAME" \
+            --arg lane "$LANE" \
+            --arg base_url "https://${DOMAIN}" \
+            --arg api_root_url "https://${DOMAIN}/core/v1" \
+            --arg safe_address "$SAFE_ADDRESS" \
+            --arg app_auth_address "$APP_AUTH" \
+            --arg version_tag "$VERSION_TAG" \
+            --arg source_sha "$SOURCE_SHA" \
+            --arg encrypted_env "$ENCRYPTED_ENV" \
+            --arg provision_hash "$PROVISION_HASH" \
+            '{lane: $lane, ingress: $ingress, replicas: ($replicas | split(" ") | map(select(length > 0))), env_keys: $env_keys, compose_hash: $compose_hash, provision_hash: $provision_hash, safe_tx_hash: $safe_tx_hash, phala_app_name: $phala_app_name, base_url: $base_url, api_root_url: $api_root_url, safe_address: $safe_address, app_auth_address: $app_auth_address, version_tag: $version_tag, source_sha: $source_sha, encrypted_env: $encrypted_env}' \
+            > "$CONTEXT_ASSET"
+          echo "Deployment context:"
+          cat "$CONTEXT_ASSET"
+
+      - name: Install GitHub CLI
+        run: |
+          if command -v gh &> /dev/null; then exit 0; fi
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+            | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+            | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt-get update && sudo apt-get install -y gh
+
+      - name: Attach deployment context to the draft GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          CONTEXT_ASSET: ${{ inputs.context_asset }}
+          LANE: ${{ inputs.lane }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Lanes run one after another and share the release: the first one
+          # creates the draft, later ones add their context to it.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --draft \
+              --title "$TAG" \
+              --generate-notes \
+              --target "$GITHUB_SHA"
+          fi
+          # A deployment context holds the encrypted environment and must never
+          # be attached to a release that is already public.
+          if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != "true" ]; then
+            echo "::error::Release $TAG is already published; refusing to attach a deployment context to it."
+            exit 1
+          fi
+          # A lane proposed again has not deployed this proposal yet.
+          gh release delete-asset "$TAG" "deployed-$LANE.json" --yes 2>/dev/null || true
+          gh release upload "$TAG" "$CONTEXT_ASSET" --clobber

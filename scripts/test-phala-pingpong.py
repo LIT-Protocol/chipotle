@@ -147,7 +147,7 @@ class Guards(unittest.TestCase):
             p.restore_dns({'gateway': {'cname': 'gateway.dstack-base-prod16.phala.network'}}, 'https://test.chipotle.litprotocol.com')
             batch = json.loads(run.call_args.args[-1])
             record = batch['Changes'][0]['ResourceRecordSet']
-            self.assertEqual(record['ResourceRecords'], [{'Value': '_.dstack-base-prod16.phala.network'}])
+            self.assertEqual(record['ResourceRecords'], [{'Value': 'gateway.dstack-base-prod16.phala.network'}])
             self.assertEqual(record['Name'], 'test.chipotle.litprotocol.com')
 
     def test_main_selection_outputs(self):

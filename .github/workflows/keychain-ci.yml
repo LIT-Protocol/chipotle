@@ -53,7 +53,28 @@ jobs:
       - run: npm run format:check
       - run: npm test
       - name: SDK version bumped if packed contents changed (merge publishes)
-        run: node scripts/publish-sdk.mjs --check
+        env:
+          PR_REPOSITORY: ${{ github.repository }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          # Private source deliberately retains explanations omitted from the
+          # public npm README and source maps. An unchanged Keychain tree must
+          # not require a release merely because those baseline bytes differ.
+          # Compare the whole tree, including build scripts, lockfiles, protocol
+          # and actions, not just sdk/. Public PRs always check npm directly.
+          if [ "$PR_REPOSITORY" = "LIT-Protocol/chipotle-private" ]; then
+            git fetch --no-tags --depth=1 origin "$PR_BASE_SHA"
+            if git diff --quiet "$PR_BASE_SHA" HEAD -- ':(top)lit-agent-keychain'; then
+              echo "Keychain tree unchanged from private PR base; no SDK release required."
+              exit 0
+            else
+              diff_status=$?
+              # Exit 1 means changed; other errors must not bypass the check.
+              [ "$diff_status" -eq 1 ] || exit "$diff_status"
+            fi
+          fi
+          node scripts/publish-sdk.mjs --check
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: npx playwright install --with-deps chromium
