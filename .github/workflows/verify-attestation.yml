@@ -1,6 +1,6 @@
 # Verify attestation from a deployed Phala CVM
 #
-# Fetches /attestation/unified from the live API, runs Phala's dstack-verifier image
+# Fetches /attestation/v3 from the live API, runs Phala's dstack-verifier image
 # (pinned by digest in .github/dstack-verifier/Dockerfile), and asserts
 # is_valid=true. Unlike the simulator CI job (which can only check
 # quote_verified), a real TEE deployment must produce a fully valid attestation.
@@ -17,7 +17,7 @@ on:
   workflow_call:
     inputs:
       base_url:
-        description: "Base URL of the deployed CVM (e.g. https://host — /attestation/unified is appended)"
+        description: "Base URL of the deployed CVM (e.g. https://host — /attestation/v3 is appended)"
         required: true
         type: string
       runner:
@@ -25,6 +25,36 @@ on:
         required: false
         type: string
         default: '["self-hosted"]'
+      sdk_policy:
+        description: "Also verify with the Core SDK's verifier under this policy (staging or production). Empty skips it."
+        required: false
+        type: string
+        default: ''
+      sdk_require_binding:
+        description: "With sdk_policy: base_url is a public AMD hostname whose TLS must be bound to the attested VM. Nothing is skipped."
+        required: false
+        type: boolean
+        default: false
+      sdk_expect_platform:
+        description: "With sdk_policy: the platform the deployment must be (for example sev-snp). Any other platform fails instead of being skipped."
+        required: false
+        type: string
+        default: ''
+      sdk_no_binding:
+        description: "With sdk_policy: base_url is a public hostname deployed without TLS evidence (ingress 1.x); verify the attestation without the TLS binding its policy would require."
+        required: false
+        type: boolean
+        default: false
+      sdk_expect_instance:
+        description: "With sdk_policy: the dstack instance id that must answer. While two replicas overlap either can answer, so the check retries until this one does."
+        required: false
+        type: string
+        default: ''
+      evidence:
+        description: "Which evidence to verify: v3 (nonce-bound, any platform; needs a guest agent with Attest) or tdx-quote (the original /attestation TDX quote, for Intel boxes whose agent predates Attest)."
+        required: false
+        type: string
+        default: v3
   workflow_dispatch:
     inputs:
       base_url:
@@ -36,6 +66,36 @@ on:
         required: false
         type: string
         default: '["self-hosted"]'
+      sdk_policy:
+        description: "Also verify with the Core SDK's verifier under this policy (staging or production). Empty skips it."
+        required: false
+        type: string
+        default: ''
+      sdk_require_binding:
+        description: "With sdk_policy: base_url is a public AMD hostname whose TLS must be bound to the attested VM. Nothing is skipped."
+        required: false
+        type: boolean
+        default: false
+      sdk_expect_platform:
+        description: "With sdk_policy: the platform the deployment must be (for example sev-snp). Any other platform fails instead of being skipped."
+        required: false
+        type: string
+        default: ''
+      sdk_no_binding:
+        description: "With sdk_policy: base_url is a public hostname deployed without TLS evidence (ingress 1.x); verify the attestation without the TLS binding its policy would require."
+        required: false
+        type: boolean
+        default: false
+      sdk_expect_instance:
+        description: "With sdk_policy: the dstack instance id that must answer. While two replicas overlap either can answer, so the check retries until this one does."
+        required: false
+        type: string
+        default: ''
+      evidence:
+        description: "Which evidence to verify: v3 (nonce-bound, any platform; needs a guest agent with Attest) or tdx-quote (the original /attestation TDX quote, for Intel boxes whose agent predates Attest)."
+        required: false
+        type: string
+        default: v3
 
 jobs:
   verify:
@@ -43,6 +103,24 @@ jobs:
     runs-on: ${{ fromJson(inputs.runner) }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check the evidence kind
+        env:
+          EVIDENCE: ${{ inputs.evidence }}
+        run: |
+          case "$EVIDENCE" in
+            v3|tdx-quote) ;;
+            *) echo "::error::Unknown evidence kind '$EVIDENCE' (expected v3 or tdx-quote)"; exit 1 ;;
+          esac
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        if: ${{ inputs.evidence == 'v3' }}
+        with:
+          version: v1.5.1
+
+      - name: Test v3 deployment verification gate
+        if: ${{ inputs.evidence == 'v3' }}
+        run: python3 scripts/test-attestation-v3-verifier.py
 
       - name: Pull pinned dstack-verifier image
         id: verifier
@@ -52,24 +130,82 @@ jobs:
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
           docker pull --platform linux/amd64 "$IMAGE"
 
-      - name: Verify remote attestation
+      # An explicit choice per deployment, never a fallback: a box that should
+      # serve v3 and does not must fail, not be verified by weaker means.
+      - name: Verify remote TDX quote
+        if: ${{ inputs.evidence == 'tdx-quote' }}
         env:
           VERIFIER_IMAGE: ${{ steps.verifier.outputs.image }}
+          ATTESTATION_URL: ${{ inputs.base_url }}
         run: |
           set -eu
-          ATTESTATION_URL="${{ inputs.base_url }}"
           TMP_DIR=$(mktemp -d /tmp/verify-remote-XXXXXX)
+          trap 'rm -rf "$TMP_DIR"' EXIT
 
-          echo "Fetching attestation from $ATTESTATION_URL/attestation/unified..."
-          curl -sf "$ATTESTATION_URL/attestation/unified" > "$TMP_DIR/attestation.json" || {
-            echo "::error::Failed to fetch $ATTESTATION_URL/attestation/unified"
+          echo "Fetching attestation from $ATTESTATION_URL/attestation..."
+          curl --max-time 30 -sf "$ATTESTATION_URL/attestation" > "$TMP_DIR/attestation.json" || {
+            echo "::error::Failed to fetch $ATTESTATION_URL/attestation"
+            exit 1
+          }
+
+          # Fix empty digests in runtime events (dstack guest-agent strips them;
+          # the Docker verifier's parser rejects digest=""). See script docstring.
+          python3 scripts/fix-attestation-event-log.py "$TMP_DIR/attestation.json" \
+            > "$TMP_DIR/verify-request.json"
+
+          echo "Running dstack-verifier (oneshot) via Docker..."
+          docker run --rm \
+            -v "$TMP_DIR:/verify" \
+            -w /verify \
+            --platform linux/amd64 \
+            "$VERIFIER_IMAGE" \
+            --verify /verify/verify-request.json || true
+
+          RESULT_FILE="$TMP_DIR/verify-request.json.verification.json"
+          if [ ! -f "$RESULT_FILE" ]; then
+            echo "::error::Verifier did not produce result file"
+            exit 1
+          fi
+
+          echo "--- Verifier output ---"
+          cat "$RESULT_FILE"
+          echo "--- end ---"
+
+          IS_VALID=$(python3 -c \
+            'import sys,json; v=json.load(open(sys.argv[1])); print("true" if v.get("is_valid") is True else "false")' \
+            "$RESULT_FILE")
+          if [ "$IS_VALID" != "true" ]; then
+            echo "::error::is_valid=false — remote attestation from $ATTESTATION_URL is not valid"
+            exit 1
+          fi
+          echo "Remote TDX attestation verified: is_valid=true."
+
+      - name: Verify remote attestation
+        if: ${{ inputs.evidence == 'v3' }}
+        env:
+          VERIFIER_IMAGE: ${{ steps.verifier.outputs.image }}
+          ATTESTATION_URL: ${{ inputs.base_url }}
+        run: |
+          set -eu
+          TMP_DIR=$(mktemp -d /tmp/verify-remote-XXXXXX)
+          trap 'rm -rf "$TMP_DIR"' EXIT
+          NONCE=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+          CHALLENGE=$(python3 -c 'import sys; print((b"chipotle-attestation-v3:" + bytes.fromhex(sys.argv[1])).hex())' "$NONCE")
+          HASH=$(cast keccak "0x$CHALLENGE")
+          EXPECTED_REPORT_DATA=$(python3 -c 'import sys; print(sys.argv[1].removeprefix("0x") + "00" * 32)' "$HASH")
+
+          echo "Fetching attestation from $ATTESTATION_URL/attestation/v3..."
+          curl --max-time 30 -sf "$ATTESTATION_URL/attestation/v3?nonce=$NONCE" > "$TMP_DIR/attestation.json" || {
+            echo "::error::Failed to fetch $ATTESTATION_URL/attestation/v3"
             rm -rf "$TMP_DIR"
             exit 1
           }
 
-          # The unified bundle carries platform-specific evidence and event logs.
-          # Pass it unchanged; dstack-verifier validates the complete bundle.
-          cp "$TMP_DIR/attestation.json" "$TMP_DIR/verify-request.json"
+          # The echoes are checked for consistency, but freshness is established
+          # only by comparing authenticated verifier output below.
+          python3 scripts/attestation-v3-verifier.py prepare \
+            "$TMP_DIR/attestation.json" "$NONCE" "$EXPECTED_REPORT_DATA" \
+            > "$TMP_DIR/verify-request.json"
 
           echo "Running dstack-verifier (oneshot) via Docker..."
           docker run --rm \
@@ -90,13 +226,45 @@ jobs:
           cat "$RESULT_FILE"
           echo "--- end ---"
 
-          IS_VALID=$(python3 -c \
-            'import sys,json; v=json.load(open(sys.argv[1])); print("true" if v.get("is_valid") else "false")' \
-            "$RESULT_FILE")
-          rm -rf "$TMP_DIR"
+          python3 scripts/attestation-v3-verifier.py check \
+            "$RESULT_FILE" "$EXPECTED_REPORT_DATA"
 
-          if [ "$IS_VALID" != "true" ]; then
-            echo "::error::is_valid=false — remote attestation from $ATTESTATION_URL is not valid"
-            exit 1
+      # The gate above is dstack's own verifier. This one is the verifier
+      # customers run: the release proceeds only if the published SDK logic
+      # accepts this box, with a fresh nonce, the certificates this box serves
+      # and the on-chain allowlists. It reads v3 evidence, so it runs with v3.
+      - uses: actions/setup-node@v4
+        if: ${{ inputs.sdk_policy != '' && inputs.evidence == 'v3' }}
+        with:
+          node-version: "22"
+
+      - name: Verify with the Core SDK verifier
+        if: ${{ inputs.sdk_policy != '' && inputs.evidence == 'v3' }}
+        env:
+          ATTESTATION_URL: ${{ inputs.base_url }}
+          SDK_POLICY: ${{ inputs.sdk_policy }}
+          REQUIRE_BINDING: ${{ inputs.sdk_require_binding }}
+          EXPECT_PLATFORM: ${{ inputs.sdk_expect_platform }}
+          NO_BINDING: ${{ inputs.sdk_no_binding }}
+          EXPECT_INSTANCE: ${{ inputs.sdk_expect_instance }}
+        run: |
+          set -euo pipefail
+          ARGS=()
+          if [ "$REQUIRE_BINDING" = "true" ]; then ARGS+=(--require-binding); fi
+          if [ "$NO_BINDING" = "true" ]; then ARGS+=(--no-binding); fi
+          if [ -n "$EXPECT_PLATFORM" ]; then ARGS+=(--expect-platform "$EXPECT_PLATFORM"); fi
+          ATTEMPTS=1
+          if [ -n "$EXPECT_INSTANCE" ]; then
+            # Passing because another replica verified would let that replica
+            # be stopped with this one unchecked. Either can answer while they
+            # overlap, so try until the expected one does.
+            ARGS+=(--expect-instance "$EXPECT_INSTANCE")
+            ATTEMPTS=20
           fi
-          echo "Remote attestation verified: is_valid=true."
+          for attempt in $(seq 1 "$ATTEMPTS"); do
+            if node lit-static/sdk/scripts/verify-live.mjs "$ATTESTATION_URL" "$SDK_POLICY" ${ARGS[@]+"${ARGS[@]}"}; then
+              exit 0
+            fi
+            if [ "$attempt" -lt "$ATTEMPTS" ]; then echo "Attempt $attempt failed; retrying in 15s"; sleep 15; fi
+          done
+          exit 1

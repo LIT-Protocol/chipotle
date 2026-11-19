@@ -48,6 +48,7 @@ fn test_config(stripe_secret_key: String, db_url: String) -> Config {
         litkey_discount_basis_points: 0,
         litkey_chain: None,
         lit_api_server_base_url: "http://127.0.0.1:1".into(),
+        lit_api_server_extra_base_urls: Vec::new(),
         lit_internal_shared_secret: "unused".into(),
         lit_accounts_rpc_url: "http://localhost:8545".to_string(),
         lit_accounts_chain_id: 175188,

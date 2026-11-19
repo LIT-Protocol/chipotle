@@ -92,19 +92,6 @@ pub async fn get_quote(
     Ok(quote)
 }
 
-/// Fetch a platform-neutral attestation bundle (Intel TDX or AMD SEV-SNP).
-/// Uses the legacy key API unchanged; this does not migrate key derivation.
-pub async fn attest() -> Result<dstack_client::AttestResponse, String> {
-    attest_at(&get_socket_path()?).await
-}
-
-async fn attest_at(socket_path: &str) -> Result<dstack_client::AttestResponse, String> {
-    dstack_client::DstackClient::new(Some(socket_path))
-        .attest(vec![0u8; 64])
-        .await
-        .map_err(|e| format!("failed to attest: {e}"))
-}
-
 /// Preserve platform-specific Info fields, including null TDX measurements on AMD.
 /// The SDK's typed InfoResponse still requires TDX measurement strings.
 pub async fn get_info_document() -> Result<serde_json::Value, String> {
@@ -314,7 +301,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod unified_rpc_tests {
+mod info_rpc_tests {
     use super::*;
     use std::io::{Read, Write};
     use std::os::unix::net::UnixListener;
@@ -361,22 +348,6 @@ mod unified_rpc_tests {
             String::from_utf8(request).unwrap()
         });
         (path, worker)
-    }
-
-    #[tokio::test]
-    async fn unified_attestation_uses_attest_and_preserves_bundle() {
-        let (socket, worker) = agent(serde_json::json!({"attestation": "01020304"}));
-        let evidence = attest_at(&socket).await.unwrap();
-        assert_eq!(evidence.attestation, "01020304");
-        let request = worker.join().unwrap();
-        assert!(
-            request.starts_with("POST http://unix.socket/Attest "),
-            "{}",
-            request.lines().next().unwrap()
-        );
-        let body: serde_json::Value =
-            serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
-        assert_eq!(body["report_data"], "00".repeat(64));
     }
 
     #[tokio::test]

@@ -1,0 +1,49 @@
+name: Core SDK
+on:
+  pull_request:
+    paths: ['lit-static/**', '.github/workflows/core-sdk.yml']
+  push:
+    branches: [main]
+    paths: ['lit-static/**', '.github/workflows/core-sdk.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test lit-static/sdk/scripts/release.test.mjs
+      - run: node lit-static/sdk/scripts/release.mjs
+  publish:
+    needs: validate
+    # CORE_SDK_PUBLISH_ENABLED is the release switch. The SDK's default API URL
+    # is the new production hostname, so nothing is published until that
+    # hostname is live.
+    if: github.repository == 'LIT-Protocol/chipotle-private' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.CORE_SDK_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: core-sdk-publish
+      cancel-in-progress: false
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.CORE_SDK_NPM_TOKEN }}
+    steps:
+      # Read current main after acquiring the lock: a queued older run must not
+      # publish older contents over a newer release. Validate this checkout too.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@11
+      - run: node --test lit-static/sdk/scripts/release.test.mjs
+      - name: Publish changed SDK with automatic patch version
+        run: node lit-static/sdk/scripts/release.mjs --publish

@@ -41,8 +41,74 @@ fn record_idle_signers(entries: &[SigningPoolEntry]) {
     metrics::gauge!("signer_pool.idle_signers").set(idle as f64);
 }
 
+/// Environment variable naming this instance's share of the payer pool, as
+/// `<index>/<count>` (for example `0/2` and `1/2`).
+///
+/// Every instance of an app derives the same payer keys, and each instance
+/// allocates nonces from its own in-memory counter. Two instances that serve
+/// traffic at the same time would therefore hand out the same nonce for the
+/// same payer. A shard gives each instance a disjoint subset: payer `n`
+/// (numbered from 1) belongs to shard `(n - 1) % count`. Unset means the whole
+/// pool, which is correct whenever only one instance serves traffic.
+pub const PAYER_SHARD_ENV: &str = "LIT_PAYER_SHARD";
+const MAX_PAYER_SHARDS: usize = 16;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PayerShard {
+    index: usize,
+    count: usize,
+}
+
+impl PayerShard {
+    pub const WHOLE_POOL: PayerShard = PayerShard { index: 0, count: 1 };
+
+    /// Parses `<index>/<count>`. An empty value is the whole pool.
+    pub fn parse(value: &str) -> Result<Self> {
+        let value = value.trim();
+        if value.is_empty() {
+            return Ok(Self::WHOLE_POOL);
+        }
+        let parsed = value.split_once('/').and_then(|(index, count)| {
+            Some(PayerShard {
+                index: index.trim().parse().ok()?,
+                count: count.trim().parse().ok()?,
+            })
+        });
+        match parsed {
+            Some(shard)
+                if shard.count >= 1
+                    && shard.count <= MAX_PAYER_SHARDS
+                    && shard.index < shard.count =>
+            {
+                Ok(shard)
+            }
+            _ => Err(anyhow::anyhow!(
+                "{PAYER_SHARD_ENV} must be <index>/<count> with index < count <= {MAX_PAYER_SHARDS}, got {value:?}"
+            )),
+        }
+    }
+
+    fn from_env() -> Result<Self> {
+        Self::parse(&std::env::var(PAYER_SHARD_ENV).unwrap_or_default())
+    }
+
+    /// Whether payer number `payer` (numbered from 1) belongs to this shard.
+    pub fn owns(&self, payer: usize) -> bool {
+        payer >= 1 && (payer - 1) % self.count == self.index
+    }
+
+    /// Exactly one shard runs the admin housekeeping (registering payers
+    /// on-chain and moving funds), so sharded instances never race on the
+    /// admin key's nonce.
+    fn runs_admin_housekeeping(&self) -> bool {
+        self.index == 0
+    }
+}
+
 #[derive(Clone)]
 pub struct SigningPoolEntry {
+    /// Payer number, from 1: the `n` in the `v1/payer_{n}` derivation path.
+    index: usize,
     client: SigningClient,
     address: Address,
     in_use: bool,
@@ -109,22 +175,43 @@ impl SignerPool {
 
 /// Spawn the signer pool background task and return a `SignerPool` handle.
 ///
-/// Creates `pool_size` signing clients using key indices 1..=pool_size via
-/// `get_lit_payer_key`. Must be called after `init_config()`.
+/// Creates signing clients for this instance's share of key indices
+/// 1..=pool_size (see `PAYER_SHARD_ENV`) via `get_lit_payer_key`. Must be
+/// called after `init_config()`.
 pub async fn start_signer_pool() -> Result<SignerPool> {
     let (tx, rx) = flume::unbounded::<SigningPoolMessage>();
 
+    let shard = PayerShard::from_env()?;
     let pool_size = get_api_payer_count().await?;
-    tracing::info!("signer_pool: attempting to start with pool size: {pool_size}");
+    tracing::info!(
+        "signer_pool: attempting to start with pool size: {pool_size}, shard: {shard:?}"
+    );
 
-    let entries = get_signer_entries(1, pool_size).await?;
+    let entries = own_entries(get_signer_entries(1, pool_size).await?, shard);
+    if pool_size > 0 && entries.is_empty() {
+        // Starting anyway would fail every write with "no signers available".
+        return Err(anyhow::anyhow!(
+            "{PAYER_SHARD_ENV}={}/{} owns none of the {pool_size} registered payers; register at least {} payers",
+            shard.index,
+            shard.count,
+            shard.count
+        ));
+    }
 
-    tokio::spawn(run_pool(entries, rx));
+    tokio::spawn(run_pool(entries, pool_size, shard, rx));
 
     Ok(SignerPool { tx })
 }
 
-/// Get the signer entries for the signer pool.
+fn own_entries(entries: Vec<SigningPoolEntry>, shard: PayerShard) -> Vec<SigningPoolEntry> {
+    entries
+        .into_iter()
+        .filter(|entry| shard.owns(entry.index))
+        .collect()
+}
+
+/// Signer entries for payers `start_index..start_index + pool_size`, for every
+/// shard: callers keep the ones they own.
 pub async fn get_signer_entries(
     start_index: usize,
     pool_size: usize,
@@ -149,6 +236,7 @@ pub async fn get_signer_entries(
         let client = crate::accounts::signable_contract::signer_provider(wallet)?;
         tracing::info!("signer_pool: created signer {} address={:?}", i, address);
         entries.push(SigningPoolEntry {
+            index: i,
             client,
             address,
             in_use: false,
@@ -238,10 +326,17 @@ fn release_lease(entries: &mut [SigningPoolEntry], lease: SignerLease, now: Inst
     }
 }
 
-async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<SigningPoolMessage>) {
-    let mut payer_count = entries.len();
+async fn run_pool(
+    mut entries: Vec<SigningPoolEntry>,
+    mut payer_count: usize,
+    shard: PayerShard,
+    rx: flume::Receiver<SigningPoolMessage>,
+) {
     let mut next_lease_id: u64 = 0;
-    tracing::info!("signer_pool: signer count: {payer_count}");
+    tracing::info!(
+        "signer_pool: signer count: {} of {payer_count} registered payers",
+        entries.len()
+    );
     record_idle_signers(&entries);
     let mut interval = tokio::time::interval(Duration::from_secs(CLEANUP_INTERVAL_SECS));
     interval.tick().await; // discard the immediate first tick
@@ -270,7 +365,7 @@ async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<Signin
                 // RPC stall here would freeze every lease grant and release.
                 if tokio::time::timeout(
                     HOUSEKEEPING_TIMEOUT,
-                    check_for_new_api_payer_count(&mut entries, &mut payer_count),
+                    check_for_new_api_payer_count(&mut entries, &mut payer_count, shard),
                 )
                 .await
                 .is_err()
@@ -286,9 +381,16 @@ async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<Signin
     }
 }
 
+/// Drops the entries for payers above `payer_count`. Entries are reordered by
+/// lease grants, so this goes by payer number, not by position.
+fn retain_registered(entries: &mut Vec<SigningPoolEntry>, payer_count: usize) {
+    entries.retain(|entry| entry.index <= payer_count);
+}
+
 async fn check_for_new_api_payer_count(
     entries: &mut Vec<SigningPoolEntry>,
     payer_count: &mut usize,
+    shard: PayerShard,
 ) {
     let new_api_payer_count = match crate::accounts::get_requested_api_payer_count().await {
         Ok(count) => count,
@@ -302,24 +404,56 @@ async fn check_for_new_api_payer_count(
         return;
     }
 
+    let old_payer_count = *payer_count;
     let old_entries = entries.clone();
 
-    if new_api_payer_count > *payer_count {
-        match get_signer_entries(*payer_count + 1, new_api_payer_count - *payer_count).await {
+    if new_api_payer_count > old_payer_count {
+        match get_signer_entries(old_payer_count + 1, new_api_payer_count - old_payer_count).await {
             Ok(new_entries) => {
-                entries.extend(new_entries);
+                entries.extend(own_entries(new_entries, shard));
                 *payer_count = new_api_payer_count;
             }
             Err(e) => {
                 tracing::error!("signer_pool: failed to get signer entries: {e}");
             }
         };
-    } else if new_api_payer_count < *payer_count {
-        entries.truncate(new_api_payer_count);
+    } else {
+        retain_registered(entries, new_api_payer_count);
         *payer_count = new_api_payer_count;
     };
 
-    if let Err(e) = set_api_payers(entries.clone()).await {
+    if !shard.runs_admin_housekeeping() {
+        tracing::info!(
+            "signer_pool: payer count is now {}; shard {}/{} leaves registration and funding to shard 0",
+            *payer_count,
+            shard.index,
+            shard.count
+        );
+        return;
+    }
+
+    // Registration and funding cover every payer, not only this shard's. The
+    // whole-pool case already holds all of them; a shard derives the rest.
+    //
+    // Draining is different. Funding a payer is signed by the admin key, which
+    // only this shard uses. Draining one is signed by the payer itself, with a
+    // nonce from this process's counter, and a payer of another shard may be
+    // signing a customer's write on its own instance at that moment. So a
+    // sharded pool never drains: payers dropped from the pool keep their gas
+    // until an operator sweeps them.
+    let (old_entries, all_entries) = if shard == PayerShard::WHOLE_POOL {
+        (old_entries, entries.clone())
+    } else {
+        match get_signer_entries(1, *payer_count).await {
+            Ok(all) => (Vec::new(), all),
+            Err(e) => {
+                tracing::error!("signer_pool: failed to derive the full payer list: {e}");
+                return;
+            }
+        }
+    };
+
+    if let Err(e) = set_api_payers(all_entries.clone()).await {
         tracing::error!("signer_pool: failed to set api payers: {e}");
         return;
     }
@@ -331,10 +465,8 @@ async fn check_for_new_api_payer_count(
         // each). Run it off the dispatcher task so lease grants never queue
         // behind it, and outside HOUSEKEEPING_TIMEOUT so a long but healthy
         // rebalance isn't clipped mid-way.
-        let old_entries = old_entries.clone();
-        let new_entries = entries.clone();
         tokio::spawn(async move {
-            if let Err(e) = rebalance_entries(rebalance_amount, old_entries, new_entries).await {
+            if let Err(e) = rebalance_entries(rebalance_amount, old_entries, all_entries).await {
                 tracing::error!("signer_pool: failed to rebalance entries: {e}");
             }
         });
@@ -535,6 +667,8 @@ mod tests {
             .connect_http("http://127.0.0.1:1".parse().expect("static url"))
             .erased();
         SigningPoolEntry {
+            // Tests address entries by byte; reuse it as the payer number.
+            index: address_byte as usize,
             client,
             address: Address::repeat_byte(address_byte),
             in_use,
@@ -542,6 +676,79 @@ mod tests {
             last_request,
             lease_id: 0,
         }
+    }
+
+    #[test]
+    fn payer_shards_partition_the_pool_without_overlap() {
+        assert_eq!(PayerShard::parse("").unwrap(), PayerShard::WHOLE_POOL);
+        assert_eq!(PayerShard::parse("  ").unwrap(), PayerShard::WHOLE_POOL);
+        assert!((1..=8).all(|payer| PayerShard::WHOLE_POOL.owns(payer)));
+
+        for count in 1..=4usize {
+            let shards: Vec<_> = (0..count)
+                .map(|index| PayerShard::parse(&format!("{index}/{count}")).unwrap())
+                .collect();
+            for payer in 1..=12usize {
+                let owners = shards.iter().filter(|shard| shard.owns(payer)).count();
+                assert_eq!(owners, 1, "payer {payer} with {count} shards");
+            }
+            // Only one shard may touch the admin key.
+            let admins = shards
+                .iter()
+                .filter(|shard| shard.runs_admin_housekeeping())
+                .count();
+            assert_eq!(admins, 1);
+        }
+
+        let first = PayerShard::parse("0/2").unwrap();
+        let second = PayerShard::parse(" 1 / 2 ").unwrap();
+        assert_eq!(
+            (1..=6).filter(|p| first.owns(*p)).collect::<Vec<_>>(),
+            [1, 3, 5]
+        );
+        assert_eq!(
+            (1..=6).filter(|p| second.owns(*p)).collect::<Vec<_>>(),
+            [2, 4, 6]
+        );
+        assert!(!first.owns(0));
+    }
+
+    #[test]
+    fn malformed_payer_shards_are_rejected() {
+        for value in [
+            "2", "2/2", "3/2", "0/0", "0/17", "-1/2", "a/b", "0/2/3", "/2", "1/",
+        ] {
+            assert!(
+                PayerShard::parse(value).is_err(),
+                "{value:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn a_shard_keeps_only_its_payers_as_the_pool_grows_and_shrinks() {
+        let now = Instant::now();
+        let all = |range: std::ops::RangeInclusive<u8>| -> Vec<SigningPoolEntry> {
+            range.map(|n| entry(n, false, None, now)).collect()
+        };
+        let indices = |entries: &[SigningPoolEntry]| -> Vec<usize> {
+            let mut out: Vec<_> = entries.iter().map(|e| e.index).collect();
+            out.sort();
+            out
+        };
+        let shard = PayerShard::parse("1/2").unwrap();
+
+        let mut entries = own_entries(all(1..=4), shard);
+        assert_eq!(indices(&entries), [2, 4]);
+        entries.extend(own_entries(all(5..=8), shard));
+        assert_eq!(indices(&entries), [2, 4, 6, 8]);
+
+        // Lease grants reorder entries, so shrinking must go by payer number.
+        entries.reverse();
+        retain_registered(&mut entries, 5);
+        assert_eq!(indices(&entries), [2, 4]);
+        retain_registered(&mut entries, 1);
+        assert!(entries.is_empty());
     }
 
     #[test]

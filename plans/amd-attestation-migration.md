@@ -1,5 +1,8 @@
 # AMD deployment attestation
 
+> This file records the first AMD deployment fix on `next`. The production
+> migration it leaves pending is planned separately.
+
 The prod16 deployment uses AMD SEV-SNP. Its guest agent rejects `/GetQuote`
 with `GetQuote is Intel TDX only, use Attest on this platform`.
 
@@ -7,11 +10,13 @@ with `GetQuote is Intel TDX only, use Attest on this platform`.
 
 - Upgrade the Rust `dstack-sdk` and `dstack-sdk-types` dependencies to 0.1.3.
   Keep the existing unversioned `/GetKey` derivation and its paths/purposes.
-- `/attestation/unified` returns the SDK's hex-encoded versioned attestation
-  bundle from `/Attest`, with 64 zero report-data bytes. This endpoint is for
-  deployment verification, not a nonce-bound freshness protocol.
+- `/attestation/v3?nonce=<32-byte lowercase hex>` returns the hex-encoded
+  versioned attestation bundle from `/Attest`, with a domain-separated nonce
+  commitment in report data. The unpublished `/attestation/unified` endpoint and
+  its `/dstack/v1` alias are removed; deploy the API and workflow together.
 - Pass the bundle unchanged to the existing digest-pinned dstack-verifier 0.6.1.
-  Require `is_valid=true`; do not substitute health checks or skip verification.
+  Require `is_valid=true` and authenticated report data equal to the locally
+  computed nonce commitment; do not substitute health checks or skip verification.
 - `/info` preserves the guest's platform-specific data, including null TDX
   measurement fields, while retaining the decoded `tcb_info` object shape.
 - `/attestation` and `/attestation/v2` retain their existing TDX contracts.

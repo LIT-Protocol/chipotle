@@ -11,10 +11,13 @@
 //!
 //! `lit-api-server` never calls `lit-payments` in the new design (the
 //! trigger is the `customer.updated` webhook on the lit-payments side), so
-//! there is no outbound client helper.
+//! there is no outbound client helper for it. [`peers`] is the one outbound
+//! call: it repeats a balance invalidation to the other instances of this
+//! app, when any are configured.
 
 pub mod config;
 pub mod guard;
+pub mod peers;
 pub mod routes;
 
 pub use config::InternalConfig;

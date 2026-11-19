@@ -3,7 +3,6 @@ use rocket::{Route, get, routes};
 use serde::Serialize;
 
 use super::dstack;
-use dstack_sdk::dstack_client;
 
 /// Response for GET /attestation — per [Phala Get Attestation](https://docs.phala.com/phala-cloud/attestation/get-attestation).
 /// Verifiers fetch this to validate the CVM runs in genuine TEE hardware.
@@ -15,16 +14,16 @@ pub struct AttestationResponse {
 }
 
 pub fn routes() -> Vec<Route> {
-    routes![attestation, unified_attestation, info]
+    routes![attestation, info]
 }
 
 /// Routes for root-level attestation (GET /attestation) and info (GET /info). Mount at "/".
 pub fn attestation_routes() -> Vec<Route> {
     routes![
         attestation,
-        unified_attestation,
         info,
-        super::attestation_v2::attestation_v2
+        super::attestation_v2::attestation_v2,
+        super::attestation_v3::attestation_v3
     ]
 }
 
@@ -51,15 +50,4 @@ async fn info() -> Result<Json<serde_json::Value>, (rocket::http::Status, String
         Ok(i) => Ok(Json(i)),
         Err(e) => Err((rocket::http::Status::ServiceUnavailable, e)),
     }
-}
-
-/// Platform-neutral evidence for dstack-verifier. Legacy TDX responses remain
-/// available at /attestation and /attestation/v2 for existing clients.
-#[get("/attestation/unified")]
-async fn unified_attestation()
--> Result<Json<dstack_client::AttestResponse>, (rocket::http::Status, String)> {
-    dstack::attest()
-        .await
-        .map(Json)
-        .map_err(|e| (rocket::http::Status::ServiceUnavailable, e))
 }

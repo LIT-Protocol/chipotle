@@ -78,13 +78,13 @@ class PhalaDeploymentEnvTests(unittest.TestCase):
         self.assertEqual([value for value in values if value.startswith(KEY + "=")], [KEY + "=false"])
 
     def test_next_deploy_disables_limit(self):
-        self.assert_cli_disabled("deploy-staging.yml", "phala deploy")
+        self.assert_cli_disabled("deploy-staging-lane.yml", "phala deploy")
 
     def test_manual_env_update_disables_limit(self):
         self.assert_cli_disabled("manual_phala-envs-update.yml", "phala envs update")
 
     def production_envs(self):
-        runs = workflow_runs("deploy-prod-1-propose.yml")
+        runs = workflow_runs("deploy-prod-lane-propose.yml")
         expression = extract(r"const envs = (\[.*?\]);", runs)
         # Evaluate only the array in an isolated JS context with empty envs.
         # Never run the workflow or import the Phala SDK.
@@ -102,7 +102,7 @@ class PhalaDeploymentEnvTests(unittest.TestCase):
         self.assertEqual([entry for entry in envs if entry["key"] == KEY], [{"key": KEY, "value": "false"}])
 
     def test_production_env_lists_match_without_duplicates(self):
-        propose = workflow_runs("deploy-prod-1-propose.yml")
+        propose = workflow_runs("deploy-prod-lane-propose.yml")
         execute = workflow_runs("deploy-prod-2-execute-manual.yml")
         allowed = json.loads(extract(r"allowed_envs:\s*(\[.*?\])", propose))
         committed = json.loads(extract(r"ENV_KEYS='(\[.*?\])'", execute))
@@ -117,7 +117,7 @@ class PhalaDeploymentEnvTests(unittest.TestCase):
         # Evaluate the actual jq payloads: matching key lists alone is not
         # sufficient if provisioning silently preserves the previous list.
         for filename, output in [
-            ("deploy-prod-1-propose.yml", "PROVISION_FILE"),
+            ("deploy-prod-lane-propose.yml", "PROVISION_FILE"),
             ("deploy-prod-2-execute-manual.yml", "COMMIT_PAYLOAD"),
         ]:
             with self.subTest(workflow=filename):

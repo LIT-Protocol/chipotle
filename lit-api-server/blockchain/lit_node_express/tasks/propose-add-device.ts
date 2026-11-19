@@ -59,6 +59,14 @@ task("propose-add-device", "Propose an AppAuth device allowlisting through Safe"
     });
 
     // Create Safe transaction and compute its hash
+    // Number the proposal after everything already queued, not after the last
+    // executed transaction: the default nonce is the Safe's on-chain one, so
+    // two proposals made before either executes would share it and executing
+    // one would void the other. Queued transactions execute in this order.
+    const apiKit = new SafeApiKit({ chainId: BigInt(chainId) });
+    const nonce = Number(await apiKit.getNextNonce(safeAddress));
+    console.log(`Safe nonce for this proposal: ${nonce}`);
+
     const safeTransaction = await protocolKit.createTransaction({
       transactions: [
         {
@@ -68,6 +76,7 @@ task("propose-add-device", "Propose an AppAuth device allowlisting through Safe"
           operation: 0, // Call
         },
       ],
+      options: { nonce },
     });
 
     const safeTxHash = await protocolKit.getTransactionHash(safeTransaction);
@@ -100,8 +109,6 @@ task("propose-add-device", "Propose an AppAuth device allowlisting through Safe"
         [rawSig.r, rawSig.s, v]
       );
     }
-
-    const apiKit = new SafeApiKit({ chainId: BigInt(chainId) });
 
     await apiKit.proposeTransaction({
       safeAddress,

@@ -1,0 +1,13 @@
+{
+  "name": "@lit-protocol/core-sdk",
+  "version": "0.1.0",
+  "description": "JavaScript client for the Lit Protocol management API, with TEE attestation verification",
+  "type": "module",
+  "main": "./core_sdk.js",
+  "exports": { ".": "./core_sdk.js", "./attestation": "./attestation.js" },
+  "files": ["core_sdk.js", "attestation.js", "account_config_view_abi.js", "account_config_full_abi.js", "tx_lifecycle.js"],
+  "engines": { "node": ">=22" },
+  "license": "Apache-2.0",
+  "homepage": "https://developer.litprotocol.com/management/api_direct",
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" }
+}

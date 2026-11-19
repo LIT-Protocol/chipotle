@@ -59,6 +59,12 @@ pub struct Config {
     /// resolution moved into the shared `lit-billing-core` crate after
     /// glitch's PR #448 architectural review.
     pub lit_api_server_base_url: String,
+    /// Further `lit-api-server` instances that keep their own balance cache
+    /// and so need the same invalidation callback, from the comma-separated
+    /// `LIT_API_SERVER_EXTRA_BASE_URLS`. Empty unless more than one instance
+    /// serves traffic at once (for example one per hostname during a platform
+    /// migration); each instance caches balances in its own process.
+    pub lit_api_server_extra_base_urls: Vec<String>,
     /// JSON-RPC endpoint for the chain that hosts AccountConfig (the
     /// contract that maps API-key hashes → admin wallets, used by the
     /// `BillingAuth` guard's API-key path). Same chain `lit-api-server`
@@ -231,6 +237,9 @@ impl Config {
             lit_api_server_base_url: required("LIT_API_SERVER_BASE_URL")?
                 .trim_end_matches('/')
                 .to_string(),
+            lit_api_server_extra_base_urls: parse_base_url_list(
+                &std::env::var("LIT_API_SERVER_EXTRA_BASE_URLS").unwrap_or_default(),
+            )?,
             lit_internal_shared_secret: required("LIT_INTERNAL_SHARED_SECRET")?,
             lit_accounts_rpc_url: required("LIT_ACCOUNTS_RPC_URL")?,
             lit_accounts_chain_id: parse_chain_id()?,
@@ -405,6 +414,41 @@ fn optional_i64(name: &str, default: i64) -> Result<i64> {
     }
 }
 
+/// Parse a comma-separated list of `http(s)` base URLs, dropping blanks and
+/// trailing slashes. A malformed entry is an error rather than a silently
+/// skipped instance.
+pub(crate) fn parse_base_url_list(raw: &str) -> Result<Vec<String>> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| {
+            let url = entry.trim_end_matches('/');
+            // The shared secret is sent to these, so: https only (plain http
+            // for a loopback development server), and nothing but a host and
+            // port, which also keeps credentials and tokens out of the logs.
+            let authority = url
+                .strip_prefix("https://")
+                .or_else(|| {
+                    url.strip_prefix("http://").filter(|rest| {
+                        let host = rest.split(':').next().unwrap_or(rest);
+                        host == "localhost" || host == "127.0.0.1"
+                    })
+                })
+                .filter(|rest| {
+                    !rest.is_empty()
+                        && rest
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b':'))
+                });
+            if authority.is_none() {
+                // The entry itself is not echoed: it may hold a credential.
+                anyhow::bail!("a LIT_API_SERVER_EXTRA_BASE_URLS entry is not a plain https origin");
+            }
+            Ok(url.to_string())
+        })
+        .collect()
+}
+
 fn optional_trimmed(name: &str) -> Option<String> {
     std::env::var(name)
         .ok()
@@ -504,6 +548,27 @@ fn parse_signing_key() -> Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn extra_api_server_urls_parse_as_a_trimmed_list() {
+        assert!(super::parse_base_url_list("").unwrap().is_empty());
+        assert!(super::parse_base_url_list(" , ").unwrap().is_empty());
+        assert_eq!(
+            super::parse_base_url_list(" https://a.example/ ,http://localhost:8000,").unwrap(),
+            ["https://a.example", "http://localhost:8000"]
+        );
+        for bad in [
+            "a.example",
+            "ftp://a.example",
+            "https://a.example https://b.example",
+            "http://b.example:8000",
+            "https://user:pw@a.example",
+            "https://a.example/path",
+            "https://a.example?token=x",
+        ] {
+            assert!(super::parse_base_url_list(bad).is_err(), "{bad:?}");
+        }
+    }
+
     use super::*;
 
     #[test]

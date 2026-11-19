@@ -42,6 +42,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Test v3 deployment verification gate
+        run: python3 scripts/test-attestation-v3-verifier.py
+
       # ── 1. Build the dstack simulator (cached by dstack HEAD SHA) ───────────
       # The verifier is Phala's release image, pinned by digest in
       # .github/dstack-verifier/Dockerfile (same as verify-attestation.yml) —
@@ -155,8 +158,10 @@ jobs:
           }
 
           # Run the Rust unit tests against the simulator socket.
-          (cd lit-api-server && DSTACK_SOCKET="$SIM_SOCK" cargo test --locked --features dstack -- dstack::v1::dstack::tests dstack::v1::attestation_v2::tests --nocapture)
+          (cd lit-api-server && DSTACK_SOCKET="$SIM_SOCK" cargo test --locked --features dstack -- dstack::v1::dstack::tests dstack::v1::attestation_v2::tests dstack::v1::attestation_v3::tests --nocapture)
           STATUS=$?
+          # Unlike ordinary local tests, require a live agent and exercise /Attest.
+          (cd lit-api-server && DSTACK_SOCKET="$SIM_SOCK" cargo test --locked --features dstack --lib dstack::v1::attestation_v3::tests::configured_agent_serves_platform_attestation -- --ignored --exact --nocapture)
 
           # Teardown.
           kill "$SIM_PID" 2>/dev/null || true
@@ -265,6 +270,19 @@ jobs:
           PY
           BAD=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$API_PORT/attestation/v2?nonce=00")
           [ "$BAD" = "400" ] || { echo "ERROR: bad nonce returned $BAD"; exit 1; }
+
+          # v3 coexists with the legacy quote routes.
+          curl -sf -D "$SIM_TMP/v3-headers" "http://localhost:$API_PORT/attestation/v3?nonce=$NONCE" > "$SIM_TMP/attestation-v3.json"
+          python3 - "$SIM_TMP/attestation-v3.json" "$NONCE" "$SIM_TMP/v3-headers" <<'PYV3'
+          import json, re, sys
+          v = json.load(open(sys.argv[1]))
+          assert v["version"] == 3 and v["nonce"] == sys.argv[2]
+          assert re.fullmatch(r"(?:[0-9a-fA-F]{2})+", v["attestation"])
+          assert re.fullmatch(r"[0-9a-f]{128}", v["report_data"])
+          assert v["report_data"][64:] == "00" * 32
+          assert "cache-control: no-store" in open(sys.argv[3]).read().lower()
+          print("/attestation/v3 simulator transport OK (not hardware verification)")
+          PYV3
 
           # Teardown simulator and lit-api-server.
           kill "$SIM_PID" "$API_PID" 2>/dev/null || true
