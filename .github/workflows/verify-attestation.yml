@@ -185,6 +185,7 @@ jobs:
         env:
           VERIFIER_IMAGE: ${{ steps.verifier.outputs.image }}
           ATTESTATION_URL: ${{ inputs.base_url }}
+          AMD_KDS_CACHE: https://cors.litgateway.com/https://kdsintf.amd.com/vcek/v1
         run: |
           set -eu
           TMP_DIR=$(mktemp -d /tmp/verify-remote-XXXXXX)
@@ -207,15 +208,27 @@ jobs:
             "$TMP_DIR/attestation.json" "$NONCE" "$EXPECTED_REPORT_DATA" \
             > "$TMP_DIR/verify-request.json"
 
-          echo "Running dstack-verifier (oneshot) via Docker..."
-          docker run --rm \
-            -v "$TMP_DIR:/verify" \
-            -w /verify \
-            --platform linux/amd64 \
-            "$VERIFIER_IMAGE" \
-            --verify /verify/verify-request.json || true
-
+          # AMD rate-limits its certificate service per address, so the chip
+          # certificate is read through our cache first, and a run that does
+          # not verify is repeated against AMD directly. The cache is not
+          # trusted: the verifier checks the certificate against AMD's root
+          # either way.
           RESULT_FILE="$TMP_DIR/verify-request.json.verification.json"
+          for KDS in "$AMD_KDS_CACHE" ""; do
+            echo "Running dstack-verifier (oneshot) via Docker${KDS:+, AMD certificates from $KDS}..."
+            rm -f "$RESULT_FILE"
+            docker run --rm \
+              -v "$TMP_DIR:/verify" \
+              -w /verify \
+              --platform linux/amd64 \
+              ${KDS:+-e "DSTACK_VERIFIER_ATTESTATION__URLS__AMD_KDS=$KDS"} \
+              "$VERIFIER_IMAGE" \
+              --verify /verify/verify-request.json || true
+            if [ -f "$RESULT_FILE" ] && grep -Eq '"is_valid": *true' "$RESULT_FILE"; then
+              break
+            fi
+          done
+
           if [ ! -f "$RESULT_FILE" ]; then
             echo "::error::Verifier did not produce result file"
             rm -rf "$TMP_DIR"
