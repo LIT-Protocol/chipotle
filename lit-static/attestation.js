@@ -1201,6 +1201,9 @@ export const TLS_PIN_MISMATCH = 'ERR_LIT_TLS_PIN_MISMATCH';
 
 /** Node built-ins, named at run time so bundlers do not resolve them for the browser. */
 async function nodeModule(name) {
+  // A browser would log a failed load of `node:https` to the console on every
+  // verification, so do not ask one.
+  if (!globalThis.process?.versions?.node) throw new Error('Node.js built-in modules are not available in this runtime');
   const specifier = ['node', name].join(':');
   return import(/* webpackIgnore: true */ /* @vite-ignore */ specifier);
 }
@@ -1214,6 +1217,16 @@ async function nodeModule(name) {
  * `deadline` bounds the whole exchange, not just inactivity.
  */
 function evidenceRequest(https, url, path, ctx, deadline) {
+  return nodeGet(https, url, `/evidences/${path}`, ctx, deadline, MAX_EVIDENCE_FILE_BYTES);
+}
+
+/**
+ * One GET on a connection of its own, returning the certificate that
+ * connection presented. While a deployment cuts over, two VMs serve the
+ * hostname, each with its own TLS key, and every new connection reaches either
+ * one: the key is how a caller tells which VM answered.
+ */
+function nodeGet(https, url, path, ctx, deadline, maxBytes) {
   return new Promise((resolve, reject) => {
     let timer;
     const settle = (fn, value) => {
@@ -1225,7 +1238,7 @@ function evidenceRequest(https, url, path, ctx, deadline) {
         host: url.hostname,
         port: Number(url.port) || 443,
         servername: url.hostname,
-        path: `/evidences/${path}`,
+        path,
         agent: false,
         headers: { Connection: 'close' },
         ...(ctx.tls ?? {}),
@@ -1236,7 +1249,7 @@ function evidenceRequest(https, url, path, ctx, deadline) {
         let size = 0;
         res.on('data', (chunk) => {
           size += chunk.length;
-          if (size > MAX_EVIDENCE_FILE_BYTES) req.destroy(new Error('evidence file is too large'));
+          if (size > maxBytes) req.destroy(new Error('response is too large'));
           else chunks.push(chunk);
         });
         res.on('end', () => {
@@ -1254,6 +1267,20 @@ function evidenceRequest(https, url, path, ctx, deadline) {
     timer = setTimeout(() => req.destroy(new Error('timed out')), Math.max(1, deadline - Date.now()));
     req.on('error', (e) => settle(reject, e));
   });
+}
+
+// How often one request is repeated to reach the VM the others reached. Enough
+// that an even split between two VMs almost never exhausts it.
+const SAME_VM_ATTEMPTS = 10;
+
+/** Hex SHA-256 of the public key in a connection's certificate, or null. */
+async function connectionKey(certificate) {
+  if (!certificate) return null;
+  try {
+    return toHex(await sha256(parseCertificate(certificate, 'TLS certificate').spki));
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -1274,7 +1301,8 @@ function evidenceRequest(https, url, path, ctx, deadline) {
  *
  * @param {string} origin
  * @param {{appId: string, composeHash: string, osImageHash: string, reportId: string}} expected - From the main verification.
- * @param {Object} [options] - `timeoutMs`, `collateral`, `kdsBaseUrl`, `fetch`, `now`, `tls`.
+ * @param {Object} [options] - `timeoutMs`, `collateral`, `kdsBaseUrl`, `fetch`, `now`, `tls`, and
+ *   `tlsKeySha256`: the TLS key of the connection the main attestation came over, when known.
  * @returns {Promise<{status: 'verified', tlsKeySha256: string} | {status: 'unavailable'|'unsupported'}>}
  *   `'unsupported'` when this runtime cannot inspect TLS certificates; `'unavailable'` when the deployment
  *   publishes no platform evidence. Throws `tls_binding_failed` when it publishes evidence that does not bind.
@@ -1300,8 +1328,23 @@ export async function verifyTlsBinding(origin, expected, options = {}) {
     return { status: 'unsupported' };
   }
   const deadline = Date.now() + ctx.timeoutMs;
-  const get = (path) =>
-    evidenceRequest(https, url, path, ctx, deadline).catch((e) => fail('tls_binding_failed', `could not fetch /evidences/${path} (${e?.message ?? e})`, e));
+  // Every file must come from the VM that answered the main attestation.
+  // While two VMs serve the hostname a connection reaches either, so a file
+  // answered under another TLS key is asked for again. Without a key to aim
+  // for, the first file's connection sets it.
+  let aim = options.tlsKeySha256 ?? null;
+  const get = async (path) => {
+    let file;
+    for (let attempt = 0; attempt < SAME_VM_ATTEMPTS; attempt++) {
+      file = await evidenceRequest(https, url, path, ctx, deadline).catch((e) =>
+        fail('tls_binding_failed', `could not fetch /evidences/${path} (${e?.message ?? e})`, e),
+      );
+      const key = await connectionKey(file.certificate);
+      if (!aim) aim = key;
+      if (!key || key === aim) break;
+    }
+    return file;
+  };
 
   const attestation = await get('attestation.json');
   if (attestation.status === 404) return { status: 'unavailable' };
@@ -1348,7 +1391,6 @@ export async function verifyTlsBinding(origin, expected, options = {}) {
   }
   if (bound.reportId !== expected.reportId) {
     const error = new AttestationError('tls_binding_failed', 'Attestation: certificate evidence is from a different VM than the one that answered');
-    error.differentGuest = true;
     throw error;
   }
   const certHash = toHex(await sha256(certPem.body));
@@ -1379,12 +1421,16 @@ export async function verifyTlsBinding(origin, expected, options = {}) {
  * Responses are buffered. Redirects are returned, not followed: a redirect
  * target would not be the verified origin.
  *
- * @param {string} tlsKeySha256 - Hex SHA-256 of the attested SubjectPublicKeyInfo.
+ * @param {string|string[]} tlsKeySha256 - Hex SHA-256 of the attested SubjectPublicKeyInfo, or of each
+ *   attested one: during a cutover two verified VMs serve the hostname, each with its own key.
+ *   A mismatch error carries the key that was presented as `tlsKeySha256`.
  * @param {{tls?: Object}} [options]
  * @returns {Promise<(input: string|URL, init?: RequestInit) => Promise<Response>>}
  */
 export async function createPinnedFetch(tlsKeySha256, { tls: tlsOptions } = {}) {
-  const pin = hexOfLength(tlsKeySha256, 32, 'tlsKeySha256');
+  const keys = Array.isArray(tlsKeySha256) ? tlsKeySha256 : [tlsKeySha256];
+  if (keys.length === 0) fail('invalid_argument', 'tlsKeySha256 is required');
+  const pins = new Set(keys.map((key) => hexOfLength(key, 32, 'tlsKeySha256')));
   const [https, tls, { createHash }] = await Promise.all([nodeModule('https'), nodeModule('tls'), nodeModule('crypto')]);
   const agent = new https.Agent({
     keepAlive: true,
@@ -1402,9 +1448,10 @@ export async function createPinnedFetch(tlsKeySha256, { tls: tlsOptions } = {}) 
       } catch (e) {
         actual = null;
       }
-      if (actual !== pin) {
+      if (!pins.has(actual)) {
         const error = new Error('the TLS key on this connection is not the attested one');
         error.code = TLS_PIN_MISMATCH;
+        error.tlsKeySha256 = actual;
         return error;
       }
       return undefined;
@@ -1466,6 +1513,9 @@ export async function createPinnedFetch(tlsKeySha256, { tls: tlsOptions } = {}) 
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Whole verifications tried before a TLS binding failure is reported.
+const BINDING_ATTEMPTS = 3;
+
 /** Resolves the policy for an origin: explicit options over the built-in table. */
 export function resolvePolicy(baseUrl, overrides = {}) {
   let origin;
@@ -1525,21 +1575,44 @@ export function resolvePolicy(baseUrl, overrides = {}) {
  * @returns {Promise<AttestationResult>}
  */
 export async function verifyAttestation(baseUrl, options = {}) {
-  const { timeoutMs = 20_000, kdsBaseUrl, collateral: suppliedCollateral, fetch: fetchOption, now = Date.now(), tls, retriedForGuest, ...overrides } = options;
+  const { timeoutMs = 20_000, kdsBaseUrl, collateral: suppliedCollateral, fetch: fetchOption, now = Date.now(), tls, bindingAttempt = 1, aimTlsKeySha256, ...overrides } = options;
   const fetchImpl = fetchOption ?? ((...args) => globalThis.fetch(...args));
   const { origin, policy } = resolvePolicy(baseUrl, overrides);
 
   const nonce = globalThis.crypto.getRandomValues(new Uint8Array(32));
   const expectedReportData = attestationV3ReportData(nonce);
 
+  // In Node.js the request is made here, not through `fetch`, so the TLS key
+  // of its connection is known: it identifies the VM that answered, which the
+  // certificate evidence must then come from.
+  let https = null;
+  if (!fetchOption && policy.tlsBinding !== 'off' && origin.startsWith('https:')) {
+    https = await nodeModule('https').catch(() => null);
+  }
+  const attestationPath = `/attestation/v3?nonce=${toHex(nonce)}`;
+  const request = async () => {
+    if (!https) return { res: await fetchImpl(`${origin}${attestationPath}`, { signal: AbortSignal.timeout(timeoutMs), cache: 'no-store' }), key: null };
+    const got = await nodeGet(https, new URL(origin), attestationPath, { tls }, Date.now() + timeoutMs, MAX_EVIDENCE_BYTES * 2 + 65536);
+    return { res: new Response(got.body, { status: got.status }), key: await connectionKey(got.certificate) };
+  };
+
   // The endpoint admits one attestation at a time and answers 429 when busy.
   let body;
+  let answeredKey = null;
+  let aimed = 0;
   for (let attempt = 0; ; attempt++) {
     let res;
     try {
-      res = await fetchImpl(`${origin}/attestation/v3?nonce=${toHex(nonce)}`, { signal: AbortSignal.timeout(timeoutMs), cache: 'no-store' });
+      ({ res, key: answeredKey } = await request());
     } catch (e) {
       fail('endpoint_unavailable', `could not reach ${origin}/attestation/v3 (${e?.message ?? e})`, e);
+    }
+    // A caller that was just refused by one VM's key asks for that VM, so the
+    // key it learns is the one it needs. Whichever VM answers is verified in
+    // full either way.
+    if (res.ok && aimTlsKeySha256 && answeredKey && answeredKey !== aimTlsKeySha256 && ++aimed < SAME_VM_ATTEMPTS) {
+      attempt--;
+      continue;
     }
     if (res.ok) {
       try {
@@ -1610,12 +1683,15 @@ export async function verifyAttestation(baseUrl, options = {}) {
   if (policy.tlsBinding !== 'off') {
     let binding;
     try {
-      binding = await verifyTlsBinding(origin, result, { fetchImpl, timeoutMs, kdsBaseUrl, collateral, now, tls });
+      binding = await verifyTlsBinding(origin, result, { fetchImpl, timeoutMs, kdsBaseUrl, collateral, now, tls, tlsKeySha256: answeredKey });
     } catch (e) {
-      // While a deployment cuts over, the nonce and the certificate evidence
-      // can be answered by two different VMs. Verify once more from the start
-      // so both come from whichever one is serving now.
-      if (e?.differentGuest && !options.retriedForGuest) return verifyAttestation(baseUrl, { ...options, retriedForGuest: true });
+      // While a deployment cuts over, two VMs serve the hostname and the
+      // nonce and the certificate evidence can still come from different ones
+      // (always, when the nonce went through `fetch`). Verify again from the
+      // start; a deployment whose evidence really does not bind fails each time.
+      if (e?.code === 'tls_binding_failed' && bindingAttempt < BINDING_ATTEMPTS) {
+        return verifyAttestation(baseUrl, { ...options, bindingAttempt: bindingAttempt + 1 });
+      }
       throw e;
     }
     tlsBinding = binding.status;
