@@ -42,6 +42,8 @@ export {
 export const DEFAULT_ATTESTATION_TTL_MS = 10 * 60 * 1000;
 /** Age past which a request waits for a new attestation instead of using the old one. */
 export const DEFAULT_ATTESTATION_MAX_AGE_MS = 60 * 60 * 1000;
+// Requests attempted when a connection presents a key the client has not verified.
+const PIN_MISMATCH_ATTEMPTS = 4;
 const warnedLegacyOrigins = new Set();
 
 // Required prefix (top 96 bits, bytes12 "lit-wallet:1") of every new wallet
@@ -645,17 +647,24 @@ export class LitNodeSimpleApiClient {
     // one-off check with other options (say, TLS binding off for a diagnostic)
     // returns its result and leaves the client's attestation alone.
     const ownPolicy = Object.keys(options).length === 0;
+    // After a connection was refused for its key, verify the VM holding it.
+    const aim = state && ownPolicy && state.aimTlsKeySha256 ? { aimTlsKeySha256: state.aimTlsKeySha256 } : {};
+    if (state && ownPolicy) state.aimTlsKeySha256 = null;
     try {
-      const result = await verifyAttestation(this.origin, { ...(state?.options ?? {}), ...options });
+      const result = await verifyAttestation(this.origin, { ...(state?.options ?? {}), ...aim, ...options });
       if (state && ownPolicy) {
         state.result = result;
+        if (result.tlsKeySha256) (state.keys ??= new Map()).set(result.tlsKeySha256, result.verifiedAt);
         state.onVerified?.(result);
       }
       return result;
     } catch (error) {
       // The origin no longer verifies under the client's policy: stop using
       // what was learned before.
-      if (state && ownPolicy) state.result = null;
+      if (state && ownPolicy) {
+        state.result = null;
+        state.keys?.clear();
+      }
       throw error;
     }
   }
@@ -698,9 +707,13 @@ export class LitNodeSimpleApiClient {
 
   /**
    * The transport for an attestation from `_ensureAttested`. When TLS binding
-   * was verified (Node.js), every connection is pinned to the attested key, so
-   * a request can only reach the VM that was verified. Otherwise the platform
+   * was verified (Node.js), every connection is pinned to an attested key, so
+   * a request can only reach a VM that was verified. Otherwise the platform
    * `fetch`.
+   *
+   * While a deployment cuts over, two VMs serve the hostname, each with its
+   * own key, and a connection reaches either. So the pin is every key this
+   * client verified within `maxAgeMs`, not only the latest.
    */
   async _transport(result) {
     const state = this._attestation;
@@ -709,24 +722,34 @@ export class LitNodeSimpleApiClient {
     const key = result.tlsKeySha256;
     // A redirect would carry the API key to an origin nobody verified.
     if (!key) return (url, init) => globalThis.fetch(url, { ...init, redirect: 'error' });
-    if (state.pinned?.key !== key) {
-      state.pinned = { key, fetch: await createPinnedFetch(key, { tls: state.options.tls }) };
+    const keys = new Set([key]);
+    for (const [other, verifiedAt] of state.keys ?? []) {
+      if (Date.now() - verifiedAt < state.maxAgeMs) keys.add(other);
+      else state.keys.delete(other);
+    }
+    const id = [...keys].sort().join(',');
+    if (state.pinned?.key !== id) {
+      state.pinned = { key: id, fetch: await createPinnedFetch([...keys], { tls: state.options.tls }) };
     }
     return state.pinned.fetch;
   }
 
   /** Every HTTP API call goes through here so nothing reaches an unverified origin. */
   async _fetch(url, init) {
-    const attested = await this._ensureAttested();
-    try {
-      return await (await this._transport(attested))(url, init);
-    } catch (error) {
-      // The VM renewed its certificate with a new key, or a new instance took
-      // over the hostname. Nothing was sent. Verify the origin again and retry
-      // once on the key that verification attests.
-      if (error?.code !== TLS_PIN_MISMATCH) throw error;
-      if (this._attestation.result === attested) this._attestation.result = null;
-      return (await this._transport(await this._ensureAttested()))(url, init);
+    for (let attempt = 1; ; attempt++) {
+      const attested = await this._ensureAttested();
+      try {
+        return await (await this._transport(attested))(url, init);
+      } catch (error) {
+        // The VM renewed its certificate with a new key, or another instance
+        // serves the hostname too. Nothing was sent. Verify the VM that holds
+        // the presented key and retry: its key joins the pin if it verifies.
+        if (error?.code !== TLS_PIN_MISMATCH || attempt >= PIN_MISMATCH_ATTEMPTS) throw error;
+        if (this._attestation.result === attested) {
+          this._attestation.result = null;
+          this._attestation.aimTlsKeySha256 = error.tlsKeySha256 ?? null;
+        }
+      }
     }
   }
 

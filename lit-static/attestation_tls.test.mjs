@@ -1,6 +1,7 @@
 // TLS binding against a real TLS server on localhost. The captured report
 // commits to nothing, so a full pass cannot be staged here; what can be shown
-// is that evidence is fetched on fresh connections, that a deployment without
+// is that evidence is fetched on fresh connections, that a file from another
+// VM is asked for again, that a deployment without
 // evidence is told apart from one with bad evidence, and that bad evidence
 // never yields 'verified'. The pass path is exercised on every deploy by
 // lit-static/sdk/scripts/verify-live.mjs.
@@ -83,6 +84,26 @@ test('a deployment that publishes no evidence is reported as unavailable', { ski
   await assert.rejects(verifyTlsBinding('https://localhost:1', { ...EXPECTED, reportId: undefined }, options()), (e) => e.code === 'invalid_argument');
 });
 
+test('a file answered by another VM is asked for again, a bounded number of times', { skip: !openssl }, async () => {
+  const files = {
+    '/evidences/attestation.json': JSON.stringify({ attestation: fixture.attestation }),
+    '/evidences/sha256sum.txt': manifest(),
+    '/evidences/cert-localhost.pem': cert,
+  };
+  // The main attestation came over this server's key: one request per file.
+  await withServer(files, async (origin, seen) => {
+    await assert.rejects(verifyTlsBinding(origin, EXPECTED, { ...options(), tlsKeySha256: keyHash() }), AttestationError);
+    assert.equal(seen.requestsPerConnection.length, 3);
+  });
+  // It came over a key this server never presents, as when the VM that
+  // answered has since stopped: each file is retried, then the binding fails.
+  await withServer(files, async (origin, seen) => {
+    await assert.rejects(verifyTlsBinding(origin, EXPECTED, { ...options(), tlsKeySha256: '22'.repeat(32) }), (e) => e.code === 'tls_binding_failed');
+    assert.equal(seen.requestsPerConnection.length, 30);
+    assert.equal(new Set(seen.requestsPerConnection).size, 30);
+  });
+});
+
 test('each evidence file is fetched on its own connection', { skip: !openssl }, async () => {
   const files = {
     '/evidences/attestation.json': JSON.stringify({ attestation: fixture.attestation }),
@@ -145,6 +166,54 @@ test('a pinned connection reaches only the attested key', { skip: !openssl }, as
     await assert.rejects(pinned('http://localhost/'), TypeError);
   });
   await assert.rejects(createPinnedFetch('not-a-hash'), (e) => e.code === 'invalid_argument');
+  await assert.rejects(createPinnedFetch([]), (e) => e.code === 'invalid_argument');
+});
+
+test('a pin may hold the keys of several verified VMs, and a refusal names the key presented', { skip: !openssl }, async () => {
+  await withServer({ '/core/v1/account_exists': '{"exists":true}' }, async (origin) => {
+    const either = await createPinnedFetch(['00'.repeat(32), keyHash()], { tls: { ca: cert } });
+    assert.equal((await either(`${origin}/core/v1/account_exists`)).status, 200);
+    const neither = await createPinnedFetch(['00'.repeat(32), '11'.repeat(32)], { tls: { ca: cert } });
+    await assert.rejects(neither(`${origin}/core/v1/account_exists`), (e) => e.code === TLS_PIN_MISMATCH && e.tlsKeySha256 === keyHash());
+  });
+});
+
+test('during a cutover the client keeps the keys of both VMs it verified', { skip: !openssl }, async () => {
+  await withServer({ '/core/v1/account_exists': '{"exists":true}' }, async (origin, seen) => {
+    const client = createClient({ baseUrl: origin, attestation: { appId: 'aa'.repeat(20), kmsContract: '0x' + 'bb'.repeat(20), tls: { ca: cert } } });
+    const state = client._attestation;
+    const aims = [];
+    const other = '11'.repeat(32); // the VM this server is not
+    let next = other;
+    let onlyOther = false;
+    client.verifyAttestation = async function () {
+      aims.push(state.aimTlsKeySha256 ?? null);
+      state.aimTlsKeySha256 = null;
+      const result = { origin, verifiedAt: Date.now(), tlsBinding: 'verified', tlsKeySha256: next };
+      state.result = result;
+      (state.keys ??= new Map()).set(next, result.verifiedAt);
+      if (!onlyOther) next = keyHash();
+      return result;
+    };
+    assert.deepEqual(await client.accountExists('k'), { exists: true });
+    // The refused connection named its key, and that VM was verified next.
+    assert.deepEqual(aims, [null, keyHash()]);
+    assert.equal(seen.requestsPerConnection.length, 1);
+    // A later verification that lands on the other VM again changes nothing:
+    // this server's key is still pinned, so requests keep going without one.
+    state.result = { origin, verifiedAt: Date.now(), tlsBinding: 'verified', tlsKeySha256: other };
+    assert.deepEqual(await client.accountExists('k'), { exists: true });
+    assert.equal(aims.length, 2);
+    // A key verified longer ago than maxAgeMs is dropped from the pin.
+    // A key verified longer ago than maxAgeMs is dropped from the pin, and
+    // the client gives up after a bounded number of verifications.
+    state.keys.set(keyHash(), Date.now() - state.maxAgeMs - 1);
+    next = other;
+    onlyOther = true;
+    await assert.rejects(client.accountExists('k'), (e) => e.code === TLS_PIN_MISMATCH);
+    assert.equal(aims.length, 5);
+    assert.equal(seen.requestsPerConnection.length, 2);
+  });
 });
 
 test('the client pins its API requests and re-verifies when the key changes', { skip: !openssl }, async () => {

@@ -14,6 +14,10 @@ function recordFetch(handler) {
   return { calls, restore: () => (globalThis.fetch = original) };
 }
 const ok = () => Response.json({ exists: true });
+// In Node.js the client asks for the attestation on a connection of its own,
+// to learn the TLS key that answered. Passing `fetch` routes it through the
+// recorder instead, as in a browser.
+const viaFetch = { fetch: (...args) => globalThis.fetch(...args) };
 const verified = (origin) => ({ origin, verifiedAt: Date.now(), platform: 'sev-snp' });
 
 test('origins without a policy are used as before, with no attestation request', async () => {
@@ -32,7 +36,7 @@ test('a known origin is attested before the first request, and nothing is sent i
   assert.ok(ATTESTED_ORIGINS[LIT_API_URL]);
   const net = recordFetch((url) => (url.includes('/attestation/v3') ? new Response('', { status: 404 }) : ok()));
   try {
-    const client = createClient(LIT_API_URL);
+    const client = createClient({ baseUrl: LIT_API_URL, attestation: viaFetch });
     await assert.rejects(client.accountExists('secret-key'), (e) => e instanceof AttestationError && e.code === 'endpoint_unavailable');
     assert.equal(net.calls.length, 1);
     assert.match(net.calls[0], /^https:\/\/api2\.chipotle\.litprotocol\.com\/attestation\/v3\?nonce=[0-9a-f]{64}$/);
@@ -244,7 +248,7 @@ test('a relative base URL is resolved against the document base and requests go 
   try {
     // A page whose <base> points at the API: `fetch` would send a relative URL
     // there, so that is the origin to attest, and nothing is sent unverified.
-    const client = createClient('/');
+    const client = createClient({ baseUrl: '/', attestation: viaFetch });
     assert.equal(client.origin, LIT_API_URL);
     assert.equal(client.baseUrl, `${LIT_API_URL}/core/v1`);
     await assert.rejects(client.accountExists('secret-key'), AttestationError);

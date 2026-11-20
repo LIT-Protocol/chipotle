@@ -44,7 +44,12 @@ trust anchors:
   Lit's multisig approved on-chain;
 - in Node.js, that the TLS key of the connection belongs to that same VM. The
   client then pins every API connection to that key, so a request can only
-  reach the VM that was verified.
+  reach a VM that was verified.
+
+During a release two VMs serve the hostname for a while, the outgoing one and
+its replacement, each with its own TLS key. The client verifies whichever one a
+connection reaches and pins the keys of both, so requests carry on through the
+changeover. A key stays pinned for at most `maxAgeMs` after it was verified.
 
 ```js
 const client = createClient(LIT_API_URL);
