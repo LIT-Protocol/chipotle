@@ -213,6 +213,46 @@ test('a scheme-relative base URL is attested like the origin it resolves to', ()
   }
 });
 
+test('a refresh that finds the endpoint busy leaves the attestation in use until maxAgeMs', async () => {
+  const net = recordFetch(ok);
+  try {
+    const client = createClient({ baseUrl: LIT_API_URL, attestation: { ttlMs: 1000, maxAgeMs: 60_000 } });
+    let busy = false;
+    let refreshes = 0;
+    client.verifyAttestation = async function () {
+      if (busy) {
+        refreshes++;
+        const error = new AttestationError('endpoint_busy', 'still busy');
+        // What the client's own verifyAttestation does with a failure.
+        if (!this._stillAttested(error)) this._attestation.result = null;
+        throw error;
+      }
+      const result = verified(this.origin);
+      this._attestation.result = result;
+      return result;
+    };
+    await client.accountExists('a');
+    busy = true;
+    client._attestation.result.verifiedAt = Date.now() - 2000;
+    // Each request past ttlMs goes out on the attestation it holds and starts
+    // another refresh behind it.
+    for (const key of ['b', 'c', 'd']) {
+      await client.accountExists(key);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      assert.ok(client.attestation, 'the attestation is still held');
+    }
+    assert.equal(net.calls.length, 4);
+    assert.equal(refreshes, 3);
+    // Past maxAgeMs it no longer stands: the request waits, and fails.
+    client._attestation.result.verifiedAt = Date.now() - 61_000;
+    await assert.rejects(client.accountExists('e'), (e) => e.code === 'endpoint_busy');
+    assert.equal(client.attestation, null);
+    assert.equal(net.calls.length, 4);
+  } finally {
+    net.restore();
+  }
+});
+
 test('a request never falls back to an unpinned transport when a refresh fails under it', async () => {
   const net = recordFetch(ok);
   try {

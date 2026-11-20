@@ -113,6 +113,7 @@ export const LEGACY_ORIGINS = Object.freeze({
  *  - `invalid_argument`       bad caller input
  *  - `no_policy`              origin has no known policy and none was given
  *  - `endpoint_unavailable`   the attestation endpoint could not be reached
+ *  - `endpoint_busy`          the endpoint was still busy after every retry
  *  - `malformed_evidence`     evidence could not be decoded
  *  - `unsupported_platform`   evidence is for a platform this verifier or policy does not accept
  *  - `collateral_unavailable` AMD endorsement certificates could not be obtained
@@ -1596,7 +1597,10 @@ export async function verifyAttestation(baseUrl, options = {}) {
     return { res: new Response(got.body, { status: got.status }), key: await connectionKey(got.certificate) };
   };
 
-  // The endpoint admits one attestation at a time and answers 429 when busy.
+  // The hardware produces one attestation at a time. The endpoint queues
+  // requests for it and answers 429 when the queue is full, which is retried
+  // for as long as `timeoutMs`.
+  const busyUntil = Date.now() + timeoutMs;
   let body;
   let answeredKey = null;
   let aimed = 0;
@@ -1622,9 +1626,13 @@ export async function verifyAttestation(baseUrl, options = {}) {
       }
       break;
     }
-    if ((res.status === 429 || res.status === 503) && attempt < 5) {
-      await sleep(250 * 2 ** attempt + Math.floor(Math.random() * 250));
-      continue;
+    if (res.status === 429 || res.status === 503) {
+      const wait = Math.min(250 * 2 ** attempt, 2000) + Math.floor(Math.random() * 250);
+      if (Date.now() + wait < busyUntil) {
+        await sleep(wait);
+        continue;
+      }
+      fail('endpoint_busy', `${origin}/attestation/v3 was still busy (HTTP ${res.status}) after ${timeoutMs} ms of retries`);
     }
     fail('endpoint_unavailable', `${origin}/attestation/v3 answered HTTP ${res.status}`);
   }

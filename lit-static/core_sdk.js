@@ -661,12 +661,23 @@ export class LitNodeSimpleApiClient {
     } catch (error) {
       // The origin no longer verifies under the client's policy: stop using
       // what was learned before.
-      if (state && ownPolicy) {
+      if (state && ownPolicy && !this._stillAttested(error)) {
         state.result = null;
         state.keys?.clear();
       }
       throw error;
     }
+  }
+
+  /**
+   * Whether a failed verification leaves the attestation the client holds in
+   * use. Only when the endpoint was too busy to answer: that says nothing
+   * about the VM, so what was verified stands until it is `maxAgeMs` old. Any
+   * other failure drops it.
+   */
+  _stillAttested(error) {
+    const state = this._attestation;
+    return error?.code === 'endpoint_busy' && !!state?.result && Date.now() - state.result.verifiedAt < state.maxAgeMs;
   }
 
   /**
@@ -680,7 +691,10 @@ export class LitNodeSimpleApiClient {
    * Past `ttlMs` the attestation is refreshed in the background and requests
    * keep going on the existing one, so verification adds nothing to the
    * request path. If that refresh fails the attestation is dropped, and the
-   * next request verifies first and fails if it cannot.
+   * next request verifies first and fails if it cannot. The exception is a
+   * refresh that could not run because the endpoint was busy: the attestation
+   * stays in use, and each later request starts another refresh, until
+   * `maxAgeMs`.
    */
   async _ensureAttested() {
     const state = this._attestation;
@@ -691,7 +705,7 @@ export class LitNodeSimpleApiClient {
     if (!state.pending) {
       state.pending = this.verifyAttestation()
         .catch((error) => {
-          state.result = null;
+          if (!this._stillAttested(error)) state.result = null;
           throw error;
         })
         .finally(() => {
