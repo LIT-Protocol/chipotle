@@ -35,6 +35,15 @@ them. If a background verification fails, the next request verifies first and
 fails if it cannot. A client idle for over an hour verifies before its next
 request.
 
+Create one client per process and reuse it. Verification belongs to the client
+object, so a client made per request verifies on every request. A verification
+takes one to two seconds: the VM's hardware produces one attestation at a
+time, and the server queues requests for it, so many clients starting together
+wait in line. A client that already holds an attestation is not held up by
+that: if a background verification finds the server too busy to answer, the
+client keeps the attestation it has, for at most `maxAgeMs`, and tries again
+on the next request.
+
 Verification proves, using only AMD's root key and the Base blockchain as
 trust anchors:
 
@@ -49,7 +58,8 @@ trust anchors:
 During a release two VMs serve the hostname for a while, the outgoing one and
 its replacement, each with its own TLS key. The client verifies whichever one a
 connection reaches and pins the keys of both, so requests carry on through the
-changeover. A key stays pinned for at most `maxAgeMs` after it was verified.
+changeover. A key stays pinned for at most `maxAgeMs` after it was verified. The
+first request to reach the new VM waits for that verification, once per client.
 
 ```js
 const client = createClient(LIT_API_URL);

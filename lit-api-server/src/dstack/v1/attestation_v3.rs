@@ -12,9 +12,20 @@ use super::{attestation_v2::parse_nonce, dstack};
 
 const REPORT_DOMAIN: &[u8] = b"chipotle-attestation-v3:";
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
-// Fresh hardware attestations are more expensive than v2's cached quote. Do not
-// let concurrent public requests build an unbounded queue at the guest agent.
+// Fresh hardware attestations are more expensive than v2's cached quote, and
+// the hardware produces one at a time. One request is with the guest agent at
+// once; the rest wait their turn here, in arrival order, so clients that start
+// together are served in a row instead of being turned away to retry later.
 static IN_FLIGHT: Semaphore = Semaphore::const_new(1);
+// The line is bounded in length and in time, so public requests cannot build an
+// unbounded queue. A report takes on the order of 100 to 200 ms, so a full line
+// clears within the wait.
+const MAX_QUEUED: usize = 32;
+static QUEUE: Semaphore = Semaphore::const_new(MAX_QUEUED + 1);
+#[cfg(not(test))]
+const MAX_WAIT: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const MAX_WAIT: Duration = Duration::from_millis(200);
 
 #[derive(Debug, Serialize)]
 pub struct AttestationV3Response {
@@ -120,12 +131,17 @@ pub async fn attestation_v3(nonce: Option<&str>) -> Result<AttestationV3Reply, A
             "nonce must be 32 bytes as 64 lowercase hex characters",
         )
     })?;
-    let _permit = IN_FLIGHT.try_acquire().map_err(|_| {
+    let busy = || {
         error(
             Status::TooManyRequests,
             "attestation generation is busy; retry later",
         )
-    })?;
+    };
+    let _place = QUEUE.try_acquire().map_err(|_| busy())?;
+    let _permit = match tokio::time::timeout(MAX_WAIT, IN_FLIGHT.acquire()).await {
+        Ok(Ok(permit)) => permit,
+        _ => return Err(busy()),
+    };
     let data = report_data(&parsed);
     let attestation = fetch_attestation(&dstack::resolve_socket_path(), &data)
         .await
@@ -338,16 +354,41 @@ mod tests {
                 Some("no-store")
             );
         }
-        let _permit = IN_FLIGHT.acquire().await.unwrap();
+        // A request that finds the agent busy waits for its turn, and is
+        // turned away only once the wait is used up.
+        let permit = IN_FLIGHT.acquire().await.unwrap();
+        let started = std::time::Instant::now();
         let response = client
             .get(format!("/attestation/v3?nonce={}", "00".repeat(32)))
             .dispatch()
             .await;
         assert_eq!(response.status(), Status::TooManyRequests);
+        assert!(started.elapsed() >= MAX_WAIT);
         assert_eq!(
             response.headers().get_one("Cache-Control"),
             Some("no-store")
         );
+        // A waiting request is served as soon as the agent is free: whatever
+        // the agent then answers, the request is not turned away as busy.
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(MAX_WAIT / 4).await;
+            drop(permit);
+        });
+        let response = client
+            .get(format!("/attestation/v3?nonce={}", "00".repeat(32)))
+            .dispatch()
+            .await;
+        assert_ne!(response.status(), Status::TooManyRequests);
+        release.await.unwrap();
+        // A full line turns a request away at once.
+        let _line = QUEUE.acquire_many(MAX_QUEUED as u32 + 1).await.unwrap();
+        let started = std::time::Instant::now();
+        let response = client
+            .get(format!("/attestation/v3?nonce={}", "00".repeat(32)))
+            .dispatch()
+            .await;
+        assert_eq!(response.status(), Status::TooManyRequests);
+        assert!(started.elapsed() < MAX_WAIT);
     }
 
     /// CI explicitly runs this against its real dstack guest-agent simulator.

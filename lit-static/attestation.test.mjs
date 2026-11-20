@@ -391,6 +391,12 @@ test('a busy endpoint is retried, a broken one is reported', async () => {
   const busy = server({ v3: (nonce) => (++attempts < 3 ? new Response('', { status: 429 }) : v3Body(nonce, { collateral })) });
   await rejects(verifyAttestation(ORIGIN, { ...POLICY, fetch: busy.fetch, now: NOW }), 'stale_evidence');
   assert.equal(attempts, 3);
+  // Still busy when the time allowed runs out: reported as busy, which a
+  // client treats differently from an endpoint that is broken.
+  let refused = 0;
+  const jammed = server({ v3: () => (refused++, new Response('', { status: 429 })) });
+  await rejects(verifyAttestation(ORIGIN, { ...POLICY, fetch: jammed.fetch, now: NOW, timeoutMs: 1500 }), 'endpoint_busy');
+  assert.ok(refused >= 2, 'it was retried before giving up');
   const missing = server({ v3: () => new Response('', { status: 404 }) });
   await rejects(verifyAttestation(ORIGIN, { ...POLICY, fetch: missing.fetch, now: NOW }), 'endpoint_unavailable');
   const wrong = server({ v3: (nonce) => Response.json({ version: 2, nonce }) });
