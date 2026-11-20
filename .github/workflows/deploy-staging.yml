@@ -214,6 +214,7 @@ jobs:
             docker-compose.phala.yml
             scripts/phala-pingpong.py
             scripts/staging-lanes.py
+            scripts/compose-hash-final.py
             scripts/phala-compose.py
             docker-compose.phala.ingress-v2.yml
             .github/workflows/wait-for-api-restart.yml

@@ -48,3 +48,6 @@ jobs:
 
       - name: Check staging lane resolution
         run: python3 -B scripts/test-staging-lanes.py
+
+      - name: Check the compose hash finality wait
+        run: python3 -B scripts/test-compose-hash-final.py

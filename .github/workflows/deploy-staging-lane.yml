@@ -260,6 +260,22 @@ jobs:
             -e "NEW_ACCOUNT_RATE_LIMIT_ENABLED=false" \
             ${LANE_ENV[@]+"${LANE_ENV[@]}"}
 
+      # The key service reads finalized chain state. Started before the
+      # approval above is finalized (about 18 minutes on Base), an instance is
+      # refused its keys and ends in `error`.
+      - name: Wait for the compose hash approval to be finalized
+        shell: bash
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          PHALA_APP_NAME: ${{ needs.determine-target.outputs.phala_app_name }}
+          BASE_CHAIN_RPC: ${{ secrets.BASE_CHAIN_RPC }}
+        run: |
+          set -euo pipefail
+          CVM=$(phala cvms get "$PHALA_APP_NAME" --json)
+          APP=$(jq -er '.kms_info.dstack_app_address' <<<"$CVM")
+          HASH=$(jq -er '.compose_hash' <<<"$CVM")
+          python3 scripts/compose-hash-final.py "$APP" "$HASH"
+
       - name: Start updated CVM if stopped
         shell: bash
         env:
@@ -268,10 +284,12 @@ jobs:
         run: |
           # Updates preserve the VM's power state. Wait for the update to settle
           # before starting a stopped target; leave running instances alone.
+          # A target that was running when it was updated restarted before the
+          # approval was finalized and sits in `error`: start it again.
           for attempt in {1..60}; do
             STATUS=$(phala cvms get "$PHALA_APP_NAME" --json | jq -er '.status')
             case "$STATUS" in
-              stopped)
+              stopped|error)
                 phala cvms start "$PHALA_APP_NAME"
                 exit 0
                 ;;

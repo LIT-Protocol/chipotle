@@ -221,6 +221,16 @@ jobs:
             --app-auth "$APP_AUTH" \
             --compose-hash "$COMPOSE_HASH"
 
+      # The key service reads finalized chain state: a replica started before
+      # the Safe transaction is finalized (about 18 minutes on Base) is refused
+      # its keys.
+      - name: Wait for the approval to be finalized
+        env:
+          APP_AUTH: ${{ needs.download-context.outputs.app_auth_address }}
+          COMPOSE_HASH: ${{ needs.download-context.outputs.compose_hash }}
+          BASE_CHAIN_RPC: ${{ secrets.BASE_CHAIN_RPC }}
+        run: python3 scripts/compose-hash-final.py "$APP_AUTH" "$COMPOSE_HASH"
+
   commit-deploy:
     needs: [download-context, verify-compose-hash-onchain]
     runs-on: self-hosted
