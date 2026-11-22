@@ -56,9 +56,10 @@ globalThis.LitTest = { op_panic };
 // parses per execution but its body is one string literal, so V8 only pays
 // for source-string scanning, not for compiling the bundled action body.
 //
-// The caller passes a content-derived `specifier` (the action's IPFS id) so
-// distinct actions occupy distinct code-cache keys; see the call site in
-// runtime.rs for why a shared specifier would let equal-length actions collide.
+// The caller passes a `specifier` naming the action (its IPFS id) for stack
+// traces. Cache identity is not the specifier: the Rust side keys the cache on
+// a hash of the source and only opens it for this one call (see
+// WorkerCodeCacheGate in v8_code_cache.rs).
 //
 // The helper deletes itself from globalThis as its first action so user code
 // (which runs inside op_eval_context below) cannot reach it; this preserves

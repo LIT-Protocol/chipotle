@@ -14,7 +14,7 @@ use deno_core::{JsRuntime, v8};
 use crate::bundler;
 use crate::cdn_module_loader::{CdnModuleLoader, LoadedModules, ModuleCache};
 use crate::import_rewriter;
-use crate::v8_code_cache::SharedV8CodeCache;
+use crate::v8_code_cache::{SharedV8CodeCache, WorkerCodeCacheGate};
 use deno_resolver::npm::{DenoInNpmPackageChecker, ManagedNpmResolver};
 use deno_runtime::{
     BootstrapOptions, WorkerLogLevel,
@@ -250,8 +250,14 @@ impl CachedActionCode {
     // eval-context code cache keys/compiles correctly across requests instead
     // of crossing one request's params into another's execution.
     fn to_executable_code(&self) -> String {
-        format!(
-            "
+        executable_action_source(&self.code)
+    }
+}
+
+/// The exact source text compiled for an action whose bundled code is `code`.
+pub fn executable_action_source(code: &str) -> String {
+    format!(
+        "
         {code}
         ;
         (async () => {{
@@ -261,9 +267,7 @@ impl CachedActionCode {
           LitActions.setResponse( {{ response: data }} );
         }}
         }})();",
-            code = self.code,
-        )
-    }
+    )
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -285,9 +289,9 @@ pub(crate) struct PoolSharedState {
     /// Heap limit in MB. Pool workers always use `DEFAULT_MEMORY_LIMIT_MB`;
     /// the legacy cold path uses whatever the caller specified.
     pub memory_limit_mb: usize,
-    /// Shared V8 code cache wired into every `MainWorker`'s
-    /// `WorkerServiceOptions`. Pool and legacy paths share the same cache,
-    /// so a code-cache hit warmed by either path benefits the other.
+    /// Shared V8 code cache. Each `MainWorker` reaches it only through its own
+    /// `WorkerCodeCacheGate` (see `build_worker_base`). Pool and legacy paths
+    /// share the same cache, so a hit warmed by either path benefits the other.
     pub v8_code_cache: SharedV8CodeCache,
 }
 
@@ -302,6 +306,9 @@ pub(crate) struct PoolSharedState {
 pub(crate) struct PreparedWorker {
     pub worker: MainWorker,
     pub loaded_modules: LoadedModules,
+    /// This worker's handle on the shared V8 code cache; closed until
+    /// `execute_with_worker` arms it for the action source.
+    pub code_cache_gate: Arc<WorkerCodeCacheGate>,
 }
 
 #[cfg(test)]
@@ -319,10 +326,9 @@ fn deno_isolate_init() -> Option<&'static [u8]> {
 }
 
 /// Compute the IPFS CID for a Lit Action's source. This is the action's
-/// canonical content identity: it keys the action-code cache and, via the
-/// op_eval_context specifier, the V8 code cache (so distinct actions can't
-/// collide on V8's length-based source hash). Exposed for tests that assert on
-/// the specifier (it appears in user-facing stack traces).
+/// canonical content identity: it keys the action-code cache and names the
+/// op_eval_context specifier. Exposed for tests that assert on the specifier
+/// (it appears in user-facing stack traces).
 pub fn get_lit_action_ipfs_id(code: &str) -> String {
     let ipfs_hasher = IpfsHasher::default();
     ipfs_hasher.compute(code.as_bytes())
@@ -492,6 +498,11 @@ pub(crate) fn build_worker_base(shared: &PoolSharedState) -> Result<PreparedWork
         loaded_modules.clone(),
     ));
 
+    // The worker never gets the shared cache itself: Deno consults whatever is
+    // wired in here for every eval-context compile, including ones action code
+    // can trigger with its own specifier and source.
+    let code_cache_gate = Arc::new(WorkerCodeCacheGate::new(shared.v8_code_cache.clone()));
+
     let options = WorkerOptions {
         bootstrap: BootstrapOptions {
             cpu_count: 1,
@@ -550,7 +561,7 @@ pub(crate) fn build_worker_base(shared: &PoolSharedState) -> Result<PreparedWork
             fetch_dns_resolver: crate::egress::egress_filtered_resolver(),
             shared_array_buffer_store: Default::default(),
             compiled_wasm_module_store: Default::default(),
-            v8_code_cache: Some(shared.v8_code_cache.clone()),
+            v8_code_cache: Some(code_cache_gate.clone()),
             bundle_provider: Default::default(),
         };
 
@@ -561,6 +572,7 @@ pub(crate) fn build_worker_base(shared: &PoolSharedState) -> Result<PreparedWork
     Ok(PreparedWorker {
         worker,
         loaded_modules,
+        code_cache_gate,
     })
 }
 
@@ -867,6 +879,7 @@ async fn execute_with_worker_inner(
     let PreparedWorker {
         mut worker,
         loaded_modules,
+        code_cache_gate,
     } = prepared;
 
     let timeout_ms = clamp_timeout_ms(timeout_ms);
@@ -1014,15 +1027,11 @@ async fn execute_with_worker_inner(
     // source-string scanning rather than compiling the bundled action body
     // (CPL-264).
     //
-    // The specifier is content-derived (the action's IPFS id) rather than a
-    // constant. Deno's code-cache key is `(specifier, kind, source_hash)`, and
-    // `source_hash` degenerates to V8's length-based string identity hash for
-    // large sources — so two *different* actions of equal length would share a
-    // `source_hash` and collide under a shared specifier, handing one action
-    // the other's compiled bytecode. Keying the specifier on the action id puts
-    // each action in its own keyspace: same action -> same specifier -> still
-    // reuses bytecode (CPL-264); different action -> different specifier -> a
-    // clean miss, so V8 is never offered a mismatched cache entry to accept.
+    // The specifier names the action (its IPFS id) for stack traces. It is not
+    // what identifies the cached bytecode: the cache is keyed on a SHA-256 of
+    // this exact source, computed here, and is only open for this one compile
+    // (see `WorkerCodeCacheGate`). Nothing action code compiles later — under
+    // this specifier or any other — can read or replace a cache entry.
     let user_code_literal =
         serde_json::to_string(&user_code).context("Could not serialize user code for eval stub")?;
     let specifier = format!("file:///user_provided_script_{action_ipfs_id}.js");
@@ -1030,10 +1039,15 @@ async fn execute_with_worker_inner(
         .context("Could not serialize eval specifier for eval stub")?;
     let stub = format!("__litEvalCached({user_code_literal}, {specifier_literal});");
 
-    if let Err(e) = worker
+    code_cache_gate.arm(&specifier, &user_code);
+    let stub_result = worker
         .js_runtime
-        .execute_script("<user_provided_script>", stub)
-    {
+        .execute_script("<user_provided_script>", stub);
+    // Already closed by the compile it was armed for; this covers a compile
+    // that never got that far.
+    code_cache_gate.close();
+
+    if let Err(e) = stub_result {
         // Delay error handling if the controller has terminated the isolate,
         // in which case halt_isolate_rx will tell the reason.
         if e.to_string() != EXECUTION_TERMINATED_ERROR {

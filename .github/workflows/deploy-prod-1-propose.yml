@@ -59,6 +59,11 @@
 #
 # Optional vars — second lane and settings for running two lanes at once:
 #   PROD_V2_DOMAIN, PROD_V2_REPLICAS (space-separated CVM names) - the v2 lane.
+#   PROD_REPLICAS (space-separated CVM names) - the legacy lane's replica pair.
+#     Set it to two replicas on the SAME Phala node: Phase 2 then stops the
+#     previous replica once the new one has passed its checks, and stops the
+#     new one if it fails them, as on the v2 lane. Unset: the original
+#     cross-node pair, retired by hand.
 #   PROD_PAYER_SHARD / PROD_V2_PAYER_SHARD - each lane's share of the payer pool,
 #     "0/2" and "1/2". REQUIRED with two lanes: replicas derive the same payer
 #     keys and would otherwise reuse each other's nonces.
@@ -270,6 +275,7 @@ jobs:
         env:
           LANE: ${{ inputs.lane || 'all' }}
           INPUT_CVM: ${{ inputs.phala_cvm_name }}
+          PROD_REPLICAS: ${{ vars.PROD_REPLICAS }}
           PROD_PAYER_SHARD: ${{ vars.PROD_PAYER_SHARD }}
           PROD_PEER_BASE_URLS: ${{ vars.PROD_PEER_BASE_URLS }}
           PROD_ORIGIN_SUNSET: ${{ vars.PROD_ORIGIN_SUNSET }}
@@ -282,8 +288,12 @@ jobs:
           PROD_V2_INGRESS: ${{ vars.PROD_V2_INGRESS }}
         run: |
           set -euo pipefail
-          # The legacy lane's replica set. To change it, edit this list.
-          LEGACY_REPLICAS="chipotle-prod-rep-r68r6 chipotle-prod-rep-08tv3"
+          # The legacy lane's replica set: PROD_REPLICAS, or the original pair.
+          LEGACY_REPLICAS="${PROD_REPLICAS:-chipotle-prod-rep-r68r6 chipotle-prod-rep-08tv3}"
+          if [ -n "$PROD_REPLICAS" ] && [ "$(wc -w <<< "$PROD_REPLICAS")" -ne 2 ]; then
+            echo "::error::PROD_REPLICAS must name exactly two replicas on one Phala node."
+            exit 1
+          fi
           LEGACY_DOMAIN="api.chipotle.litprotocol.com"
 
           LANES=$(jq -cn \

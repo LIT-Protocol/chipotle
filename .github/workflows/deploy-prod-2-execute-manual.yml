@@ -406,11 +406,12 @@ jobs:
   # while both run. So once the new replica has passed every check, stop the
   # lane's other running replicas. This also leaves the pair with one running
   # and one stopped member, which is how the next release finds its cold
-  # replica. The legacy lane's replicas are on different nodes and are retired
-  # by hand, as before.
+  # replica. The legacy lane's original replicas are on different nodes and
+  # are retired by hand; once PROD_REPLICAS names a same-node pair for it, it
+  # is retired here like v2.
   retire-previous:
     needs: [download-context, k6-correctness, verify-attestation]
-    if: ${{ inputs.lane == 'v2' && needs.download-context.outputs.replicas != '' }}
+    if: ${{ (inputs.lane == 'v2' || vars.PROD_REPLICAS != '') && needs.download-context.outputs.replicas != '' }}
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -445,7 +446,7 @@ jobs:
   # that the lane's other running replica is healthy.
   stop-failed-target:
     needs: [download-context, commit-deploy, wait-for-api-available, target-instance, verify-attestation, openapi-spec-check, k6-smoke, k6-correctness]
-    if: ${{ always() && inputs.lane == 'v2' && needs.download-context.outputs.replicas != '' && needs.commit-deploy.result == 'success' && contains(needs.*.result, 'failure') }}
+    if: ${{ always() && (inputs.lane == 'v2' || vars.PROD_REPLICAS != '') && needs.download-context.outputs.replicas != '' && needs.commit-deploy.result == 'success' && contains(needs.*.result, 'failure') }}
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -466,6 +467,22 @@ jobs:
             [ "$other" != "$FAILED" ] || continue
             status=$(phala cvms get "$other" --json | jq -er '.status')
             [ "$status" = "running" ] || continue
+            # A replica on a release from before /version reported cvm_name
+            # cannot be identified by name. Check its health on its own URL,
+            # which only it answers, then stop the failed one.
+            other_url=$(phala cvms get "$other" --json | jq -er '[.endpoints[].instance | select(test("-8000\\."))] | select(length == 1) | .[0] | sub("/+$"; "")')
+            if ! curl -fsS --max-time 10 "$other_url/core/v1/version" | jq -e '.cvm_name | type == "string" and length > 0' >/dev/null; then
+              curl -fsS --max-time 10 "$other_url/health" | jq -e '.lit_actions_reachable == true and .cpu_available == true' >/dev/null
+              phala cvms stop "$FAILED"
+              for attempt in $(seq 1 60); do
+                [ "$(phala cvms get "$FAILED" --json | jq -r '.status')" = "stopped" ] && break
+                sleep 5
+              done
+              [ "$(phala cvms get "$FAILED" --json | jq -r '.status')" = "stopped" ]
+              curl -fsS --max-time 10 "$PUBLIC_URL/health" | jq -e '.lit_actions_reachable == true and .cpu_available == true' >/dev/null
+              echo "::error::$FAILED failed verification and was stopped; $other serves $PUBLIC_URL."
+              exit 0
+            fi
             # Verifies the surviving replica on its own URL and on the public
             # hostname, stops the failed one, then verifies the hostname again.
             python3 scripts/phala-pingpong.py retire "$FAILED" "$other" "$PUBLIC_URL"
