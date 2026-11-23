@@ -63,9 +63,12 @@ jobs:
           # not require a release merely because those baseline bytes differ.
           # Compare the whole tree, including build scripts, lockfiles, protocol
           # and actions, not just sdk/. Public PRs always check npm directly.
+          # Cargo.lock is left out: the Rust lockfile is not an input to the
+          # npm package, so a Rust dependency update alone needs no release.
           if [ "$PR_REPOSITORY" = "LIT-Protocol/chipotle-private" ]; then
             git fetch --no-tags --depth=1 origin "$PR_BASE_SHA"
-            if git diff --quiet "$PR_BASE_SHA" HEAD -- ':(top)lit-agent-keychain'; then
+            if git diff --quiet "$PR_BASE_SHA" HEAD -- ':(top)lit-agent-keychain' \
+              ':(top,exclude)lit-agent-keychain/Cargo.lock'; then
               echo "Keychain tree unchanged from private PR base; no SDK release required."
               exit 0
             else
