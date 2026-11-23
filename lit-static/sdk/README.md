@@ -22,6 +22,13 @@ Keep account keys on your server. Action execution requires a usage key.
 ES modules; Node.js 22+ or a modern browser with a bundler. The HTTP API and
 attestation have no dependencies.
 
+TypeScript declarations are included. `litAction` takes the type of the value
+your action returns:
+
+```ts
+const { response } = await client.litAction<{ address: string }>({ apiKey, code });
+```
+
 ## Attestation
 
 `LIT_API_URL` (`https://api2.chipotle.litprotocol.com`) runs in an AMD SEV-SNP
@@ -95,9 +102,9 @@ server when the channel matters.
 
 ## Migrating from `api.chipotle.litprotocol.com`
 
-The original origin runs on Intel TDX and is being retired. It keeps working
-until its announced sunset date, and this SDK warns once when a client is
-created for it. To migrate, change `baseUrl` to `LIT_API_URL`. Accounts, API
+The original origin runs on Intel TDX and is retired on December 31, 2026. It
+keeps working until then, and this SDK warns once when a client is created for
+it. To migrate, change `baseUrl` to `LIT_API_URL`. Accounts, API
 keys, wallets and their addresses are the same on both origins: both run the
 same app with the same keys.
 

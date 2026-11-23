@@ -1,34 +1,51 @@
 ---
 title: "Verify in 30 Seconds"
-description: "View the Phala Trust Center report, inspect API metadata and on-chain policy, and learn what full attestation and TLS verification requires."
+description: "Verify the live Lit API with one SDK call, inspect its metadata and on-chain policy, and view the Phala Trust Center report."
 ---
 
-When you call `api.chipotle.litprotocol.com`, your request terminates inside an Intel TDX [Trusted Execution Environment](https://www.intel.com/content/www/us/en/developer/tools/trust-domain-extensions/overview.html) (TEE) operated by [Phala Cloud](https://phala.com/). The TEE generates a hardware-signed attestation quote on every boot, and the code it's allowed to run is gated by smart contracts on Base — not by Lit Protocol or any Phala employee.
+When you call `api2.chipotle.litprotocol.com`, your request terminates inside an AMD SEV-SNP [Trusted Execution Environment](https://www.amd.com/en/developer/sev.html) (TEE) operated by [Phala Cloud](https://phala.com/). The processor signs an attestation report that says what the machine booted, and the code it's allowed to run is gated by smart contracts on Base — not by Lit Protocol or any Phala employee.
 
-Start with the Phala Trust Center report for our production app. This page is a quick diagnostic guide, not a production attestation implementation. Viewing a report does not verify the connection your application uses to reach Chipotle.
+## Verify with the SDK
+
+`verifyAttestation` from [`@lit-protocol/core-sdk`](https://www.npmjs.com/package/@lit-protocol/core-sdk) runs the whole check from your machine. It needs Node.js 22 or later.
+
+```bash
+mkdir lit-verify && cd lit-verify && npm init -y > /dev/null
+npm install @lit-protocol/core-sdk
+
+node --input-type=module -e "
+import { verifyAttestation } from '@lit-protocol/core-sdk/attestation';
+const p = await verifyAttestation('https://api2.chipotle.litprotocol.com');
+console.log(p.platform, p.tcbStatus, p.tlsBinding, p.composeHash);
+"
+# sev-snp UpToDate verified 53dcf787de9b306be7299f35b16f0303da99f847eddff8d5037804bd2b951c3a
+```
+
+The compose hash changes with each release. The call throws an `AttestationError` if any check fails. When it returns, these hold:
+
+| Result | What was checked |
+|---|---|
+| `platform: 'sev-snp'` | The report is signed by a genuine AMD processor, through AMD's certificate chain to a root key pinned in the SDK. Debugging is off. |
+| A fresh report | The signed report commits to a random nonce the SDK generated for this call, so it cannot be a replay. |
+| `osImageHash` | The signed launch measurement was recomputed from the firmware, kernel and boot parameters the machine declares, and that OS image is allowlisted in the Phala KMS contract on Base. |
+| `appId`, `composeHash` | The signed `HOST_DATA` field binds Lit's app and the hash of the docker-compose document it runs, and that hash is allowlisted in Lit's DstackApp contract on Base. |
+| `tlsBinding: 'verified'` | The TLS key of the connection the SDK used belongs to that same machine. Checked in Node.js. |
+
+A client made with `createClient` runs this before its first request and pins every later connection to the verified TLS key, so the check protects the requests that carry your data. See [Production verification](/architecture/verification/index#production-verification).
+
+## The Phala Trust Center report
+
+Phala publishes an independent report for the production app. Viewing a report does not verify the connection your application uses to reach Lit; the SDK check above does.
 
 <Card
   title="View the Lit Chipotle Trust Center Report"
   icon="shield-check"
   href="https://trust.phala.com/app/3f91deaf16ff7c823ee65081d6bafa1ceea05ffc"
 >
-  Phala's public Trust Center verifies the Intel TDX hardware quote, the Docker compose hash, the OS measurements, the TLS certificate, and the on-chain KMS configuration — all automatically, no install required.
+  Phala's public Trust Center checks the hardware attestation, the Docker compose hash, the OS image and the on-chain KMS configuration — no install required.
 </Card>
 
 The Trust Center URL contains our `app_id` (`3f91deaf16ff7c823ee65081d6bafa1ceea05ffc`). This same value is returned by `GET /info` on the live API and is the address of the on-chain [DstackApp contract](https://basescan.org/address/0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC) that governs which code the enclave is allowed to run.
-
-## What you should expect to see
-
-A passing Trust Center report confirms four independent properties:
-
-| Property | Why it matters |
-|---|---|
-| **Hardware quote verified** | Intel's TDX hardware root of trust signed a statement about what code is running. Anyone can verify the signature against Intel's published root CAs. |
-| **Compose hash matches** | The SHA-256 of `app-compose.json` (the docker-compose config + metadata) recorded in the TDX quote matches what's whitelisted in the on-chain DstackApp contract. |
-| **OS measurements match** | The boot-time measurements (firmware, kernel, initrd) match a known-good dstack OS release whitelisted in the Phala KMS contract. |
-| **TLS terminates in TEE** | The HTTPS certificate served by `api.chipotle.litprotocol.com` was generated inside the TEE itself. No proxy, load balancer, or CDN can see your traffic. |
-
-If any of these fail, the report will show it.
 
 ## Inspect API metadata and on-chain policy
 
@@ -40,12 +57,12 @@ These commands inspect what the API reports and whether its reported compose has
 
 ```bash
 # 1. What metadata does the API report? (Not authenticated attestation.)
-curl -sf https://api.chipotle.litprotocol.com/info \
+curl -sf https://api2.chipotle.litprotocol.com/info \
   | python3 -m json.tool | head -20
 
-# 2. Is the reported compose hash whitelisted on Base?
+# 2. Is the reported compose hash allowlisted on Base?
 #    (Requires `cast` from Foundry — https://book.getfoundry.sh)
-COMPOSE_HASH=0x$(curl -sf https://api.chipotle.litprotocol.com/info \
+COMPOSE_HASH=0x$(curl -sf https://api2.chipotle.litprotocol.com/info \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["compose_hash"])')
 cast call 0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC \
   "allowedComposeHashes(bytes32)(bool)" "$COMPOSE_HASH" \
@@ -53,19 +70,9 @@ cast call 0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC \
 # Expect: true
 ```
 
-### Production verification is integration-specific
+### What these commands leave out
 
-For full production verification, follow [Phala’s official application verification instructions](https://docs.phala.com/phala-cloud/attestation/verify-your-application) and [complete chain-of-trust checklist](https://docs.phala.com/phala-cloud/attestation/chain-of-trust), the authoritative references for Phala/dstack verification.
-
-You are responsible for implementing and enforcing attestation verification correctly in your integration. The implementation depends on your setup and where and how your client connects to the Chipotle server, including any proxies, gateways, and TLS termination points. Apply your approved workload and security policy, and bind verified evidence to the connection carrying your application traffic before sending secrets. Phala’s instructions do not select that application policy or enforce it in your client for you.
-
-### TLS verification requires authenticated evidence
-
-Comparing the live TLS certificate with a PEM fetched from the same server proves only that they match. A server with no attestation can serve a matching PEM.
-
-Before trusting a certificate binding, verify the **evidence quote signature**, validate its approved measurements and workload identity, and use `reportData` extracted from that verified quote. Then verify the checksum chain from `reportData` through `sha256sum.txt` to the certificate file and bind that certificate to the TLS connection you will actually use. Verifying the separate `/attestation` quote alone does not authenticate the TLS evidence quote.
-
-Unauthenticated `quote.json` fields and matching hashes are not proof of attestation. See the [Full Verification Guide](/architecture/verification/full-verification) for the verification layers and evidence format; its checksum comparisons are not a standalone substitute for quote signature and measurement validation.
+The two commands above read claims from the server and a policy from the chain. They do not check a hardware signature, so they cannot tell an attested machine from one that copies its answers. The [SDK check](#verify-with-the-sdk) covers that, and the [Full Verification Guide](/architecture/verification/full-verification) shows how to repeat each of its checks by hand.
 
 ## On-chain governance you can audit
 
@@ -105,6 +112,6 @@ Smart contracts on Base together define what Lit Chipotle is allowed to do. Lit'
 ## What's next
 
 - [On-Chain KMS](/architecture/verification/onchain-kms) — how the KMS contracts gate key release and what to look for on Basescan
-- [Full Verification Guide](/architecture/verification/full-verification) — Chipotle-specific diagnostic examples and prerequisites; follow Phala’s instructions for production
+- [Full Verification Guide](/architecture/verification/full-verification) — repeat each of the SDK's checks by hand
 - [Chain of Trust Reference](/architecture/verification/chain-of-trust) — what each layer checks and why
 - [Security & Verification Overview](/architecture/verification/index) — Zero-Trust TLS and the trust model

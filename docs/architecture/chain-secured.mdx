@@ -102,7 +102,7 @@ Chain Secured covers who can change the rules. Keep these limits in mind as well
 
 - **The operator can pause signing.** Your rules stay on-chain while signing is paused, but signing needs the runtime and the key service, so plan for recovery.
 - **The contracts can be upgraded.** The Lit Safe that approves new releases (2 of 4 signers) also owns the AccountConfig contract, and an upgrade to that contract can change how rules are enforced. There is no timelock: an upgrade takes effect as soon as the Safe executes it. See [Upgrade Governance](/architecture/verification/upgrade-governance) for the Safe's settings and how to check them.
-- **Attestation shows which code is running.** It doesn't prove that the code is free of bugs, and it relies on Intel's hardware being secure. See [What Is Attestation?](/architecture/verification/attestation).
+- **Attestation shows which code is running.** It doesn't prove that the code is free of bugs, and it relies on AMD's hardware being secure. See [What Is Attestation?](/architecture/verification/attestation).
 
 ## Further reading
 

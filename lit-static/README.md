@@ -19,13 +19,22 @@ No build step — files are served as-is.
 
 The Core SDK is packaged as `@lit-protocol/core-sdk`. Its package manifest and
 consumer documentation live in `sdk/`; the five runtime files remain here as the
-single source for both the dashboard and npm. Packaging copies only those files,
-the consumer README, and the manifest to a temporary directory. No dashboard,
+single source for both the dashboard and npm, with hand-written TypeScript
+declarations (`core_sdk.d.ts`, `attestation.d.ts`) beside the two entry points.
+Packaging copies only those files, the consumer README, and the manifest to a
+temporary directory. No dashboard,
 scripts, tests, or repository documentation is shipped.
 
 Run `node --test lit-static/sdk/scripts/release.test.mjs` and
 `node lit-static/sdk/scripts/release.mjs` to validate version selection and install
 and exercise the real tarball. Neither command publishes.
+
+When you add or rename an export or a public client method, update the
+declarations too. `node --test lit-static/sdk/scripts/types.test.mjs` fails
+when the JavaScript and the declarations name different things, and
+`LIT_SDK_TYPECHECK=5.6.3 node lit-static/sdk/scripts/release.mjs` compiles a
+strict TypeScript consumer (`sdk/scripts/consumer.mts`) against the tarball.
+CI runs both on pull requests.
 
 `.github/workflows/core-sdk.yml` validates PRs and publishes changed package
 contents after merges to private `main`. Unrelated static asset changes are a

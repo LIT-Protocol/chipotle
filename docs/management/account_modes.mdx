@@ -138,9 +138,9 @@ Calls go over HTTP with your account API key in the header. The Core SDK
 default constructor is API mode:
 
 ```javascript
-import { createClient } from './core_sdk.js';
+import { createClient } from '@lit-protocol/core-sdk';
 
-const client = createClient('https://api.chipotle.litprotocol.com');
+const client = createClient('https://api2.chipotle.litprotocol.com');
 
 const res = await client.newAccount({
   accountName: 'My App',
@@ -167,14 +167,14 @@ provider instead of `rpcUrl`. The `rpcUrl` constructor option is the
 fallback used for reads that happen before a signer is attached.
 
 ```javascript
-import { LitNodeSimpleApiClient } from './core_sdk.js';
+import { LitNodeSimpleApiClient } from '@lit-protocol/core-sdk';
 import { ethers } from 'ethers';
 
 const provider = new ethers.BrowserProvider(window.ethereum);
 const signer = await provider.getSigner();
 
 const client = new LitNodeSimpleApiClient({
-  baseUrl: 'https://api.chipotle.litprotocol.com',
+  baseUrl: 'https://api2.chipotle.litprotocol.com',
   mode: 'sovereign',
   rpcUrl: 'https://mainnet.base.org',
   contractAddress: '0xYourAccountConfigDiamond',
@@ -341,11 +341,11 @@ the server's api\_payer signs the on-chain conversion on their behalf.
 ### Step-by-step (SDK)
 
 ```javascript
-import { createClient } from './core_sdk.js';
+import { createClient } from '@lit-protocol/core-sdk';
 import { ethers } from 'ethers';
 
 // Sign in with API mode (default) and your existing master API key.
-const client = createClient('https://api.chipotle.litprotocol.com');
+const client = createClient('https://api2.chipotle.litprotocol.com');
 
 // Connect the wallet that will become the new on-chain admin.
 const provider = new ethers.BrowserProvider(window.ethereum);
@@ -498,7 +498,7 @@ rotations forward to fresh addresses; you cannot transfer ownership back.
 ### Step-by-step (SDK)
 
 ```javascript
-import { LitNodeSimpleApiClient } from './core_sdk.js';
+import { LitNodeSimpleApiClient } from '@lit-protocol/core-sdk';
 import { ethers } from 'ethers';
 
 // Connect the CURRENT admin wallet in sovereign mode.
@@ -507,7 +507,7 @@ const signer = await provider.getSigner();
 const address = await signer.getAddress();
 
 const client = new LitNodeSimpleApiClient({
-  baseUrl: 'https://api.chipotle.litprotocol.com',
+  baseUrl: 'https://api2.chipotle.litprotocol.com',
   mode: 'sovereign',
   rpcUrl: 'https://mainnet.base.org',
   contractAddress: '0xYourAccountConfigDiamond',

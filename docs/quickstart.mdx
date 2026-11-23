@@ -5,7 +5,7 @@ description: "Go from zero to a running Lit Action in a few minutes using the Li
 
 import RequestPath from "/snippets/request-path.mdx";
 
-This guide walks you through creating an account, funding it, and running your first Lit Action. You can do everything from the [**Dashboard**](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/) (web GUI) or directly against the [**REST API**](https://api.chipotle.litprotocol.com/).
+This guide walks you through creating an account, funding it, and running your first Lit Action. You can do everything from the [**Dashboard**](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/) (web GUI) or directly against the [**REST API**](https://api2.chipotle.litprotocol.com/).
 
 ## How the pieces fit
 
@@ -36,7 +36,7 @@ Your first run needs only an account, some credits, and a usage key with wildcar
 To run your first action from a terminal, send your usage key and a line of code. The account key can't run actions, so use the usage key from step 3.
 
 ```bash
-curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/lit_action" \
+curl -s -X POST "https://api2.chipotle.litprotocol.com/core/v1/lit_action" \
   -H "Content-Type: application/json" \
   -H "X-Api-Key: YOUR_USAGE_KEY" \
   -d '{"code":"async function main() { return \"hello\"; }","js_params":null}'
@@ -89,4 +89,4 @@ The Dashboard is just your human-friendly configuration tool. Once your account 
 - [Examples](/lit-actions/examples) — signing, encryption, HTTP fetching, contract calls
 - [Architecture](/architecture/index) — the TEE / on-chain / IPFS layers
 - [Chain Secured](/architecture/chain-secured) — why your keys' authority lives on-chain, and how an attested TEE enforces it
-- [OpenAPI Spec](https://api.chipotle.litprotocol.com/core/v1/openapi.json) / [Swagger UI](https://api.chipotle.litprotocol.com/core/v1/swagger-ui)
+- [OpenAPI Spec](https://api2.chipotle.litprotocol.com/core/v1/openapi.json) / [Swagger UI](https://api2.chipotle.litprotocol.com/core/v1/swagger-ui)

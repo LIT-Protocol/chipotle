@@ -50,7 +50,7 @@ const ADDRESS_DERIVER_CODE = `
 async function main() {
   env.load();
   const {
-    LIT_API_BASE = "https://api.chipotle.litprotocol.com",
+    LIT_API_BASE = "https://api2.chipotle.litprotocol.com",
     LIT_API_KEY,
     DATABASE_URL,
   } = process.env;

@@ -1,6 +1,6 @@
 ---
 title: "What Is Attestation?"
-description: "A plain-English explanation of remote attestation: what a TEE proves, what an attestation quote is, and how a stranger turns 'I received a quote' into 'I can trust this server' — without trusting Lit or the cloud provider."
+description: "A plain-English explanation of remote attestation: what a TEE proves, what an attestation report is, and how a stranger turns 'I received a report' into 'I can trust this server' — without trusting Lit or the cloud provider."
 ---
 
 Every other page in this section tells you *how* to verify Lit Chipotle. This page
@@ -11,7 +11,7 @@ Environment (TEE) before, start here.
 ## The problem attestation solves
 
 When you send data to an ordinary cloud server, you are trusting a lot of people you
-will never meet: the application operator (Lit), the cloud provider (Phala/Intel),
+will never meet: the application operator (Lit), the cloud provider (Phala),
 the OS administrators, anyone with physical access to the machine. Any of them
 *could*, in principle, read your data, swap the code for a malicious version, or
 copy out a private key. You have no way to tell. "Trust us" is the only guarantee.
@@ -19,7 +19,7 @@ copy out a private key. You have no way to tell. "Trust us" is the only guarante
 **Remote attestation removes that trust.** It lets a remote machine produce
 hardware-signed, mathematical proof of *exactly what code it is running*. You can
 check the proof yourself, and no operator (including Lit) can forge it. You no longer
-have to trust the operator. You still trust Intel's hardware and the math that checks
+have to trust the operator. You still trust the processor maker's hardware (AMD's) and the math that checks
 its signature.
 
 Attestation tells you which code is running. It doesn't tell you that the code is free
@@ -32,69 +32,71 @@ their word for it.
 ## What a TEE is
 
 A **Trusted Execution Environment** is a hardware-isolated region of a CPU. Lit
-Chipotle runs inside **Intel TDX** (Trust Domain Extensions), a TEE built into recent
-Intel server chips. Inside the TEE:
+Chipotle runs inside **AMD SEV-SNP** (Secure Encrypted Virtualization with Secure Nested
+Paging), a TEE built into AMD EPYC server chips. Inside the TEE:
 
 - Memory is **encrypted by the CPU**. Even someone with root on the host, physical
   access to the RAM, or a hypervisor cannot read the plaintext.
-- The boot chain is **measured**. As firmware, kernel, and application load, the CPU
-  records a cryptographic hash of each stage into tamper-proof registers.
+- The launch is **measured**. Before the VM starts, the processor hashes its initial
+  state (firmware, kernel, boot parameters) into a value the VM cannot change.
 - Secrets generated inside (like the TLS private key) **never leave**. There is no
   API to extract them, by design.
 
-Lit Chipotle runs as a confidential virtual machine, or **CVM**, inside TDX. These
+Lit Chipotle runs as a confidential virtual machine, or **CVM**, inside SEV-SNP. These
 pages use "CVM" for that machine and "enclave" as another word for the TEE.
 
-A TEE is not magic — it rests on the assumption that Intel's hardware root of trust
+A TEE is not magic — it rests on the assumption that AMD's hardware root of trust
 is sound, and TEEs have known classes of side-channel research. But it replaces *many
 fully-trusted humans* with *one well-studied hardware assumption you can reason
 about*.
 
-## What an attestation quote is
+## What an attestation report is
 
-When the TEE boots, it produces an **attestation quote**: a small binary document,
-**signed by Intel's hardware root of trust**, that contains the measurements of
-everything that loaded. Think of it as a notarized receipt the silicon hands you,
-saying "here is exactly what I am running."
+On request, the processor produces an **attestation report**: a small binary document,
+**signed by a key that only that AMD chip holds**, that describes the VM it is running.
+Think of it as a notarized receipt the silicon hands you, saying "here is exactly what
+I am running." (Intel calls the same thing a quote.)
 
-The measurements live in registers called **MRTD** and **RTMR0–RTMR3**:
+Three fields carry most of the weight:
 
-| Register | What it records |
+| Field | What it records |
 |---|---|
-| **MRTD** | The virtual firmware |
-| **RTMR0–RTMR2** | Hardware config, kernel, boot parameters — i.e. the **operating system** |
-| **RTMR3** | The **application**: the hash of the docker-compose configuration (the *compose hash*, computed over `app-compose.json`), plus which KMS issued its keys |
+| **Launch measurement** | One hash over the virtual firmware, kernel, initial filesystem and boot parameters, i.e. the **operating system** |
+| **`HOST_DATA`** | A value fixed when the VM launches. It is the hash of a document that names the **application**: Lit's app id, the hash of the docker-compose configuration (the *compose hash*, computed over `app-compose.json`), and which KMS issues its keys |
+| **Report data** | 64 bytes chosen by whoever asked for the report. A verifier puts a random number here so the report is provably fresh |
 
-Two numbers carry most of the weight:
+Two numbers come out of these:
 
-- The **OS measurements** (MRTD/RTMR0–2) prove which operating system image booted.
-- The **compose hash** (in RTMR3) proves which application code booted — it is the
+- The **OS image hash** identifies which operating system image booted. The launch
+  measurement can be recomputed from that image's published parts.
+- The **compose hash** proves which application code booted — it is the
   SHA-256 of `app-compose.json`, which holds the exact, image-digest-pinned
   docker-compose that defines Lit Chipotle, plus its metadata. The explainer videos
   call it the release hash.
 
 If even one byte of the OS or the application changes, these numbers change, and the
-quote no longer matches what is expected. For example, if a payment program that sends
+report no longer matches what is expected. For example, if a payment program that sends
 1,000 were changed to send 1,001, its hash would come out completely different.
 
-## How a stranger turns a quote into trust
+## How a stranger turns a report into trust
 
-Receiving a quote is not enough — anyone can hand you a document. The value comes
+Receiving a report is not enough — anyone can hand you a document. The value comes
 from four independent checks, each of which you can run yourself:
 
-1. **Is the quote real?** Verify Intel's signature on the quote against Intel's
-   published root certificates. This proves the quote came from genuine TDX hardware
-   running with security patches up to date (not a simulator, not debug mode).
+1. **Is the report real?** Verify the chip's signature on the report, and the chip's
+   certificate against AMD's published root keys. This proves the report came from
+   genuine SEV-SNP hardware (not a simulator, not debug mode). Check too that it
+   answers the random number you just sent, so it is not a recording.
 
-2. **Is the OS one I trust?** Check the OS measurements against a known-good dstack OS
+2. **Is the OS one I trust?** Check the launch measurement against a known-good dstack OS
    release — and confirm that release is whitelisted on-chain (see below).
 
 3. **Is the code one I trust?** Recompute the compose hash from the public source and
-   confirm it matches the quote — and that it is whitelisted on-chain.
+   confirm it matches the report — and that it is whitelisted on-chain.
 
 4. **Am I really talking to that TEE?** The TLS certificate for
-   `api.chipotle.litprotocol.com` was generated *inside* the TEE and bound into the
-   quote. Once you have checked that binding and pinned the certificate, a successful
+   `api2.chipotle.litprotocol.com` was generated *inside* the TEE and bound into a
+   signed report. Once you have checked that binding and pinned the certificate, a successful
    HTTPS handshake proves your connection terminates in the attested enclave — no
    proxy in the middle. A handshake on its own, before those checks, does not prove
    this. (See [Zero-Trust TLS](/architecture/verification/index#zero-trust-tls).)
@@ -121,52 +123,59 @@ Put the pieces together and the trust model inverts:
 That is the whole point of attestation: you check the evidence yourself instead of
 taking anyone's word for it.
 
-## The stronger check in the Lit SDK
+## The SDK runs these checks for you
 
-`verifyLitEndpoint()` in `@lit-protocol/keychain` (2.3.0 and later) runs every check
-above with no configuration. It is opt-in: Keychain, Owner, the CLI and MCP keep
-running the original checks, unchanged, and nothing calls `verifyLitEndpoint()`
-unless your code does. It reads `GET /attestation/v2?nonce=…`, which adds two things
-the plain `/attestation` quote cannot provide:
+[`@lit-protocol/core-sdk`](https://www.npmjs.com/package/@lit-protocol/core-sdk) runs
+all four checks with no configuration. A client created for the production API
+verifies the server before its first request, and if verification fails the request
+rejects with an `AttestationError` and nothing is sent:
 
-- **The OS image is tied to the hardware measurement.** The event log that names the
-  OS image is written by the guest itself, so on its own it proves nothing about what
-  booted. dstack's KMS, however, releases an app's keys only to a CVM whose
-  MRTD/RTMR0–2 match a whitelisted OS image and whose compose hash is governed. The
-  endpoint returns a signer derived from those keys with the KMS signature chain, and
-  the SDK checks that chain against the KMS root key published in the DstackKms
-  contract, which must also match the root pinned in the SDK so a dishonest Base RPC
-  cannot substitute its own. A machine that did not boot the approved image cannot
-  produce it.
-- **Freshness.** The signer signs a random nonce chosen by the SDK together with the
-  hash of the quote it serves, so a response cannot be replayed or paired with
-  another machine's quote.
+```javascript
+import { createClient, LIT_API_URL } from '@lit-protocol/core-sdk';
 
-In Node it also binds the TLS certificate the origin serves to the enclave and
-returns it as `tlsCertificateSha256`. Requests are bound to the attested enclave only
-on connections that pin that certificate. The SDK's own connections do not, so pin it
-in your HTTP client if you need that.
+const client = createClient(LIT_API_URL);
+const proof = await client.verifyAttestation();
+// { platform: 'sev-snp', appId, composeHash, osImageHash, tcbStatus, tlsBinding, ... }
+```
+
+Three things make the check hold for the requests that follow, not only for the moment
+it ran:
+
+- **Freshness.** The SDK sends a random nonce to `GET /attestation/v3?nonce=…` and
+  requires the signed report to commit to it, so a response cannot be replayed.
+- **The connection is pinned.** In Node.js the SDK checks that the TLS key of its
+  connection belongs to the attested VM, then pins every API connection to that key.
+  A request can only reach a VM that was verified.
+- **It re-verifies.** After ten minutes the client verifies again in the background,
+  and a client idle for over an hour verifies before its next request.
+
+Only the first request waits for verification, which takes one to two seconds.
 
 Failures throw an `AttestationError` with a stable `code` (for example
-`BOOT_BINDING_FAILED`, `KMS_MISMATCH`, `STALE_OR_REPLAYED`, `NOT_GOVERNED`).
-`verifyAttestation()`, the original check the SDK's connections use, is unchanged and
-performs neither check above.
+`untrusted_hardware`, `stale_evidence`, `measurement_mismatch`, `not_governed`,
+`tls_binding_failed`).
 
-This relies on the governed KMS enforcing its OS-image whitelist when it releases
-keys (dstack's default). It does not check Intel TCB status or PCK revocation.
 Browsers cannot read or pin TLS certificates: there the check proves that genuine
 Lit evidence was served at the origin, and the requests that follow rely on the
-browser's own TLS validation.
+browser's own TLS validation. Verify from a server when the channel matters.
 
-## Production verification is your integration’s responsibility
+The check trusts AMD's root key and the Base blockchain. It reads Base through public
+RPC endpoints by default; pass your own with `attestation: { rpcUrls: [...] }` for
+stronger guarantees.
 
-For full production verification, follow [Phala’s official application verification instructions](https://docs.phala.com/phala-cloud/attestation/verify-your-application) and [complete chain-of-trust checklist](https://docs.phala.com/phala-cloud/attestation/chain-of-trust), the authoritative references for Phala/dstack verification. You are responsible for implementing and enforcing these checks for your setup and the path your client uses to reach Chipotle, including any proxies and TLS termination points. A report or matching hashes alone cannot authenticate that connection; your client must enforce your approved workload and security policy against authenticated evidence.
+## If you do not use the SDK
+
+Calling the HTTP API directly works, and nothing verifies the server for you. To get
+the same guarantee, verify the attestation and bind the verified identity to the
+connection that carries your requests, including through any proxy or gateway of your
+own that terminates TLS. The [Full Verification Guide](/architecture/verification/full-verification)
+shows each check and how to pin a connection to the verified key.
 
 ## What's next
 
 <CardGroup cols={2}>
   <Card title="Verify in 30 Seconds" icon="shield-check" href="/architecture/verification/quick-verify">
-    The Phala Trust Center report, plus preliminary API metadata and on-chain policy checks.
+    One SDK call that verifies the live API, plus the Phala Trust Center report.
   </Card>
   <Card title="On-Chain KMS" icon="key" href="/architecture/verification/onchain-kms">
     How Base smart contracts — not Lit or Phala — gate key release to the enclave.
@@ -175,13 +184,13 @@ For full production verification, follow [Phala’s official application verific
     How a new release is reviewed and approved by the Safe multisig before it can run.
   </Card>
   <Card title="Full Verification Guide" icon="list-checks" href="/architecture/verification/full-verification">
-    Chipotle-specific diagnostic examples and prerequisites, with Phala’s production verification instructions.
+    Repeat each of the SDK's checks by hand, one layer at a time.
   </Card>
 </CardGroup>
 
 ## Further reading
 
 - [Proof of Cloud](https://proofofcloud.org/) — the verifiable-cloud movement
-- [Intel TDX overview](https://www.intel.com/content/www/us/en/developer/tools/trust-domain-extensions/overview.html)
+- [AMD SEV-SNP overview](https://www.amd.com/en/developer/sev.html)
 - [Phala: Attestation Overview](https://docs.phala.com/phala-cloud/attestation/overview)
 - [Phala: Complete Chain of Trust](https://docs.phala.com/phala-cloud/attestation/chain-of-trust)

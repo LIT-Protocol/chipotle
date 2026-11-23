@@ -37,7 +37,7 @@ function arg(name, def) {
 
 async function main() {
   env.load();
-  const base = process.env.LIT_API_BASE || "https://api.chipotle.litprotocol.com";
+  const base = process.env.LIT_API_BASE || "https://api2.chipotle.litprotocol.com";
   const usageKey = process.env.LIT_USAGE_API_KEY;
   const pkpId = process.env.VAULT_PKP_ADDRESS;
   const encryptedDbUrl = process.env.ENCRYPTED_DATABASE_URL;

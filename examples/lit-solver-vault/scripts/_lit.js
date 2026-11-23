@@ -12,7 +12,7 @@ const ACTION_FILE = path.join(__dirname, "..", "action", "solverPolicy.js");
 
 async function requestFillAuthorization(jsParams) {
   const {
-    LIT_API_BASE = "https://api.chipotle.litprotocol.com",
+    LIT_API_BASE = "https://api2.chipotle.litprotocol.com",
     LIT_USAGE_API_KEY,
   } = process.env;
 

@@ -122,7 +122,7 @@ Chipotle identifies an action by the CIDv0 of its UTF-8 source (UnixFS, 256 KiB 
   <Tab title="REST">
     ```bash
     # No auth required. Body is a JSON string containing the source.
-    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/get_lit_action_ipfs_id" \
+    curl -s -X POST "https://api2.chipotle.litprotocol.com/core/v1/get_lit_action_ipfs_id" \
       -H "Content-Type: application/json" \
       -d '"async function main(){ return 1 }"'
     ```
@@ -151,7 +151,7 @@ Newly granted permissions are eventually consistent. Poll the real path (run the
 There is no upload step. Every execution submits the full derived source as `code`; the server hashes it and checks execution permission. Scoped usage keys require a permitted group matching that CID; wildcard usage keys do not require a group to execute it.
 
 ```javascript
-const res = await fetch("https://api.chipotle.litprotocol.com/core/v1/lit_action", {
+const res = await fetch("https://api2.chipotle.litprotocol.com/core/v1/lit_action", {
   method: "POST",
   headers: { "Content-Type": "application/json", "X-Api-Key": usageKey },
   body: JSON.stringify({ code: actionSource(template, manifest), js_params: params }),

@@ -153,13 +153,19 @@ test('legacy origins warn once and are not attested', async () => {
 });
 
 test('the default client is the production API, attested, not an unauthenticated localhost', async () => {
-  const net = recordFetch((url) => (url.includes('/attestation/v3') ? new Response('', { status: 404 }) : ok()));
+  // No request is made here. In Node.js a default client asks the real
+  // production API for its attestation on a connection of its own, which the
+  // recorder cannot intercept, so a request would depend on the network. The
+  // test above covers what a client with attestation on does when it fails.
+  const net = recordFetch(ok);
   try {
     for (const client of [createClient(), new (createClient().constructor)()]) {
       assert.equal(client.origin, LIT_API_URL);
-      await assert.rejects(client.accountExists('secret-key'), AttestationError);
+      assert.equal(client.baseUrl, `${LIT_API_URL}/core/v1`);
+      assert.ok(client._attestation, 'attestation is on by default');
+      assert.equal(client.attestation, null);
     }
-    assert.ok(net.calls.every((c) => c.startsWith(`${LIT_API_URL}/attestation/v3`)));
+    assert.deepEqual(net.calls, []);
   } finally {
     net.restore();
   }

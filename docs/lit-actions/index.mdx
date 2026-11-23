@@ -44,7 +44,7 @@ Because the code is immutable and the keys never leave the enclave, an action's 
 You run an action by sending its code to `POST /core/v1/lit_action` with a usage key. The server passes `js_params` to your `main` function as its argument, and whatever `main` returns comes back as `response`:
 
 ```bash
-curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/lit_action" \
+curl -s -X POST "https://api2.chipotle.litprotocol.com/core/v1/lit_action" \
   -H "Content-Type: application/json" \
   -H "X-Api-Key: YOUR_USAGE_KEY" \
   -d '{"code":"async function main({ symbol }) { return { symbol }; }","js_params":{"symbol":"ETH"}}'
