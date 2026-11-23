@@ -1,121 +1,74 @@
 ---
 title: "Full Verification Guide"
-description: "Chipotle-specific verification layers and diagnostic examples, with links to Phala’s authoritative production verification instructions."
+description: "Repeat each check the SDK makes on the live Lit API: hardware, application code, TLS and on-chain governance."
 ---
 
-For full production verification, follow [Phala’s official application verification instructions](https://docs.phala.com/phala-cloud/attestation/verify-your-application) and [complete chain-of-trust checklist](https://docs.phala.com/phala-cloud/attestation/chain-of-trust). These are the authoritative references for Phala/dstack verification; this guide adds Chipotle-specific context and diagnostic examples, not a complete production verifier.
+The Core SDK verifies the Lit API before it sends a request, and a client made with `createClient` does it without any setup. This guide walks through the same checks one layer at a time, so you can see what each one establishes and confirm the results yourself.
 
-You are responsible for implementing and enforcing attestation verification correctly for your integration. The implementation depends on your setup and where and how your client connects to the Chipotle server, including proxies, gateways, and TLS termination points. Define the workload and security policy you accept, and enforce the verified identity on the connection carrying application traffic before sending secrets. Following Phala’s instructions does not automatically choose your application policy or integrate those checks into your client.
-
-The commands below are diagnostic building blocks. In particular, observe the authentication prerequisites and limitations in Step 3; a passing checksum comparison is not authenticated attestation.
+Some checks cannot reasonably be done by hand: verifying AMD's signature chain and recomputing the launch measurement need a program. Step 1 uses the SDK's verifier for those. It is one dependency-free file, [`lit-static/attestation.js`](https://github.com/LIT-Protocol/chipotle/blob/main/lit-static/attestation.js), that you can read. The later steps use ordinary tools to check the values it reports.
 
 <Tip>
-**New to TEE verification?** Work through the layers in order. Individual checksum matches are not proof of attestation; the TLS evidence checks require the signature, measurement and connection-binding prerequisites described in Step 3.
+**New to TEE verification?** Read [What Is Attestation?](/architecture/verification/attestation) first, then work through the layers in order.
 </Tip>
 
-**Prerequisites:** `python3` (3.8+), `docker`, `openssl`, `dig`, and optionally [`cosign`](https://docs.sigstore.dev/cosign/system_config/installation/) and [`cast`](https://book.getfoundry.sh/getting-started/installation) (from Foundry).
+**Prerequisites:** Node.js 22 or later, `python3`, `openssl`, `curl`, and optionally [`cosign`](https://docs.sigstore.dev/cosign/system_config/installation/) and [`cast`](https://book.getfoundry.sh/getting-started/installation) (from Foundry).
 
-## 1. Verify the TDX attestation quote (Platform)
+## 1. Verify the attestation report (Platform)
 
-**What this checks:** Is the server running on real Intel TDX hardware? The TDX attestation quote is like a hardware-signed certificate of authenticity — Intel's chips sign a statement about what software is running, and this step verifies that signature is genuine.
-
-Fetch the attestation from the live API and run the official dstack verifier. This validates the Intel TDX quote signature (proving genuine hardware), replays the RTMR3 event log (proving no events were tampered with), and checks OS measurements.
-
-Save the Python script below as `fix-attestation-event-log.py`, then run the verification commands.
-
-<CodeGroup>
-```python fix-attestation-event-log.py
-#!/usr/bin/env python3
-"""Fix event log for dstack verifier: compute digests for runtime events with empty digest.
-
-The dstack guest-agent strips digests from runtime events (RTMR3, event_type 0x08000001)
-to reduce response size. The digest is deterministically derived as
-SHA384(event_type || ":" || event || ":" || payload), so it can be recomputed.
-The Docker verifier's serde parser rejects digest="", so we fill in the computed digest
-before calling the verifier.
-"""
-import hashlib
-import json
-import struct
-import sys
-
-DSTACK_RUNTIME = 0x08000001
-
-
-def hex_to_bytes(s: str) -> bytes:
-    return bytes.fromhex(s) if s else b""
-
-
-def compute_digest(event: str, payload_hex: str) -> str:
-    payload = hex_to_bytes(payload_hex)
-    data = struct.pack("<I", DSTACK_RUNTIME) + b":" + event.encode() + b":" + payload
-    return hashlib.sha384(data).hexdigest()
-
-
-def main() -> None:
-    attest_path = sys.argv[1]
-    with open(attest_path) as f:
-        d = json.load(f)
-    events = json.loads(d["event_log"])
-    for e in events:
-        if e.get("digest") == "" and e.get("event_type") == DSTACK_RUNTIME:
-            e["digest"] = compute_digest(e.get("event", ""), e.get("event_payload", ""))
-    d["event_log"] = json.dumps(events)
-    q = d["quote"]
-    q = q[2:] if isinstance(q, str) and q.startswith("0x") else q
-    out = {"quote": q, "event_log": d["event_log"], "vm_config": d["vm_config"], "attestation": None}
-    json.dump(out, sys.stdout, separators=(",", ":"))
-
-
-if __name__ == "__main__":
-    main()
-```
-
-```bash Verification commands
-# 1. Fetch attestation from the live API
-curl -sf https://api.chipotle.litprotocol.com/attestation > attestation.json
-
-# 2. Fix empty digests in runtime events (see note below)
-python3 fix-attestation-event-log.py attestation.json > verify-request.json
-
-# 3. Run the official dstack verifier (Phala's release image)
-docker run --rm -v $(pwd):/verify -w /verify --platform linux/amd64 \
-  ghcr.io/dstack-tee/dstack-verifier:0.6.1 --verify /verify/verify-request.json
-
-# 4. Check result
-python3 -c '
-import json
-v = json.load(open("verify-request.json.verification.json"))
-print("VALID" if v.get("is_valid") else "INVALID")
-'
-```
-</CodeGroup>
-
-<Note>
-The dstack guest-agent strips digests from RTMR3 runtime events to reduce response size. The fix script recomputes them as `SHA384(event_type || ":" || event || ":" || payload)`. The Docker verifier's parser rejects empty digests, so this preprocessing step is necessary.
-</Note>
-
-Phala publishes the verifier at `ghcr.io/dstack-tee/dstack-verifier` with signed build provenance. To confirm that an image was built by Phala's release workflow, run `gh attestation verify oci://ghcr.io/dstack-tee/dstack-verifier:0.6.1 --repo Dstack-TEE/dstack`.
-
-If you prefer not to run the Docker verifier locally, you can verify the TDX quote signature via the Phala Cloud API:
+**What this checks:** Is the server a genuine AMD SEV-SNP confidential VM, and what did it boot? The processor signs an attestation report with a key only that chip holds. The report carries a measurement of the launch state and a field, `HOST_DATA`, that binds the app the VM runs.
 
 ```bash
-# Extract the raw quote hex and verify via Phala Cloud
-QUOTE=$(python3 -c 'import json; q=json.load(open("attestation.json"))["quote"]; print(q[2:] if q.startswith("0x") else q)')
-
-curl -X POST https://cloud-api.phala.network/api/v1/attestations/verify \
-  -H "Content-Type: application/json" \
-  -d "{\"hex\": \"$QUOTE\"}"
+mkdir lit-verify && cd lit-verify && npm init -y > /dev/null
+npm install @lit-protocol/core-sdk
 ```
 
-<Note>
-**Why are there two TDX quotes?** This guide verifies two separate TDX quotes from the same CVM:
-- **`/attestation`** (Step 1) returns a fresh TDX quote for validating RTMR measurements and the software stack. Its `reportData` is unused (all zeros).
-- **`/attestation/v2?nonce=<64 hex>`** returns the same quote plus a KMS-certified signer and its signature over your nonce and the quote. The Lit SDK's opt-in `verifyLitEndpoint()` verifies it; see [The stronger check in the Lit SDK](/architecture/verification/attestation#the-stronger-check-in-the-lit-sdk).
-- **`/evidences/quote.json`** (Step 3) returns a separate TDX quote generated by dstack-ingress, where `reportData` contains `SHA-256(sha256sum.txt)` — binding the TLS certificate checksums to the TEE hardware.
+```javascript verify.mjs
+import { verifyAttestation } from '@lit-protocol/core-sdk/attestation';
 
-Both quotes come from the same CVM and share the same RTMR values, but serve different verification purposes.
-</Note>
+const proof = await verifyAttestation('https://api2.chipotle.litprotocol.com');
+console.log(JSON.stringify(proof, null, 2));
+```
+
+```bash
+node verify.mjs > proof.json && cat proof.json
+```
+
+The call throws an `AttestationError` with a stable `code` if a check fails. A passing result looks like this, shortened:
+
+```json
+{
+  "platform": "sev-snp",
+  "appId": "3f91deaf16ff7c823ee65081d6bafa1ceea05ffc",
+  "composeHash": "53dcf787de9b306be7299f35b16f0303da99f847eddff8d5037804bd2b951c3a",
+  "osImageHash": "4771a29e03e93f0e2d5e37174cd8bb1112942c9689deb36b16c5df9e183d8623",
+  "deviceId": "72791b7add93ac1f84c9d20ed738a3a091f90b92bf67914e48069086378ee9d5",
+  "product": "Milan",
+  "tcbStatus": "UpToDate",
+  "tlsBinding": "verified",
+  "tlsKeySha256": "76cd51ba00bcce67c5754e5615b686b366236ae09249d169b2374f5b87370de6"
+}
+```
+
+`composeHash` changes with each release, and `tlsKeySha256` changes when a release replaces the VM. What the verifier did to produce it:
+
+| Check | How |
+|---|---|
+| **Hardware** | Verified the report's signature with the chip's key (VCEK), and that key's certificate chain through AMD's intermediate (ASK) to an AMD root key (ARK) pinned in the verifier. |
+| **Freshness** | Fetched `/attestation/v3?nonce=<random>` and required the signed report to commit to that nonce. |
+| **Launch state** | Recomputed the launch measurement from the firmware, kernel, initrd and kernel command line the VM declares, and required it to equal the signed measurement. Refused a VM with debugging or migration enabled. |
+| **Workload** | Required the signed `HOST_DATA` to equal the hash of the app identity document, which names the `appId` and `composeHash`. |
+| **Governance** | Read the Base contracts and required both the compose hash and the OS image to be allowlisted. Step 4 repeats this. |
+| **Channel** | Required the TLS key of its own connection to be bound to the same app. Step 3 repeats this. |
+
+To look at the raw evidence, fetch it yourself. The nonce is any 32 random bytes in hex:
+
+```bash
+curl -sf "https://api2.chipotle.litprotocol.com/attestation/v3?nonce=$(openssl rand -hex 32)" \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); print({k: (v if k in ("version","nonce") else type(v).__name__) for k,v in d.items()})'
+# {'version': 3, 'nonce': '…', 'report_data': 'str', 'attestation': 'str', 'collateral': 'dict'}
+```
+
+`attestation` holds the signed report and the documents it binds. `collateral` holds the AMD certificates for the chip, so a verifier does not have to fetch them from AMD.
 
 ## 2. Verify the application code (Application)
 
@@ -123,19 +76,20 @@ Both quotes come from the same CVM and share the same RTMR values, but serve dif
 
 ```bash
 # Fetch app info (compose hash + full app-compose config)
-curl -sf https://api.chipotle.litprotocol.com/info > info.json
+curl -sf https://api2.chipotle.litprotocol.com/info > info.json
 
 # 2a. Verify compose-hash: the SHA-256 of the app-compose.json config
-#     (which includes docker-compose.yaml + metadata) is recorded in RTMR3.
+#     (which includes docker-compose.yaml + metadata) must equal the hash the
+#     attestation report binds, which Step 1 saved in proof.json.
 python3 -c '
 import json, hashlib
 info = json.load(open("info.json"))
 app_compose = info["tcb_info"]["app_compose"]
 computed = hashlib.sha256(app_compose.encode()).hexdigest()
-recorded = info["compose_hash"]
+attested = json.load(open("proof.json"))["composeHash"]
 print(f"Computed:  {computed}")
-print(f"Recorded:  {recorded}")
-assert computed == recorded, "MISMATCH"
+print(f"Attested:  {attested}")
+assert computed == attested, "MISMATCH"
 print("compose-hash OK")
 '
 
@@ -173,102 +127,79 @@ The `dstack-ingress` image is a third-party dependency from the [dstack project]
 
 ## 3. Verify TLS terminates in the TEE (Network)
 
-<Warning>
-**The commands below are not a standalone TLS attestation verifier.** Before trusting this chain, independently verify the signature of the dstack-ingress evidence quote and validate its measurements and workload identity against approved policy. Use `reportData` extracted from that verified quote, not an unauthenticated JSON field. Verifying the separate `/attestation` quote in Step 1 does not authenticate this evidence quote.
+**What this checks:** Does your HTTPS connection end inside the attested VM, with no proxy in between that could read it?
 
-The checksum comparison below reads `report_data` from JSON; it does not perform those prerequisite checks. You must also verify that the certificate file is covered by the authenticated `sha256sum.txt` and enforce the verified certificate on the TLS connection used for application traffic. A matching PEM from the same origin, or a separate `openssl` connection, is not sufficient to authenticate a later connection.
-</Warning>
+Lit uses [dstack-ingress](https://github.com/Dstack-TEE/dstack-examples/tree/main/custom-domain/dstack-ingress) for TLS on its own domain. It runs inside the VM, generates the TLS private key there and obtains a Let's Encrypt certificate for it. It then publishes evidence at `/evidences/`:
 
-**Verification goal:** Establish that the certificate belongs to the approved TEE workload and is enforced on your application connection. The comparisons below alone do not establish this.
+| File | Contents |
+|---|---|
+| `cert-<domain>.pem` | The certificate it obtained. |
+| `acme-account.json` | The Let's Encrypt account it used. |
+| `sha256sum.txt` | The SHA-256 of each file above. |
+| `attestation.json` | A SEV-SNP attestation whose signed report data is `SHA-256(sha256sum.txt)`. |
 
-Lit Chipotle uses [dstack-ingress](https://github.com/Dstack-TEE/dstack-examples/tree/main/custom-domain/dstack-ingress) for custom-domain TLS. Unlike the default dstack gateway (which embeds cert hashes directly in the CVM's boot-time TDX quote via `reportData`), dstack-ingress runs as an application container and generates a **separate** TDX evidence quote after obtaining the Let's Encrypt certificate. This evidence quote binds the certificate to TDX hardware through a checksum chain:
-
-1. dstack-ingress obtains a Let's Encrypt cert via DNS-01 inside the TEE
-2. It computes `SHA-256` of each evidence file (cert PEM, ACME account) → `sha256sum.txt`
-3. It computes `SHA-256(sha256sum.txt)` and requests a TDX quote with this hash as `reportData`
-4. The evidence files and quote are served at `/evidences/` on the custom domain
+Because the report is signed by the processor and carries the hash of the manifest, the certificate in the manifest is one that this VM holds. Step 1 already verified that attestation and that it comes from the same app, and returned the hash of the attested TLS public key as `tlsKeySha256`. Check that the certificate you are served has that key:
 
 ```bash
-# 3a. Download evidence files from the dstack-ingress container
-curl -sf https://api.chipotle.litprotocol.com/evidences/sha256sum.txt > evidences-sha256sum.txt
-curl -sf https://api.chipotle.litprotocol.com/evidences/quote.json > evidences-quote.json
+# 3a. The key the verifier attested (from Step 1)
+ATTESTED_KEY=$(python3 -c 'import json; print(json.load(open("proof.json"))["tlsKeySha256"])')
 
-# Download the attested cert PEM (filename includes the domain)
-CERT_FILE=$(curl -sf https://api.chipotle.litprotocol.com/evidences/ \
-  | grep -o 'href="cert-[^"]*\.pem"' | sed 's/href="//;s/"//')
-curl -sf "https://api.chipotle.litprotocol.com/evidences/$CERT_FILE" > evidences-cert.pem
+# 3b. The key of the certificate served to you now
+LIVE_KEY=$(openssl s_client -connect api2.chipotle.litprotocol.com:443 \
+  -servername api2.chipotle.litprotocol.com </dev/null 2>/dev/null \
+  | openssl x509 -pubkey -noout \
+  | openssl pkey -pubin -outform DER \
+  | openssl dgst -sha256 -hex | awk '{print $NF}')
 
-# 3b. Verify the evidence checksum chain
-# The quote's reportData must equal SHA-256(sha256sum.txt)
-python3 -c '
-import hashlib, json
-
-# Compute SHA-256 of the sha256sum.txt file
-with open("evidences-sha256sum.txt", "rb") as f:
-    computed = hashlib.sha256(f.read()).hexdigest()
-
-# Extract reportData from the evidence quote
-eq = json.load(open("evidences-quote.json"))
-report_data = eq.get("report_data", "")
-# reportData is the hash zero-padded to 64 bytes (128 hex chars)
-attested = report_data[:64]
-
-print(f"SHA-256(sha256sum.txt): {computed}")
-print(f"Evidence reportData:    {attested}")
-assert computed == attested, "MISMATCH — evidence checksum chain broken"
-print("Evidence checksum chain OK")
-'
-
-# 3c. Verify the live TLS cert matches the attested cert
-# Extract the leaf cert (DER) fingerprint from what your TLS handshake received
-LIVE_CERT_HASH=$(openssl s_client -connect api.chipotle.litprotocol.com:443 \
-  -servername api.chipotle.litprotocol.com </dev/null 2>/dev/null \
-  | openssl x509 -outform DER 2>/dev/null \
-  | openssl dgst -sha256 -hex 2>/dev/null | awk '{print $NF}')
-
-# Extract the leaf cert (DER) fingerprint from the evidence PEM
-EVIDENCE_CERT_HASH=$(openssl x509 -in evidences-cert.pem -outform DER 2>/dev/null \
-  | openssl dgst -sha256 -hex 2>/dev/null | awk '{print $NF}')
-
-echo "Live TLS cert hash:     $LIVE_CERT_HASH"
-echo "Evidence cert hash:     $EVIDENCE_CERT_HASH"
-
-if [ "$LIVE_CERT_HASH" = "$EVIDENCE_CERT_HASH" ]; then
-  echo "TLS certificate matches evidence — OK"
-else
-  echo "MISMATCH: the served certificate does not match the attested evidence"
-fi
-
-# 3d. Verify CAA DNS records restrict certificate issuance
-# dstack-ingress sets a CAA CNAME alias on the custom domain pointing to the
-# gateway domain, which holds the actual CAA records restricting issuance to
-# Let's Encrypt with DNS-01 validation and a specific ACME account URI.
-echo ""
-echo "CAA alias on custom domain:"
-dig CAA api.chipotle.litprotocol.com +short
-echo "Resolved CAA policy:"
-dig CAA dstack-base-prod5.phala.network +short
-
-# 3e. Verify the ACME account URI matches the CAA allowlist
-# The CAA records include `accounturi=` restrictions. Verify the ACME account
-# used by this CVM matches one of the allowed accounts.
-curl -sf https://api.chipotle.litprotocol.com/evidences/acme-account.json > evidences-acme-account.json
-ACME_URI=$(python3 -c 'import json; a=json.load(open("evidences-acme-account.json")); print(a.get("uri", a.get("account_uri", "")))')
-echo ""
-echo "ACME account URI from TEE: $ACME_URI"
-echo "Allowed accounts in CAA:"
-dig CAA dstack-base-prod5.phala.network +short | grep accounturi
+echo "Attested TLS key: $ATTESTED_KEY"
+echo "Live TLS key:     $LIVE_KEY"
+[ "$ATTESTED_KEY" = "$LIVE_KEY" ] && echo "TLS key matches — OK" || echo "MISMATCH"
 ```
 
-<Note>
-The CAA records on the gateway domain restrict certificate issuance to specific ACME account URIs. Verify that the ACME account URI from `/evidences/acme-account.json` matches one of the `accounturi=` values in the CAA records. If they don't match, it means this CVM's ACME account is not authorized by the DNS policy to obtain certificates for this domain.
-</Note>
+During a release two VMs serve the hostname for a short time, each with its own key. If the keys differ, run Step 1 again and compare once more.
+
+You can also check the evidence files against their manifest:
+
+```bash
+# 3c. Download the evidence files and check them against the manifest
+mkdir -p evidences && cd evidences
+curl -sf https://api2.chipotle.litprotocol.com/evidences/sha256sum.txt -o sha256sum.txt
+CERT_FILE=$(curl -sf https://api2.chipotle.litprotocol.com/evidences/ \
+  | grep -o 'href="cert-[^"]*\.pem"' | sed 's/href="//;s/"//')
+curl -sf "https://api2.chipotle.litprotocol.com/evidences/$CERT_FILE" -o "$CERT_FILE"
+curl -sf https://api2.chipotle.litprotocol.com/evidences/acme-account.json -o acme-account.json
+shasum -a 256 -c sha256sum.txt
+# acme-account.json: OK
+# cert-api2.chipotle.litprotocol.com.pem: OK
+
+# 3d. The certificate in the evidence has the attested key
+openssl x509 -in "$CERT_FILE" -pubkey -noout \
+  | openssl pkey -pubin -outform DER \
+  | openssl dgst -sha256 -hex | awk '{print $NF}'
+cd ..
+```
+
+<Warning>
+**A matching checksum is not attestation by itself.** Anyone can serve a manifest and files that agree with each other. What makes the certificate trustworthy is the signed report in `attestation.json` that carries the manifest's hash, and the check that the report comes from the governed app. The verifier in Step 1 does both. Steps 3c and 3d only show you the files it worked from.
+</Warning>
+
+**Keeping the guarantee on later connections.** A check on one connection says nothing about the next one. A client made with `createClient` pins every API connection to the verified key. If you use your own HTTP client in Node.js, `createPinnedFetch` from `@lit-protocol/core-sdk/attestation` returns a `fetch` that refuses any other key:
+
+```javascript
+import { verifyAttestation, createPinnedFetch } from '@lit-protocol/core-sdk/attestation';
+
+const proof = await verifyAttestation('https://api2.chipotle.litprotocol.com');
+const pinnedFetch = await createPinnedFetch(proof.tlsKeySha256);
+const res = await pinnedFetch('https://api2.chipotle.litprotocol.com/core/v1/version');
+```
+
+Browsers cannot inspect TLS certificates, so `tlsBinding` reports `'unsupported'` there and the other checks still run. Verify from a server when the channel matters.
 
 ## 4. Verify on-chain governance (Governance)
 
 **What this checks:** Was the code running in the TEE authorized through on-chain governance? The compose-hash (a fingerprint of the entire application configuration) must be registered in a smart contract on Base before the CVM will accept it. This means deploying new code requires an on-chain transaction — you can audit the full history on Basescan.
 
-The compose-hash must be registered in the **DstackApp** smart contract on Base before the CVM will accept it. A separate **Phala KMS** contract whitelists allowed OS images and KMS instances. You can inspect both on [Basescan](https://basescan.org).
+The compose-hash must be registered in the **DstackApp** smart contract on Base before the key service will release keys to a CVM running it. A separate **Phala KMS** contract whitelists allowed OS images and KMS instances. You can inspect both on [Basescan](https://basescan.org).
 
 **Finding the DstackApp contract address:** The DstackApp contract is the on-chain governance contract that authorizes what code the CVM can run. To find the correct address for a given CVM:
 
@@ -287,10 +218,14 @@ echo "DstackApp: $DSTACK_APP"
 # Check if the compose-hash is whitelisted in DstackApp
 COMPOSE_HASH=$(python3 -c 'import json; print("0x" + json.load(open("info.json"))["compose_hash"])')
 echo "Compose hash: $COMPOSE_HASH"
-cast call "$DSTACK_APP" "allowedComposeHashes(bytes32)" "$COMPOSE_HASH" --rpc-url https://mainnet.base.org
+cast call "$DSTACK_APP" "allowedComposeHashes(bytes32)(bool)" "$COMPOSE_HASH" --rpc-url https://mainnet.base.org
+# Expect: true
 
-# A return value of 0x...01 (true) means the compose-hash is whitelisted.
-# If it returns 0x...00 (false), the CVM is running unauthorized code.
+# Check if the OS image is allowlisted in the Phala KMS contract
+OS_IMAGE=$(python3 -c 'import json; print("0x" + json.load(open("proof.json"))["osImageHash"])')
+echo "OS image: $OS_IMAGE"
+cast call 0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C "allowedOsImages(bytes32)(bool)" "$OS_IMAGE" --rpc-url https://mainnet.base.org
+# Expect: true
 ```
 
 **Governance via Safe multisig:** Lit's on-chain governance actions are controlled by a Safe multisig ([`0xF688411c0FFc300cAb33EB1dA651DBb3E6891098`](https://basescan.org/address/0xF688411c0FFc300cAb33EB1dA651DBb3E6891098)) on Base. This Safe administers:

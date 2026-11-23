@@ -29,7 +29,7 @@ diagnostic detail.
 
 | Status | `error` | What it means | What to do |
 |--------|---------|---------------|------------|
-| `400 Bad Request` | `bad_request` | The body is malformed JSON or a parameter has the wrong shape. | Compare your request against the [OpenAPI spec](https://api.chipotle.litprotocol.com/core/v1/swagger-ui). |
+| `400 Bad Request` | `bad_request` | The body is malformed JSON or a parameter has the wrong shape. | Compare your request against the [OpenAPI spec](https://api2.chipotle.litprotocol.com/core/v1/swagger-ui). |
 | `401 Unauthorized` | `unauthorized` | No API key was sent, **or the key does not resolve to any account** (typo'd, revoked, or never created). | Send the key via `X-Api-Key` or `Authorization: Bearer`. Verify it with `GET /core/v1/account_exists`. |
 | `402 Payment Required` | `payment_required` | Your account exists but its credit balance cannot cover this operation. The `message` includes the required amount and your balance. | [Add funds](/management/pricing) — card or [crypto](/management/crypto) — or `POST /core/v1/billing/create_payment_intent`. Check balance with `GET /core/v1/billing/balance`. |
 | `403 Forbidden` | `forbidden` | The key is valid and funded but not permitted to do this — usually a usage key acting outside its granted groups. | Inspect scopes with `GET /core/v1/list_api_keys`, or use the account master key for management calls. The account key can't run actions, so for `/lit_action` use a usage key with execute permission. See [API Keys](/management/api_keys). |

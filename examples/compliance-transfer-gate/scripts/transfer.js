@@ -13,7 +13,7 @@ const env = require("./_env");
 env.load();
 
 const {
-  LIT_API_BASE = "https://api.chipotle.litprotocol.com",
+  LIT_API_BASE = "https://api2.chipotle.litprotocol.com",
   // Scoped usage key created by setup.js (step 6) with execute permission
   // for the compliance action's group. Required for /lit_action — the
   // master account key won't work here.

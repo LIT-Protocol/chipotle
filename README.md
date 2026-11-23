@@ -19,7 +19,7 @@
 
 <p align="center">
   <a href="https://github.com/LIT-Protocol/chipotle/stargazers"><img src="https://img.shields.io/github/stars/LIT-Protocol/chipotle?style=social" alt="Stars"></a>&nbsp;
-  <a href="https://api.chipotle.litprotocol.com/core/v1/swagger-ui"><img src="https://img.shields.io/badge/API-Swagger_UI-85ea2d" alt="Swagger"></a>&nbsp;
+  <a href="https://api2.chipotle.litprotocol.com/core/v1/swagger-ui"><img src="https://img.shields.io/badge/API-Swagger_UI-85ea2d" alt="Swagger"></a>&nbsp;
   <a href="https://dashboard.chipotle.litprotocol.com/dapps/dashboard/"><img src="https://img.shields.io/badge/Try-Dashboard-ff6b35" alt="Dashboard"></a>&nbsp;
   <a href="https://developer.litprotocol.com/"><img src="https://img.shields.io/badge/Docs-developer.litprotocol.com-blue" alt="Docs"></a>
 </p>
@@ -62,7 +62,7 @@ Five steps against the live API. No SDK needed — just `curl`. Steps 3–5 cons
 ### 1. Create an account
 
 ```bash
-curl -s -X POST https://api.chipotle.litprotocol.com/core/v1/new_account \
+curl -s -X POST https://api2.chipotle.litprotocol.com/core/v1/new_account \
   -H "Content-Type: application/json" \
   -d '{"account_name": "my-app", "account_description": "Getting started"}' | jq
 ```
@@ -87,7 +87,7 @@ Skipping this step? Steps 3–5 will answer `402 Payment Required` — the error
 Your account key is the master credential — don't embed it in apps. Create a scoped usage key instead:
 
 ```bash
-curl -s -X POST https://api.chipotle.litprotocol.com/core/v1/add_usage_api_key \
+curl -s -X POST https://api2.chipotle.litprotocol.com/core/v1/add_usage_api_key \
   -H "Content-Type: application/json" \
   -H "X-Api-Key: $API_KEY" \
   -d '{
@@ -114,7 +114,7 @@ Save this key — it's shown only once. Use it in place of your account key for 
 ### 4. Create a wallet (PKP)
 
 ```bash
-curl -s -X POST https://api.chipotle.litprotocol.com/core/v1/create_wallet \
+curl -s -X POST https://api2.chipotle.litprotocol.com/core/v1/create_wallet \
   -H "X-Api-Key: $API_KEY" | jq
 ```
 
@@ -127,7 +127,7 @@ curl -s -X POST https://api.chipotle.litprotocol.com/core/v1/create_wallet \
 ### 5. Run a Lit Action
 
 ```bash
-curl -s -X POST https://api.chipotle.litprotocol.com/core/v1/lit_action \
+curl -s -X POST https://api2.chipotle.litprotocol.com/core/v1/lit_action \
   -H "X-Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -192,7 +192,7 @@ See the full [Examples guide](https://developer.litprotocol.com/lit-actions/exam
 
 Every endpoint accepts `X-Api-Key` or `Authorization: Bearer <key>`. The Core API is mounted at `/core/v1/`.
 
-Full OpenAPI spec: [`/core/v1/swagger-ui`](https://api.chipotle.litprotocol.com/core/v1/swagger-ui)
+Full OpenAPI spec: [`/core/v1/swagger-ui`](https://api2.chipotle.litprotocol.com/core/v1/swagger-ui)
 
 ### Key endpoints
 
@@ -296,8 +296,8 @@ See the [Architecture overview](https://developer.litprotocol.com/architecture/i
 |---|---|
 | **Documentation** | [developer.litprotocol.com](https://developer.litprotocol.com/) |
 | **Dashboard** | [dashboard.chipotle.litprotocol.com](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/) |
-| **API** | [api.chipotle.litprotocol.com](https://api.chipotle.litprotocol.com/) |
-| **OpenAPI / Swagger** | [Swagger UI](https://api.chipotle.litprotocol.com/core/v1/swagger-ui) |
+| **API** | [api2.chipotle.litprotocol.com](https://api2.chipotle.litprotocol.com/) |
+| **OpenAPI / Swagger** | [Swagger UI](https://api2.chipotle.litprotocol.com/core/v1/swagger-ui) |
 | **Architecture** | [Architecture overview](https://developer.litprotocol.com/architecture/index) |
 | **Auth model** | [Authentication model](https://developer.litprotocol.com/architecture/authModel) |
 | **Lit Actions** | [Overview](https://developer.litprotocol.com/lit-actions/index) · [Examples](https://developer.litprotocol.com/lit-actions/examples) · [Patterns](https://developer.litprotocol.com/lit-actions/patterns) |

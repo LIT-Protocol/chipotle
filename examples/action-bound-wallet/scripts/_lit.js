@@ -30,7 +30,7 @@ async function withRetry(fn, { attempts = 4, baseDelayMs = 1500, label = "reques
 
 async function postLitAction(code, jsParams) {
   const {
-    LIT_API_BASE = "https://api.chipotle.litprotocol.com",
+    LIT_API_BASE = "https://api2.chipotle.litprotocol.com",
     LIT_USAGE_API_KEY,
   } = process.env;
 

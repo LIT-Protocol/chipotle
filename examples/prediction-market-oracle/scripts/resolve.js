@@ -14,7 +14,7 @@ const env = require("./_env");
 env.load();
 
 const {
-  LIT_API_BASE = "https://api.chipotle.litprotocol.com",
+  LIT_API_BASE = "https://api2.chipotle.litprotocol.com",
   LIT_USAGE_API_KEY,
   DECRYPT_PKP_ADDRESS,
   PREDICTION_MARKET_ADDRESS,

@@ -75,6 +75,17 @@ export async function release(publish = false) {
       };
       assert.deepEqual(await client.accountExists('test-key'), { exists: true });
     `], { cwd: consumer, stdio: 'inherit' });
+    // CI's validate job also compiles a strict TypeScript consumer against the
+    // tarball. Publishing does not, so it downloads nothing it does not ship.
+    if (process.env.LIT_SDK_TYPECHECK) {
+      await copyFile(join(sdk, 'scripts', 'consumer.mts'), join(consumer, 'consumer.mts'));
+      await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
+        compilerOptions: { strict: true, noEmit: true, target: 'es2022', module: 'nodenext', lib: ['es2022', 'dom'], types: [] },
+        files: ['consumer.mts'],
+      }));
+      execFileSync('npm', ['install', '--prefix', consumer, '--ignore-scripts', '--no-audit', '--no-fund', `typescript@${process.env.LIT_SDK_TYPECHECK}`], { stdio: 'pipe' });
+      execFileSync(join(consumer, 'node_modules', '.bin', 'tsc'), ['-p', consumer], { stdio: 'inherit' });
+    }
     if (publish) {
       execFileSync('npm', ['publish', join(stage, packed.filename), '--access', 'public', '--ignore-scripts', '--registry', registry], { cwd: stage, stdio: 'inherit' });
     }

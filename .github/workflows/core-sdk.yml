@@ -16,8 +16,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: node --test lit-static/sdk/scripts/release.test.mjs
+      - run: node --test lit-static/sdk/scripts/release.test.mjs lit-static/sdk/scripts/types.test.mjs
       - run: node lit-static/sdk/scripts/release.mjs
+        env:
+          # Also compile a strict TypeScript consumer against the tarball.
+          LIT_SDK_TYPECHECK: '5.6.3'
   publish:
     needs: validate
     # CORE_SDK_PUBLISH_ENABLED is the release switch. The SDK's default API URL

@@ -13,7 +13,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function runActionOnce(jsParams) {
   const {
-    LIT_API_BASE = "https://api.chipotle.litprotocol.com",
+    LIT_API_BASE = "https://api2.chipotle.litprotocol.com",
     LIT_USAGE_API_KEY,
   } = process.env;
   if (!LIT_USAGE_API_KEY) {

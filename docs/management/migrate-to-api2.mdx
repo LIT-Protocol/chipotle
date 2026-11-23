@@ -1,0 +1,128 @@
+---
+title: "Migrate to the new API hostname"
+description: "The Lit API moved to api2.chipotle.litprotocol.com on AMD SEV-SNP hardware. Move before December 31, 2026, when the old hostname is retired."
+---
+
+The Lit API has a new production hostname, `api2.chipotle.litprotocol.com`. It runs on AMD SEV-SNP confidential-computing hardware. The previous hostname, `api.chipotle.litprotocol.com`, runs on Intel TDX and is retired on **December 31, 2026**.
+
+| | Previous | New |
+|---|---|---|
+| **Hostname** | `api.chipotle.litprotocol.com` | `api2.chipotle.litprotocol.com` |
+| **Hardware** | Intel TDX | AMD SEV-SNP |
+| **Attestation** | `/attestation`, `/attestation/v2` (TDX quote) | `/attestation/v3` (SEV-SNP report) |
+| **Available until** | December 31, 2026 | |
+
+## What stays the same
+
+Both hostnames run the same application with the same keys. Nothing about your account moves:
+
+- your account, API keys and usage keys;
+- your wallets (PKPs) and their addresses;
+- your Lit Actions, their CIDs and the keys derived for them;
+- groups and permissions, which live on-chain;
+- your credit balance and billing;
+- every request path, parameter and response under `/core/v1/`.
+
+Until the retirement date you can send requests to either hostname, split traffic between them, and move back at any time.
+
+## What to do
+
+The change depends on how you call the API. You do not need the SDK to migrate.
+
+### If you call the HTTPS endpoints directly
+
+This applies to `curl`, `fetch`, or an HTTP client in any language. Replace `https://api.chipotle.litprotocol.com` with `https://api2.chipotle.litprotocol.com` wherever your code or configuration sets it. Paths, headers, request bodies and responses stay the same.
+
+```javascript
+const res = await fetch('https://api2.chipotle.litprotocol.com/core/v1/lit_action', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-Api-Key': process.env.LIT_USAGE_API_KEY,
+  },
+  body: JSON.stringify({
+    code: 'async function main() { return "hello"; }',
+    js_params: {},
+  }),
+});
+const { response, logs, has_error } = await res.json();
+```
+
+That is the whole required change. A plain HTTPS call trusts the TLS certificate and does not check the hardware. If you want that check and want to keep your own HTTP code, you have two options:
+
+- **Node.js:** verify once with the SDK, then use a `fetch` that only accepts the verified TLS key.
+
+  ```javascript
+  import { verifyAttestation, createPinnedFetch } from '@lit-protocol/core-sdk/attestation';
+
+  const LIT = 'https://api2.chipotle.litprotocol.com';
+  const proof = await verifyAttestation(LIT);
+  const pinnedFetch = await createPinnedFetch(proof.tlsKeySha256);
+  const res = await pinnedFetch(`${LIT}/core/v1/version`);
+  ```
+
+  A connection that presents another key fails with `ERR_LIT_TLS_PIN_MISMATCH`. Each release starts a new VM with a new key, so verify again and build a new pinned `fetch` when you see that error.
+- **Any other language:** follow the [full verification guide](/architecture/verification/full-verification), which uses `curl`, `openssl` and `cast`.
+
+### If you use the SDK
+
+Install the npm package. It uses the new hostname by default and verifies the server before it sends anything.
+
+```bash
+npm install @lit-protocol/core-sdk
+```
+
+```javascript
+import { createClient, LIT_API_URL } from '@lit-protocol/core-sdk';
+
+const client = createClient(LIT_API_URL);
+const result = await client.litAction({
+  apiKey: process.env.LIT_USAGE_API_KEY,
+  code: 'async function main() { return "hello"; }',
+});
+```
+
+- If you used a copy of `core_sdk.js`, replace it with the package. The client class and its methods are the same.
+- If you pass a base URL to `createClient`, change it to the new hostname or use `LIT_API_URL`.
+- The package needs Node.js 22 or later and is published as ES modules.
+
+### Then, either way
+
+<Steps>
+  <Step title="Check a wallet you already use">
+    Run an action that returns an address for one of your wallets on both hostnames and compare. They match, because both hostnames derive keys from the same root.
+  </Step>
+  <Step title="Move traffic">
+    Move test traffic first, then a share of production, then the rest. To go back, point at the previous hostname again.
+  </Step>
+</Steps>
+
+## If you verify attestation yourself
+
+A check written for the Intel TDX quote does not pass on the new hostname, which presents AMD SEV-SNP evidence instead. On the new hostname:
+
+- `/attestation` and `/attestation/v2` answer `503`. Use `/attestation/v3?nonce=<64 hex characters>`.
+- `/evidences/quote.json` is replaced by `/evidences/attestation.json`.
+- The registers of a TDX quote (MRTD, RTMR0 to RTMR3) do not exist. A SEV-SNP report carries one launch measurement and a `HOST_DATA` field that binds the app.
+
+The simplest replacement is `verifyAttestation` from the SDK. It checks the AMD signature chain, freshness, the launch measurement, the app identity, the on-chain allowlists and, in Node.js, the TLS key of the connection:
+
+```javascript
+import { verifyAttestation } from '@lit-protocol/core-sdk/attestation';
+
+const proof = await verifyAttestation('https://api2.chipotle.litprotocol.com');
+console.log(proof.platform, proof.composeHash, proof.tlsBinding);
+// sev-snp 53dc…1c3a verified
+```
+
+See [Security & Verification](/architecture/verification/index) for what each check proves and how to repeat it by hand.
+
+## If you allowlist IP addresses
+
+The new hostname resolves to a different address from the previous one, and the address can change. Allowlist the hostname where you can. If your firewall needs an address, resolve `api2.chipotle.litprotocol.com` and plan to update it.
+
+## After December 31, 2026
+
+Requests to `api.chipotle.litprotocol.com` are no longer served from Intel TDX hardware, and clients that verify a TDX quote stop working. Move before that date. If you cannot, [contact us](mailto:support@litprotocol.com) before then.
+
+The SDK prints one warning when a client is created for the previous hostname.

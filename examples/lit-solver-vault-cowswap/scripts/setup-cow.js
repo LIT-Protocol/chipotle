@@ -25,7 +25,7 @@ const ACTION_FILE = path.join(__dirname, "..", "action", "cowPolicy.js");
 
 async function main() {
   env.load();
-  const { LIT_API_BASE = "https://api.chipotle.litprotocol.com", LIT_API_KEY } = process.env;
+  const { LIT_API_BASE = "https://api2.chipotle.litprotocol.com", LIT_API_KEY } = process.env;
 
   for (const k of ["LIT_API_KEY", "DEPLOYER_PRIVATE_KEY", "ALCHEMY_BASE_SEPOLIA_URL"]) {
     if (!process.env[k]) {

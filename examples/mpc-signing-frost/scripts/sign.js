@@ -29,7 +29,7 @@ const { MpcClient } = require("../client/mpcClient");
 const store = require("../client/store");
 
 const {
-  LIT_API_BASE = "https://api.chipotle.litprotocol.com",
+  LIT_API_BASE = "https://api2.chipotle.litprotocol.com",
   LIT_USAGE_API_KEY,
   MPC_PKP_ADDRESS,
   SOLANA_RPC_URL = "https://api.devnet.solana.com",

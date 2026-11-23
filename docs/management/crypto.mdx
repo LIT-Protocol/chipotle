@@ -36,7 +36,7 @@ You can also initiate crypto payments programmatically using the billing API. Th
 Examples below assume the following setup:
 
 ```javascript
-const BASE = 'https://api.chipotle.litprotocol.com';
+const BASE = 'https://api2.chipotle.litprotocol.com';
 const accountApiKey = 'your-account-api-key';         // from /new_account
 ```
 
@@ -53,7 +53,7 @@ cURL snippets use `$KEY` for your API key.
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s "https://api.chipotle.litprotocol.com/core/v1/billing/stripe_config"
+    curl -s "https://api2.chipotle.litprotocol.com/core/v1/billing/stripe_config"
     ```
   </Tab>
 </Tabs>
@@ -79,7 +79,7 @@ Create a PaymentIntent for the desired amount (minimum 500 cents = $5.00).
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/billing/create_payment_intent" \
+    curl -s -X POST "https://api2.chipotle.litprotocol.com/core/v1/billing/create_payment_intent" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: $KEY" \
       -d '{"amount_cents": 2500}'
@@ -141,7 +141,7 @@ After Stripe confirms the crypto payment has settled, call the confirm endpoint 
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/billing/confirm_payment" \
+    curl -s -X POST "https://api2.chipotle.litprotocol.com/core/v1/billing/confirm_payment" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: $KEY" \
       -d '{"payment_intent_id": "pi_..."}'
@@ -163,7 +163,7 @@ After Stripe confirms the crypto payment has settled, call the confirm endpoint 
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s "https://api.chipotle.litprotocol.com/core/v1/billing/balance" \
+    curl -s "https://api2.chipotle.litprotocol.com/core/v1/billing/balance" \
       -H "X-Api-Key: $KEY"
     ```
   </Tab>

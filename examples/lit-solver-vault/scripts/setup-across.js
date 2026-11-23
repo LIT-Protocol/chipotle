@@ -27,7 +27,7 @@ const DEPLOY_NETWORK = process.env.DEPLOY_NETWORK || "baseSepolia";
 
 async function main() {
   env.load();
-  const { LIT_API_BASE = "https://api.chipotle.litprotocol.com", LIT_API_KEY } = process.env;
+  const { LIT_API_BASE = "https://api2.chipotle.litprotocol.com", LIT_API_KEY } = process.env;
 
   for (const k of [
     "LIT_API_KEY",

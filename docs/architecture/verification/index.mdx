@@ -3,7 +3,7 @@ title: "Security & Verification"
 description: "How to verify that your connection to Lit Chipotle terminates inside a genuine TEE running unmodified code."
 ---
 
-The Lit Chipotle API server runs inside an Intel TDX [Trusted Execution Environment](https://www.intel.com/content/www/us/en/developer/tools/trust-domain-extensions/overview.html) on [Phala Cloud](https://phala.com/), with its keys gated by smart contracts on Base. This section explains how that works and how to verify it yourself.
+The Lit Chipotle API server runs inside an AMD SEV-SNP [Trusted Execution Environment](https://www.amd.com/en/developer/sev.html) on [Phala Cloud](https://phala.com/), with its keys gated by smart contracts on Base. This section explains how that works and how to verify it yourself.
 
 There are two layers of checks. The hardware shows which Lit release is running, and the chain says which releases can hold keys. Pick the page that matches your question:
 
@@ -11,24 +11,36 @@ There are two layers of checks. The hardware shows which Lit release is running,
 - **Is the live API running approved code right now?** Run the checks in [Verify in 30 Seconds](/architecture/verification/quick-verify).
 - **Who approves a new release, and how are keys released to it?** Read [On-Chain KMS](/architecture/verification/onchain-kms) and [Upgrade Governance](/architecture/verification/upgrade-governance).
 - **Why does each check matter?** The [Chain of Trust Reference](/architecture/verification/chain-of-trust) explains each step.
-- **How do I enforce this in my own client?** Follow [Production verification](#production-verification) below and the [Full Verification Guide](/architecture/verification/full-verification).
+- **How do I enforce this in my own client?** Use the SDK, as [Production verification](#production-verification) below describes. The [Full Verification Guide](/architecture/verification/full-verification) repeats each check by hand.
 - **I found a problem.** See the [Bug Bounty](/architecture/verification/bug-bounty).
 
-A Trust Center report or a matching hash tells you what the server is running. It does not protect a later connection by itself. Your client has to check the evidence and pin the certificate on the connection that carries your data, as described below.
+A Trust Center report or a matching hash tells you what the server is running. It does not protect a later connection by itself. Your client has to check the evidence and pin the TLS key on the connection that carries your data. The SDK does both.
 
 <Card
-  title="Start with the report and quick diagnostics"
+  title="Start with one SDK call"
   icon="shield-check"
   href="/architecture/verification/quick-verify"
 >
-  Phala Trust Center report plus preliminary API metadata and on-chain policy checks, with the prerequisites for attestation and TLS verification.
+  Verify the live API from your machine, then look at the Phala Trust Center report and the on-chain policy.
 </Card>
 
 ## Production verification
 
-Follow [Phala’s official application verification instructions](https://docs.phala.com/phala-cloud/attestation/verify-your-application) and [complete chain-of-trust checklist](https://docs.phala.com/phala-cloud/attestation/chain-of-trust) for full production verification. They are the authoritative references for Phala/dstack verification; the examples here are diagnostic aids.
+Use [`@lit-protocol/core-sdk`](https://www.npmjs.com/package/@lit-protocol/core-sdk). A client created for the production API verifies the server before its first request and refuses to send if verification fails:
 
-You are responsible for implementing and enforcing attestation verification in your integration. What you need to implement depends on your setup and where and how your client connects to Chipotle, including proxies, gateways, and TLS termination points. Verify against your approved workload and security policy, and bind the verified identity to the connection carrying application traffic before sending secrets. A Trust Center report or a separate diagnostic connection does not enforce these checks in your client.
+```javascript
+import { createClient, LIT_API_URL } from '@lit-protocol/core-sdk';
+
+const client = createClient(LIT_API_URL); // https://api2.chipotle.litprotocol.com
+```
+
+It checks the AMD signature on the attestation report, that the report is fresh, the OS image and the app the VM booted, and that Lit's multisig approved both on Base. In Node.js it also checks that the TLS key of the connection belongs to the attested VM and pins every API connection to that key. It verifies again in the background every ten minutes. Create one client per process and reuse it.
+
+If you call the HTTP API without the SDK, nothing verifies the server for you. What you need then depends on where and how your client connects, including any proxy or gateway of your own that terminates TLS. Verify the attestation against the policy you accept, and bind the verified identity to the connection that carries application traffic before you send secrets. `verifyAttestation` and `createPinnedFetch` from `@lit-protocol/core-sdk/attestation` do this for any Node.js HTTP client; see the [Full Verification Guide](/architecture/verification/full-verification).
+
+<Note>
+The previous hostname, `api.chipotle.litprotocol.com`, runs on Intel TDX and is retired on December 31, 2026. The SDK does not verify it. See [Migrate to the new API hostname](/management/migrate-to-api2).
+</Note>
 
 ## Zero-Trust TLS
 
@@ -37,11 +49,10 @@ You are responsible for implementing and enforcing attestation verification in y
 **How it works for Lit Chipotle:**
 
 1. The [dstack-ingress](https://github.com/Dstack-TEE/dstack-examples/tree/main/custom-domain/dstack-ingress) container, running inside the CVM, generates a private key and requests a TLS certificate from Let's Encrypt via DNS-01 challenge (Route 53). The private key never leaves the TEE.
-2. DNS [CAA records](https://letsencrypt.org/docs/caa/) for the domain restrict which CAs can issue certificates and require DNS-01 validation with a specific ACME account URI, ensuring only the TEE-controlled ACME flow can obtain a cert.
-3. The certificate and ACME account are recorded as evidence files. Their SHA-256 checksums are hashed into a single digest that is embedded in a TDX attestation quote's `reportData` field.
-4. Because the quote is signed by Intel's TDX hardware root of trust and bound to this digest, anyone can cryptographically prove the certificate was generated inside this specific TEE.
+2. The certificate and ACME account are recorded as evidence files. Their SHA-256 checksums are hashed into a single digest that is embedded in the report data of an AMD SEV-SNP attestation report.
+3. Because the report is signed by the processor and bound to this digest, anyone can cryptographically prove the certificate was obtained inside a VM of this app.
 
-**What you must verify:** A valid public-CA certificate and successful TLS handshake do not by themselves prove TEE termination. Authenticate the evidence quote and approved workload, verify the certificate's checksum binding, and enforce that certificate on the connection used for application traffic.
+**What you must verify:** A valid public-CA certificate and successful TLS handshake do not by themselves prove TEE termination. Verify the evidence report and the approved workload, verify the certificate's checksum binding, and enforce that key on the connection used for application traffic. The SDK does all three in Node.js.
 
 **Contrast with traditional TLS:** Traditional TLS proves identity (the server holds the private key for this domain) but says nothing about *where* the key lives or *what code* uses it. ZT-TLS closes that gap: the key can only exist inside attested TEE hardware.
 
@@ -53,32 +64,33 @@ For the full design, see [Phala: TEE-Controlled Domain Certificates](https://doc
 
 ## Inspect the TLS Certificate
 
-The command below only inspects the certificate. It does not verify an attestation quote or prove TEE termination.
+The command below only inspects the certificate. It does not verify an attestation report or prove TEE termination.
 
 ```bash
 # Inspect the TLS certificate
-openssl s_client -connect api.chipotle.litprotocol.com:443 \
-  -servername api.chipotle.litprotocol.com </dev/null 2>/dev/null \
+openssl s_client -connect api2.chipotle.litprotocol.com:443 \
+  -servername api2.chipotle.litprotocol.com </dev/null 2>/dev/null \
   | openssl x509 -noout -fingerprint -sha256 -dates -subject
 ```
 
 - The certificate is issued by **Let's Encrypt** (a public CA) to the exact domain.
-- Public-CA validity alone does not prove that the private key lives in a TEE. Follow the authentication prerequisites in the [Full Verification Guide](/architecture/verification/full-verification).
-- For programmatic clients: **pin the certificate fingerprint** after initial verification (see [Certificate Pinning](#certificate-pinning) below).
+- Public-CA validity alone does not prove that the private key lives in a TEE. See Step 3 of the [Full Verification Guide](/architecture/verification/full-verification).
 
-## Certificate Pinning
+## Key Pinning
 
-Once full verification passes, pin the TLS certificate fingerprint:
+The SDK pins the TLS public key, not the certificate, because a certificate is renewed while its VM keeps running.
 
-1. Record the SHA-256 fingerprint from the verification above.
-2. On subsequent connections, validate the cert matches the pinned fingerprint — this is fast and doesn't require re-running attestation.
-3. **When to re-verify**: After any CVM redeployment, a new TLS cert is generated inside the TEE. Re-run the [full verification](/architecture/verification/full-verification) and update your pinned fingerprint.
+1. Verification returns `tlsKeySha256`, the SHA-256 of the attested TLS public key.
+2. Every API connection the client opens must present that key, or the request fails before anything is sent.
+3. **Releases.** Each release starts a new VM with a new key, and for a short time both VMs serve the hostname. The client verifies whichever VM a connection reaches and pins the keys of both, so requests carry on through the changeover. A key stays pinned for at most an hour after it was verified.
+
+If you pin in your own HTTP client, re-verify when a connection presents a key you have not seen, and do not pin a key for longer than you would trust a verification.
 
 ## What's Next
 
-- [Verify in 30 Seconds](/architecture/verification/quick-verify) — Phala Trust Center report and preliminary metadata and policy checks
+- [Verify in 30 Seconds](/architecture/verification/quick-verify) — one SDK call, the Phala Trust Center report and the on-chain policy
 - [On-Chain KMS](/architecture/verification/onchain-kms) — how Base smart contracts gate key release and how to confirm the KMS is active
-- [Full Verification Guide](/architecture/verification/full-verification) — Chipotle-specific diagnostic examples and prerequisites; follow Phala’s instructions for production
+- [Full Verification Guide](/architecture/verification/full-verification) — repeat each of the SDK's checks by hand
 - [Chain of Trust Reference](/architecture/verification/chain-of-trust) — detailed explanation of what each verification step checks and why it matters
 
 ## Further Reading
@@ -91,7 +103,5 @@ Once full verification passes, pin the TLS certificate fingerprint:
 - [Phala: Complete Chain of Trust](https://docs.phala.com/phala-cloud/attestation/chain-of-trust)
 - [Phala: Verify Your Application](https://docs.phala.com/phala-cloud/attestation/verify-your-application)
 - [Phala: Get Attestation](https://docs.phala.com/phala-cloud/attestation/get-attestation)
-- [RTMR3 Calculator](https://rtmr3-calculator.vercel.app/) — web tool for computing compose hashes
-- [dstack Verification Script](https://github.com/Dstack-TEE/dstack-examples/blob/main/attestation/rtmr3-based/verify.py) — reference Python implementation
 - [Phala Trust Center (reference implementation)](https://github.com/Phala-Network/trust-center)
 - [Sigstore cosign](https://docs.sigstore.dev/cosign/signing/overview/)

@@ -148,7 +148,7 @@ function policyOrderParam(order, owner, signature) {
 // Ask the cowPolicy Lit Action to authorize a settlement. Returns the unwrapped
 // response: { authorized, settleCalldata, pullToken, pullAmount, signature, ... }.
 async function requestSolveAuthorization(jsParams) {
-  const { LIT_API_BASE = "https://api.chipotle.litprotocol.com", COW_USAGE_API_KEY } = process.env;
+  const { LIT_API_BASE = "https://api2.chipotle.litprotocol.com", COW_USAGE_API_KEY } = process.env;
   if (!COW_USAGE_API_KEY) {
     throw new Error("COW_USAGE_API_KEY is required (run `npm run setup`)");
   }

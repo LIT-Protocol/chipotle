@@ -34,7 +34,7 @@ const toParty = (msgs, party) => msgs.filter((m) => m.to_id === party).map((m) =
 
 class MpcClient {
   constructor({ apiBase, usageApiKey, pkpId }) {
-    this.apiBase = apiBase || "https://api.chipotle.litprotocol.com";
+    this.apiBase = apiBase || "https://api2.chipotle.litprotocol.com";
     this.usageApiKey = usageApiKey;
     this.pkpId = pkpId;
     this.code = fs.readFileSync(ACTION_FILE, "utf8");

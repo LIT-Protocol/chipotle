@@ -27,6 +27,7 @@
               "management/api_keys",
               "management/dashboard",
               "management/api_direct",
+              "management/migrate-to-api2",
               "management/account_modes",
               "management/pricing",
               "management/crypto",
@@ -132,6 +133,10 @@
     { "source": "/learningLab/:slug*", "destination": "/quickstart" },
     { "source": "/concepts/programmable-signing-concept", "destination": "/lit-actions/index" }
   ],
+  "banner": {
+    "content": "The Lit API moved to `api2.chipotle.litprotocol.com`. The previous hostname is retired on December 31, 2026. [How to migrate](/management/migrate-to-api2)",
+    "dismissible": true
+  },
   "favicon": "/favicon.svg",
   "logo": {
     "light": "/logo/light.svg",

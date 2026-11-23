@@ -23,7 +23,7 @@ const { buildActions } = require("./lib/buildAction");
 const { PRIVUSD_ABI, MOCK_USDC_ABI, callAction, rand32, deadlineIn } = require("./lib/litClient");
 
 const {
-  LIT_API_BASE = "https://api.chipotle.litprotocol.com",
+  LIT_API_BASE = "https://api2.chipotle.litprotocol.com",
   LIT_USAGE_API_KEY,
   LEDGER_PKP_ADDRESS,
   PRIVUSD_ADDRESS,

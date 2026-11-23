@@ -27,7 +27,7 @@ A shared Phala contract that maintains the registry of KMS nodes, approved dstac
 
 | Key state | What it means |
 |---|---|
-| `allowedOsImages(bytes32)` | Whitelist of dstack OS image measurements (firmware + kernel + initrd hashes). The CVM's MRTD / RTMR0–2 must match a whitelisted image or boot is refused. |
+| `allowedOsImages(bytes32)` | Allowlist of dstack OS images (firmware, kernel, initrd and root filesystem). The CVM's attested launch measurement must correspond to an allowlisted image or it receives no keys. |
 | `kmsAllowedAggregatedMrs(bytes32)` | Whitelist of KMS instance measurements. Pins the CVM to a specific trusted KMS. |
 | `owner()` | A Phala-controlled Safe multisig ([`0x3926…a663`](https://basescan.org/address/0x3926658a072F82BAEa5e5a15e1Fed8a776F4a663), 2-of-3) — **not** the Lit Safe. Because this is a shared Phala contract, Lit does not control the OS-image / KMS whitelist. |
 
@@ -36,14 +36,14 @@ A shared Phala contract that maintains the registry of KMS nodes, approved dstac
 The application-specific contract for Lit Chipotle. Its address is the `app_id` returned by `GET /info`. Anyone can confirm this matches:
 
 ```bash
-curl -sf https://api.chipotle.litprotocol.com/info \
+curl -sf https://api2.chipotle.litprotocol.com/info \
   | python3 -c 'import json,sys; print("0x" + json.load(sys.stdin)["app_id"])'
 # Expect: 0x3f91deaf16ff7c823ee65081d6bafa1ceea05ffc
 ```
 
 | Key state | What it means |
 |---|---|
-| `allowedComposeHashes(bytes32)` | Whitelist of `app-compose.json` SHA-256 hashes. The TEE's RTMR3 must record a compose hash present here, or the KMS will not release keys. |
+| `allowedComposeHashes(bytes32)` | Whitelist of `app-compose.json` SHA-256 hashes. The CVM's attestation must bind a compose hash present here, or the KMS will not release keys. |
 | `allowedDeviceIds(bytes32)` | Whitelist of approved hardware device identifiers. |
 | `owner()` | The Lit Safe multisig ([`0xF688…1098`](https://basescan.org/address/0xF688411c0FFc300cAb33EB1dA651DBb3E6891098)) — only this address can add or remove compose hashes and device IDs. |
 
@@ -51,8 +51,8 @@ curl -sf https://api.chipotle.litprotocol.com/info \
 
 The flow on every CVM boot:
 
-1. The CVM generates an Intel TDX attestation quote covering its hardware, OS, and the compose hash of the code it loaded.
-2. The KMS verifies the quote against Intel's root certificates.
+1. The CVM requests an AMD SEV-SNP attestation report covering its hardware, OS, and the compose hash of the code it loaded.
+2. The KMS verifies the report against AMD's root certificates.
 3. The KMS reads the on-chain state:
     - Is the OS image in `Phala KMS.allowedOsImages`?
     - Is the KMS measurement in `Phala KMS.kmsAllowedAggregatedMrs`?
@@ -69,7 +69,7 @@ This means: even if Lit Protocol pushed a malicious Docker image, the CVM runnin
 ### 1. The live compose hash is whitelisted
 
 ```bash
-COMPOSE_HASH=0x$(curl -sf https://api.chipotle.litprotocol.com/info \
+COMPOSE_HASH=0x$(curl -sf https://api2.chipotle.litprotocol.com/info \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["compose_hash"])')
 
 cast call 0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC \
@@ -94,7 +94,7 @@ This proves no single party can modify the compose-hash whitelist. The [Safe at 
 ### 3. The CVM's app_id matches the DstackApp address
 
 ```bash
-APP_ID=$(curl -sf https://api.chipotle.litprotocol.com/info \
+APP_ID=$(curl -sf https://api2.chipotle.litprotocol.com/info \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["app_id"])')
 echo "Live app_id:        0x$APP_ID"
 echo "Expected DstackApp: 0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC"
@@ -117,6 +117,6 @@ This is the same audit trail used by the [Phala Trust Center](https://trust.phal
 ## What's next
 
 - [Verify in 30 Seconds](/architecture/verification/quick-verify) — the Trust Center one-click report
-- [Full Verification Guide](/architecture/verification/full-verification) — replay the RTMR3 event log and check every layer
+- [Full Verification Guide](/architecture/verification/full-verification) — repeat each of the SDK's checks by hand
 - [Phala: Understanding On-Chain KMS](https://docs.phala.com/phala-cloud/key-management/understanding-onchain-kms)
 - [Phala: Cloud vs On-Chain KMS](https://docs.phala.com/phala-cloud/key-management/cloud-vs-onchain-kms)

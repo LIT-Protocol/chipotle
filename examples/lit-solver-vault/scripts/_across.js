@@ -52,7 +52,7 @@ const RELAY_DATA_TUPLE =
 // response: { authorized, signature, relayData, authDeadline, ... }.
 async function requestAcrossAuthorization(jsParams) {
   const {
-    LIT_API_BASE = "https://api.chipotle.litprotocol.com",
+    LIT_API_BASE = "https://api2.chipotle.litprotocol.com",
     ACROSS_USAGE_API_KEY,
   } = process.env;
   if (!ACROSS_USAGE_API_KEY) {
